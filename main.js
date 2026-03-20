@@ -85,16 +85,16 @@ ipcMain.handle("check-for-updates", () => {
           const data = JSON.parse(body)
           const latest = (data.tag_name || "").replace(/^v/, "")
           const current = app.getVersion()
-          if (!latest) return resolve({ status: "error" })
+          if (!latest) return resolve({ status: "error", message: `API: ${data.message || "no tag_name"} (HTTP ${res.statusCode})` })
           if (latest === current) return resolve({ status: "up-to-date" })
           resolve({ status: "available", version: latest })
-        } catch {
-          resolve({ status: "error" })
+        } catch (e) {
+          resolve({ status: "error", message: `Parse error (HTTP ${res.statusCode}): ${e.message}` })
         }
       })
     })
-    req.on("error", () => resolve({ status: "error" }))
-    req.setTimeout(8000, () => { req.destroy(); resolve({ status: "error" }) })
+    req.on("error", (e) => resolve({ status: "error", message: `Network: ${e.message}` }))
+    req.setTimeout(8000, () => { req.destroy(); resolve({ status: "error", message: "Timeout" }) })
   })
 })
 

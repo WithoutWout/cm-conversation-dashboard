@@ -1,6 +1,6 @@
 {
   "name": "cm-com-dashboard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop dashboard for inspecting CM.com Conversation AI Cloud content exports",
   "author": "Wout van Os",
   "main": "main.js",
@@ -25,7 +25,8 @@
     "publish": {
       "provider": "github",
       "owner": "WithoutWout",
-      "repo": "cm-conversation-dashboard"
+      "repo": "cm-conversation-dashboard",
+      "draft": false
     },
     "mac": {
       "target": {
