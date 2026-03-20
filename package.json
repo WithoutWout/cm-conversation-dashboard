@@ -25,8 +25,7 @@
     "publish": {
       "provider": "github",
       "owner": "WithoutWout",
-      "repo": "cm-conversation-dashboard",
-      "draft": false
+      "repo": "cm-conversation-dashboard"
     },
     "mac": {
       "category": "public.app-category.productivity",
