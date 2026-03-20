@@ -1,10 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron")
 const path = require("path")
 const fs = require("fs")
-const { autoUpdater } = require("electron-updater")
-
-autoUpdater.autoDownload = false
-autoUpdater.autoInstallOnAppQuit = false
+const https = require("https")
 
 let win
 
@@ -73,18 +70,32 @@ ipcMain.handle("get-data", () => {
   return result
 })
 
-ipcMain.handle("check-for-updates", async () => {
-  if (!app.isPackaged) return { status: "dev" }
-  try {
-    const result = await autoUpdater.checkForUpdates()
-    if (!result) return { status: "up-to-date" }
-    const latest = result.updateInfo.version
-    const current = app.getVersion()
-    if (latest === current) return { status: "up-to-date" }
-    return { status: "available", version: latest }
-  } catch (err) {
-    return { status: "error", message: err.message }
-  }
+ipcMain.handle("check-for-updates", () => {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: "api.github.com",
+      path: "/repos/WithoutWout/cm-conversation-dashboard/releases/latest",
+      headers: { "User-Agent": "cm-conversation-dashboard" },
+    }
+    const req = https.get(options, (res) => {
+      let body = ""
+      res.on("data", (chunk) => { body += chunk })
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(body)
+          const latest = (data.tag_name || "").replace(/^v/, "")
+          const current = app.getVersion()
+          if (!latest) return resolve({ status: "error" })
+          if (latest === current) return resolve({ status: "up-to-date" })
+          resolve({ status: "available", version: latest })
+        } catch {
+          resolve({ status: "error" })
+        }
+      })
+    })
+    req.on("error", () => resolve({ status: "error" }))
+    req.setTimeout(8000, () => { req.destroy(); resolve({ status: "error" }) })
+  })
 })
 
 ipcMain.handle("get-version", () => app.getVersion())
