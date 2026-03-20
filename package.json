@@ -29,6 +29,7 @@
       "draft": false
     },
     "mac": {
+      "notarize": true,
       "target": {
         "target": "dmg",
         "arch": [
