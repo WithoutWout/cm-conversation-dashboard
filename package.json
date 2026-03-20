@@ -1,6 +1,6 @@
 {
   "name": "cm-com-dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop dashboard for inspecting CM.com Conversation AI Cloud content exports",
   "author": "Wout van Os",
   "main": "main.js",
