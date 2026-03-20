@@ -1,0 +1,2618 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CM.com — Conversation AI Cloud Dashboard</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --bg: #0f1117;
+        --surface: #1a1d27;
+        --surface2: #21253a;
+        --border: #2a2d3e;
+        --text: #e2e8f0;
+        --muted: #64738b;
+        --accent: #7c6af7;
+        --green: #4ade80;
+        --blue: #60a5fa;
+        --orange: #fb923c;
+        --red: #f87171;
+        --teal: #2dd4bf;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font-size: 14px;
+        overflow: hidden;
+      }
+
+      /* === HEADER === */
+      .app-header {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 10px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .brand-logo {
+        width: 30px;
+        height: 30px;
+        background: var(--accent);
+        border-radius: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 800;
+        color: #fff;
+        letter-spacing: -0.5px;
+        flex-shrink: 0;
+      }
+      .brand-text {
+        display: flex;
+        flex-direction: column;
+      }
+      .brand-name {
+        font-size: 0.83rem;
+        font-weight: 700;
+        color: var(--text);
+        line-height: 1.2;
+      }
+      .brand-sub {
+        font-size: 0.62rem;
+        color: var(--muted);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .header-files {
+        margin-left: auto;
+        display: flex;
+        gap: 7px;
+        font-size: 0.67rem;
+        color: var(--muted);
+        font-family: monospace;
+        flex-wrap: wrap;
+      }
+      .file-tag {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 7px;
+      }
+      .icon-btn {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 5px 9px;
+        font-size: 0.73rem;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-left: 4px;
+        white-space: nowrap;
+      }
+      .icon-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+
+      /* === GLOBAL SEARCH === */
+      .global-search-bar {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 7px 20px;
+        flex-shrink: 0;
+      }
+      .search-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .search-wrap-global {
+        position: relative;
+        flex: 1;
+        max-width: 680px;
+      }
+      .search-wrap-global svg {
+        position: absolute;
+        left: 11px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+        pointer-events: none;
+      }
+      .search-wrap-global input {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        padding: 8px 34px 8px 34px;
+        font-size: 0.88rem;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .search-wrap-global input.regex-error {
+        border-color: var(--red) !important;
+      }
+      .search-wrap-global input::placeholder {
+        color: var(--muted);
+      }
+      .search-wrap-global input:focus {
+        border-color: var(--accent);
+      }
+      .clear-btn {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 1rem;
+        line-height: 1;
+        padding: 2px 4px;
+        display: none;
+        border-radius: 3px;
+      }
+      .clear-btn:hover {
+        color: var(--text);
+      }
+      .clear-btn.visible {
+        display: block;
+      }
+      .search-opts {
+        display: flex;
+        gap: 3px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .sopt {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.72rem;
+        font-family: monospace;
+        font-weight: 700;
+        padding: 4px 8px;
+        line-height: 1;
+        transition: all 0.15s;
+        white-space: nowrap;
+        letter-spacing: 0;
+      }
+      .sopt:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .sopt.on {
+        background: rgba(124, 106, 247, 0.18);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .sopt.on.err {
+        background: rgba(248, 113, 113, 0.15);
+        border-color: var(--red);
+        color: var(--red);
+      }
+      .sopt-sep {
+        width: 1px;
+        height: 18px;
+        background: var(--border);
+        margin: 0 2px;
+      }
+
+      /* === TABS === */
+      .tab-bar {
+        display: flex;
+        background: var(--surface);
+        border-bottom: 2px solid var(--border);
+        padding: 0 20px;
+        flex-shrink: 0;
+        gap: 2px;
+      }
+      .tab {
+        padding: 9px 15px;
+        border: none;
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.81rem;
+        font-weight: 500;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
+      }
+      .tab:hover {
+        color: var(--text);
+      }
+      .tab.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .tab-badge {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1px 7px;
+        font-size: 0.67rem;
+        color: var(--muted);
+        min-width: 24px;
+        text-align: center;
+      }
+      .tab.active .tab-badge {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      /* === PANELS === */
+      .panel {
+        display: none;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+      }
+      .panel.active {
+        display: flex;
+      }
+
+      /* === STATS === */
+      .stats-bar {
+        display: flex;
+        gap: 7px;
+        padding: 8px 20px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        flex-wrap: wrap;
+      }
+      .stat {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 5px 13px;
+        min-width: 70px;
+      }
+      .stat .sv {
+        font-size: 1.12rem;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .stat .sl {
+        font-size: 0.6rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-top: 2px;
+        white-space: nowrap;
+      }
+      .c-accent {
+        color: var(--accent);
+      }
+      .c-green {
+        color: var(--green);
+      }
+      .c-blue {
+        color: var(--blue);
+      }
+      .c-orange {
+        color: var(--orange);
+      }
+      .c-teal {
+        color: var(--teal);
+      }
+
+      /* === TOOLBAR === */
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        padding: 7px 20px;
+        flex-shrink: 0;
+        align-items: center;
+        flex-wrap: wrap;
+        border-bottom: 1px solid var(--border);
+      }
+      .filter-pills {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .pill {
+        padding: 4px 11px;
+        border-radius: 20px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.72rem;
+        font-weight: 500;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .pill:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .pill.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .result-count {
+        font-size: 0.71rem;
+        color: var(--muted);
+        margin-left: auto;
+        white-space: nowrap;
+      }
+
+      /* === CARDS === */
+      .list-wrap {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 20px 10px;
+      }
+      .list-wrap::-webkit-scrollbar {
+        width: 5px;
+      }
+      .list-wrap::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 3px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--border);
+        border-radius: 9px;
+        margin-top: 5px;
+        overflow: hidden;
+        transition: border-color 0.15s;
+      }
+      .card.type-article {
+        border-left-color: var(--blue);
+      }
+      .card.type-dialog {
+        border-left-color: var(--accent);
+      }
+      .card.type-tdialog {
+        border-left-color: var(--teal);
+      }
+      .card:hover {
+        border-color: #3a3d55;
+      }
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 11px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .card-id {
+        font-family: monospace;
+        font-size: 0.71rem;
+        font-weight: 700;
+        color: var(--accent);
+        background: rgba(124, 106, 247, 0.1);
+        border: 1px solid rgba(124, 106, 247, 0.25);
+        border-radius: 5px;
+        padding: 3px 8px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        min-width: 62px;
+        text-align: center;
+        letter-spacing: 0.03em;
+      }
+      .card-id.id-blue {
+        color: var(--blue);
+        background: rgba(96, 165, 250, 0.09);
+        border-color: rgba(96, 165, 250, 0.22);
+      }
+      .card-id.id-teal {
+        color: var(--teal);
+        background: rgba(45, 212, 191, 0.09);
+        border-color: rgba(45, 212, 191, 0.22);
+      }
+      .card-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .card-title {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1.4;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card-title.italic {
+        color: var(--muted);
+        font-weight: 400;
+        font-style: italic;
+      }
+      .card-meta {
+        display: flex;
+        gap: 6px;
+        margin-top: 3px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .badge {
+        font-size: 0.6rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      .b-article {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--blue);
+        border: 1px solid rgba(96, 165, 250, 0.2);
+      }
+      .b-dialog {
+        background: rgba(124, 106, 247, 0.12);
+        color: var(--accent);
+        border: 1px solid rgba(124, 106, 247, 0.2);
+      }
+      .b-tdialog {
+        background: rgba(45, 212, 191, 0.12);
+        color: var(--teal);
+        border: 1px solid rgba(45, 212, 191, 0.2);
+      }
+      .b-faq {
+        background: rgba(74, 222, 128, 0.12);
+        color: var(--green);
+        border: 1px solid rgba(74, 222, 128, 0.2);
+      }
+      .b-response {
+        background: rgba(96, 165, 250, 0.08);
+        color: #93c5fd;
+        border: 1px solid rgba(96, 165, 250, 0.15);
+      }
+      .b-recog {
+        background: rgba(124, 106, 247, 0.1);
+        color: #a89ff5;
+        border: 1px solid rgba(124, 106, 247, 0.2);
+      }
+      .b-outnode {
+        background: rgba(251, 146, 60, 0.1);
+        color: var(--orange);
+        border: 1px solid rgba(251, 146, 60, 0.2);
+      }
+      .meta-dim {
+        font-size: 0.69rem;
+        color: var(--muted);
+      }
+      .card-actions {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .action-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--muted);
+        text-decoration: none;
+        transition: all 0.15s;
+        font-size: 0.7rem;
+        cursor: pointer;
+      }
+      .action-link:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .radio-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .radio-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text);
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      .radio-option input[type="radio"] {
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      .expand-icon {
+        color: var(--muted);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+      }
+      .card.open .expand-icon {
+        transform: rotate(180deg);
+      }
+
+      .card-detail {
+        display: none;
+        border-top: 1px solid var(--border);
+        padding: 10px 11px;
+        gap: 9px;
+        flex-direction: column;
+      }
+      .card.open .card-detail {
+        display: flex;
+      }
+      .detail-section h4 {
+        font-size: 0.61rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .chip-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .chip {
+        font-size: 0.74rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 8px;
+        color: var(--text);
+      }
+      .chip.is-faq {
+        border-color: rgba(74, 222, 128, 0.3);
+        color: var(--green);
+      }
+      .response-box {
+        font-size: 0.79rem;
+        color: #b0bcd0;
+        line-height: 1.65;
+        background: var(--bg);
+        border-left: 3px solid var(--accent);
+        padding: 7px 11px;
+        border-radius: 0 6px 6px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 160px;
+        overflow-y: auto;
+      }
+      .dialog-link-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        flex-wrap: wrap;
+      }
+      .jump-link {
+        color: var(--accent);
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .jump-link:hover {
+        color: #a89ff5;
+      }
+      .jump-link.tlink {
+        color: var(--teal);
+      }
+      .jump-link.tlink:hover {
+        color: #5eead4;
+      }
+
+      /* dialogs */
+      .nodes-list {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .dialog-node {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 10px;
+      }
+      .node-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+        flex-wrap: wrap;
+      }
+      .node-name {
+        font-size: 0.77rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .node-answer {
+        font-size: 0.74rem;
+        color: #9aafcc;
+        background: #0d1018;
+        border-left: 2px solid var(--accent);
+        padding: 4px 8px;
+        border-radius: 0 4px 4px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 100px;
+        overflow-y: auto;
+        margin: 4px 0;
+      }
+      .node-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 4px;
+      }
+      .node-option {
+        font-size: 0.7rem;
+        background: rgba(124, 106, 247, 0.1);
+        border: 1px solid rgba(124, 106, 247, 0.25);
+        border-radius: 4px;
+        padding: 2px 7px;
+        color: #a89ff5;
+      }
+      .node-option.fallback {
+        background: rgba(251, 146, 60, 0.08);
+        border-color: rgba(251, 146, 60, 0.25);
+        color: var(--orange);
+      }
+      .node-routes {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: 4px;
+      }
+      .node-route {
+        font-size: 0.72rem;
+        color: var(--muted);
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .node-route strong {
+        color: var(--accent);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .node-route strong:hover {
+        color: #a89ff5;
+      }
+      .node-route.tlink strong {
+        color: var(--teal);
+      }
+      .desc-text {
+        font-size: 0.79rem;
+        color: #8fa0b8;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      mark {
+        background: rgba(124, 106, 247, 0.3);
+        color: #cfc8ff;
+        border-radius: 2px;
+        padding: 0 1px;
+      }
+
+      /* pagination */
+      .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 20px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+      }
+      .page-btn {
+        padding: 4px 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.75rem;
+        transition: all 0.15s;
+      }
+      .page-btn:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .page-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      .page-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .page-info {
+        font-size: 0.71rem;
+        color: var(--muted);
+      }
+      .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--muted);
+      }
+      .empty-state p {
+        font-size: 0.84rem;
+      }
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px;
+        gap: 10px;
+        color: var(--muted);
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spinner {
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+
+      /* === MODAL === */
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 100;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-overlay.open {
+        display: flex;
+      }
+      .modal-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 440px;
+        max-width: 90vw;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .modal-header h3 {
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+      .close-btn {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 1.1rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .close-btn:hover {
+        color: var(--text);
+      }
+      .modal-body {
+        padding: 16px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .modal-body label {
+        font-size: 0.73rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .modal-body input {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 8px 12px;
+        font-size: 0.86rem;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .modal-body input:focus {
+        border-color: var(--accent);
+      }
+      .modal-body input::placeholder {
+        color: var(--muted);
+      }
+      .hint {
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .hint code {
+        font-family: monospace;
+        color: #9a90f0;
+        font-size: 0.7rem;
+      }
+      .modal-footer {
+        padding: 12px 18px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .btn-primary {
+        background: var(--accent);
+        border: none;
+        border-radius: 7px;
+        color: #fff;
+        padding: 7px 18px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      .btn-primary:hover {
+        opacity: 0.85;
+      }
+      .btn-secondary {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 7px 14px;
+        font-size: 0.82rem;
+        cursor: pointer;
+        transition: border-color 0.15s;
+      }
+      .btn-secondary:hover {
+        border-color: var(--accent);
+      }
+      /* === INSTRUCTIONS MODAL === */
+      .instructions-modal-box {
+        width: 500px;
+        max-height: 82vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .instructions-modal-box .modal-body {
+        flex: 1;
+        overflow-y: auto;
+        gap: 14px;
+      }
+      .instructions-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 4px;
+      }
+      .instructions-step {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      .instructions-step-num {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 1px;
+      }
+      .instructions-step-text {
+        font-size: 0.8rem;
+        line-height: 1.5;
+        color: var(--text);
+      }
+      .instructions-step-text code {
+        font-family: monospace;
+        color: #9a90f0;
+        font-size: 0.75rem;
+      }
+      .instructions-section-title {
+        font-size: 0.73rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 4px;
+      }
+      .instructions-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 2px 0;
+      }
+      .btn-link {
+        background: none;
+        border: none;
+        color: var(--accent);
+        font-size: 0.75rem;
+        cursor: pointer;
+        padding: 0;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .btn-link:hover {
+        opacity: 0.8;
+      }
+      /* === EXPORT MODAL === */
+      .export-modal-box {
+        width: 620px;
+        max-height: 82vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .export-modal-box .modal-body {
+        flex: 1;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+      .export-textarea {
+        width: 100%;
+        flex: 1;
+        min-height: 240px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 10px 12px;
+        font-size: 0.74rem;
+        font-family: monospace;
+        resize: none;
+        outline: none;
+        line-height: 1.7;
+      }
+      .export-textarea:focus {
+        border-color: var(--accent);
+      }
+      .copy-feedback {
+        font-size: 0.73rem;
+        color: var(--green);
+        min-width: 60px;
+      }
+      .export-meta {
+        font-size: 0.71rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- HEADER -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-logo">cm</div>
+        <div class="brand-text">
+          <span class="brand-name">Conversation AI Cloud</span>
+          <span class="brand-sub">Content Dashboard</span>
+        </div>
+      </div>
+      <div class="header-files" id="fileNames"></div>
+      <button class="icon-btn" id="settingsBtn">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+          />
+        </svg>
+        Settings
+      </button>
+      <button class="icon-btn" id="exportBtn">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        Export IDs
+      </button>
+    </header>
+
+    <!-- GLOBAL SEARCH -->
+    <div class="global-search-bar">
+      <div class="search-row">
+        <div class="search-wrap-global">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            id="g-search"
+            type="text"
+            placeholder="Search articles, dialogs, responses, IDs…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="clear-btn" id="clearSearch">&#x2715;</button>
+        </div>
+        <div class="search-opts">
+          <button class="sopt" id="opt-case" title="Case sensitive">Aa</button>
+          <div class="sopt-sep"></div>
+          <button class="sopt" id="opt-word" title="Whole word">\b</button>
+          <div class="sopt-sep"></div>
+          <button class="sopt" id="opt-regex" title="Regular expression">
+            .*
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tab-bar">
+      <button class="tab active" data-tab="all">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        All Results <span class="tab-badge" id="tab-all-count">--</span>
+      </button>
+      <button class="tab" data-tab="articles">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+          />
+          <polyline points="14 2 14 8 20 8" />
+        </svg>
+        Articles <span class="tab-badge" id="tab-a-count">--</span>
+      </button>
+      <button class="tab" data-tab="dialogs">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+          />
+        </svg>
+        Dialogs <span class="tab-badge" id="tab-d-count">--</span>
+      </button>
+    </div>
+
+    <!-- ALL RESULTS PANEL -->
+    <div id="panel-all" class="panel active">
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="sv c-accent" id="all-stat-total">--</span
+          ><span class="sl">Total</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-blue" id="all-stat-articles">--</span
+          ><span class="sl">Articles</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-accent" id="all-stat-dialogs">--</span
+          ><span class="sl">Dialogs</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-teal" id="all-stat-tdialogs">--</span
+          ><span class="sl">Transactional Dialogs</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="filter-pills">
+          <button class="pill active" data-filter="all">All</button>
+          <button class="pill" data-filter="articles">Articles</button>
+          <button class="pill" data-filter="dialogs">Dialogs</button>
+          <button class="pill" data-filter="tdialogs">
+            Transactional Dialogs
+          </button>
+        </div>
+        <span class="result-count" id="all-result-count"></span>
+      </div>
+      <div class="list-wrap" id="allList">
+        <div class="loading">
+          <div class="spinner"></div>
+          &nbsp;Loading…
+        </div>
+      </div>
+      <div class="pagination" id="all-pagination"></div>
+    </div>
+
+    <!-- ARTICLES PANEL -->
+    <div id="panel-articles" class="panel">
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="sv c-blue" id="a-stat-total">--</span
+          ><span class="sl">Articles</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-accent" id="a-stat-response">--</span
+          ><span class="sl">Has Response</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-orange" id="a-stat-dialog">--</span
+          ><span class="sl">Dialog Link</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="filter-pills">
+          <button class="pill active" data-filter="all">All</button>
+          <button class="pill" data-filter="answer">Has response</button>
+          <button class="pill" data-filter="dialog">Dialog link</button>
+        </div>
+        <span class="result-count" id="a-result-count"></span>
+      </div>
+      <div class="list-wrap" id="articleList">
+        <div class="loading">
+          <div class="spinner"></div>
+          &nbsp;Loading…
+        </div>
+      </div>
+      <div class="pagination" id="a-pagination"></div>
+    </div>
+
+    <!-- DIALOGS PANEL -->
+    <div id="panel-dialogs" class="panel">
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="sv c-accent" id="d-stat-dialogs">--</span
+          ><span class="sl">Dialogs</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-teal" id="d-stat-tdialogs">--</span
+          ><span class="sl">Transactional Dialogs</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-blue" id="d-stat-nodes">--</span
+          ><span class="sl">Nodes</span>
+        </div>
+        <div class="stat">
+          <span class="sv c-green" id="d-stat-recognition">--</span
+          ><span class="sl">Recognition Nodes</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="filter-pills">
+          <button class="pill active" data-filter="all">All</button>
+          <button class="pill" data-filter="dialogs">Dialogs</button>
+          <button class="pill" data-filter="tdialogs">
+            Transactional Dialogs
+          </button>
+          <button class="pill" data-filter="recognition">Has responses</button>
+        </div>
+        <span class="result-count" id="d-result-count"></span>
+      </div>
+      <div class="list-wrap" id="dialogList">
+        <div class="loading">
+          <div class="spinner"></div>
+          &nbsp;Loading…
+        </div>
+      </div>
+      <div class="pagination" id="d-pagination"></div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div class="modal-overlay" id="settingsModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Settings</h3>
+          <button class="close-btn" id="closeSettings">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <label for="setting-base-url">CM.com Context URL</label>
+          <input
+            id="setting-base-url"
+            type="text"
+            placeholder="https://www.cm.com/en-gb/app/aicloud/{tenantId}/{org}/{channel}/{culture}"
+            autocomplete="off"
+          />
+          <p class="hint">
+            The base URL up to (and including) the culture segment of your AI
+            Cloud environment. Links are generated by appending the item path.
+          </p>
+          <p class="hint">Article: <code>{contextUrl}/articles/{id}</code></p>
+          <p class="hint">
+            Dialog:&nbsp; <code>{contextUrl}/dialogs/{id}</code>
+          </p>
+          <div style="margin-top: 14px">
+            <label>Open CM.com links</label>
+            <div class="radio-group">
+              <label class="radio-option"
+                ><input type="radio" name="open-mode" value="popup" /> In a
+                popup window (Electron)</label
+              >
+              <label class="radio-option"
+                ><input type="radio" name="open-mode" value="browser" /> In
+                default browser</label
+              >
+            </div>
+          </div>
+          <div
+            style="
+              margin-top: 14px;
+              padding-top: 14px;
+              border-top: 1px solid var(--border);
+            "
+          >
+            <label>Update Export Files</label>
+            <p class="hint" style="margin-bottom: 8px">
+              Replace the JSON export files used by this dashboard.
+            </p>
+            <div style="display: flex; gap: 8px">
+              <button class="btn-secondary" id="importArticlesBtn">
+                Update Articles file…
+              </button>
+              <button class="btn-secondary" id="importDialogsBtn">
+                Update Dialogs file…
+              </button>
+            </div>
+            <p
+              class="hint"
+              id="importFeedback"
+              style="margin-top: 8px; min-height: 1.2em"
+            ></p>
+          </div>
+          <div
+            style="
+              margin-top: 14px;
+              padding-top: 14px;
+              border-top: 1px solid var(--border);
+            "
+          >
+            <label>App Updates</label>
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 6px">
+              <button class="btn-secondary" id="checkUpdateBtn">Check for updates</button>
+              <span class="hint" id="updateStatus" style="min-height: 1.2em"></span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content: space-between">
+          <button class="btn-link" id="openInstructionsBtn">
+            How to get export files?
+          </button>
+          <div style="display: flex; gap: 8px">
+            <button class="btn-secondary" id="cancelSettings">Cancel</button>
+            <button class="btn-primary" id="saveSettings">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INSTRUCTIONS MODAL -->
+    <div class="modal-overlay" id="instructionsModal">
+      <div class="modal-box instructions-modal-box">
+        <div class="modal-header">
+          <h3>How to Get Export Files</h3>
+          <button class="close-btn" id="closeInstructions">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <p class="hint">
+            Follow these steps in the CM.com AI Cloud dashboard to download the
+            JSON export files needed by this app.
+          </p>
+
+          <p class="instructions-section-title">Articles</p>
+          <div class="instructions-steps">
+            <div class="instructions-step">
+              <span class="instructions-step-num">1</span>
+              <span class="instructions-step-text"
+                >In CM.com AI Cloud, open the <code>Articles</code> section from
+                the left navigation.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">2</span>
+              <span class="instructions-step-text"
+                >Click <code>Export</code> in the top toolbar or action
+                menu.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">3</span>
+              <span class="instructions-step-text"
+                >Choose <code>Export JSON</code> and save the downloaded
+                file.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">4</span>
+              <span class="instructions-step-text"
+                >Back in Settings, click
+                <code>Update Articles file&#x2026;</code> and select the
+                downloaded file.</span
+              >
+            </div>
+          </div>
+
+          <hr class="instructions-divider" />
+
+          <p class="instructions-section-title">Dialogs</p>
+          <div class="instructions-steps">
+            <div class="instructions-step">
+              <span class="instructions-step-num">1</span>
+              <span class="instructions-step-text"
+                >In CM.com AI Cloud, open the <code>Dialogs</code> section from
+                the left navigation.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">2</span>
+              <span class="instructions-step-text"
+                >Click <code>Export</code> in the top toolbar or action
+                menu.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">3</span>
+              <span class="instructions-step-text"
+                >Choose <code>Export JSON</code> and save the downloaded
+                file.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">4</span>
+              <span class="instructions-step-text"
+                >Back in Settings, click
+                <code>Update Dialogs file&#x2026;</code> and select the
+                downloaded file.</span
+              >
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="closeInstructions2">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXPORT IDs MODAL -->
+    <div class="modal-overlay" id="exportModal">
+      <div class="modal-box export-modal-box">
+        <div class="modal-header">
+          <div style="display: flex; flex-direction: column; gap: 3px">
+            <h3>Export IDs</h3>
+            <span class="export-meta" id="export-meta"></span>
+          </div>
+          <button class="close-btn" id="closeExport">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <textarea
+            class="export-textarea"
+            id="exportTextarea"
+            readonly
+            spellcheck="false"
+          ></textarea>
+          <p class="hint">
+            One item per line: <code>[Type #ID] Title → URL</code> &mdash; URL
+            only when CM.com Base URL is set in Settings. Paste directly into a
+            Jira ticket description or comment.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <span class="copy-feedback" id="copy-feedback"></span>
+          <button class="btn-secondary" id="closeExport2">Close</button>
+          <button class="btn-primary" id="copyExport">Copy to clipboard</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const PAGE_SIZE = 50
+
+      // ── State ───────────────────────────────────────────────────────
+      let gQuery = ""
+      let searchCase = false
+      let searchWord = false
+      let searchRegex = false
+      let allFilterPill = "all"
+      let aFilter = "all"
+      let dFilter = "all"
+      let allPage = 1,
+        aPage = 1,
+        dPage = 1
+
+      let allArticles = []
+      let allDialogsCombined = []
+      let allCombinedItems = []
+      let filteredAll = []
+      let filteredArticles = []
+      let filteredDialogs = []
+
+      let dialogMap = new Map()
+      let tDialogMap = new Map()
+      const CM_DEFAULT_URL = ""
+      let cmBaseUrl = localStorage.getItem("cm-base-url") || CM_DEFAULT_URL
+      let openMode = localStorage.getItem("cm-open-mode") || "popup"
+
+      // ── Helpers ─────────────────────────────────────────────────────
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+      }
+      function buildSearchRegex(q) {
+        if (!q) return null
+        try {
+          let pat = searchRegex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          if (searchWord)
+            pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
+          return new RegExp(pat, searchCase ? "" : "i")
+        } catch (e) {
+          return null
+        }
+      }
+      function hl(text, q) {
+        if (!q || text == null) return esc(text)
+        const re = buildSearchRegex(q)
+        if (!re) return esc(text)
+        const e = esc(text)
+        const reG = new RegExp(re.source, re.flags + "g")
+        return e.replace(reG, (m) => "<mark>" + m + "</mark>")
+      }
+      function strip(t) {
+        return (t || "")
+          .replace(/\{[^}]*\}/g, "")
+          .replace(/%\{[^}]*\}/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+      }
+      function chev() {
+        return '<svg class="expand-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>'
+      }
+      function extLinkSvg() {
+        return '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+      }
+      function cmLink(type, id) {
+        if (!cmBaseUrl) return ""
+        const path =
+          type === "article"
+            ? cmBaseUrl + "/articles/" + id
+            : cmBaseUrl + "/dialogs/" + id
+        return (
+          '<a class="action-link" href="' +
+          esc(path) +
+          '" title="Open in CM.com" target="_blank">' +
+          extLinkSvg() +
+          "</a>"
+        )
+      }
+      function pagHtml(cur, tot, cb) {
+        if (tot <= 1) return ""
+        const d = 2,
+          range = []
+        for (let i = Math.max(1, cur - d); i <= Math.min(tot, cur + d); i++)
+          range.push(i)
+        let h =
+          '<button class="page-btn" onclick="' +
+          cb +
+          "(" +
+          (cur - 1) +
+          ')"' +
+          (cur === 1 ? " disabled" : "") +
+          ">&#8249;</button>"
+        if (range[0] > 1) {
+          h += '<button class="page-btn" onclick="' + cb + '(1)">1</button>'
+          if (range[0] > 2) h += '<span class="page-info">…</span>'
+        }
+        range.forEach((p) => {
+          h +=
+            '<button class="page-btn' +
+            (p === cur ? " active" : "") +
+            '" onclick="' +
+            cb +
+            "(" +
+            p +
+            ')">' +
+            p +
+            "</button>"
+        })
+        const last = range[range.length - 1]
+        if (last < tot) {
+          if (last < tot - 1) h += '<span class="page-info">…</span>'
+          h +=
+            '<button class="page-btn" onclick="' +
+            cb +
+            "(" +
+            tot +
+            ')">' +
+            tot +
+            "</button>"
+        }
+        h +=
+          '<button class="page-btn" onclick="' +
+          cb +
+          "(" +
+          (cur + 1) +
+          ')"' +
+          (cur === tot ? " disabled" : "") +
+          ">&#8250;</button>"
+        h += '<span class="page-info">' + cur + " / " + tot + "</span>"
+        return h
+      }
+      function toggleCard(el) {
+        el.closest(".card").classList.toggle("open")
+      }
+
+      // ── Article helpers ─────────────────────────────────────────────
+      function aKind(a) {
+        const types = a.Outputs.map((o) => o.Type)
+        if (types.includes("Answer")) return "answer"
+        if (types.includes("TDialogStart")) return "tdialog"
+        return "dialog"
+      }
+      function aHasFaq(a) {
+        return a.Questions.some((q) => q.IsFaq)
+      }
+      function aFaqQ(a) {
+        const f = a.Questions.find((q) => q.IsFaq)
+        return f ? f.Text : a.Questions[0] ? a.Questions[0].Text : null
+      }
+      function aResponse(a) {
+        const o = a.Outputs.find((o) => o.Type === "Answer")
+        return o ? o.Text : null
+      }
+
+      // ── Article card ────────────────────────────────────────────────
+      function renderArticleCard(art, q) {
+        const kind = aKind(art),
+          faq = aHasFaq(art),
+          pq = aFaqQ(art),
+          qCnt = art.Questions.length
+        const kindBadge =
+          kind === "answer"
+            ? '<span class="badge b-response">Response</span>'
+            : kind === "tdialog"
+            ? '<span class="badge b-tdialog">Transactional Dialog</span>'
+            : '<span class="badge b-dialog">Dialog Link</span>'
+        let outputSection = ""
+        if (kind === "answer") {
+          const raw = strip(aResponse(art) || "")
+          if (raw)
+            outputSection =
+              '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
+              hl(raw, q) +
+              "</div></div>"
+        } else {
+          const refs = art.Outputs.map((o) => {
+            if (o.Type === "DialogStart") {
+              const d = dialogMap.get(o.DialogId),
+                name = d ? d.name : "#" + o.DialogId
+              return (
+                '&#8594; <span class="jump-link" onclick="jumpToDialog(' +
+                o.DialogId +
+                ',false)">' +
+                esc(name) +
+                '</span> <span class="meta-dim">(Dialog #' +
+                o.DialogId +
+                ")</span>"
+              )
+            }
+            if (o.Type === "TDialogStart") {
+              const tid = o.TDialogId || o.DialogId,
+                d = tDialogMap.get(tid),
+                name = d ? d.name : "#" + tid
+              return (
+                '&#8594; <span class="jump-link tlink" onclick="jumpToDialog(' +
+                tid +
+                ',true)">' +
+                esc(name) +
+                '</span> <span class="meta-dim">(Transactional Dialog #' +
+                tid +
+                ")</span>"
+              )
+            }
+            return null
+          }).filter(Boolean)
+          if (refs.length)
+            outputSection =
+              '<div class="detail-section"><h4>Linked Dialog</h4><div class="dialog-link-row">' +
+              refs.join(" ") +
+              "</div></div>"
+        }
+        const chips = art.Questions.map(
+          (qs) =>
+            '<span class="chip' +
+            (qs.IsFaq ? " is-faq" : "") +
+            '">' +
+            hl(qs.Text, q) +
+            "</span>",
+        ).join("")
+        return (
+          '<div class="card type-article">' +
+          '<div class="card-header" onclick="toggleCard(this)">' +
+          '<span class="card-id id-blue">' +
+          art.Id +
+          "</span>" +
+          '<div class="card-main">' +
+          '<div class="card-title' +
+          (pq ? "" : " italic") +
+          '">' +
+          (pq ? hl(pq, q) : "no question") +
+          "</div>" +
+          '<div class="card-meta">' +
+          '<span class="badge b-article">Article</span>' +
+          kindBadge +
+          (faq ? '<span class="badge b-faq">FAQ</span>' : "") +
+          '<span class="meta-dim">' +
+          qCnt +
+          " question" +
+          (qCnt !== 1 ? "s" : "") +
+          "</span>" +
+          "</div>" +
+          "</div>" +
+          '<div class="card-actions">' +
+          cmLink("article", art.Id) +
+          chev() +
+          "</div>" +
+          "</div>" +
+          '<div class="card-detail">' +
+          '<div class="detail-section"><h4>Questions / Training Phrases (' +
+          qCnt +
+          ')</h4><div class="chip-grid">' +
+          chips +
+          "</div></div>" +
+          outputSection +
+          "</div>" +
+          "</div>"
+        )
+      }
+
+      // ── Dialog node ─────────────────────────────────────────────────
+      function renderNodeHtml(node, dialog, q) {
+        const isRec = node.type === "Recognition"
+        const items = (node.output && node.output.items) || []
+        const ansItem = items.find((i) => i.type === "Answer")
+        const ansRaw = strip(
+          (ansItem && ansItem.data && ansItem.data.text) || "",
+        )
+        const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
+        const optHtml = (node.links || [])
+          .flatMap((link) => {
+            const isFB =
+              link.condition &&
+              link.condition.data &&
+              link.condition.data.isFallback
+            const childN = nodeMap.get(link.childNodeId)
+            return (
+              (link.condition &&
+                link.condition.data &&
+                link.condition.data.questions) ||
+              []
+            ).map((qo) => {
+              const dest = childN
+                ? ' <span style="color:var(--muted);font-size:0.62rem">&#8594; ' +
+                  esc(childN.name) +
+                  "</span>"
+                : ""
+              return (
+                '<span class="node-option' +
+                (isFB ? " fallback" : "") +
+                '">' +
+                hl(qo.text, q) +
+                dest +
+                "</span>"
+              )
+            })
+          })
+          .join("")
+        const routeHtml = items
+          .filter((i) => i.type !== "Answer")
+          .map((item) => {
+            if (item.type === "DialogStart") {
+              const did = item.data && item.data.dialogId
+              const d = dialogMap.get(did),
+                name = d ? esc(d.name) : "#" + (did || "")
+              return (
+                '<span class="node-route">&#8594; Dialog: <strong onclick="jumpToDialog(' +
+                did +
+                ',false)">' +
+                name +
+                "</strong></span>"
+              )
+            }
+            if (item.type === "TDialogStart") {
+              const tid = item.data && item.data.tDialogId
+              const d = tDialogMap.get(tid),
+                name = d ? esc(d.name) : "#" + (tid || "")
+              return (
+                '<span class="node-route tlink">&#8594; Transactional Dialog: <strong style="color:var(--teal)" onclick="jumpToDialog(' +
+                tid +
+                ',true)">' +
+                name +
+                "</strong></span>"
+              )
+            }
+            return ""
+          })
+          .filter(Boolean)
+          .join("")
+        return (
+          '<div class="dialog-node">' +
+          '<div class="node-header">' +
+          '<span class="badge ' +
+          (isRec ? "b-recog" : "b-outnode") +
+          '">' +
+          esc(node.type) +
+          "</span>" +
+          '<span class="node-name">' +
+          hl(node.name, q) +
+          "</span>" +
+          "</div>" +
+          (ansRaw
+            ? '<div class="node-answer">' + hl(ansRaw, q) + "</div>"
+            : "") +
+          (optHtml ? '<div class="node-options">' + optHtml + "</div>" : "") +
+          (routeHtml
+            ? '<div class="node-routes">' + routeHtml + "</div>"
+            : "") +
+          "</div>"
+        )
+      }
+
+      // ── Dialog card ─────────────────────────────────────────────────
+      function renderDialogCard(item, q) {
+        if (item._kind === "tdialog") {
+          return (
+            '<div class="card type-tdialog">' +
+            '<div class="card-header" style="cursor:default">' +
+            '<span class="card-id id-teal">' +
+            item.id +
+            "</span>" +
+            '<div class="card-main">' +
+            '<div class="card-title">' +
+            hl(item.name, q) +
+            "</div>" +
+            '<div class="card-meta"><span class="badge b-tdialog">Transactional Dialog</span></div>' +
+            "</div>" +
+            '<div class="card-actions">' +
+            cmLink("dialog", item.id) +
+            "</div>" +
+            "</div>" +
+            "</div>"
+          )
+        }
+        const nodeCnt = (item.nodes || []).length
+        const recCnt = (item.nodes || []).filter(
+          (n) => n.type === "Recognition",
+        ).length
+        const desc = item.description || ""
+        const nodesHtml = (item.nodes || [])
+          .map((n) => renderNodeHtml(n, item, q))
+          .join("")
+        return (
+          '<div class="card type-dialog">' +
+          '<div class="card-header" onclick="toggleCard(this)">' +
+          '<span class="card-id">' +
+          item.id +
+          "</span>" +
+          '<div class="card-main">' +
+          '<div class="card-title">' +
+          hl(item.name, q) +
+          "</div>" +
+          '<div class="card-meta">' +
+          '<span class="badge b-dialog">Dialog</span>' +
+          '<span class="badge b-recog">' +
+          recCnt +
+          " Recognition</span>" +
+          '<span class="meta-dim">' +
+          nodeCnt +
+          " node" +
+          (nodeCnt !== 1 ? "s" : "") +
+          "</span>" +
+          (desc
+            ? '<span class="meta-dim">' +
+              esc(desc.slice(0, 60)) +
+              (desc.length > 60 ? "…" : "") +
+              "</span>"
+            : "") +
+          "</div>" +
+          "</div>" +
+          '<div class="card-actions">' +
+          cmLink("dialog", item.id) +
+          chev() +
+          "</div>" +
+          "</div>" +
+          '<div class="card-detail">' +
+          (desc
+            ? '<div class="detail-section"><h4>Description</h4><p class="desc-text">' +
+              hl(desc, q) +
+              "</p></div>"
+            : "") +
+          '<div class="detail-section"><h4>Nodes (' +
+          nodeCnt +
+          ')</h4><div class="nodes-list">' +
+          nodesHtml +
+          "</div></div>" +
+          "</div>" +
+          "</div>"
+        )
+      }
+
+      // ── Match functions ─────────────────────────────────────────────
+      function testRe(re, str) {
+        if (!re || !str) return false
+        re.lastIndex = 0
+        return re.test(str)
+      }
+      function matchArticle(a, q) {
+        if (!q) return true
+        const re = buildSearchRegex(q)
+        if (!re) return false
+        if (testRe(re, String(a.Id))) return true
+        if (a.Questions.some((qs) => testRe(re, qs.Text))) return true
+        if (testRe(re, strip(aResponse(a) || ""))) return true
+        return false
+      }
+      function matchDialog(item, q) {
+        if (!q) return true
+        const re = buildSearchRegex(q)
+        if (!re) return false
+        if (testRe(re, String(item.id))) return true
+        if (testRe(re, item.name || "")) return true
+        if (testRe(re, item.description || "")) return true
+        if (
+          (item.nodes || []).some((n) => {
+            if (testRe(re, n.name || "")) return true
+            const ans = ((n.output && n.output.items) || []).find(
+              (i) => i.type === "Answer",
+            )
+            if (ans && testRe(re, strip((ans.data && ans.data.text) || "")))
+              return true
+            return false
+          })
+        )
+          return true
+        return false
+      }
+
+      // ── Apply & render: All ─────────────────────────────────────────
+      function applyAllFilters() {
+        const q = gQuery
+        filteredAll = allCombinedItems.filter((item) => {
+          if (allFilterPill === "articles" && item._kind !== "article")
+            return false
+          if (allFilterPill === "dialogs" && item._kind !== "dialog")
+            return false
+          if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
+            return false
+          return item._kind === "article"
+            ? matchArticle(item, q)
+            : matchDialog(item, q)
+        })
+        allPage = 1
+        renderAllList()
+        const tot = allCombinedItems.length,
+          mat = filteredAll.length
+        document.getElementById("all-result-count").textContent =
+          mat + (mat !== tot ? " of " + tot : "") + " results"
+        document.getElementById("tab-all-count").textContent = mat
+        document.getElementById("all-pagination").innerHTML = pagHtml(
+          allPage,
+          Math.ceil(mat / PAGE_SIZE),
+          "goAllPage",
+        )
+      }
+      function renderAllList() {
+        const el = document.getElementById("allList")
+        const slice = filteredAll.slice(
+          (allPage - 1) * PAGE_SIZE,
+          allPage * PAGE_SIZE,
+        )
+        if (!slice.length) {
+          el.innerHTML =
+            '<div class="empty-state"><p>No results found.</p></div>'
+          return
+        }
+        el.innerHTML = slice
+          .map((item) =>
+            item._kind === "article"
+              ? renderArticleCard(item, gQuery)
+              : renderDialogCard(item, gQuery),
+          )
+          .join("")
+      }
+      function goAllPage(p) {
+        const tot = Math.ceil(filteredAll.length / PAGE_SIZE)
+        if (p < 1 || p > tot) return
+        allPage = p
+        renderAllList()
+        document.getElementById("all-pagination").innerHTML = pagHtml(
+          p,
+          tot,
+          "goAllPage",
+        )
+        document.getElementById("allList").scrollTop = 0
+      }
+
+      // ── Apply & render: Articles ────────────────────────────────────
+      function applyArticleFilters() {
+        const q = gQuery
+        filteredArticles = allArticles.filter((a) => {
+          if (aFilter === "answer" && aKind(a) !== "answer") return false
+          if (aFilter === "dialog" && aKind(a) === "answer") return false
+          return matchArticle(a, q)
+        })
+        aPage = 1
+        renderArticleList()
+        const tot = allArticles.length,
+          mat = filteredArticles.length
+        document.getElementById("a-result-count").textContent =
+          mat + (mat !== tot ? " of " + tot : "") + " articles"
+        document.getElementById("tab-a-count").textContent = mat
+        document.getElementById("a-pagination").innerHTML = pagHtml(
+          aPage,
+          Math.ceil(mat / PAGE_SIZE),
+          "goAPage",
+        )
+      }
+      function renderArticleList() {
+        const el = document.getElementById("articleList")
+        const slice = filteredArticles.slice(
+          (aPage - 1) * PAGE_SIZE,
+          aPage * PAGE_SIZE,
+        )
+        if (!slice.length) {
+          el.innerHTML =
+            '<div class="empty-state"><p>No articles found.</p></div>'
+          return
+        }
+        el.innerHTML = slice.map((a) => renderArticleCard(a, gQuery)).join("")
+      }
+      function goAPage(p) {
+        const tot = Math.ceil(filteredArticles.length / PAGE_SIZE)
+        if (p < 1 || p > tot) return
+        aPage = p
+        renderArticleList()
+        document.getElementById("a-pagination").innerHTML = pagHtml(
+          p,
+          tot,
+          "goAPage",
+        )
+        document.getElementById("articleList").scrollTop = 0
+      }
+
+      // ── Apply & render: Dialogs ─────────────────────────────────────
+      function applyDialogFilters() {
+        const q = gQuery
+        filteredDialogs = allDialogsCombined.filter((item) => {
+          if (dFilter === "dialogs" && item._kind !== "dialog") return false
+          if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
+          if (dFilter === "recognition" && item._kind === "tdialog")
+            return false
+          if (
+            dFilter === "recognition" &&
+            !(item.nodes || []).some((n) =>
+              ((n.output && n.output.items) || []).some(
+                (i) => i.type === "Answer",
+              ),
+            )
+          )
+            return false
+          return matchDialog(item, q)
+        })
+        dPage = 1
+        renderDialogList()
+        const tot = allDialogsCombined.length,
+          mat = filteredDialogs.length
+        document.getElementById("d-result-count").textContent =
+          mat + (mat !== tot ? " of " + tot : "") + " dialogs"
+        document.getElementById("tab-d-count").textContent = mat
+        document.getElementById("d-pagination").innerHTML = pagHtml(
+          dPage,
+          Math.ceil(mat / PAGE_SIZE),
+          "goDPage",
+        )
+      }
+      function renderDialogList() {
+        const el = document.getElementById("dialogList")
+        const slice = filteredDialogs.slice(
+          (dPage - 1) * PAGE_SIZE,
+          dPage * PAGE_SIZE,
+        )
+        if (!slice.length) {
+          el.innerHTML =
+            '<div class="empty-state"><p>No dialogs found.</p></div>'
+          return
+        }
+        el.innerHTML = slice
+          .map((item) => renderDialogCard(item, gQuery))
+          .join("")
+      }
+      function goDPage(p) {
+        const tot = Math.ceil(filteredDialogs.length / PAGE_SIZE)
+        if (p < 1 || p > tot) return
+        dPage = p
+        renderDialogList()
+        document.getElementById("d-pagination").innerHTML = pagHtml(
+          p,
+          tot,
+          "goDPage",
+        )
+        document.getElementById("dialogList").scrollTop = 0
+      }
+
+      // ── Cross-navigation ────────────────────────────────────────────
+      function jumpToDialog(id, isTDialog) {
+        document
+          .querySelectorAll(".tab")
+          .forEach((t) => t.classList.remove("active"))
+        document
+          .querySelectorAll(".panel")
+          .forEach((p) => p.classList.remove("active"))
+        document.querySelector('[data-tab="dialogs"]').classList.add("active")
+        document.getElementById("panel-dialogs").classList.add("active")
+        const sid = String(id)
+        document.getElementById("g-search").value = sid
+        document.getElementById("clearSearch").classList.add("visible")
+        gQuery = sid
+        dFilter = "all"
+        document
+          .querySelectorAll("#panel-dialogs .pill")
+          .forEach((p) => p.classList.remove("active"))
+        document
+          .querySelector('#panel-dialogs [data-filter="all"]')
+          .classList.add("active")
+        applyDialogFilters()
+        // Also re-apply other panels so counts stay accurate
+        applyAllFilters()
+        applyArticleFilters()
+        setTimeout(() => {
+          const c = document.querySelector("#dialogList .card")
+          if (c) {
+            c.classList.add("open")
+            c.scrollIntoView({ behavior: "smooth", block: "start" })
+          }
+        }, 60)
+      }
+
+      // ── Global search ───────────────────────────────────────────────
+      function updateRegexIndicator() {
+        const inp = document.getElementById("g-search")
+        const btn = document.getElementById("opt-regex")
+        const bad = searchRegex && gQuery && buildSearchRegex(gQuery) === null
+        inp.classList.toggle("regex-error", bad)
+        btn.classList.toggle("err", bad)
+      }
+      function triggerSearch() {
+        updateRegexIndicator()
+        applyAllFilters()
+        applyArticleFilters()
+        applyDialogFilters()
+      }
+      let searchTimer
+      document.getElementById("g-search").addEventListener("input", (e) => {
+        clearTimeout(searchTimer)
+        searchTimer = setTimeout(() => {
+          gQuery = e.target.value.trim()
+          document
+            .getElementById("clearSearch")
+            .classList.toggle("visible", gQuery.length > 0)
+          triggerSearch()
+        }, 200)
+      })
+      document.getElementById("clearSearch").addEventListener("click", () => {
+        document.getElementById("g-search").value = ""
+        document.getElementById("clearSearch").classList.remove("visible")
+        gQuery = ""
+        triggerSearch()
+      })
+      document.getElementById("opt-case").addEventListener("click", () => {
+        searchCase = !searchCase
+        document.getElementById("opt-case").classList.toggle("on", searchCase)
+        triggerSearch()
+      })
+      document.getElementById("opt-word").addEventListener("click", () => {
+        searchWord = !searchWord
+        document.getElementById("opt-word").classList.toggle("on", searchWord)
+        triggerSearch()
+      })
+      document.getElementById("opt-regex").addEventListener("click", () => {
+        searchRegex = !searchRegex
+        document.getElementById("opt-regex").classList.toggle("on", searchRegex)
+        triggerSearch()
+      })
+
+      // ── Tabs ────────────────────────────────────────────────────────
+      document.querySelectorAll(".tab").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll(".tab")
+            .forEach((t) => t.classList.remove("active"))
+          document
+            .querySelectorAll(".panel")
+            .forEach((p) => p.classList.remove("active"))
+          btn.classList.add("active")
+          document
+            .getElementById("panel-" + btn.dataset.tab)
+            .classList.add("active")
+        })
+      })
+
+      // ── Filter pills ────────────────────────────────────────────────
+      document.querySelectorAll("#panel-all .pill").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("#panel-all .pill")
+            .forEach((p) => p.classList.remove("active"))
+          btn.classList.add("active")
+          allFilterPill = btn.dataset.filter
+          applyAllFilters()
+        })
+      })
+      document.querySelectorAll("#panel-articles .pill").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("#panel-articles .pill")
+            .forEach((p) => p.classList.remove("active"))
+          btn.classList.add("active")
+          aFilter = btn.dataset.filter
+          applyArticleFilters()
+        })
+      })
+      document.querySelectorAll("#panel-dialogs .pill").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("#panel-dialogs .pill")
+            .forEach((p) => p.classList.remove("active"))
+          btn.classList.add("active")
+          dFilter = btn.dataset.filter
+          applyDialogFilters()
+        })
+      })
+
+      // ── Export IDs modal ─────────────────────────────────────────────
+      function getActiveExportItems() {
+        const activeTab = document.querySelector(".tab.active").dataset.tab
+        if (activeTab === "articles")
+          return filteredArticles.map((a) => ({
+            kind: "article",
+            id: a.Id,
+            title: aFaqQ(a) || "(no question)",
+          }))
+        if (activeTab === "dialogs")
+          return filteredDialogs.map((d) => ({
+            kind: d._kind,
+            id: d.id,
+            title: d.name || "",
+          }))
+        return filteredAll.map((item) =>
+          item._kind === "article"
+            ? {
+                kind: "article",
+                id: item.Id,
+                title: aFaqQ(item) || "(no question)",
+              }
+            : { kind: item._kind, id: item.id, title: item.name || "" },
+        )
+      }
+      function buildItemUrl(kind, id) {
+        if (!cmBaseUrl) return ""
+        return kind === "article"
+          ? cmBaseUrl + "/articles/" + id
+          : cmBaseUrl + "/dialogs/" + id
+      }
+      function openExportModal() {
+        const items = getActiveExportItems()
+        const activeTab = document.querySelector(".tab.active").dataset.tab
+        const tabLabel =
+          activeTab === "articles"
+            ? "Articles"
+            : activeTab === "dialogs"
+            ? "Dialogs"
+            : "All Results"
+        document.getElementById("export-meta").textContent =
+          items.length +
+          " item" +
+          (items.length !== 1 ? "s" : "") +
+          " — " +
+          tabLabel +
+          (gQuery ? ' · search: "' + gQuery + '"' : "")
+        const lines = items.map((item) => {
+          const typeLabel =
+            item.kind === "article"
+              ? "Article"
+              : item.kind === "tdialog"
+              ? "Transactional Dialog"
+              : "Dialog"
+          const url = buildItemUrl(item.kind, item.id)
+          return (
+            "[" +
+            typeLabel +
+            " #" +
+            item.id +
+            "] " +
+            item.title +
+            (url ? "  →  " + url : "")
+          )
+        })
+        document.getElementById("exportTextarea").value = lines.join("\n")
+        document.getElementById("copy-feedback").textContent = ""
+        document.getElementById("exportModal").classList.add("open")
+      }
+      function closeExportModal() {
+        document.getElementById("exportModal").classList.remove("open")
+      }
+      document
+        .getElementById("exportBtn")
+        .addEventListener("click", openExportModal)
+      document
+        .getElementById("closeExport")
+        .addEventListener("click", closeExportModal)
+      document
+        .getElementById("closeExport2")
+        .addEventListener("click", closeExportModal)
+      document.getElementById("exportModal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("exportModal"))
+          closeExportModal()
+      })
+      document.getElementById("copyExport").addEventListener("click", () => {
+        navigator.clipboard
+          .writeText(document.getElementById("exportTextarea").value)
+          .then(() => {
+            const fb = document.getElementById("copy-feedback")
+            fb.textContent = "\u2713 Copied!"
+            setTimeout(() => {
+              fb.textContent = ""
+            }, 2000)
+          })
+      })
+
+      // ── Instructions modal ────────────────────────────────────────────
+      function openInstructions() {
+        document.getElementById("instructionsModal").classList.add("open")
+      }
+      function closeInstructions() {
+        document.getElementById("instructionsModal").classList.remove("open")
+      }
+      document
+        .getElementById("openInstructionsBtn")
+        .addEventListener("click", openInstructions)
+      document
+        .getElementById("closeInstructions")
+        .addEventListener("click", closeInstructions)
+      document
+        .getElementById("closeInstructions2")
+        .addEventListener("click", closeInstructions)
+      document
+        .getElementById("instructionsModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("instructionsModal"))
+            closeInstructions()
+        })
+
+      // ── Settings modal ───────────────────────────────────────────────
+      document.getElementById("settingsBtn").addEventListener("click", () => {
+        document.getElementById("setting-base-url").value = cmBaseUrl
+        document.querySelector(
+          `input[name="open-mode"][value="${openMode}"]`,
+        ).checked = true
+        document.getElementById("settingsModal").classList.add("open")
+      })
+      function closeSettings() {
+        document.getElementById("settingsModal").classList.remove("open")
+      }
+      document
+        .getElementById("closeSettings")
+        .addEventListener("click", closeSettings)
+      document
+        .getElementById("cancelSettings")
+        .addEventListener("click", closeSettings)
+      document
+        .getElementById("settingsModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("settingsModal"))
+            closeSettings()
+        })
+      document.getElementById("saveSettings").addEventListener("click", () => {
+        cmBaseUrl = document
+          .getElementById("setting-base-url")
+          .value.trim()
+          .replace(/\/$/, "")
+        localStorage.setItem("cm-base-url", cmBaseUrl)
+        openMode = document.querySelector(
+          'input[name="open-mode"]:checked',
+        ).value
+        localStorage.setItem("cm-open-mode", openMode)
+        closeSettings()
+        renderAllList()
+        renderArticleList()
+        renderDialogList()
+      })
+
+      document.getElementById("checkUpdateBtn").addEventListener("click", async () => {
+        const el = document.getElementById("updateStatus")
+        el.textContent = "Checking\u2026"
+        const res = await window.electronAPI.checkForUpdates()
+        if (res.status === "available") {
+          el.innerHTML = `v${esc(res.version)} available &mdash; <a class="action-link" href="https://github.com/wouttonio/cm-conversation-dashboard/releases/latest">Download</a>`
+        } else if (res.status === "up-to-date") {
+          el.textContent = "You\u2019re on the latest version."
+        } else if (res.status === "dev") {
+          el.textContent = "Update checks are disabled in dev mode."
+        } else {
+          el.textContent = "Could not check for updates."
+        }
+      })
+
+      // Open CM.com links in browser or popup based on setting
+      document.addEventListener("click", (e) => {
+        const a = e.target.closest("a.action-link")
+        if (!a || !a.href) return
+        if (openMode === "browser") {
+          e.preventDefault()
+          window.electronAPI.openUrl(a.href)
+        }
+      })
+
+      // ── Bootstrap ────────────────────────────────────────────────────
+      function loadData() {
+        window.electronAPI
+          .getData()
+          .then((data) => {
+            dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
+            tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
+
+            const hasArticles = !!(data.files && data.files.articles)
+            const hasDialogs = !!(data.files && data.files.dialogs)
+
+            if (data.files) {
+              const parts = []
+              if (hasArticles)
+                parts.push(
+                  '<span class="file-tag">' +
+                    esc(data.files.articles) +
+                    "</span>",
+                )
+              if (hasDialogs)
+                parts.push(
+                  '<span class="file-tag">' +
+                    esc(data.files.dialogs) +
+                    "</span>",
+                )
+              document.getElementById("fileNames").innerHTML = parts.join("")
+            }
+
+            if (!hasArticles && !hasDialogs) {
+              const msg =
+                '<div class="empty-state" style="padding:60px 20px">' +
+                '<p style="font-size:1rem;font-weight:600;color:var(--text);margin-bottom:8px">No export files found</p>' +
+                '<p>Open <button class="btn-secondary" style="display:inline;padding:2px 10px;cursor:pointer" onclick="document.getElementById(\'settingsBtn\').click()">Settings</button> and use <strong>Update Export Files</strong> to import your Articles and Dialogs JSON exports.</p>' +
+                "</div>"
+              document.getElementById("allList").innerHTML = msg
+              document.getElementById("articleList").innerHTML = msg
+              document.getElementById("dialogList").innerHTML = msg
+              return
+            }
+
+            // Articles
+            allArticles = data.articles || []
+            const respCnt = allArticles.filter(
+              (a) => aKind(a) === "answer",
+            ).length
+            document.getElementById("a-stat-total").textContent =
+              allArticles.length
+            document.getElementById("a-stat-response").textContent = respCnt
+            document.getElementById("a-stat-dialog").textContent =
+              allArticles.length - respCnt
+
+            // Dialogs
+            const dialogs = data.dialogs || []
+            const tDialogs = data.tDialogs || []
+            allDialogsCombined = [
+              ...dialogs.map((d) => Object.assign({}, d, { _kind: "dialog" })),
+              ...tDialogs.map((d) =>
+                Object.assign({}, d, { _kind: "tdialog" }),
+              ),
+            ]
+            const nodeCnt = dialogs.reduce(
+              (s, d) => s + (d.nodes ? d.nodes.length : 0),
+              0,
+            )
+            const recCnt = dialogs.reduce(
+              (s, d) =>
+                s +
+                (d.nodes || []).filter((n) => n.type === "Recognition").length,
+              0,
+            )
+            document.getElementById("d-stat-dialogs").textContent =
+              dialogs.length
+            document.getElementById("d-stat-tdialogs").textContent =
+              tDialogs.length
+            document.getElementById("d-stat-nodes").textContent = nodeCnt
+            document.getElementById("d-stat-recognition").textContent = recCnt
+
+            // Combined
+            allCombinedItems = [
+              ...allArticles.map((a) =>
+                Object.assign({}, a, { _kind: "article" }),
+              ),
+              ...allDialogsCombined,
+            ]
+            document.getElementById("all-stat-total").textContent =
+              allCombinedItems.length
+            document.getElementById("all-stat-articles").textContent =
+              allArticles.length
+            document.getElementById("all-stat-dialogs").textContent =
+              dialogs.length
+            document.getElementById("all-stat-tdialogs").textContent =
+              tDialogs.length
+
+            // Initial render
+            filteredAll = [...allCombinedItems]
+            filteredArticles = [...allArticles]
+            filteredDialogs = [...allDialogsCombined]
+            document.getElementById("all-result-count").textContent =
+              allCombinedItems.length + " results"
+            document.getElementById("a-result-count").textContent =
+              allArticles.length + " articles"
+            document.getElementById("d-result-count").textContent =
+              allDialogsCombined.length + " dialogs"
+            document.getElementById("tab-all-count").textContent =
+              allCombinedItems.length
+            document.getElementById("tab-a-count").textContent =
+              allArticles.length
+            document.getElementById("tab-d-count").textContent =
+              allDialogsCombined.length
+            renderAllList()
+            renderArticleList()
+            renderDialogList()
+            document.getElementById("all-pagination").innerHTML = pagHtml(
+              allPage,
+              Math.ceil(allCombinedItems.length / PAGE_SIZE),
+              "goAllPage",
+            )
+            document.getElementById("a-pagination").innerHTML = pagHtml(
+              aPage,
+              Math.ceil(allArticles.length / PAGE_SIZE),
+              "goAPage",
+            )
+            document.getElementById("d-pagination").innerHTML = pagHtml(
+              dPage,
+              Math.ceil(allDialogsCombined.length / PAGE_SIZE),
+              "goDPage",
+            )
+          })
+          .catch((err) => {
+            document.getElementById("allList").innerHTML =
+              '<div class="empty-state"><p style="color:var(--red)">Error loading data: ' +
+              esc(String(err)) +
+              "</p></div>"
+          })
+      }
+
+      // ── Import file buttons ───────────────────────────────────────────
+      function handleImport(type, label) {
+        const fb = document.getElementById("importFeedback")
+        fb.style.color = "var(--muted)"
+        fb.textContent = "Opening file picker…"
+        window.electronAPI.importFile(type).then((result) => {
+          if (!result || result.reason === "canceled") {
+            fb.textContent = ""
+            return
+          }
+          if (result.ok) {
+            fb.style.color = "var(--green)"
+            fb.textContent = label + " updated: " + result.filename
+            loadData()
+          } else {
+            fb.style.color = "var(--red)"
+            fb.textContent = "Error: " + (result.reason || "unknown error")
+          }
+        })
+      }
+      document
+        .getElementById("importArticlesBtn")
+        .addEventListener("click", () => {
+          handleImport("ArticlesExport", "Articles file")
+        })
+      document
+        .getElementById("importDialogsBtn")
+        .addEventListener("click", () => {
+          handleImport("DialogsExport", "Dialogs file")
+        })
+
+      loadData()
+
+      window.electronAPI.getVersion().then((v) => {
+        const el = document.querySelector(".brand-sub")
+        if (el) el.textContent = `Content Dashboard \u00b7 v${v}`
+      })
+    </script>
+  </body>
+</html>

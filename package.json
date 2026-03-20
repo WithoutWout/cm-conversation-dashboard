@@ -1,0 +1,61 @@
+{
+  "name": "cm-com-dashboard",
+  "version": "0.1.0",
+  "description": "Desktop dashboard for inspecting CM.com Conversation AI Cloud content exports",
+  "author": "Wout van Os",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build": "electron-builder --mac --win",
+    "publish:mac": "electron-builder --mac --publish always",
+    "publish:win": "electron-builder --win --publish always"
+  },
+  "build": {
+    "appId": "com.cm.conversation-dashboard",
+    "productName": "Conversation AI Dashboard",
+    "icon": "build/icon.png",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "package.json"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "WithoutWout",
+      "repo": "cm-conversation-dashboard"
+    },
+    "mac": {
+      "target": {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    },
+    "win": {
+      "target": {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    },
+    "nsis": {
+      "perMachine": false,
+      "allowElevation": false
+    },
+    "dmg": {
+      "shrink": true
+    }
+  },
+  "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  }
+}
