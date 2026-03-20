@@ -9,8 +9,8 @@
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build": "electron-builder --mac --win",
-    "publish:mac": "electron-builder --mac --publish always",
-    "publish:win": "electron-builder --win --publish always"
+    "publish:mac": "electron-builder --mac --publish always --config electron-builder.js",
+    "publish:win": "electron-builder --win --publish always --config electron-builder.js"
   },
   "build": {
     "appId": "com.cm.conversation-dashboard",
@@ -29,7 +29,8 @@
       "draft": false
     },
     "mac": {
-      "notarize": true,
+      "category": "public.app-category.productivity",
+      "notarize": false,
       "target": {
         "target": "dmg",
         "arch": [
