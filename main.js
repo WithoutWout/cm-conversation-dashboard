@@ -14,7 +14,9 @@ function findFile(pattern) {
   for (const dir of [dataDir(), __dirname]) {
     try {
       const files = fs.readdirSync(dir)
-      const match = files.find((f) => f.includes(pattern) && f.endsWith(".json"))
+      const match = files.find(
+        (f) => f.includes(pattern) && f.endsWith(".json"),
+      )
       if (match) return path.join(dir, match)
     } catch (_) {}
   }
@@ -37,11 +39,15 @@ ipcMain.handle("import-file", async (_e, type) => {
   if (canceled || !filePaths.length) return { ok: false, reason: "canceled" }
   const src = filePaths[0]
   const basename = path.basename(src)
-  const destBasename = basename.includes(type) ? basename : type + "_" + basename
+  const destBasename = basename.includes(type)
+    ? basename
+    : type + "_" + basename
   const destDir = dataDir()
   const oldPath = findFile(type)
   if (oldPath && path.basename(oldPath) !== destBasename) {
-    try { fs.unlinkSync(oldPath) } catch (_) {}
+    try {
+      fs.unlinkSync(oldPath)
+    } catch (_) {}
   }
   fs.copyFileSync(src, path.join(destDir, destBasename))
   return { ok: true, filename: destBasename }
@@ -79,22 +85,38 @@ ipcMain.handle("check-for-updates", () => {
     }
     const req = https.get(options, (res) => {
       let body = ""
-      res.on("data", (chunk) => { body += chunk })
+      res.on("data", (chunk) => {
+        body += chunk
+      })
       res.on("end", () => {
         try {
           const data = JSON.parse(body)
           const latest = (data.tag_name || "").replace(/^v/, "")
           const current = app.getVersion()
-          if (!latest) return resolve({ status: "error", message: `API: ${data.message || "no tag_name"} (HTTP ${res.statusCode})` })
+          if (!latest)
+            return resolve({
+              status: "error",
+              message: `API: ${data.message || "no tag_name"} (HTTP ${
+                res.statusCode
+              })`,
+            })
           if (latest === current) return resolve({ status: "up-to-date" })
           resolve({ status: "available", version: latest })
         } catch (e) {
-          resolve({ status: "error", message: `Parse error (HTTP ${res.statusCode}): ${e.message}` })
+          resolve({
+            status: "error",
+            message: `Parse error (HTTP ${res.statusCode}): ${e.message}`,
+          })
         }
       })
     })
-    req.on("error", (e) => resolve({ status: "error", message: `Network: ${e.message}` }))
-    req.setTimeout(8000, () => { req.destroy(); resolve({ status: "error", message: "Timeout" }) })
+    req.on("error", (e) =>
+      resolve({ status: "error", message: `Network: ${e.message}` }),
+    )
+    req.setTimeout(8000, () => {
+      req.destroy()
+      resolve({ status: "error", message: "Timeout" })
+    })
   })
 })
 

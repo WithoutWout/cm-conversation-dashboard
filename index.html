@@ -1029,8 +1029,12 @@
         border-bottom: 1px solid var(--border);
         font-size: 0.78rem;
       }
-      .export-row:last-child { border-bottom: none; }
-      .export-row:hover { background: var(--surface2); }
+      .export-row:last-child {
+        border-bottom: none;
+      }
+      .export-row:hover {
+        background: var(--surface2);
+      }
       .export-row-id {
         color: var(--blue);
         text-decoration: underline;
@@ -1059,8 +1063,14 @@
         flex-shrink: 0;
         transition: border-color 0.15s, color 0.15s;
       }
-      .export-row-copy:hover { border-color: var(--accent); color: var(--accent); }
-      .export-row-copy.copied { border-color: var(--green); color: var(--green); }
+      .export-row-copy:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .export-row-copy.copied {
+        border-color: var(--green);
+        color: var(--green);
+      }
       .copy-feedback {
         font-size: 0.73rem;
         color: var(--green);
@@ -1099,19 +1109,26 @@
         padding: 0 2px;
         opacity: 0.7;
       }
-      .update-banner-close:hover { opacity: 1; }
+      .update-banner-close:hover {
+        opacity: 1;
+      }
     </style>
   </head>
   <body>
     <!-- UPDATE BANNER -->
     <div class="update-banner" id="updateBanner">
       <span id="updateBannerText"></span>
-      <button class="update-banner-close" id="updateBannerClose" title="Dismiss">&#x2715;</button>
+      <button
+        class="update-banner-close"
+        id="updateBannerClose"
+        title="Dismiss"
+      >
+        &#x2715;
+      </button>
     </div>
 
     <!-- HEADER -->
     <header class="app-header">
-
       <div class="brand">
         <div class="brand-logo">cm</div>
         <div class="brand-text">
@@ -1420,9 +1437,22 @@
             "
           >
             <label>App Updates</label>
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 6px">
-              <button class="btn-secondary" id="checkUpdateBtn">Check for updates</button>
-              <span class="hint" id="updateStatus" style="min-height: 1.2em"></span>
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-top: 6px;
+              "
+            >
+              <button class="btn-secondary" id="checkUpdateBtn">
+                Check for updates
+              </button>
+              <span
+                class="hint"
+                id="updateStatus"
+                style="min-height: 1.2em"
+              ></span>
             </div>
           </div>
         </div>
@@ -1533,10 +1563,13 @@
           <button class="close-btn" id="closeUpdateModal">&#x2715;</button>
         </div>
         <div class="modal-body">
-          <p style="font-size:0.85rem; line-height:1.6">
-            A new version <strong id="updateModalVersion"></strong> of the Conversation AI Dashboard is available.
+          <p style="font-size: 0.85rem; line-height: 1.6">
+            A new version <strong id="updateModalVersion"></strong> of the
+            Conversation AI Dashboard is available.
           </p>
-          <p class="hint">Download and reinstall the app to get the latest features and fixes.</p>
+          <p class="hint">
+            Download and reinstall the app to get the latest features and fixes.
+          </p>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" id="closeUpdateModal2">Later</button>
@@ -1544,8 +1577,13 @@
             id="updateModalDownloadBtn"
             href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest"
             class="btn-primary"
-            style="text-decoration:none; display:inline-flex; align-items:center"
-          >Download update</a>
+            style="
+              text-decoration: none;
+              display: inline-flex;
+              align-items: center;
+            "
+            >Download update</a
+          >
         </div>
       </div>
     </div>
@@ -1563,7 +1601,8 @@
         <div class="modal-body">
           <div class="export-list" id="exportList"></div>
           <p class="hint">
-            Click an ID to open it in CM.com &mdash; Copy row copies a Jira-ready hyperlink. Copy all copies the full list.
+            Click an ID to open it in CM.com &mdash; Copy row copies a
+            Jira-ready hyperlink. Copy all copies the full list.
           </p>
         </div>
         <div class="modal-footer">
@@ -2391,8 +2430,7 @@
         // Wrap in a full HTML document with CF_HTML-style fragment markers.
         // This is identical to what Word puts on the clipboard, which TinyMCE's
         // paste plugin handles on all platforms including macOS.
-        const wrapped =
-          `<html><body><!--StartFragment-->${htmlStr}<!--EndFragment--></body></html>`
+        const wrapped = `<html><body><!--StartFragment-->${htmlStr}<!--EndFragment--></body></html>`
         const plain = htmlStr.replace(/<[^>]+>/g, "")
         if (typeof ClipboardItem !== "undefined") {
           navigator.clipboard
@@ -2441,21 +2479,32 @@
           (gQuery ? ' · search: "' + gQuery + '"' : "")
 
         const list = document.getElementById("exportList")
-        list.innerHTML = items.map((item) => {
-          const idToken = item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
-          const url = buildItemUrl(item.kind, item.id)
-          const idText = idToken
-          const idLabel = idToken
-          const safeUrl = esc(url)
-          const safeTitle = esc(JSON.stringify(item.title))
-          const safeIdText = esc(JSON.stringify(idLabel))
-          return `<div class="export-row">
-            <span class="export-row-id" onclick="${url ? `window.electronAPI.openUrl('${safeUrl}')` : ''}" title="${url ? safeUrl : 'Set CM.com Context URL in Settings to enable links'}">${esc(idText)}</span>
-            <span class="export-row-title" title="${esc(item.title)}">${esc(item.title)}</span>
+        list.innerHTML = items
+          .map((item) => {
+            const idToken =
+              item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
+            const url = buildItemUrl(item.kind, item.id)
+            const idText = idToken
+            const idLabel = idToken
+            const safeUrl = esc(url)
+            const safeTitle = esc(JSON.stringify(item.title))
+            const safeIdText = esc(JSON.stringify(idLabel))
+            return `<div class="export-row">
+            <span class="export-row-id" onclick="${
+              url ? `window.electronAPI.openUrl('${safeUrl}')` : ""
+            }" title="${
+              url
+                ? safeUrl
+                : "Set CM.com Context URL in Settings to enable links"
+            }">${esc(idText)}</span>
+            <span class="export-row-title" title="${esc(item.title)}">${esc(
+              item.title,
+            )}</span>
             <button class="export-row-copy" title="Copy Jira-ready link"
               onclick="copyJiraLink('${safeUrl}', ${safeIdText}, ${safeTitle}, this)">Copy link</button>
           </div>`
-        }).join("")
+          })
+          .join("")
 
         document.getElementById("copy-feedback").textContent = ""
         document.getElementById("exportModal").classList.add("open")
@@ -2478,17 +2527,24 @@
       })
       document.getElementById("copyExport").addEventListener("click", () => {
         const items = getActiveExportItems()
-        const htmlStr = items.map((item) => {
-          const idLabel = item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
-          const url = buildItemUrl(item.kind, item.id)
-          return url
-            ? `<a href="${url}">${esc(idLabel)}</a> → ${esc(item.title)}`
-            : `${esc(idLabel)} → ${esc(item.title)}`
-        }).join("<br>\n")
+        const htmlStr = items
+          .map((item) => {
+            const idLabel =
+              item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
+            const url = buildItemUrl(item.kind, item.id)
+            return url
+              ? `<a href="${url}">${esc(idLabel)}</a> → ${esc(item.title)}`
+              : `${esc(idLabel)} → ${esc(item.title)}`
+          })
+          .join("<br>\n")
         copyRichHtml(htmlStr)
         const fb = document.getElementById("copy-feedback")
-        fb.textContent = `\u2713 Copied ${items.length} Jira-ready link${items.length !== 1 ? "s" : ""}!`
-        setTimeout(() => { fb.textContent = "" }, 2500)
+        fb.textContent = `\u2713 Copied ${items.length} Jira-ready link${
+          items.length !== 1 ? "s" : ""
+        }!`
+        setTimeout(() => {
+          fb.textContent = ""
+        }, 2500)
       })
 
       // ── Instructions modal ────────────────────────────────────────────
@@ -2553,20 +2609,26 @@
         renderDialogList()
       })
 
-      document.getElementById("checkUpdateBtn").addEventListener("click", async () => {
-        const el = document.getElementById("updateStatus")
-        el.textContent = "Checking\u2026"
-        const res = await window.electronAPI.checkForUpdates()
-        if (res.status === "available") {
-          el.innerHTML = `v${esc(res.version)} available &mdash; <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download</a>`
-        } else if (res.status === "up-to-date") {
-          el.textContent = "You\u2019re on the latest version."
-        } else if (res.status === "dev") {
-          el.textContent = "Update checks are disabled in dev mode."
-        } else {
-          el.textContent = `Could not check for updates${res.message ? ": " + res.message : "."}`
-        }
-      })
+      document
+        .getElementById("checkUpdateBtn")
+        .addEventListener("click", async () => {
+          const el = document.getElementById("updateStatus")
+          el.textContent = "Checking\u2026"
+          const res = await window.electronAPI.checkForUpdates()
+          if (res.status === "available") {
+            el.innerHTML = `v${esc(
+              res.version,
+            )} available &mdash; <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download</a>`
+          } else if (res.status === "up-to-date") {
+            el.textContent = "You\u2019re on the latest version."
+          } else if (res.status === "dev") {
+            el.textContent = "Update checks are disabled in dev mode."
+          } else {
+            el.textContent = `Could not check for updates${
+              res.message ? ": " + res.message : "."
+            }`
+          }
+        })
 
       // Open CM.com links in browser or popup based on setting
       document.addEventListener("click", (e) => {
@@ -2754,36 +2816,57 @@
 
       // ── Startup update check ────────────────────────────────────────
       function openUpdateModal(version) {
-        document.getElementById("updateModalVersion").textContent = `v${version}`
+        document.getElementById(
+          "updateModalVersion",
+        ).textContent = `v${version}`
         document.getElementById("updateModal").classList.add("open")
       }
       function closeUpdateModal() {
         document.getElementById("updateModal").classList.remove("open")
       }
-      document.getElementById("closeUpdateModal").addEventListener("click", closeUpdateModal)
-      document.getElementById("closeUpdateModal2").addEventListener("click", closeUpdateModal)
+      document
+        .getElementById("closeUpdateModal")
+        .addEventListener("click", closeUpdateModal)
+      document
+        .getElementById("closeUpdateModal2")
+        .addEventListener("click", closeUpdateModal)
       document.getElementById("updateModal").addEventListener("click", (e) => {
-        if (e.target === document.getElementById("updateModal")) closeUpdateModal()
+        if (e.target === document.getElementById("updateModal"))
+          closeUpdateModal()
       })
-      document.getElementById("updateModalDownloadBtn").addEventListener("click", (e) => {
-        e.preventDefault()
-        window.electronAPI.openUrl("https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest")
-        closeUpdateModal()
-      })
+      document
+        .getElementById("updateModalDownloadBtn")
+        .addEventListener("click", (e) => {
+          e.preventDefault()
+          window.electronAPI.openUrl(
+            "https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest",
+          )
+          closeUpdateModal()
+        })
 
-      window.electronAPI.checkForUpdates().then((res) => {
-        if (res.status !== "available") return
-        // Banner
-        const banner = document.getElementById("updateBanner")
-        document.getElementById("updateBannerText").innerHTML =
-          `\u2728 v${esc(res.version)} is available \u2014 <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download update</a>`
-        banner.classList.add("visible")
-        // Modal
-        openUpdateModal(res.version)
-      }).catch(() => { /* silently ignore — no connection or other error */ })
-      document.getElementById("updateBannerClose").addEventListener("click", () => {
-        document.getElementById("updateBanner").classList.remove("visible")
-      })
+      window.electronAPI
+        .checkForUpdates()
+        .then((res) => {
+          if (res.status !== "available") return
+          // Banner
+          const banner = document.getElementById("updateBanner")
+          document.getElementById(
+            "updateBannerText",
+          ).innerHTML = `\u2728 v${esc(
+            res.version,
+          )} is available \u2014 <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download update</a>`
+          banner.classList.add("visible")
+          // Modal
+          openUpdateModal(res.version)
+        })
+        .catch(() => {
+          /* silently ignore — no connection or other error */
+        })
+      document
+        .getElementById("updateBannerClose")
+        .addEventListener("click", () => {
+          document.getElementById("updateBanner").classList.remove("visible")
+        })
     </script>
   </body>
 </html>
