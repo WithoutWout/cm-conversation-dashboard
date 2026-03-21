@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.2"
+version = "0.2.2-tauri"
 description = "Desktop dashboard for inspecting CM.com Conversational AI Cloud content exports"
 authors = ["Wout van Os"]
 license = ""
