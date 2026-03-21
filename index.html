@@ -1281,15 +1281,41 @@
           <button class="clear-btn" id="clearSearch">&#x2715;</button>
         </div>
         <div class="search-opts">
-          <button class="sopt" id="opt-case" title="Case sensitive" data-tooltip="Match case (Aa)">Aa</button>
+          <button
+            class="sopt"
+            id="opt-case"
+            title="Case sensitive"
+            data-tooltip="Match case (Aa)"
+          >
+            Aa
+          </button>
           <div class="sopt-sep"></div>
-          <button class="sopt" id="opt-word" title="Whole word" data-tooltip="Whole word only (\b)">\b</button>
+          <button
+            class="sopt"
+            id="opt-word"
+            title="Whole word"
+            data-tooltip="Whole word only (\b)"
+          >
+            \b
+          </button>
           <div class="sopt-sep"></div>
-          <button class="sopt" id="opt-regex" title="Regular expression" data-tooltip="Use regular expression (.*)">
+          <button
+            class="sopt"
+            id="opt-regex"
+            title="Regular expression"
+            data-tooltip="Use regular expression (.*)"
+          >
             .*
           </button>
           <div class="sopt-sep"></div>
-          <button class="sopt on" id="opt-content" title="Responses only" data-tooltip="Responses only — ignore IDs, titles &amp; entities">&#xAC;T</button>
+          <button
+            class="sopt on"
+            id="opt-content"
+            title="Responses only"
+            data-tooltip="Responses only — ignore IDs, titles &amp; entities"
+          >
+            &#xAC;T
+          </button>
         </div>
       </div>
     </div>
@@ -1655,7 +1681,8 @@
         </div>
         <div class="modal-body">
           <p style="font-size: 0.85rem; line-height: 1.6">
-            A new version of the Conversational AI Dashboard is ready to download.
+            A new version of the Conversational AI Dashboard is ready to
+            download.
           </p>
           <div class="update-version-diff">
             <span class="ver-from" id="updateModalVersionFrom"></span>
@@ -1663,7 +1690,8 @@
             <span class="ver-to" id="updateModalVersion"></span>
           </div>
           <p class="hint">
-            Download the latest release, then reinstall to get the newest features and fixes.
+            Download the latest release, then reinstall to get the newest
+            features and fixes.
           </p>
         </div>
         <div class="modal-footer">
@@ -2149,7 +2177,8 @@
         const re = buildSearchRegex(q)
         if (!re) return false
         if (!searchContent && testRe(re, String(a.Id))) return true
-        if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text))) return true
+        if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text)))
+          return true
         if (testRe(re, strip(aResponse(a) || ""))) return true
         return false
       }
@@ -2423,7 +2452,9 @@
       })
       document.getElementById("opt-content").addEventListener("click", () => {
         searchContent = !searchContent
-        document.getElementById("opt-content").classList.toggle("on", searchContent)
+        document
+          .getElementById("opt-content")
+          .classList.toggle("on", searchContent)
         triggerSearch()
       })
 
@@ -2923,7 +2954,8 @@
           "updateModalVersion",
         ).textContent = `v${version}`
         const fromEl = document.getElementById("updateModalVersionFrom")
-        if (fromEl) fromEl.textContent = currentVersion ? `v${currentVersion}` : ""
+        if (fromEl)
+          fromEl.textContent = currentVersion ? `v${currentVersion}` : ""
         document.getElementById("updateModal").classList.add("open")
       }
       function closeUpdateModal() {
@@ -2937,7 +2969,10 @@
         .addEventListener("click", () => {
           const vEl = document.getElementById("updateModalVersion")
           if (vEl && vEl.textContent)
-            localStorage.setItem("cm-dismissed-version", vEl.textContent.replace(/^v/, ""))
+            localStorage.setItem(
+              "cm-dismissed-version",
+              vEl.textContent.replace(/^v/, ""),
+            )
           closeUpdateModal()
         })
       document.getElementById("updateModal").addEventListener("click", (e) => {
@@ -2961,9 +2996,9 @@
           const dismissedVersion = localStorage.getItem("cm-dismissed-version")
           // Banner
           const banner = document.getElementById("updateBanner")
-          document.getElementById(
-            "updateBannerText",
-          ).innerHTML = `v${esc(res.version)} is available \u2014 <a class="update-banner-download action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">&#x2B07; Download</a>`
+          document.getElementById("updateBannerText").innerHTML = `v${esc(
+            res.version,
+          )} is available \u2014 <a class="update-banner-download action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">&#x2B07; Download</a>`
           banner.classList.add("visible")
           // Modal — skip if user already dismissed this version
           if (dismissedVersion !== res.version) {

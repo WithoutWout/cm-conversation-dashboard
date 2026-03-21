@@ -218,27 +218,27 @@ let openMode // "popup" | "browser"
 
 Always use these terms in the UI:
 
-| Use                  | Never use                |
-| -------------------- | ------------------------ |
-| Article              | Knowledge Base Item      |
+| Use                  | Never use                   |
+| -------------------- | --------------------------- |
+| Article              | Knowledge Base Item         |
 | Entities             | Questions, Training Phrases |
-| Response             | Answer Output            |
-| Dialog               | Flow                     |
-| Transactional Dialog | Transfer Dialog, tDialog |
-| Recognition Node     | Recognition              |
-| Output Node          | Output                   |
-| Dialog Link          | DialogStart              |
-| CM.com Context URL   | Base URL                 |
+| Response             | Answer Output               |
+| Dialog               | Flow                        |
+| Transactional Dialog | Transfer Dialog, tDialog    |
+| Recognition Node     | Recognition                 |
+| Output Node          | Output                      |
+| Dialog Link          | DialogStart                 |
+| CM.com Context URL   | Base URL                    |
 
 ---
 
 ## localStorage keys
 
-| Key            | Value                                |
-| -------------- | ------------------------------------ |
-| `cm-base-url`          | CM.com context URL override (string)       |
-| `cm-open-mode`         | `"popup"` or `"browser"`                   |
-| `cm-dismissed-version` | Last update version the user dismissed     |
+| Key                    | Value                                  |
+| ---------------------- | -------------------------------------- |
+| `cm-base-url`          | CM.com context URL override (string)   |
+| `cm-open-mode`         | `"popup"` or `"browser"`               |
+| `cm-dismissed-version` | Last update version the user dismissed |
 
 ---
 
