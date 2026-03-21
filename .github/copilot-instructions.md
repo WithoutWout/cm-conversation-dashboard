@@ -242,6 +242,8 @@ Always use these terms in the UI:
 
 ---
 
+Example `cm-base-url` value: https://www.cm.com/en-gb/app/aicloud/dbd80c7c-e9b1-44d2-9762-fb5ad1664b7f/Efteling/EFTELING/nl/
+
 ## GitHub repository
 
 GitHub account: **WithoutWout** (not `wouttonio`)
