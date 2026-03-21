@@ -7,7 +7,7 @@
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CM.com — Conversation AI Cloud Dashboard</title>
+    <title>CM.com — Conversational AI Cloud Dashboard</title>
     <style>
       *,
       *::before,
@@ -228,6 +228,34 @@
         height: 18px;
         background: var(--border);
         margin: 0 2px;
+      }
+      /* === SOPT TOOLTIP === */
+      .sopt[data-tooltip] {
+        position: relative;
+      }
+      .sopt[data-tooltip]::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.72rem;
+        font-weight: 400;
+        letter-spacing: 0;
+        white-space: nowrap;
+        padding: 5px 9px;
+        border-radius: 5px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        z-index: 200;
+      }
+      .sopt[data-tooltip]:hover::after {
+        opacity: 1;
       }
 
       /* === TABS === */
@@ -1084,8 +1112,8 @@
       .update-banner {
         display: none;
         background: #1a2a1a;
-        border-bottom: 1px solid var(--green);
-        padding: 7px 20px;
+        border-bottom: 2px solid var(--green);
+        padding: 8px 20px;
         font-size: 0.78rem;
         color: var(--green);
         align-items: center;
@@ -1095,9 +1123,28 @@
       .update-banner.visible {
         display: flex;
       }
+      .update-banner-icon {
+        font-size: 1rem;
+        flex-shrink: 0;
+      }
       .update-banner a {
         color: var(--green);
         font-weight: 600;
+      }
+      .update-banner-download {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--green);
+        color: #000 !important;
+        font-weight: 700 !important;
+        padding: 2px 10px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        text-decoration: none !important;
+      }
+      .update-banner-download:hover {
+        opacity: 0.85;
       }
       .update-banner-close {
         background: none;
@@ -1107,16 +1154,55 @@
         font-size: 1rem;
         margin-left: auto;
         padding: 0 2px;
-        opacity: 0.7;
+        opacity: 0.5;
       }
       .update-banner-close:hover {
         opacity: 1;
+      }
+      /* === UPDATE MODAL EXTRAS === */
+      .update-version-diff {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 12px 0 4px;
+        font-size: 0.85rem;
+      }
+      .update-version-diff .ver-from {
+        color: var(--muted);
+        font-family: monospace;
+        text-decoration: line-through;
+      }
+      .update-version-diff .ver-arrow {
+        color: var(--green);
+      }
+      .update-version-diff .ver-to {
+        color: var(--green);
+        font-family: monospace;
+        font-weight: 700;
+      }
+      .btn-primary-download {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--green);
+        color: #000;
+        border: none;
+        border-radius: 6px;
+        padding: 7px 16px;
+        font-size: 0.82rem;
+        font-weight: 700;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .btn-primary-download:hover {
+        opacity: 0.85;
       }
     </style>
   </head>
   <body>
     <!-- UPDATE BANNER -->
     <div class="update-banner" id="updateBanner">
+      <span class="update-banner-icon">&#x2B07;</span>
       <span id="updateBannerText"></span>
       <button
         class="update-banner-close"
@@ -1132,7 +1218,7 @@
       <div class="brand">
         <div class="brand-logo">cm</div>
         <div class="brand-text">
-          <span class="brand-name">Conversation AI Cloud</span>
+          <span class="brand-name">Conversational AI Cloud</span>
           <span class="brand-sub">Content Dashboard</span>
         </div>
       </div>
@@ -1195,13 +1281,15 @@
           <button class="clear-btn" id="clearSearch">&#x2715;</button>
         </div>
         <div class="search-opts">
-          <button class="sopt" id="opt-case" title="Case sensitive">Aa</button>
+          <button class="sopt" id="opt-case" title="Case sensitive" data-tooltip="Match case (Aa)">Aa</button>
           <div class="sopt-sep"></div>
-          <button class="sopt" id="opt-word" title="Whole word">\b</button>
+          <button class="sopt" id="opt-word" title="Whole word" data-tooltip="Whole word only (\b)">\b</button>
           <div class="sopt-sep"></div>
-          <button class="sopt" id="opt-regex" title="Regular expression">
+          <button class="sopt" id="opt-regex" title="Regular expression" data-tooltip="Use regular expression (.*)">
             .*
           </button>
+          <div class="sopt-sep"></div>
+          <button class="sopt on" id="opt-content" title="Responses only" data-tooltip="Responses only — ignore IDs, titles &amp; entities">&#xAC;T</button>
         </div>
       </div>
     </div>
@@ -1454,6 +1542,9 @@
                 style="min-height: 1.2em"
               ></span>
             </div>
+            <p class="hint" style="margin-top: 5px">
+              Current version: <span id="settingsCurrentVersion"></span>
+            </p>
           </div>
         </div>
         <div class="modal-footer" style="justify-content: space-between">
@@ -1559,16 +1650,20 @@
     <div class="modal-overlay" id="updateModal">
       <div class="modal-box">
         <div class="modal-header">
-          <h3>Update Available</h3>
+          <h3>&#x2B07;&nbsp; Update Available</h3>
           <button class="close-btn" id="closeUpdateModal">&#x2715;</button>
         </div>
         <div class="modal-body">
           <p style="font-size: 0.85rem; line-height: 1.6">
-            A new version <strong id="updateModalVersion"></strong> of the
-            Conversation AI Dashboard is available.
+            A new version of the Conversational AI Dashboard is ready to download.
           </p>
+          <div class="update-version-diff">
+            <span class="ver-from" id="updateModalVersionFrom"></span>
+            <span class="ver-arrow">&#x2192;</span>
+            <span class="ver-to" id="updateModalVersion"></span>
+          </div>
           <p class="hint">
-            Download and reinstall the app to get the latest features and fixes.
+            Download the latest release, then reinstall to get the newest features and fixes.
           </p>
         </div>
         <div class="modal-footer">
@@ -1576,13 +1671,8 @@
           <a
             id="updateModalDownloadBtn"
             href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest"
-            class="btn-primary"
-            style="
-              text-decoration: none;
-              display: inline-flex;
-              align-items: center;
-            "
-            >Download update</a
+            class="btn-primary-download"
+            >&#x2B07;&nbsp;Download update</a
           >
         </div>
       </div>
@@ -1621,6 +1711,7 @@
       let searchCase = false
       let searchWord = false
       let searchRegex = false
+      let searchContent = true
       let allFilterPill = "all"
       let aFilter = "all"
       let dFilter = "all"
@@ -1865,7 +1956,7 @@
           "</div>" +
           "</div>" +
           '<div class="card-detail">' +
-          '<div class="detail-section"><h4>Questions / Training Phrases (' +
+          '<div class="detail-section"><h4>Entities (' +
           qCnt +
           ')</h4><div class="chip-grid">' +
           chips +
@@ -2057,8 +2148,8 @@
         if (!q) return true
         const re = buildSearchRegex(q)
         if (!re) return false
-        if (testRe(re, String(a.Id))) return true
-        if (a.Questions.some((qs) => testRe(re, qs.Text))) return true
+        if (!searchContent && testRe(re, String(a.Id))) return true
+        if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text))) return true
         if (testRe(re, strip(aResponse(a) || ""))) return true
         return false
       }
@@ -2066,12 +2157,12 @@
         if (!q) return true
         const re = buildSearchRegex(q)
         if (!re) return false
-        if (testRe(re, String(item.id))) return true
-        if (testRe(re, item.name || "")) return true
-        if (testRe(re, item.description || "")) return true
+        if (!searchContent && testRe(re, String(item.id))) return true
+        if (!searchContent && testRe(re, item.name || "")) return true
+        if (!searchContent && testRe(re, item.description || "")) return true
         if (
           (item.nodes || []).some((n) => {
-            if (testRe(re, n.name || "")) return true
+            if (!searchContent && testRe(re, n.name || "")) return true
             const ans = ((n.output && n.output.items) || []).find(
               (i) => i.type === "Answer",
             )
@@ -2328,6 +2419,11 @@
       document.getElementById("opt-regex").addEventListener("click", () => {
         searchRegex = !searchRegex
         document.getElementById("opt-regex").classList.toggle("on", searchRegex)
+        triggerSearch()
+      })
+      document.getElementById("opt-content").addEventListener("click", () => {
+        searchContent = !searchContent
+        document.getElementById("opt-content").classList.toggle("on", searchContent)
         triggerSearch()
       })
 
@@ -2612,15 +2708,20 @@
       document
         .getElementById("checkUpdateBtn")
         .addEventListener("click", async () => {
+          const btn = document.getElementById("checkUpdateBtn")
           const el = document.getElementById("updateStatus")
-          el.textContent = "Checking\u2026"
+          btn.disabled = true
+          btn.textContent = "Checking\u2026"
+          el.textContent = ""
           const res = await window.electronAPI.checkForUpdates()
+          btn.disabled = false
+          btn.textContent = "Check for updates"
           if (res.status === "available") {
-            el.innerHTML = `v${esc(
+            el.innerHTML = `&#x2B07; v${esc(
               res.version,
-            )} available &mdash; <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download</a>`
+            )} available \u2014 <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download</a>`
           } else if (res.status === "up-to-date") {
-            el.textContent = "You\u2019re on the latest version."
+            el.innerHTML = `&#x2713; You\u2019re on the latest version.`
           } else if (res.status === "dev") {
             el.textContent = "Update checks are disabled in dev mode."
           } else {
@@ -2812,13 +2913,17 @@
       window.electronAPI.getVersion().then((v) => {
         const el = document.querySelector(".brand-sub")
         if (el) el.textContent = `Content Dashboard \u00b7 v${v}`
+        const verEl = document.getElementById("settingsCurrentVersion")
+        if (verEl) verEl.textContent = `v${v}`
       })
 
       // ── Startup update check ────────────────────────────────────────
-      function openUpdateModal(version) {
+      function openUpdateModal(version, currentVersion) {
         document.getElementById(
           "updateModalVersion",
         ).textContent = `v${version}`
+        const fromEl = document.getElementById("updateModalVersionFrom")
+        if (fromEl) fromEl.textContent = currentVersion ? `v${currentVersion}` : ""
         document.getElementById("updateModal").classList.add("open")
       }
       function closeUpdateModal() {
@@ -2829,7 +2934,12 @@
         .addEventListener("click", closeUpdateModal)
       document
         .getElementById("closeUpdateModal2")
-        .addEventListener("click", closeUpdateModal)
+        .addEventListener("click", () => {
+          const vEl = document.getElementById("updateModalVersion")
+          if (vEl && vEl.textContent)
+            localStorage.setItem("cm-dismissed-version", vEl.textContent.replace(/^v/, ""))
+          closeUpdateModal()
+        })
       document.getElementById("updateModal").addEventListener("click", (e) => {
         if (e.target === document.getElementById("updateModal"))
           closeUpdateModal()
@@ -2848,16 +2958,19 @@
         .checkForUpdates()
         .then((res) => {
           if (res.status !== "available") return
+          const dismissedVersion = localStorage.getItem("cm-dismissed-version")
           // Banner
           const banner = document.getElementById("updateBanner")
           document.getElementById(
             "updateBannerText",
-          ).innerHTML = `\u2728 v${esc(
-            res.version,
-          )} is available \u2014 <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download update</a>`
+          ).innerHTML = `v${esc(res.version)} is available \u2014 <a class="update-banner-download action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">&#x2B07; Download</a>`
           banner.classList.add("visible")
-          // Modal
-          openUpdateModal(res.version)
+          // Modal — skip if user already dismissed this version
+          if (dismissedVersion !== res.version) {
+            window.electronAPI.getVersion().then((current) => {
+              openUpdateModal(res.version, current)
+            })
+          }
         })
         .catch(() => {
           /* silently ignore — no connection or other error */

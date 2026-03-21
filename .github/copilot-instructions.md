@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Electron desktop dashboard for inspecting and navigating CM.com Conversation AI Cloud content exports. It reads two JSON files from the project root and renders a searchable, filterable UI in a single BrowserWindow.
+Electron desktop dashboard for inspecting and navigating CM.com Conversational AI Cloud content exports. It reads two JSON files from the project root and renders a searchable, filterable UI in a single BrowserWindow.
 
 **Stack:** Electron (main + preload + renderer), vanilla JS, no bundler, no framework, no external CSS.
 
@@ -121,6 +121,7 @@ let gQuery = "" // current search query string
 let searchCase = false // Aa toggle
 let searchWord = false // \b toggle
 let searchRegex = false // .* toggle
+let searchContent = true // ¬T toggle — skip IDs, names, entities; match response/answer text only (on by default)
 let allFilterPill = "all" // filter in All Results tab
 let aFilter = "all" // filter in Articles tab
 let dFilter = "all" // filter in Dialogs tab
@@ -213,14 +214,14 @@ let openMode // "popup" | "browser"
 
 ---
 
-## Terminology (CM.com Conversation AI Cloud)
+## Terminology (CM.com Conversational AI Cloud)
 
 Always use these terms in the UI:
 
 | Use                  | Never use                |
 | -------------------- | ------------------------ |
 | Article              | Knowledge Base Item      |
-| Training Phrases     | Questions                |
+| Entities             | Questions, Training Phrases |
 | Response             | Answer Output            |
 | Dialog               | Flow                     |
 | Transactional Dialog | Transfer Dialog, tDialog |
@@ -235,8 +236,20 @@ Always use these terms in the UI:
 
 | Key            | Value                                |
 | -------------- | ------------------------------------ |
-| `cm-base-url`  | CM.com context URL override (string) |
-| `cm-open-mode` | `"popup"` or `"browser"`             |
+| `cm-base-url`          | CM.com context URL override (string)       |
+| `cm-open-mode`         | `"popup"` or `"browser"`                   |
+| `cm-dismissed-version` | Last update version the user dismissed     |
+
+---
+
+## GitHub repository
+
+GitHub account: **WithoutWout** (not `wouttonio`)
+Repository: `WithoutWout/cm-conversation-dashboard`
+Release URL pattern: `https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest`
+
+- Always use `WithoutWout` as the GitHub username, never `wouttonio`.
+- The `check-for-updates` IPC handler fetches `api.github.com/repos/WithoutWout/cm-conversation-dashboard/releases/latest`.
 
 ---
 

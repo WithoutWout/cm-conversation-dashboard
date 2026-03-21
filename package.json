@@ -1,7 +1,7 @@
 {
   "name": "cm-com-dashboard",
-  "version": "0.2.1",
-  "description": "Desktop dashboard for inspecting CM.com Conversation AI Cloud content exports",
+  "version": "0.2.2",
+  "description": "Desktop dashboard for inspecting CM.com Conversational AI Cloud content exports",
   "author": "Wout van Os",
   "main": "main.js",
   "scripts": {
@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "com.cm.conversation-dashboard",
-    "productName": "Conversation AI Dashboard",
+    "productName": "Conversational AI Dashboard",
     "icon": "build/icon.png",
     "files": [
       "main.js",
