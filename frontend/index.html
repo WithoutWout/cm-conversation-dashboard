@@ -1734,6 +1734,21 @@
     <script>
       const PAGE_SIZE = 50
 
+      // ── Tauri / Electron API bridge ─────────────────────────────────
+      // Wraps Tauri invoke() behind the same window.electronAPI surface
+      // so all existing call sites work without modification.
+      ;(function () {
+        const invoke = window.__TAURI__?.core?.invoke
+        if (!invoke) return // Electron path: preload already set window.electronAPI
+        window.electronAPI = {
+          getData: () => invoke("get_data"),
+          openUrl: (url) => invoke("open_url", { url }),
+          importFile: (type) => invoke("import_file", { fileType: type }),
+          checkForUpdates: () => invoke("check_for_updates"),
+          getVersion: () => invoke("get_version"),
+        }
+      })()
+
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
       let searchCase = false
