@@ -95,12 +95,24 @@
         color: var(--muted);
         font-family: monospace;
         flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        max-width: 42%;
       }
       .file-tag {
         background: var(--bg);
         border: 1px solid var(--border);
         border-radius: 4px;
         padding: 2px 7px;
+        white-space: nowrap;
+      }
+      .file-tag.is-folder {
+        border-color: var(--teal);
+        color: var(--text);
+      }
+      .file-tag.is-warning {
+        border-color: var(--orange);
+        color: var(--orange);
       }
       .icon-btn {
         background: none;
@@ -128,6 +140,45 @@
         border-bottom: 1px solid var(--border);
         padding: 7px 20px;
         flex-shrink: 0;
+      }
+      .app-loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 17, 23, 0.5);
+        backdrop-filter: blur(3px);
+      }
+      .app-loading-overlay.open {
+        display: flex;
+      }
+      .app-loading-card {
+        min-width: 240px;
+        max-width: 320px;
+        padding: 16px 18px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: rgba(26, 29, 39, 0.96);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .app-loading-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .app-loading-title {
+        font-size: 0.84rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .app-loading-text {
+        font-size: 0.73rem;
+        color: var(--muted);
       }
       .search-row {
         display: flex;
@@ -1223,6 +1274,23 @@
         </div>
       </div>
       <div class="header-files" id="fileNames"></div>
+      <button class="icon-btn" id="refreshBtn" title="Refresh data">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path
+            d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15"
+          />
+        </svg>
+        Refresh
+      </button>
       <button class="icon-btn" id="settingsBtn">
         <svg
           width="12"
@@ -1316,6 +1384,18 @@
           >
             &#xAC;T
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-loading-overlay" id="appLoadingOverlay">
+      <div class="app-loading-card">
+        <div class="spinner"></div>
+        <div class="app-loading-copy">
+          <span class="app-loading-title">Refreshing dashboard</span>
+          <span class="app-loading-text" id="appLoadingText"
+            >Loading export files…</span
+          >
         </div>
       </div>
     </div>
@@ -1525,21 +1605,33 @@
               border-top: 1px solid var(--border);
             "
           >
-            <label>Update Export Files</label>
+            <label>Data Folder</label>
             <p class="hint" style="margin-bottom: 8px">
-              Replace the JSON export files used by this dashboard.
+              Select the folder that contains your CM.com export files. The
+              dashboard automatically uses the newest matching file for each
+              supported source and keeps watching the folder for updates.
             </p>
             <div style="display: flex; gap: 8px">
-              <button class="btn-secondary" id="importArticlesBtn">
-                Update Articles file…
+              <button class="btn-secondary" id="selectDataFolderBtn">
+                Select Data Folder…
               </button>
-              <button class="btn-secondary" id="importDialogsBtn">
-                Update Dialogs file…
+              <button class="btn-secondary" id="refreshDataBtn">
+                Refresh Data
               </button>
             </div>
             <p
               class="hint"
-              id="importFeedback"
+              id="dataFolderCurrent"
+              style="margin-top: 8px; min-height: 1.2em"
+            ></p>
+            <p
+              class="hint"
+              id="dataFolderDetails"
+              style="margin-top: 4px; min-height: 1.2em"
+            ></p>
+            <p
+              class="hint"
+              id="dataFolderFeedback"
               style="margin-top: 8px; min-height: 1.2em"
             ></p>
           </div>
@@ -1624,9 +1716,8 @@
             <div class="instructions-step">
               <span class="instructions-step-num">4</span>
               <span class="instructions-step-text"
-                >Back in Settings, click
-                <code>Update Articles file&#x2026;</code> and select the
-                downloaded file.</span
+                >Save the downloaded file in the folder you selected in this
+                app under <code>Settings</code> &rarr; <code>Data Folder</code>.</span
               >
             </div>
           </div>
@@ -1659,9 +1750,8 @@
             <div class="instructions-step">
               <span class="instructions-step-num">4</span>
               <span class="instructions-step-text"
-                >Back in Settings, click
-                <code>Update Dialogs file&#x2026;</code> and select the
-                downloaded file.</span
+                >Save the downloaded file in the same selected export folder
+                so the dashboard can detect the update and ask when to reload.</span
               >
             </div>
           </div>
@@ -1706,6 +1796,29 @@
       </div>
     </div>
 
+    <!-- DATA CHANGED MODAL -->
+    <div class="modal-overlay" id="dataChangedModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Export Files Updated</h3>
+          <button class="close-btn" id="closeDataChangedModal">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.85rem; line-height: 1.6">
+            Updated export files were detected in the selected folder.
+          </p>
+          <p class="hint" id="dataChangedFolder"></p>
+          <p class="hint">
+            Reload the dashboard when you want to use the updated files.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="dismissDataChangedModal">Later</button>
+          <button class="btn-primary" id="reloadDataChangedModal">OK, reload data</button>
+        </div>
+      </div>
+    </div>
+
     <!-- EXPORT IDs MODAL -->
     <div class="modal-overlay" id="exportModal">
       <div class="modal-box export-modal-box">
@@ -1739,15 +1852,30 @@
       // so all existing call sites work without modification.
       ;(function () {
         const invoke = window.__TAURI__?.core?.invoke
+        const listen = window.__TAURI__?.event?.listen
         if (!invoke) return // Electron path: preload already set window.electronAPI
         window.electronAPI = {
-          getData: () => invoke("get_data"),
+          getData: (selectedFolder) =>
+            invoke("get_data", {
+              args: { selected_folder: selectedFolder || null },
+            }),
           openUrl: (url) => invoke("open_url", { url }),
-          importFile: (type) => invoke("import_file", { fileType: type }),
+          selectDataFolder: () => invoke("select_data_folder"),
+          onDataFolderUpdated: (handler) =>
+            listen
+              ? listen("data-folder-updated", handler)
+              : Promise.resolve(() => {}),
           checkForUpdates: () => invoke("check_for_updates"),
           getVersion: () => invoke("get_version"),
         }
       })()
+      if (!window.electronAPI.selectDataFolder) {
+        window.electronAPI.selectDataFolder = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
+      }
+      if (!window.electronAPI.onDataFolderUpdated) {
+        window.electronAPI.onDataFolderUpdated = () => Promise.resolve(() => {})
+      }
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -1772,8 +1900,18 @@
       let dialogMap = new Map()
       let tDialogMap = new Map()
       const CM_DEFAULT_URL = ""
+      const DATA_FOLDER_STORAGE_KEY = "cm-data-folder"
       let cmBaseUrl = localStorage.getItem("cm-base-url") || CM_DEFAULT_URL
       let openMode = localStorage.getItem("cm-open-mode") || "popup"
+      let dataFolderPath = localStorage.getItem(DATA_FOLDER_STORAGE_KEY) || ""
+      let dataSourceInfo = null
+      let dataLoadInFlight = false
+      let queuedReloadReason = ""
+      let needsQueuedReload = false
+      let dataFolderUnlisten = null
+      let dataFolderFeedback = { text: "", color: "var(--muted)" }
+      let pendingDataChangedFolder = ""
+      let currentLoadingMessage = "Loading export files…"
 
       // ── Helpers ─────────────────────────────────────────────────────
       function esc(s) {
@@ -1884,6 +2022,149 @@
       }
       function toggleCard(el) {
         el.closest(".card").classList.toggle("open")
+      }
+      function shortPath(path) {
+        if (!path) return ""
+        const parts = String(path).split(/[\\/]/)
+        return parts[parts.length - 1] || path
+      }
+      function setDataFolderFeedback(text, color = "var(--muted)") {
+        dataFolderFeedback = { text, color }
+        const el = document.getElementById("dataFolderFeedback")
+        if (!el) return
+        el.style.color = color
+        el.textContent = text
+      }
+      function setRefreshControls(isLoading) {
+        const refreshBtn = document.getElementById("refreshBtn")
+        const refreshDataBtn = document.getElementById("refreshDataBtn")
+        if (refreshBtn) {
+          refreshBtn.disabled = isLoading
+          refreshBtn.style.opacity = isLoading ? "0.7" : "1"
+          refreshBtn.textContent = isLoading ? "Refreshing…" : "Refresh"
+          if (isLoading) {
+            refreshBtn.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15" /></svg>Refreshing…'
+          } else {
+            refreshBtn.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10M1 14l5.36 4.36A9 9 0 0 0 20.49 15" /></svg>Refresh'
+          }
+        }
+        if (refreshDataBtn) refreshDataBtn.disabled = isLoading
+      }
+      function loadingMessageForReason(reason) {
+        if (reason === "select-folder") return "Scanning selected folder…"
+        if (reason === "manual-refresh") return "Refreshing data from selected folder…"
+        if (reason === "confirmed-refresh") return "Reloading updated export files…"
+        if (reason === "auto-refresh") return "Preparing updated export files…"
+        return "Loading export files…"
+      }
+      function setAppLoadingState(isLoading, message) {
+        const overlay = document.getElementById("appLoadingOverlay")
+        const textEl = document.getElementById("appLoadingText")
+        if (message) currentLoadingMessage = message
+        if (textEl) textEl.textContent = currentLoadingMessage
+        if (!overlay) return
+        overlay.classList.toggle("open", isLoading)
+      }
+      function waitForNextPaint() {
+        return new Promise((resolve) => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(resolve)
+          })
+        })
+      }
+      function renderDataFolderState() {
+        const currentEl = document.getElementById("dataFolderCurrent")
+        const detailsEl = document.getElementById("dataFolderDetails")
+        if (!currentEl) return
+        if (!dataFolderPath) {
+          currentEl.textContent = "No data folder selected."
+          if (detailsEl) detailsEl.textContent = ""
+          return
+        }
+        const active = !!(dataSourceInfo && dataSourceInfo.selectedFolder)
+        const watched = dataSourceInfo && dataSourceInfo.watchedFolder
+        const statuses = (dataSourceInfo && dataSourceInfo.statuses) || []
+        const loadedFiles = statuses
+          .filter((status) => status.filename)
+          .map((status) => status.label + ": " + status.filename)
+        currentEl.textContent = "Selected folder: " + shortPath(dataFolderPath)
+        if (!detailsEl) return
+        const stateBits = [dataFolderPath]
+        stateBits.push(
+          active
+            ? "using files from selected folder"
+            : "selected folder unavailable",
+        )
+        stateBits.push(watched ? "change notifications on" : "change notifications off")
+        if (loadedFiles.length) {
+          stateBits.push("loaded files: " + loadedFiles.join(" | "))
+        }
+        detailsEl.textContent = stateBits.join(" · ")
+      }
+      function renderFileTags(data) {
+        const parts = []
+        if (dataFolderPath) {
+          parts.push(
+            '<span class="file-tag is-folder" title="' +
+              esc(dataFolderPath) +
+              '">Folder: ' +
+              esc(shortPath(dataFolderPath)) +
+              "</span>",
+          )
+        }
+        const statuses = (data.dataSource && data.dataSource.statuses) || []
+        const loadedCount = statuses.filter((status) => status.found).length
+        const totalCount = statuses.length
+        const summaryClass =
+          loadedCount === totalCount ? "file-tag" : "file-tag is-warning"
+        const summaryTitle = statuses
+          .map((status) =>
+            status.filename
+              ? status.label + ": " + status.filename
+              : status.label + ": missing",
+          )
+          .join("\n")
+        if (dataFolderPath && totalCount) {
+          parts.push(
+            '<span class="' +
+              summaryClass +
+              '" title="' +
+              esc(summaryTitle) +
+              '">' +
+              esc(loadedCount + "/" + totalCount + " sources") +
+              "</span>",
+          )
+        }
+        document.getElementById("fileNames").innerHTML = parts.join("")
+      }
+      function summarizeLoadedSources(data) {
+        if (!dataFolderPath) return "Select a data folder to load export files."
+        if (!data.dataSource) return ""
+        if (data.dataSource.missingSources && data.dataSource.missingSources.length) {
+          return (
+            "Missing supported sources: " +
+            data.dataSource.missingSources.join(", ") +
+            "."
+          )
+        }
+        if (data.dataSource.statuses && data.dataSource.statuses.some((item) => item.found)) {
+          return "Supported sources loaded successfully."
+        }
+        return "No supported export files found."
+      }
+      async function ensureDataFolderWatcher() {
+        if (dataFolderUnlisten) return
+        dataFolderUnlisten = await window.electronAPI.onDataFolderUpdated((event) => {
+          pendingDataChangedFolder =
+            (event && event.payload && event.payload.folder) || dataFolderPath || ""
+          const label = pendingDataChangedFolder
+            ? "Updated export files detected in " + shortPath(pendingDataChangedFolder) + "."
+            : "Updated export files detected."
+          setDataFolderFeedback(label, "var(--orange)")
+          openDataChangedModal(pendingDataChangedFolder)
+        })
       }
 
       // ── Article helpers ─────────────────────────────────────────────
@@ -2718,6 +2999,8 @@
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
+        renderDataFolderState()
+        setDataFolderFeedback(dataFolderFeedback.text, dataFolderFeedback.color)
         document.getElementById("settingsModal").classList.add("open")
       })
       function closeSettings() {
@@ -2788,172 +3071,197 @@
       })
 
       // ── Bootstrap ────────────────────────────────────────────────────
-      function loadData() {
-        window.electronAPI
-          .getData()
-          .then((data) => {
-            dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
-            tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
+      async function loadData(reason = "manual") {
+        if (dataLoadInFlight) {
+          needsQueuedReload = true
+          queuedReloadReason = reason
+          return
+        }
+        dataLoadInFlight = true
+        setAppLoadingState(true, loadingMessageForReason(reason))
+        setRefreshControls(true)
+        try {
+          await waitForNextPaint()
+          const data = await window.electronAPI.getData(dataFolderPath || null)
+          dataSourceInfo = data.dataSource || null
+          dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
+          tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
 
-            const hasArticles = !!(data.files && data.files.articles)
-            const hasDialogs = !!(data.files && data.files.dialogs)
+          const hasArticles = !!(data.files && data.files.articles)
+          const hasDialogs = !!(data.files && data.files.dialogs)
+          renderFileTags(data)
+          renderDataFolderState()
 
-            if (data.files) {
-              const parts = []
-              if (hasArticles)
-                parts.push(
-                  '<span class="file-tag">' +
-                    esc(data.files.articles) +
-                    "</span>",
-                )
-              if (hasDialogs)
-                parts.push(
-                  '<span class="file-tag">' +
-                    esc(data.files.dialogs) +
-                    "</span>",
-                )
-              document.getElementById("fileNames").innerHTML = parts.join("")
-            }
+          if (reason === "select-folder") {
+            setDataFolderFeedback("Data folder selected. Scanning for supported sources…")
+          }
 
-            if (!hasArticles && !hasDialogs) {
-              const msg =
-                '<div class="empty-state" style="padding:60px 20px">' +
-                '<p style="font-size:1rem;font-weight:600;color:var(--text);margin-bottom:8px">No export files found</p>' +
-                '<p>Open <button class="btn-secondary" style="display:inline;padding:2px 10px;cursor:pointer" onclick="document.getElementById(\'settingsBtn\').click()">Settings</button> and use <strong>Update Export Files</strong> to import your Articles and Dialogs JSON exports.</p>' +
-                "</div>"
-              document.getElementById("allList").innerHTML = msg
-              document.getElementById("articleList").innerHTML = msg
-              document.getElementById("dialogList").innerHTML = msg
-              return
-            }
+          const summary = summarizeLoadedSources(data)
+          if (summary) {
+            const tone = !dataFolderPath
+              ? "var(--muted)"
+              : hasArticles || hasDialogs
+              ? "var(--green)"
+              : "var(--orange)"
+            setDataFolderFeedback(summary, tone)
+          }
 
-            // Articles
-            allArticles = data.articles || []
-            const respCnt = allArticles.filter(
-              (a) => aKind(a) === "answer",
-            ).length
-            document.getElementById("a-stat-total").textContent =
-              allArticles.length
-            document.getElementById("a-stat-response").textContent = respCnt
-            document.getElementById("a-stat-dialog").textContent =
-              allArticles.length - respCnt
-
-            // Dialogs
-            const dialogs = data.dialogs || []
-            const tDialogs = data.tDialogs || []
-            allDialogsCombined = [
-              ...dialogs.map((d) => Object.assign({}, d, { _kind: "dialog" })),
-              ...tDialogs.map((d) =>
-                Object.assign({}, d, { _kind: "tdialog" }),
-              ),
-            ]
-            const nodeCnt = dialogs.reduce(
-              (s, d) => s + (d.nodes ? d.nodes.length : 0),
-              0,
-            )
-            const recCnt = dialogs.reduce(
-              (s, d) =>
-                s +
-                (d.nodes || []).filter((n) => n.type === "Recognition").length,
-              0,
-            )
-            document.getElementById("d-stat-dialogs").textContent =
-              dialogs.length
-            document.getElementById("d-stat-tdialogs").textContent =
-              tDialogs.length
-            document.getElementById("d-stat-nodes").textContent = nodeCnt
-            document.getElementById("d-stat-recognition").textContent = recCnt
-
-            // Combined
-            allCombinedItems = [
-              ...allArticles.map((a) =>
-                Object.assign({}, a, { _kind: "article" }),
-              ),
-              ...allDialogsCombined,
-            ]
-            document.getElementById("all-stat-total").textContent =
-              allCombinedItems.length
-            document.getElementById("all-stat-articles").textContent =
-              allArticles.length
-            document.getElementById("all-stat-dialogs").textContent =
-              dialogs.length
-            document.getElementById("all-stat-tdialogs").textContent =
-              tDialogs.length
-
-            // Initial render
-            filteredAll = [...allCombinedItems]
-            filteredArticles = [...allArticles]
-            filteredDialogs = [...allDialogsCombined]
-            document.getElementById("all-result-count").textContent =
-              allCombinedItems.length + " results"
-            document.getElementById("a-result-count").textContent =
-              allArticles.length + " articles"
-            document.getElementById("d-result-count").textContent =
-              allDialogsCombined.length + " dialogs"
-            document.getElementById("tab-all-count").textContent =
-              allCombinedItems.length
-            document.getElementById("tab-a-count").textContent =
-              allArticles.length
-            document.getElementById("tab-d-count").textContent =
-              allDialogsCombined.length
-            renderAllList()
-            renderArticleList()
-            renderDialogList()
-            document.getElementById("all-pagination").innerHTML = pagHtml(
-              allPage,
-              Math.ceil(allCombinedItems.length / PAGE_SIZE),
-              "goAllPage",
-            )
-            document.getElementById("a-pagination").innerHTML = pagHtml(
-              aPage,
-              Math.ceil(allArticles.length / PAGE_SIZE),
-              "goAPage",
-            )
-            document.getElementById("d-pagination").innerHTML = pagHtml(
-              dPage,
-              Math.ceil(allDialogsCombined.length / PAGE_SIZE),
-              "goDPage",
-            )
-          })
-          .catch((err) => {
-            document.getElementById("allList").innerHTML =
-              '<div class="empty-state"><p style="color:var(--red)">Error loading data: ' +
-              esc(String(err)) +
-              "</p></div>"
-          })
-      }
-
-      // ── Import file buttons ───────────────────────────────────────────
-      function handleImport(type, label) {
-        const fb = document.getElementById("importFeedback")
-        fb.style.color = "var(--muted)"
-        fb.textContent = "Opening file picker…"
-        window.electronAPI.importFile(type).then((result) => {
-          if (!result || result.reason === "canceled") {
-            fb.textContent = ""
+          if (!hasArticles && !hasDialogs) {
+            const emptyTitle = dataFolderPath
+              ? "No supported export files found in the selected folder"
+              : "No data folder selected"
+            const msg =
+              '<div class="empty-state" style="padding:60px 20px">' +
+              '<p style="font-size:1rem;font-weight:600;color:var(--text);margin-bottom:8px">' +
+              esc(emptyTitle) +
+              "</p>" +
+              '<p>Open <button class="btn-secondary" style="display:inline;padding:2px 10px;cursor:pointer" onclick="document.getElementById(\'settingsBtn\').click()">Settings</button> and use <strong>Data Folder</strong> to select the folder that contains your export files. The dashboard only uses JSON files found in that selected folder.</p>' +
+              "</div>"
+            document.getElementById("allList").innerHTML = msg
+            document.getElementById("articleList").innerHTML = msg
+            document.getElementById("dialogList").innerHTML = msg
+            document.getElementById("all-pagination").innerHTML = ""
+            document.getElementById("a-pagination").innerHTML = ""
+            document.getElementById("d-pagination").innerHTML = ""
+            document.getElementById("all-result-count").textContent = "0 results"
+            document.getElementById("a-result-count").textContent = "0 articles"
+            document.getElementById("d-result-count").textContent = "0 dialogs"
+            document.getElementById("tab-all-count").textContent = "0"
+            document.getElementById("tab-a-count").textContent = "0"
+            document.getElementById("tab-d-count").textContent = "0"
+            document.getElementById("all-stat-total").textContent = "0"
+            document.getElementById("all-stat-articles").textContent = "0"
+            document.getElementById("all-stat-dialogs").textContent = "0"
+            document.getElementById("all-stat-tdialogs").textContent = "0"
+            document.getElementById("a-stat-total").textContent = "0"
+            document.getElementById("a-stat-response").textContent = "0"
+            document.getElementById("a-stat-dialog").textContent = "0"
+            document.getElementById("d-stat-dialogs").textContent = "0"
+            document.getElementById("d-stat-tdialogs").textContent = "0"
+            document.getElementById("d-stat-nodes").textContent = "0"
+            document.getElementById("d-stat-recognition").textContent = "0"
             return
           }
-          if (result.ok) {
-            fb.style.color = "var(--green)"
-            fb.textContent = label + " updated: " + result.filename
-            loadData()
-          } else {
-            fb.style.color = "var(--red)"
-            fb.textContent = "Error: " + (result.reason || "unknown error")
-          }
-        })
-      }
-      document
-        .getElementById("importArticlesBtn")
-        .addEventListener("click", () => {
-          handleImport("ArticlesExport", "Articles file")
-        })
-      document
-        .getElementById("importDialogsBtn")
-        .addEventListener("click", () => {
-          handleImport("DialogsExport", "Dialogs file")
-        })
 
+          allArticles = data.articles || []
+          const respCnt = allArticles.filter((a) => aKind(a) === "answer").length
+          document.getElementById("a-stat-total").textContent = allArticles.length
+          document.getElementById("a-stat-response").textContent = respCnt
+          document.getElementById("a-stat-dialog").textContent =
+            allArticles.length - respCnt
+
+          const dialogs = data.dialogs || []
+          const tDialogs = data.tDialogs || []
+          allDialogsCombined = [
+            ...dialogs.map((d) => Object.assign({}, d, { _kind: "dialog" })),
+            ...tDialogs.map((d) => Object.assign({}, d, { _kind: "tdialog" })),
+          ]
+          const nodeCnt = dialogs.reduce(
+            (s, d) => s + (d.nodes ? d.nodes.length : 0),
+            0,
+          )
+          const recCnt = dialogs.reduce(
+            (s, d) =>
+              s + (d.nodes || []).filter((n) => n.type === "Recognition").length,
+            0,
+          )
+          document.getElementById("d-stat-dialogs").textContent = dialogs.length
+          document.getElementById("d-stat-tdialogs").textContent = tDialogs.length
+          document.getElementById("d-stat-nodes").textContent = nodeCnt
+          document.getElementById("d-stat-recognition").textContent = recCnt
+
+          allCombinedItems = [
+            ...allArticles.map((a) => Object.assign({}, a, { _kind: "article" })),
+            ...allDialogsCombined,
+          ]
+          document.getElementById("all-stat-total").textContent = allCombinedItems.length
+          document.getElementById("all-stat-articles").textContent = allArticles.length
+          document.getElementById("all-stat-dialogs").textContent = dialogs.length
+          document.getElementById("all-stat-tdialogs").textContent = tDialogs.length
+
+          filteredAll = [...allCombinedItems]
+          filteredArticles = [...allArticles]
+          filteredDialogs = [...allDialogsCombined]
+          document.getElementById("all-result-count").textContent =
+            allCombinedItems.length + " results"
+          document.getElementById("a-result-count").textContent =
+            allArticles.length + " articles"
+          document.getElementById("d-result-count").textContent =
+            allDialogsCombined.length + " dialogs"
+          document.getElementById("tab-all-count").textContent = allCombinedItems.length
+          document.getElementById("tab-a-count").textContent = allArticles.length
+          document.getElementById("tab-d-count").textContent = allDialogsCombined.length
+          renderAllList()
+          renderArticleList()
+          renderDialogList()
+          document.getElementById("all-pagination").innerHTML = pagHtml(
+            allPage,
+            Math.ceil(allCombinedItems.length / PAGE_SIZE),
+            "goAllPage",
+          )
+          document.getElementById("a-pagination").innerHTML = pagHtml(
+            aPage,
+            Math.ceil(allArticles.length / PAGE_SIZE),
+            "goAPage",
+          )
+          document.getElementById("d-pagination").innerHTML = pagHtml(
+            dPage,
+            Math.ceil(allDialogsCombined.length / PAGE_SIZE),
+            "goDPage",
+          )
+        } catch (err) {
+          setDataFolderFeedback(
+            "Error loading data: " + String(err),
+            "var(--red)",
+          )
+          document.getElementById("allList").innerHTML =
+            '<div class="empty-state"><p style="color:var(--red)">Error loading data: ' +
+            esc(String(err)) +
+            "</p></div>"
+        } finally {
+          dataLoadInFlight = false
+          setAppLoadingState(false)
+          setRefreshControls(false)
+          if (needsQueuedReload) {
+            const nextReason = queuedReloadReason || "queued-refresh"
+            needsQueuedReload = false
+            queuedReloadReason = ""
+            loadData(nextReason)
+          }
+        }
+      }
+
+      async function handleSelectDataFolder() {
+        const previousFeedback = { ...dataFolderFeedback }
+        setDataFolderFeedback("Opening folder picker…")
+        const result = await window.electronAPI.selectDataFolder()
+        if (!result || result.canceled) {
+          setDataFolderFeedback(previousFeedback.text, previousFeedback.color)
+          return
+        }
+        if (result.ok && result.path) {
+          dataFolderPath = result.path
+          localStorage.setItem(DATA_FOLDER_STORAGE_KEY, dataFolderPath)
+          renderDataFolderState()
+          await loadData("select-folder")
+          return
+        }
+        setDataFolderFeedback("Could not select a data folder.", "var(--red)")
+      }
+
+      document.getElementById("refreshBtn").addEventListener("click", () => {
+        setDataFolderFeedback("Refreshing data…")
+        loadData("manual-refresh")
+      })
+      document
+        .getElementById("selectDataFolderBtn")
+        .addEventListener("click", handleSelectDataFolder)
+      document.getElementById("refreshDataBtn").addEventListener("click", () => {
+        setDataFolderFeedback("Refreshing data…")
+        loadData("manual-refresh")
+      })
+
+      ensureDataFolderWatcher()
       loadData()
 
       window.electronAPI.getVersion().then((v) => {
@@ -2975,6 +3283,16 @@
       }
       function closeUpdateModal() {
         document.getElementById("updateModal").classList.remove("open")
+      }
+      function openDataChangedModal(folder) {
+        const el = document.getElementById("dataChangedFolder")
+        if (el) {
+          el.textContent = folder ? "Folder: " + folder : ""
+        }
+        document.getElementById("dataChangedModal").classList.add("open")
+      }
+      function closeDataChangedModal() {
+        document.getElementById("dataChangedModal").classList.remove("open")
       }
       document
         .getElementById("closeUpdateModal")
@@ -3003,6 +3321,24 @@
           )
           closeUpdateModal()
         })
+      document
+        .getElementById("closeDataChangedModal")
+        .addEventListener("click", closeDataChangedModal)
+      document
+        .getElementById("dismissDataChangedModal")
+        .addEventListener("click", closeDataChangedModal)
+      document
+        .getElementById("reloadDataChangedModal")
+        .addEventListener("click", async () => {
+          closeDataChangedModal()
+          setDataFolderFeedback("Refreshing updated files…")
+          await loadData("confirmed-refresh")
+        })
+      document.getElementById("dataChangedModal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("dataChangedModal")) {
+          closeDataChangedModal()
+        }
+      })
 
       window.electronAPI
         .checkForUpdates()
