@@ -133,7 +133,7 @@ function createWindow() {
     },
   })
 
-  win.loadFile("index.html")
+  win.loadFile("frontend/index.html")
 
   // Uncomment to open DevTools:
   // win.webContents.openDevTools()

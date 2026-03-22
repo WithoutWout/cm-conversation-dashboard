@@ -2,49 +2,89 @@
 
 ## Project overview
 
-Electron desktop dashboard for inspecting and navigating CM.com Conversational AI Cloud content exports. It reads two JSON files from the project root and renders a searchable, filterable UI in a single BrowserWindow.
+Tauri desktop dashboard for inspecting and navigating CM.com Conversational AI Cloud content exports. It reads two JSON files from a user-selected folder and renders a searchable, filterable UI in a single window.
 
-**Stack:** Electron (main + preload + renderer), vanilla JS, no bundler, no framework, no external CSS.
+**Stack:** Tauri v2 (Rust backend + vanilla JS frontend), vanilla JS, no bundler, no framework, no external CSS.
+
+Libraries may be used, but must be vendored locally (e.g. `frontend/vendor/`) so the app works fully offline. Never load dependencies from a CDN.
 
 ---
 
 ## File structure
 
 ```
-main.js        — Electron main process: IPC handlers, BrowserWindow setup
-preload.js     — contextBridge: exposes electronAPI to renderer
-index.html     — Entire renderer: HTML + embedded <style> + embedded <script>
-package.json   — entry: main.js, devDep: electron
+src-tauri/
+  src/
+    lib.rs     — Tauri commands (get_data, open_url, select_data_folder, check_for_updates, get_version)
+    main.rs    — Entry point, calls lib::run()
+  tauri.conf.json — App config, window setup, frontendDist: ../frontend
+  Cargo.toml  — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog)
+  capabilities/
+    default.json — Capability grants: core:default, opener:default, dialog:default
+frontend/
+  index.html  — Entire renderer: HTML + embedded <style> + embedded <script>
+package.json  — scripts: tauri dev / tauri build
 ```
 
-Data files (read-only, never committed, placed in project root):
+Data files (read-only, never committed, placed in a user-selected folder):
 
-- `*ArticlesExport*.json` — matched by `findFile("ArticlesExport")`
-- `*DialogsExport*.json` — matched by `findFile("DialogsExport")`
-
----
-
-## Electron security rules
-
-- `nodeIntegration: false` and `contextIsolation: true` — never change these.
-- All Node/Electron access goes through the contextBridge in `preload.js`.
-- `shell.openExternal` is only called after validating that the URL starts with `https?://`.
-- Never add new IPC channels without validating input on the main-process side.
+- `*ArticlesExport*.json` — matched by pattern `"ArticlesExport"`
+- `*DialogsExport*.json` — matched by pattern `"DialogsExport"`
 
 ---
 
-## IPC channels
+## Tauri security rules
 
-| Channel    | Direction       | Description                                                                   |
-| ---------- | --------------- | ----------------------------------------------------------------------------- |
-| `get-data` | renderer → main | Returns `{ articles[], dialogs[], tDialogs[], files: { articles, dialogs } }` |
-| `open-url` | renderer → main | Opens a URL with `shell.openExternal` (https only)                            |
+- The renderer has no direct Node or filesystem access — all backend calls go through Tauri commands via `window.__TAURI__.core.invoke()`.
+- `withGlobalTauri: true` is set in `tauri.conf.json`, making `window.__TAURI__` available.
+- `open_url` only calls `opener::open_url` after validating that the URL starts with `https://` or `http://`.
+- Never add new Tauri commands without validating input on the Rust side.
+- Capability grants in `capabilities/default.json` must be kept minimal.
+
+---
+
+## Tauri commands (Rust → JS)
+
+| Command              | JS call via `window.electronAPI` | Description                                                                     |
+| -------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| `get_data`           | `getData(selectedFolder)`        | Returns `{ articles[], dialogs[], tDialogs[], files, sourceFiles, dataSource }` |
+| `open_url`           | `openUrl(url)`                   | Opens a URL with `opener::open_url` (https/http only)                           |
+| `select_data_folder` | `selectDataFolder()`             | Opens a native folder picker, returns `{ ok, canceled, path }`                  |
+| `check_for_updates`  | `checkForUpdates()`              | Fetches GitHub releases API, returns `{ status, version, message }`             |
+| `get_version`        | `getVersion()`                   | Returns the app version string from `package_info()`                            |
+
+## Events (Rust → renderer)
+
+| Event                 | Payload              | Description                                               |
+| --------------------- | -------------------- | --------------------------------------------------------- |
+| `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher when export files change |
+
+---
+
+## Frontend bridge (`index.html`)
+
+The renderer uses `window.electronAPI` as its sole interface to the backend. At startup, a shim in `index.html` wraps Tauri's `invoke` behind `window.electronAPI`:
+
+```js
+// Wraps Tauri invoke() behind the window.electronAPI surface
+const invoke = window.__TAURI__?.core?.invoke
+const listen = window.__TAURI__?.event?.listen
+window.electronAPI = {
+  getData: (selectedFolder) =>
+    invoke("get_data", { args: { selected_folder: selectedFolder } }),
+  openUrl: (url) => invoke("open_url", { url }),
+  selectDataFolder: () => invoke("select_data_folder"),
+  onDataFolderUpdated: (cb) => listen("data-folder-updated", cb),
+  checkForUpdates: () => invoke("check_for_updates"),
+  getVersion: () => invoke("get_version"),
+}
+```
 
 ---
 
 ## Data schemas
 
-### ArticlesExport (`data.Articles[]`)
+### ArticlesExport (`data.articles[]`)
 
 ```js
 {
@@ -65,7 +105,7 @@ Data files (read-only, never committed, placed in project root):
 }
 ```
 
-### DialogsExport (`data.dialogs.result[]`)
+### DialogsExport (`data.dialogs[]`)
 
 ```js
 {
@@ -83,7 +123,7 @@ Data files (read-only, never committed, placed in project root):
 }
 ```
 
-### tDialogs (`data.tDialogs[]` or `data.tDialogs.result[]`)
+### tDialogs (`data.tDialogs[]`)
 
 ```js
 { id: number, name: string }
@@ -163,7 +203,7 @@ let openMode // "popup" | "browser"
 
 ### Rendering pipeline
 
-1. Data loads via `window.electronAPI.getData()`
+1. Data loads via `window.electronAPI.getData(dataFolderPath)`
 2. Maps (`dialogMap`, `tDialogMap`) populated
 3. Combined item arrays assembled (each item gets `._kind = "article" | "dialog" | "tdialog"`)
 4. `applyAllFilters()` / `applyArticleFilters()` / `applyDialogFilters()` called
@@ -184,23 +224,22 @@ let openMode // "popup" | "browser"
   brand | file tags | Export IDs button | Settings button (gear)
 
 <div.global-search-bar>
-  search input | [Aa] [\\b] [.*] toggle buttons
+  search input | [Aa] [\b] [.*] toggle buttons
 
 <div.tab-bar>
-  All Results | Articles | Dialogs
+  All Results (with sub-stats: art · dlg · t.dlg)
+  | Articles (with sub-stats: resp · dlg-lnk)
+  | Dialogs (with sub-stats: dlg · t.dlg · nodes · recog)
 
 <div#panel-all>
-  stats (Total / Articles / Dialogs / Transactional Dialogs)
   filter pills (All / Articles / Dialogs / Transactional Dialogs)
   item list | pagination
 
 <div#panel-articles>
-  stats (Articles / Has Response / Dialog Link)
   filter pills (All / Has response / Dialog link)
   item list | pagination
 
 <div#panel-dialogs>
-  stats (Dialogs / Transactional Dialogs / Nodes / Recognition Nodes)
   filter pills (All / Dialogs / Transactional Dialogs / Has responses)
   item list | pagination
 
@@ -242,6 +281,8 @@ Always use these terms in the UI:
 
 ---
 
+Example `cm-base-url` value: https://www.cm.com/en-gb/app/aicloud/dbd80c7c-e9b1-44d2-9762-fb5ad1664b7f/Efteling/EFTELING/nl/
+
 ## GitHub repository
 
 GitHub account: **WithoutWout** (not `wouttonio`)
@@ -249,16 +290,16 @@ Repository: `WithoutWout/cm-conversation-dashboard`
 Release URL pattern: `https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest`
 
 - Always use `WithoutWout` as the GitHub username, never `wouttonio`.
-- The `check-for-updates` IPC handler fetches `api.github.com/repos/WithoutWout/cm-conversation-dashboard/releases/latest`.
+- The `check_for_updates` Tauri command fetches `api.github.com/repos/WithoutWout/cm-conversation-dashboard/releases/latest`.
 
 ---
 
 ## Coding conventions
 
-- No external libraries (no lodash, no jQuery, no UI framework).
 - All HTML built via string concatenation — always use `esc()` for any dynamic value.
 - CSS variables for theming: `--bg`, `--surface`, `--surface2`, `--border`, `--text`, `--muted`, `--accent`, `--green`, `--blue`, `--orange`, `--red`, `--teal`.
 - Internal identifiers (`_kind`, `tDialogMap`, `b-tdialog`, CSS class `type-tdialog`) use the short `tdialog`/`tDialog` form — only the user-facing label says "Transactional Dialog".
 - Use `querySelector` / `getElementById` for DOM access; event delegation where multiple dynamic elements share a handler.
 - `buildSearchRegex` is the single source of truth for search logic — do not duplicate regex construction elsewhere.
 - Inline `onclick="..."` attributes are used intentionally for dynamically rendered cards (no event listener cleanup needed in this app).
+- Rust commands use `snake_case`; the JS shim maps them to `camelCase` on `window.electronAPI`.

@@ -1,11 +1,14 @@
 {
   "name": "cm-com-dashboard",
-  "version": "0.2.2",
+  "version": "0.2.6",
   "description": "Desktop dashboard for inspecting CM.com Conversational AI Cloud content exports",
   "author": "Wout van Os",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build": "electron-builder --mac --win",
@@ -19,7 +22,7 @@
     "files": [
       "main.js",
       "preload.js",
-      "index.html",
+      "frontend/index.html",
       "package.json"
     ],
     "publish": {
@@ -53,7 +56,12 @@
     }
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "electron": "latest",
-    "electron-builder": "^26.8.1"
+    "electron-builder": "^26.8.1",
+    "vis-network": "^10.0.2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
   }
 }

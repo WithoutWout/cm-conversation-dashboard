@@ -8,6 +8,7 @@ dist/
 *.dmg
 *.exe
 *.blockmap
+src-tauri/target/
 
 # Export data files — provided by the user, not committed
 *ArticlesExport*.json
