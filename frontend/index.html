@@ -330,9 +330,9 @@
         margin-bottom: -2px;
         transition: all 0.15s;
         display: flex;
-        align-items: center;
-        gap: 7px;
-        white-space: nowrap;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
       }
       .tab:hover {
         color: var(--text);
@@ -340,6 +340,12 @@
       .tab.active {
         color: var(--accent);
         border-bottom-color: var(--accent);
+      }
+      .tab-top {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        white-space: nowrap;
       }
       .tab-badge {
         background: var(--bg);
@@ -356,6 +362,23 @@
         border-color: var(--accent);
         color: #fff;
       }
+      .tab-sub {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 0.67rem;
+        padding-left: 19px;
+      }
+      .ts-val {
+        font-weight: 600;
+      }
+      .ts-lbl {
+        color: var(--muted);
+      }
+      .ts-sep {
+        color: var(--border);
+        padding: 0 1px;
+      }
 
       /* === PANELS === */
       .panel {
@@ -368,39 +391,6 @@
         display: flex;
       }
 
-      /* === STATS === */
-      .stats-bar {
-        display: flex;
-        gap: 7px;
-        padding: 8px 20px;
-        background: var(--surface);
-        border-bottom: 1px solid var(--border);
-        flex-shrink: 0;
-        flex-wrap: wrap;
-      }
-      .stat {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 7px;
-        padding: 5px 13px;
-        min-width: 70px;
-      }
-      .stat .sv {
-        font-size: 1.12rem;
-        font-weight: 700;
-        line-height: 1.2;
-      }
-      .stat .sl {
-        font-size: 0.6rem;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin-top: 2px;
-        white-space: nowrap;
-      }
       .c-accent {
         color: var(--accent);
       }
@@ -493,6 +483,33 @@
       }
       .card:hover {
         border-color: #3a3d55;
+      }
+      .card-header[data-tooltip] {
+        position: relative;
+      }
+      .card-header[data-tooltip]::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        top: calc(100% + 5px);
+        left: 11px;
+        right: 11px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.75rem;
+        font-weight: 400;
+        white-space: pre-wrap;
+        word-break: break-word;
+        padding: 6px 10px;
+        border-radius: 6px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.08s;
+        z-index: 50;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      }
+      .card-header[data-tooltip]:hover::after {
+        opacity: 1;
       }
       .card-header {
         display: flex;
@@ -625,6 +642,44 @@
         border-color: var(--accent);
         color: var(--accent);
       }
+      .btn-show-dialog {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 5px;
+        border: 1px solid rgba(124, 106, 247, 0.45);
+        background: rgba(124, 106, 247, 0.1);
+        color: var(--accent);
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .btn-open-url {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 5px;
+        border: none;
+        background: var(--accent);
+        color: #fff;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: opacity 0.15s;
+        white-space: nowrap;
+      }
+      .btn-open-url:hover {
+        opacity: 0.85;
+      }
+      .btn-show-dialog:hover {
+        background: rgba(124, 106, 247, 0.2);
+        border-color: var(--accent);
+      }
       .radio-group {
         display: flex;
         flex-direction: column;
@@ -685,6 +740,26 @@
       .chip.is-faq {
         border-color: rgba(74, 222, 128, 0.3);
         color: var(--green);
+      }
+      .chip-overflow {
+        display: none;
+      }
+      .chip-overflow.expanded {
+        display: contents;
+      }
+      .show-more-btn {
+        font-size: 0.72rem;
+        background: none;
+        border: 1px dashed var(--border);
+        border-radius: 5px;
+        padding: 2px 8px;
+        color: var(--muted);
+        cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .show-more-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .response-box {
         font-size: 0.79rem;
@@ -761,6 +836,17 @@
         overflow-y: auto;
         margin: 4px 0;
       }
+      .node-kba-ref {
+        display: inline-block;
+        font-size: 0.62rem;
+        color: var(--accent);
+        margin-bottom: 2px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .node-kba-ref:hover {
+        text-decoration: underline;
+      }
       .node-options {
         display: flex;
         flex-wrap: wrap;
@@ -804,6 +890,217 @@
       }
       .node-route.tlink strong {
         color: var(--teal);
+      }
+
+      .modal-box.dialog-info-modal-box {
+        width: calc(100vw - 32px) !important;
+        max-width: calc(100vw - 32px) !important;
+        height: calc(100vh - 32px);
+        max-height: calc(100vh - 32px);
+        display: flex;
+        flex-direction: column;
+        border-radius: 14px;
+      }
+      .dialog-info-modal-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 16px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      /* === FLOW MODAL TREE === */
+      .modal-box.flow-modal-box {
+        width: calc(100vw - 32px) !important;
+        max-width: calc(100vw - 32px) !important;
+        height: calc(100vh - 32px);
+        max-height: calc(100vh - 32px);
+        display: flex;
+        flex-direction: column;
+        border-radius: 14px;
+      }
+      .flow-modal-body {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        position: relative;
+        background: var(--bg);
+        border-radius: 0 0 14px 14px;
+      }
+      .flow-canvas-container {
+        width: 100%;
+        height: 100%;
+      }
+      .flow-hint {
+        position: absolute;
+        bottom: 10px;
+        right: 14px;
+        font-size: 0.68rem;
+        color: var(--muted);
+        pointer-events: none;
+        user-select: none;
+      }
+      .back-btn {
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 3px 10px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+        transition: all 0.15s;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+      .back-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .flow-dir-btn {
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 3px 10px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+        transition: all 0.15s;
+        letter-spacing: 0.04em;
+      }
+      .flow-dir-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .flow-dir-btn.active {
+        background: rgba(124, 106, 247, 0.12);
+        border-color: rgba(124, 106, 247, 0.5);
+        color: var(--accent);
+      }
+      .vis-tooltip {
+        max-width: 340px !important;
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        line-height: 1.5 !important;
+        font-size: 0.75rem !important;
+        background: #1a1d27 !important;
+        border: 1px solid #2a2d3e !important;
+        color: #c9d1d9 !important;
+        border-radius: 6px !important;
+        padding: 8px 10px !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+      }
+      .flow-node-info {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(13, 15, 23, 0.97);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid var(--border);
+        display: none;
+        flex-direction: column;
+        font-size: 0.75rem;
+        color: var(--text);
+        z-index: 3;
+        max-height: 220px;
+      }
+      .flow-node-info.visible {
+        display: flex;
+      }
+      .flow-node-info-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        min-width: 0;
+      }
+      .flow-node-info-name {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+        min-width: 0;
+      }
+      .flow-node-info-body {
+        overflow-y: auto;
+        padding: 6px 12px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .flow-node-info-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        line-height: 1.45;
+        min-width: 0;
+      }
+      .flow-node-info-label {
+        font-size: 0.68rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+        flex-shrink: 0;
+        padding-top: 1px;
+      }
+      .flow-node-info-text {
+        font-size: 0.75rem;
+        color: var(--text);
+        word-break: break-word;
+      }
+      .flow-node-info-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        align-items: center;
+      }
+      .flow-node-link-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 7px;
+        font-size: 0.7rem;
+      }
+      .flow-node-entity-chip {
+        display: inline-flex;
+        align-items: center;
+        background: rgba(124, 106, 247, 0.1);
+        border: 1px solid rgba(124, 106, 247, 0.25);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.68rem;
+        color: #b0a8f7;
+        white-space: nowrap;
+      }
+      .flow-node-goto-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 7px;
+        font-size: 0.7rem;
+        color: var(--muted);
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+      }
+      button.flow-node-goto-chip:hover {
+        border-color: rgba(124, 106, 247, 0.55);
+        color: var(--text);
+        background: rgba(124, 106, 247, 0.1);
       }
       .desc-text {
         font-size: 0.79rem;
@@ -911,7 +1208,8 @@
       .modal-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 10px;
         padding: 14px 18px;
         border-bottom: 1px solid var(--border);
       }
@@ -1249,6 +1547,7 @@
         opacity: 0.85;
       }
     </style>
+    <script src="vendor/vis-network.min.js"></script>
   </head>
   <body>
     <!-- UPDATE BANNER -->
@@ -1403,72 +1702,92 @@
     <!-- TABS -->
     <div class="tab-bar">
       <button class="tab active" data-tab="all">
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        All Results <span class="tab-badge" id="tab-all-count">--</span>
+        <div class="tab-top">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          All Results <span class="tab-badge" id="tab-all-count">--</span>
+        </div>
+        <div class="tab-sub">
+          <span class="ts-val c-blue" id="all-stat-articles">--</span
+          ><span class="ts-lbl"> art</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-accent" id="all-stat-dialogs">--</span
+          ><span class="ts-lbl"> dlg</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-teal" id="all-stat-tdialogs">--</span
+          ><span class="ts-lbl"> t.dlg</span>
+        </div>
+        <span id="all-stat-total" hidden>--</span>
       </button>
       <button class="tab" data-tab="articles">
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path
-            d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-          />
-          <polyline points="14 2 14 8 20 8" />
-        </svg>
-        Articles <span class="tab-badge" id="tab-a-count">--</span>
+        <div class="tab-top">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+            />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          Articles <span class="tab-badge" id="tab-a-count">--</span>
+        </div>
+        <div class="tab-sub">
+          <span class="ts-val c-accent" id="a-stat-response">--</span
+          ><span class="ts-lbl"> resp</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-orange" id="a-stat-dialog">--</span
+          ><span class="ts-lbl"> dlg-lnk</span>
+        </div>
+        <span id="a-stat-total" hidden>--</span>
       </button>
       <button class="tab" data-tab="dialogs">
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path
-            d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-          />
-        </svg>
-        Dialogs <span class="tab-badge" id="tab-d-count">--</span>
+        <div class="tab-top">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+            />
+          </svg>
+          Dialogs <span class="tab-badge" id="tab-d-count">--</span>
+        </div>
+        <div class="tab-sub">
+          <span class="ts-val c-accent" id="d-stat-dialogs">--</span
+          ><span class="ts-lbl"> dlg</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-teal" id="d-stat-tdialogs">--</span
+          ><span class="ts-lbl"> t.dlg</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-blue" id="d-stat-nodes">--</span
+          ><span class="ts-lbl"> nodes</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-green" id="d-stat-recognition">--</span
+          ><span class="ts-lbl"> recog</span>
+        </div>
       </button>
     </div>
 
     <!-- ALL RESULTS PANEL -->
     <div id="panel-all" class="panel active">
-      <div class="stats-bar">
-        <div class="stat">
-          <span class="sv c-accent" id="all-stat-total">--</span
-          ><span class="sl">Total</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-blue" id="all-stat-articles">--</span
-          ><span class="sl">Articles</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-accent" id="all-stat-dialogs">--</span
-          ><span class="sl">Dialogs</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-teal" id="all-stat-tdialogs">--</span
-          ><span class="sl">Transactional Dialogs</span>
-        </div>
-      </div>
       <div class="toolbar">
         <div class="filter-pills">
           <button class="pill active" data-filter="all">All</button>
@@ -1491,20 +1810,6 @@
 
     <!-- ARTICLES PANEL -->
     <div id="panel-articles" class="panel">
-      <div class="stats-bar">
-        <div class="stat">
-          <span class="sv c-blue" id="a-stat-total">--</span
-          ><span class="sl">Articles</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-accent" id="a-stat-response">--</span
-          ><span class="sl">Has Response</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-orange" id="a-stat-dialog">--</span
-          ><span class="sl">Dialog Link</span>
-        </div>
-      </div>
       <div class="toolbar">
         <div class="filter-pills">
           <button class="pill active" data-filter="all">All</button>
@@ -1524,24 +1829,6 @@
 
     <!-- DIALOGS PANEL -->
     <div id="panel-dialogs" class="panel">
-      <div class="stats-bar">
-        <div class="stat">
-          <span class="sv c-accent" id="d-stat-dialogs">--</span
-          ><span class="sl">Dialogs</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-teal" id="d-stat-tdialogs">--</span
-          ><span class="sl">Transactional Dialogs</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-blue" id="d-stat-nodes">--</span
-          ><span class="sl">Nodes</span>
-        </div>
-        <div class="stat">
-          <span class="sv c-green" id="d-stat-recognition">--</span
-          ><span class="sl">Recognition Nodes</span>
-        </div>
-      </div>
       <div class="toolbar">
         <div class="filter-pills">
           <button class="pill active" data-filter="all">All</button>
@@ -1590,7 +1877,7 @@
             <div class="radio-group">
               <label class="radio-option"
                 ><input type="radio" name="open-mode" value="popup" /> In a
-                popup window (Electron)</label
+                popup window</label
               >
               <label class="radio-option"
                 ><input type="radio" name="open-mode" value="browser" /> In
@@ -1695,15 +1982,14 @@
             <div class="instructions-step">
               <span class="instructions-step-num">1</span>
               <span class="instructions-step-text"
-                >In CM.com AI Cloud, open the <code>Articles</code> section from
-                the left navigation.</span
+                >In CM.com Conversational AI Cloud, open the
+                <code>Articles</code> section from the left navigation.</span
               >
             </div>
             <div class="instructions-step">
               <span class="instructions-step-num">2</span>
               <span class="instructions-step-text"
-                >Click <code>Export</code> in the top toolbar or action
-                menu.</span
+                >Click the three dots menu and click <code>Export</code>.</span
               >
             </div>
             <div class="instructions-step">
@@ -1716,8 +2002,9 @@
             <div class="instructions-step">
               <span class="instructions-step-num">4</span>
               <span class="instructions-step-text"
-                >Save the downloaded file in the folder you selected in this
-                app under <code>Settings</code> &rarr; <code>Data Folder</code>.</span
+                >Save the downloaded file in the folder you selected in this app
+                under <code>Settings</code> &rarr;
+                <code>Data Folder</code>.</span
               >
             </div>
           </div>
@@ -1729,15 +2016,14 @@
             <div class="instructions-step">
               <span class="instructions-step-num">1</span>
               <span class="instructions-step-text"
-                >In CM.com AI Cloud, open the <code>Dialogs</code> section from
-                the left navigation.</span
+                >In CM.com Conversational AI Cloud, open the
+                <code>Dialogs</code> section from the left navigation.</span
               >
             </div>
             <div class="instructions-step">
               <span class="instructions-step-num">2</span>
               <span class="instructions-step-text"
-                >Click <code>Export</code> in the top toolbar or action
-                menu.</span
+                >Click the three dots menu and click <code>Export</code>.</span
               >
             </div>
             <div class="instructions-step">
@@ -1750,8 +2036,9 @@
             <div class="instructions-step">
               <span class="instructions-step-num">4</span>
               <span class="instructions-step-text"
-                >Save the downloaded file in the same selected export folder
-                so the dashboard can detect the update and ask when to reload.</span
+                >Save the downloaded file in the folder you selected in this app
+                under <code>Settings</code> &rarr;
+                <code>Data Folder</code>.</span
               >
             </div>
           </div>
@@ -1813,8 +2100,12 @@
           </p>
         </div>
         <div class="modal-footer">
-          <button class="btn-secondary" id="dismissDataChangedModal">Later</button>
-          <button class="btn-primary" id="reloadDataChangedModal">OK, reload data</button>
+          <button class="btn-secondary" id="dismissDataChangedModal">
+            Later
+          </button>
+          <button class="btn-primary" id="reloadDataChangedModal">
+            OK, reload data
+          </button>
         </div>
       </div>
     </div>
@@ -1844,8 +2135,147 @@
       </div>
     </div>
 
+    <!-- ARTICLE INFO MODAL -->
+    <div class="modal-overlay" id="articleInfoModal">
+      <div class="modal-box dialog-info-modal-box">
+        <div class="modal-header">
+          <button
+            id="article-back-btn"
+            class="back-btn"
+            onclick="navBack()"
+            title="Back"
+          >
+            &#8592; Back
+          </button>
+          <div style="display: flex; flex-direction: column; gap: 3px">
+            <h3 id="article-info-title">Article</h3>
+            <span
+              id="article-info-subtitle"
+              style="font-size: 0.72rem; color: var(--muted)"
+            ></span>
+          </div>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              margin-left: auto;
+            "
+          >
+            <div
+              id="article-info-actions"
+              style="display: flex; gap: 6px"
+            ></div>
+            <button
+              class="close-btn"
+              onclick="closeArticleInfoModal(); _navClear()"
+            >
+              &#x2715;
+            </button>
+          </div>
+        </div>
+        <div class="dialog-info-modal-body" id="article-info-body"></div>
+      </div>
+    </div>
+
+    <!-- DIALOG INFO MODAL -->
+    <div class="modal-overlay" id="dialogInfoModal">
+      <div class="modal-box dialog-info-modal-box">
+        <div class="modal-header">
+          <button
+            id="dialog-back-btn"
+            class="back-btn"
+            onclick="navBack()"
+            title="Back"
+          >
+            &#8592; Back
+          </button>
+          <div style="display: flex; flex-direction: column; gap: 3px">
+            <h3 id="dialog-info-title">Dialog</h3>
+            <span
+              id="dialog-info-subtitle"
+              style="font-size: 0.72rem; color: var(--muted)"
+            ></span>
+          </div>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              margin-left: auto;
+            "
+          >
+            <div id="dialog-info-actions" style="display: flex; gap: 6px"></div>
+            <button
+              class="close-btn"
+              onclick="closeDialogInfoModal(); _navClear()"
+            >
+              &#x2715;
+            </button>
+          </div>
+        </div>
+        <div class="dialog-info-modal-body" id="dialog-info-body"></div>
+      </div>
+    </div>
+
+    <!-- FLOW MODAL -->
+    <div class="modal-overlay" id="flowModal">
+      <div class="modal-box flow-modal-box">
+        <div class="modal-header">
+          <button
+            id="flow-back-btn"
+            class="back-btn"
+            onclick="navBack()"
+            title="Back"
+          >
+            &#8592; Back
+          </button>
+          <div style="display: flex; flex-direction: column; gap: 3px">
+            <h3>Dialog Flow</h3>
+            <span
+              id="flow-modal-subtitle"
+              style="font-size: 0.72rem; color: var(--muted)"
+            ></span>
+          </div>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              margin-left: auto;
+            "
+          >
+            <div style="display: flex; gap: 4px">
+              <button
+                class="flow-dir-btn"
+                id="flow-dir-lr"
+                onclick="setFlowDirection('LR')"
+                title="Left to right"
+              >
+                → LR
+              </button>
+              <button
+                class="flow-dir-btn"
+                id="flow-dir-ud"
+                onclick="setFlowDirection('UD')"
+                title="Top to bottom"
+              >
+                ↓ TB
+              </button>
+            </div>
+            <span id="flow-modal-cm-btn"></span>
+            <button class="close-btn" onclick="closeFlowModal(); _navClear()">
+              &#x2715;
+            </button>
+          </div>
+        </div>
+        <div class="flow-modal-body" id="flow-modal-body"></div>
+      </div>
+    </div>
+
     <script>
       const PAGE_SIZE = 50
+      const ENTITY_PREVIEW = 8
 
       // ── Tauri / Electron API bridge ─────────────────────────────────
       // Wraps Tauri invoke() behind the same window.electronAPI surface
@@ -1899,10 +2329,20 @@
 
       let dialogMap = new Map()
       let tDialogMap = new Map()
+      let articleMap = new Map()
       const CM_DEFAULT_URL = ""
       const DATA_FOLDER_STORAGE_KEY = "cm-data-folder"
       let cmBaseUrl = localStorage.getItem("cm-base-url") || CM_DEFAULT_URL
       let openMode = localStorage.getItem("cm-open-mode") || "popup"
+      let flowNetwork = null
+      let flowDirection = localStorage.getItem("cm-flow-direction") || "LR"
+      let flowCurrentDialogId = null
+      let renderFlowNodeInfo = function () {}
+
+      // ── Navigation history ──────────────────────────────────────────
+      let navHistory = []
+      let _navCurrentModal = null // { type: "article"|"dialog"|"flow", id, isTDialog? }
+      let _navBackMode = false
       let dataFolderPath = localStorage.getItem(DATA_FOLDER_STORAGE_KEY) || ""
       let dataSourceInfo = null
       let dataLoadInFlight = false
@@ -1967,6 +2407,26 @@
           "</a>"
         )
       }
+      function cmOpenButton(type, id) {
+        if (cmBaseUrl) {
+          const path =
+            type === "article"
+              ? cmBaseUrl + "/articles/" + id
+              : cmBaseUrl + "/dialogs/" + id
+          return (
+            '<a class="btn-open-url" href="' +
+            esc(path) +
+            '" title="Open in CM.com" target="_blank">' +
+            extLinkSvg() +
+            " Open in CM.com</a>"
+          )
+        }
+        return (
+          '<button class="btn-open-url" disabled style="opacity:0.35;cursor:not-allowed" title="Configure a CM.com Context URL in Settings to enable this link">' +
+          extLinkSvg() +
+          " Open in CM.com</button>"
+        )
+      }
       function pagHtml(cur, tot, cb) {
         if (tot <= 1) return ""
         const d = 2,
@@ -2023,6 +2483,11 @@
       function toggleCard(el) {
         el.closest(".card").classList.toggle("open")
       }
+      function toggleEntityOverflow(id, btn, hiddenCount) {
+        const el = document.getElementById(id)
+        const expanded = el.classList.toggle("expanded")
+        btn.textContent = expanded ? "Show less" : "+" + hiddenCount + " more"
+      }
       function shortPath(path) {
         if (!path) return ""
         const parts = String(path).split(/[\\/]/)
@@ -2054,8 +2519,10 @@
       }
       function loadingMessageForReason(reason) {
         if (reason === "select-folder") return "Scanning selected folder…"
-        if (reason === "manual-refresh") return "Refreshing data from selected folder…"
-        if (reason === "confirmed-refresh") return "Reloading updated export files…"
+        if (reason === "manual-refresh")
+          return "Refreshing data from selected folder…"
+        if (reason === "confirmed-refresh")
+          return "Reloading updated export files…"
         if (reason === "auto-refresh") return "Preparing updated export files…"
         return "Loading export files…"
       }
@@ -2097,7 +2564,9 @@
             ? "using files from selected folder"
             : "selected folder unavailable",
         )
-        stateBits.push(watched ? "change notifications on" : "change notifications off")
+        stateBits.push(
+          watched ? "change notifications on" : "change notifications off",
+        )
         if (loadedFiles.length) {
           stateBits.push("loaded files: " + loadedFiles.join(" | "))
         }
@@ -2142,29 +2611,41 @@
       function summarizeLoadedSources(data) {
         if (!dataFolderPath) return "Select a data folder to load export files."
         if (!data.dataSource) return ""
-        if (data.dataSource.missingSources && data.dataSource.missingSources.length) {
+        if (
+          data.dataSource.missingSources &&
+          data.dataSource.missingSources.length
+        ) {
           return (
             "Missing supported sources: " +
             data.dataSource.missingSources.join(", ") +
             "."
           )
         }
-        if (data.dataSource.statuses && data.dataSource.statuses.some((item) => item.found)) {
+        if (
+          data.dataSource.statuses &&
+          data.dataSource.statuses.some((item) => item.found)
+        ) {
           return "Supported sources loaded successfully."
         }
         return "No supported export files found."
       }
       async function ensureDataFolderWatcher() {
         if (dataFolderUnlisten) return
-        dataFolderUnlisten = await window.electronAPI.onDataFolderUpdated((event) => {
-          pendingDataChangedFolder =
-            (event && event.payload && event.payload.folder) || dataFolderPath || ""
-          const label = pendingDataChangedFolder
-            ? "Updated export files detected in " + shortPath(pendingDataChangedFolder) + "."
-            : "Updated export files detected."
-          setDataFolderFeedback(label, "var(--orange)")
-          openDataChangedModal(pendingDataChangedFolder)
-        })
+        dataFolderUnlisten = await window.electronAPI.onDataFolderUpdated(
+          (event) => {
+            pendingDataChangedFolder =
+              (event && event.payload && event.payload.folder) ||
+              dataFolderPath ||
+              ""
+            const label = pendingDataChangedFolder
+              ? "Updated export files detected in " +
+                shortPath(pendingDataChangedFolder) +
+                "."
+              : "Updated export files detected."
+            setDataFolderFeedback(label, "var(--orange)")
+            openDataChangedModal(pendingDataChangedFolder)
+          },
+        )
       }
 
       // ── Article helpers ─────────────────────────────────────────────
@@ -2243,17 +2724,43 @@
               refs.join(" ") +
               "</div></div>"
         }
-        const chips = art.Questions.map(
-          (qs) =>
-            '<span class="chip' +
-            (qs.IsFaq ? " is-faq" : "") +
-            '">' +
-            hl(qs.Text, q) +
-            "</span>",
-        ).join("")
+        const makeChip = (qs) =>
+          '<span class="chip' +
+          (qs.IsFaq ? " is-faq" : "") +
+          '">' +
+          hl(qs.Text, q) +
+          "</span>"
+        const visibleChips = art.Questions.slice(0, ENTITY_PREVIEW)
+          .map(makeChip)
+          .join("")
+        const hiddenQs = art.Questions.slice(ENTITY_PREVIEW)
+        const overflowId = "eo-" + art.Id
+        const entityGridHtml =
+          hiddenQs.length > 0
+            ? visibleChips +
+              '<div class="chip-overflow" id="' +
+              overflowId +
+              '">' +
+              hiddenQs.map(makeChip).join("") +
+              "</div>" +
+              '<button class="show-more-btn" onclick="toggleEntityOverflow(\'' +
+              overflowId +
+              "',this," +
+              hiddenQs.length +
+              ')">' +
+              "+" +
+              hiddenQs.length +
+              " more</button>"
+            : visibleChips
+        const hoverTitle =
+          kind === "answer" ? strip(aResponse(art) || "").slice(0, 250) : ""
         return (
           '<div class="card type-article">' +
-          '<div class="card-header" onclick="toggleCard(this)">' +
+          '<div class="card-header" onclick="goToArticle(' +
+          art.Id +
+          ')"' +
+          (hoverTitle ? ' data-tooltip="' + esc(hoverTitle) + '"' : "") +
+          ">" +
           '<span class="card-id id-blue">' +
           art.Id +
           "</span>" +
@@ -2276,19 +2783,556 @@
           "</div>" +
           '<div class="card-actions">' +
           cmLink("article", art.Id) +
-          chev() +
           "</div>" +
-          "</div>" +
-          '<div class="card-detail">' +
-          '<div class="detail-section"><h4>Entities (' +
-          qCnt +
-          ')</h4><div class="chip-grid">' +
-          chips +
-          "</div></div>" +
-          outputSection +
           "</div>" +
           "</div>"
         )
+      }
+
+      // ── Flow modal ──────────────────────────────────────────────────
+      function buildFlowGraph(dialog) {
+        const nodes = []
+        const edges = []
+        const entryNodeIds = new Set(
+          (dialog.entryPoints || []).map((ep) => ep.nodeId),
+        )
+
+        ;(dialog.nodes || []).forEach((node) => {
+          const isEntry = entryNodeIds.has(node.id)
+          const items = (node.output && node.output.items) || []
+          const ansItem = items.find((i) => i.type === "Answer")
+          const ansRaw = strip(
+            (ansItem && ansItem.data && ansItem.data.text) || "",
+          )
+          const ansPreview =
+            ansRaw.length > 80 ? ansRaw.slice(0, 80) + "\u2026" : ansRaw
+
+          // exit dialog info for tooltip
+          const exitLines = items
+            .filter(
+              (i) => i.type === "DialogStart" || i.type === "TDialogStart",
+            )
+            .map((item) => {
+              if (item.type === "DialogStart") {
+                const did = item.data && item.data.dialogId
+                const d = dialogMap.get(did)
+                return "\u2192 Dialog: " + (d ? d.name : "#" + (did || ""))
+              } else {
+                const tid = item.data && item.data.tDialogId
+                const d = tDialogMap.get(tid)
+                return "\u2192 T.Dialog: " + (d ? d.name : "#" + (tid || ""))
+              }
+            })
+
+          const typeLabel =
+            node.type === "Recognition"
+              ? "RECOGNITION"
+              : node.type === "Output"
+              ? "OUTPUT"
+              : "GOTO"
+
+          const nameTruncated =
+            node.name.length > 30
+              ? node.name.slice(0, 29) + "\u2026"
+              : node.name
+          const label = typeLabel + "\n" + nameTruncated
+
+          let titleParts = [node.type + " node: " + node.name]
+          if (ansRaw) titleParts.push(ansRaw.slice(0, 500))
+          if (exitLines.length) titleParts = titleParts.concat(exitLines)
+          const title = titleParts.join("\n\n")
+
+          let color, borderDashes
+          if (node.type === "Recognition") {
+            color = {
+              border: isEntry ? "#a89ff5" : "#7c6af7",
+              background: "#1a1730",
+              highlight: { border: "#c4bbff", background: "#211e3d" },
+              hover: { border: "#a89ff5", background: "#211e3d" },
+            }
+          } else if (node.type === "Output") {
+            color = {
+              border: "#60a5fa",
+              background: "#131c2e",
+              highlight: { border: "#93c5fd", background: "#1a2740" },
+              hover: { border: "#93c5fd", background: "#1a2740" },
+            }
+          } else {
+            color = {
+              border: "#3a3d55",
+              background: "#161b22",
+              highlight: { border: "#8892a4", background: "#1f2433" },
+              hover: { border: "#8892a4", background: "#1f2433" },
+            }
+            borderDashes = [5, 3]
+          }
+
+          nodes.push({
+            id: node.id,
+            label,
+            title,
+            color,
+            borderDashes: borderDashes || undefined,
+            borderWidth: isEntry ? 2.5 : 1.5,
+            font: {
+              size: 11,
+              color: "#c9d1d9",
+              face: "system-ui,-apple-system,sans-serif",
+              multi: false,
+            },
+          })
+          ;(node.links || []).forEach((link) => {
+            const cond = link.condition || {}
+            const condData = cond.data || {}
+            let edgeLabel = ""
+            let edgeColor = "#3a3d55"
+            let dashes = undefined
+            if (cond.type === "GoTo") {
+              edgeLabel = "GoTo"
+              edgeColor = "#64738b"
+              dashes = [4, 3]
+            } else if (condData.isFallback) {
+              edgeLabel = "Fallback"
+              edgeColor = "#fb923c"
+            } else {
+              const qs = (condData.questions || []).map((q) => q.text)
+              const shown = qs.slice(0, 2).join(", ")
+              edgeLabel = shown + (qs.length > 2 ? " +" + (qs.length - 2) : "")
+            }
+            edges.push({
+              from: node.id,
+              to: link.childNodeId,
+              label: edgeLabel,
+              color: {
+                color: edgeColor,
+                highlight: "#7c6af7",
+                hover: "#a89ff5",
+              },
+              dashes,
+              font: {
+                size: 10,
+                color: "#8892a4",
+                align: "middle",
+                strokeWidth: 0,
+              },
+            })
+          })
+        })
+
+        return { nodes, edges }
+      }
+
+      function openFlowModal(dialogId, restoreNodeId, restoreViewport) {
+        const dialog = allDialogsCombined.find((d) => d.id === dialogId)
+        if (!dialog) return
+
+        _navPushCurrent()
+        _navCurrentModal = { type: "flow", id: dialogId }
+        flowCurrentDialogId = dialogId
+        const nodeCnt = (dialog.nodes || []).length
+        document.getElementById("flow-modal-subtitle").textContent =
+          "Dialog #" +
+          dialogId +
+          " \u00b7 " +
+          nodeCnt +
+          " node" +
+          (nodeCnt !== 1 ? "s" : "")
+        document.getElementById("flowModal").classList.add("open")
+        _navUpdateBackButtons()
+        document.getElementById("flow-modal-cm-btn").innerHTML = cmOpenButton(
+          "dialog",
+          dialogId,
+        )
+        document
+          .getElementById("flow-dir-lr")
+          .classList.toggle("active", flowDirection === "LR")
+        document
+          .getElementById("flow-dir-ud")
+          .classList.toggle("active", flowDirection === "UD")
+
+        if (flowNetwork) {
+          flowNetwork.destroy()
+          flowNetwork = null
+        }
+
+        const body = document.getElementById("flow-modal-body")
+        body.innerHTML =
+          '<div class="flow-canvas-container" id="flow-canvas"></div>' +
+          '<div class="flow-hint">Scroll to zoom \u00b7 Drag to pan</div>' +
+          '<div class="flow-node-info" id="flow-node-info"></div>'
+
+        const container = document.getElementById("flow-canvas")
+        const { nodes, edges } = buildFlowGraph(dialog)
+        const isLR = flowDirection === "LR"
+
+        flowNetwork = new vis.Network(
+          container,
+          { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) },
+          {
+            layout: {
+              hierarchical: {
+                enabled: true,
+                direction: flowDirection,
+                sortMethod: "directed",
+                levelSeparation: 160,
+                nodeSpacing: isLR ? 120 : 180,
+                treeSpacing: isLR ? 180 : 220,
+                parentCentralization: true,
+                blockShifting: true,
+                edgeMinimization: true,
+              },
+            },
+            physics: { enabled: false },
+            interaction: {
+              dragNodes: false,
+              dragView: true,
+              zoomView: true,
+              zoomSpeed: 0.1,
+              hover: true,
+              tooltipDelay: 150,
+              navigationButtons: false,
+            },
+            edges: {
+              arrows: { to: { enabled: true, scaleFactor: 0.65 } },
+              smooth: {
+                type: "cubicBezier",
+                forceDirection: isLR ? "horizontal" : "vertical",
+                roundness: 0.45,
+              },
+              font: {
+                size: 10,
+                color: "#8892a4",
+                align: "middle",
+                strokeWidth: 0,
+              },
+              color: {
+                color: "#3a3d55",
+                highlight: "#7c6af7",
+                hover: "#a89ff5",
+              },
+            },
+            nodes: {
+              shape: "box",
+              borderWidth: 1.5,
+              borderWidthSelected: 2.5,
+              widthConstraint: { maximum: 220 },
+              margin: { top: 8, bottom: 8, left: 12, right: 12 },
+              font: {
+                size: 11,
+                color: "#c9d1d9",
+                face: "system-ui,-apple-system,sans-serif",
+              },
+            },
+          },
+        )
+
+        renderFlowNodeInfo = function renderFlowNodeInfo(nodeId) {
+          const infoEl = document.getElementById("flow-node-info")
+          if (!infoEl) return
+          const dlg = allDialogsCombined.find(function (d) {
+            return d.id === flowCurrentDialogId
+          })
+          if (!dlg) return
+          const node = (dlg.nodes || []).find(function (n) {
+            return n.id === nodeId
+          })
+          if (!node) return
+
+          const isEntry = (dlg.entryPoints || []).some(function (ep) {
+            return ep.nodeId === node.id
+          })
+          const nodeMap = new Map(
+            (dlg.nodes || []).map(function (n) {
+              return [n.id, n]
+            }),
+          )
+          const items = (node.output && node.output.items) || []
+          const ansItem = items.find(function (i) {
+            return i.type === "Answer"
+          })
+          const kbaRef = node.output && node.output.kbaIdReference
+          const kbaArt = !ansItem && kbaRef ? articleMap.get(kbaRef) : null
+          const kbaAnsItem =
+            kbaArt &&
+            (kbaArt.Outputs || []).find(function (o) {
+              return o.Type === "Answer"
+            })
+          const ansText = strip(
+            (ansItem && ansItem.data && ansItem.data.text) ||
+              (kbaAnsItem && kbaAnsItem.Text) ||
+              "",
+          )
+          const kbaRefLink = kbaArt
+            ? '<a class="node-kba-ref" onclick="closeFlowModal();goToArticle(' +
+              kbaRef +
+              ')" title="Open article ' +
+              kbaRef +
+              '">&#128279; Article ' +
+              kbaRef +
+              "</a> "
+            : ""
+          const outputLinks = items.filter(function (i) {
+            return i.type === "DialogStart" || i.type === "TDialogStart"
+          })
+
+          // Collect all entities across links (Recognition node)
+          const allEntities = []
+          ;(node.links || []).forEach(function (link) {
+            const condData = (link.condition && link.condition.data) || {}
+            if (
+              !condData.isFallback &&
+              link.condition &&
+              link.condition.type !== "GoTo"
+            ) {
+              ;(condData.questions || []).forEach(function (qo) {
+                if (qo.text) allEntities.push(qo.text)
+              })
+            }
+          })
+
+          // Collect all outgoing node connections
+          const connections = (node.links || []).map(function (link) {
+            const cond = link.condition || {}
+            const condData = cond.data || {}
+            const target = nodeMap.get(link.childNodeId)
+            const targetName = target ? target.name : "#" + link.childNodeId
+            const targetType = target ? target.type : ""
+            let kind
+            if (cond.type === "GoTo") {
+              kind = "goto"
+            } else if (condData.isFallback) {
+              kind = "fallback"
+            } else {
+              kind = "normal"
+            }
+            return {
+              kind: kind,
+              targetName: targetName,
+              targetType: targetType,
+              targetId: link.childNodeId,
+            }
+          })
+
+          const typeBadgeClass =
+            node.type === "Recognition"
+              ? "b-recog"
+              : node.type === "Output"
+              ? "b-outnode"
+              : "b-article"
+
+          // Build header
+          let html =
+            '<div class="flow-node-info-header">' +
+            '<span class="badge ' +
+            typeBadgeClass +
+            '" style="font-size:0.65rem;flex-shrink:0">' +
+            esc(node.type) +
+            "</span>" +
+            (isEntry
+              ? '<span class="badge" style="font-size:0.62rem;background:rgba(168,159,245,0.15);border:1px solid rgba(168,159,245,0.4);color:#a89ff5;flex-shrink:0">Entry</span>'
+              : "") +
+            '<span class="flow-node-info-name">' +
+            esc(node.name) +
+            "</span>" +
+            '<button class="flow-dir-btn" onclick="document.getElementById("flow-node-info").className="flow-node-info"" style="padding:2px 7px;flex-shrink:0" title="Dismiss">&#x2715;</button>' +
+            "</div>" +
+            '<div class="flow-node-info-body">'
+
+          // Response
+          if (ansText) {
+            const preview = ansText
+            html +=
+              '<div class="flow-node-info-row">' +
+              '<span class="flow-node-info-label">Response</span>' +
+              '<span class="flow-node-info-text" style="color:#c9d1d9">' +
+              kbaRefLink +
+              esc(preview) +
+              "</span>" +
+              "</div>"
+          }
+
+          // Entities (Recognition)
+          if (allEntities.length) {
+            const shown = allEntities.slice(0, 12)
+            const extra = allEntities.length - shown.length
+            html +=
+              '<div class="flow-node-info-row">' +
+              '<span class="flow-node-info-label">Entities</span>' +
+              '<span class="flow-node-info-chips">'
+            shown.forEach(function (e) {
+              html +=
+                '<span class="flow-node-entity-chip">' + esc(e) + "</span>"
+            })
+            if (extra > 0) {
+              html +=
+                '<span style="color:var(--muted);font-size:0.68rem">+' +
+                extra +
+                " more</span>"
+            }
+            html += "</span></div>"
+          }
+
+          // Connections to other nodes
+          if (connections.length) {
+            html +=
+              '<div class="flow-node-info-row">' +
+              '<span class="flow-node-info-label">Connects to</span>' +
+              '<span class="flow-node-info-chips">'
+            connections.forEach(function (c) {
+              let chipStyle = ""
+              let prefix = "\u2192 "
+              if (c.kind === "fallback") {
+                chipStyle = "border-color:rgba(251,146,60,0.4);color:#fb923c"
+                prefix = "\u21af "
+              } else if (c.kind === "goto") {
+                chipStyle = "border-style:dashed"
+                prefix = "\u21b7 "
+              }
+              html +=
+                '<button class="flow-node-goto-chip" style="cursor:pointer;' +
+                chipStyle +
+                '" onclick="flowGoToNode(' +
+                c.targetId +
+                ')" onmouseenter="flowHoverNode(' +
+                c.targetId +
+                ',true)" onmouseleave="flowHoverNode(' +
+                c.targetId +
+                ',false)" title="Select and pan to node">' +
+                prefix +
+                esc(c.targetName) +
+                (c.targetType
+                  ? ' <span style="opacity:0.5;font-size:0.62rem">(' +
+                    esc(c.targetType) +
+                    ")</span>"
+                  : "") +
+                "</button>"
+            })
+            html += "</span></div>"
+          }
+
+          // Dialog / Transactional Dialog links
+          if (outputLinks.length) {
+            html +=
+              '<div class="flow-node-info-row">' +
+              '<span class="flow-node-info-label">Links to</span>' +
+              '<span class="flow-node-info-chips">'
+            outputLinks.forEach(function (item) {
+              if (item.type === "DialogStart") {
+                const did = item.data && item.data.dialogId
+                const d = dialogMap.get(did)
+                const name = d ? esc(d.name) : "#" + (did || "?")
+                html += '<span class="flow-node-link-chip">'
+                html +=
+                  '<span class="badge b-dialog" style="font-size:0.6rem">Dialog</span>'
+                html += "<span>" + name + "</span>"
+                html +=
+                  '<button class="flow-dir-btn" onclick="openFlowModal(' +
+                  did +
+                  ')" style="padding:2px 6px" title="Open in flow">&#8594; View</button>'
+                html += cmLink("dialog", did)
+                html += "</span>"
+              } else {
+                const tid = item.data && item.data.tDialogId
+                const d = tDialogMap.get(tid)
+                const name = d ? esc(d.name) : "#" + (tid || "?")
+                html += '<span class="flow-node-link-chip">'
+                html +=
+                  '<span class="badge b-tdialog" style="font-size:0.6rem">Transactional Dialog</span>'
+                html += '<span style="color:var(--teal)">' + name + "</span>"
+                html +=
+                  '<button class="flow-dir-btn" onclick="closeFlowModal();openDialogInfoModal(' +
+                  tid +
+                  ',true)" style="padding:2px 6px;color:var(--teal)" title="Open details">&#8594; View</button>'
+                html += cmLink("dialog", tid)
+                html += "</span>"
+              }
+            })
+            html += "</span></div>"
+          }
+
+          html += "</div>"
+          infoEl.innerHTML = html
+          infoEl.className = "flow-node-info visible"
+        }
+
+        flowNetwork.on("click", function (params) {
+          const infoEl = document.getElementById("flow-node-info")
+          if (!infoEl) return
+          if (!params.nodes || params.nodes.length === 0) {
+            infoEl.className = "flow-node-info"
+            if (_navCurrentModal) _navCurrentModal.selectedNodeId = null
+            return
+          }
+          const nodeId = params.nodes[0]
+          if (_navCurrentModal) _navCurrentModal.selectedNodeId = nodeId
+          renderFlowNodeInfo(nodeId)
+        })
+
+        if (restoreViewport != null || restoreNodeId != null) {
+          flowNetwork.once("afterDrawing", function () {
+            if (!flowNetwork) return
+            if (restoreViewport != null) {
+              flowNetwork.moveTo({
+                position: restoreViewport.position,
+                scale: restoreViewport.scale,
+                animation: false,
+              })
+            }
+            if (restoreNodeId != null) {
+              flowNetwork.selectNodes([restoreNodeId])
+              renderFlowNodeInfo(restoreNodeId)
+            }
+          })
+        }
+      }
+
+      function flowHoverNode(nodeId, isHover) {
+        if (!flowNetwork) return
+        const node = flowNetwork.body.nodes[nodeId]
+        if (!node) return
+        node.hover = isHover
+        // Also hover/unhover all edges whose target is this node
+        Object.values(flowNetwork.body.edges).forEach(function (edge) {
+          if (edge.to && edge.to.id === nodeId) {
+            edge.hover = isHover
+          }
+        })
+        flowNetwork.redraw()
+      }
+
+      function flowGoToNode(nodeId) {
+        if (!flowNetwork) return
+        flowNetwork.selectNodes([nodeId])
+        flowNetwork.focus(nodeId, {
+          scale: flowNetwork.getScale(),
+          animation: { duration: 300, easingFunction: "easeInOutQuad" },
+        })
+        renderFlowNodeInfo(nodeId)
+        if (_navCurrentModal) _navCurrentModal.selectedNodeId = nodeId
+      }
+
+      function setFlowDirection(dir) {
+        if (flowDirection === dir) return
+        flowDirection = dir
+        localStorage.setItem("cm-flow-direction", dir)
+        if (flowCurrentDialogId !== null) openFlowModal(flowCurrentDialogId)
+      }
+
+      function closeFlowModal() {
+        if (flowNetwork) {
+          // Capture viewport BEFORE removing "open" — removing it resizes the
+          // container, which shifts the canvas center that getViewPosition()
+          // returns and produces a wrong position offset on restore.
+          if (_navCurrentModal && _navCurrentModal.type === "flow") {
+            _navCurrentModal.viewport = {
+              position: flowNetwork.getViewPosition(),
+              scale: flowNetwork.getScale(),
+            }
+          }
+          flowNetwork.destroy()
+          flowNetwork = null
+        }
+        document.getElementById("flowModal").classList.remove("open")
       }
 
       // ── Dialog node ─────────────────────────────────────────────────
@@ -2296,9 +3340,26 @@
         const isRec = node.type === "Recognition"
         const items = (node.output && node.output.items) || []
         const ansItem = items.find((i) => i.type === "Answer")
+        const kbaRef = node.output && node.output.kbaIdReference
+        const kbaArt = !ansItem && kbaRef ? articleMap.get(kbaRef) : null
+        const kbaAnsText =
+          kbaArt &&
+          kbaArt.Outputs &&
+          kbaArt.Outputs.find((o) => o.Type === "Answer")
         const ansRaw = strip(
-          (ansItem && ansItem.data && ansItem.data.text) || "",
+          (ansItem && ansItem.data && ansItem.data.text) ||
+            (kbaAnsText && kbaAnsText.Text) ||
+            "",
         )
+        const kbaRefLink = kbaArt
+          ? '<a class="node-kba-ref" onclick="closeDialogInfoModal();goToArticle(' +
+            kbaRef +
+            ')" title="Open article ' +
+            kbaRef +
+            '">&#128279; Article ' +
+            kbaRef +
+            "</a> "
+          : ""
         const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
         const optHtml = (node.links || [])
           .flatMap((link) => {
@@ -2373,7 +3434,10 @@
           "</span>" +
           "</div>" +
           (ansRaw
-            ? '<div class="node-answer">' + hl(ansRaw, q) + "</div>"
+            ? '<div class="node-answer">' +
+              kbaRefLink +
+              hl(ansRaw, q) +
+              "</div>"
             : "") +
           (optHtml ? '<div class="node-options">' + optHtml + "</div>" : "") +
           (routeHtml
@@ -2388,7 +3452,9 @@
         if (item._kind === "tdialog") {
           return (
             '<div class="card type-tdialog">' +
-            '<div class="card-header" style="cursor:default">' +
+            '<div class="card-header" onclick="openDialogInfoModal(' +
+            item.id +
+            ', true)">' +
             '<span class="card-id id-teal">' +
             item.id +
             "</span>" +
@@ -2410,13 +3476,20 @@
           (n) => n.type === "Recognition",
         ).length
         const desc = item.description || ""
-        const nodesHtml = (item.nodes || [])
-          .map((n) => renderNodeHtml(n, item, q))
-          .join("")
+        const hasDetail = !!desc
         return (
           '<div class="card type-dialog">' +
-          '<div class="card-header" onclick="toggleCard(this)">' +
-          '<span class="card-id">' +
+          '<div class="card-header" onclick="openDialogInfoModal(' +
+          item.id +
+          ', false)"' +
+          (desc
+            ? ' data-tooltip="' +
+              esc(desc.slice(0, 250)) +
+              (desc.length > 250 ? "…" : "") +
+              '"'
+            : "") +
+          ">" +
+          '<span class="card-id id-blue">' +
           item.id +
           "</span>" +
           '<div class="card-main">' +
@@ -2433,30 +3506,14 @@
           " node" +
           (nodeCnt !== 1 ? "s" : "") +
           "</span>" +
-          (desc
-            ? '<span class="meta-dim">' +
-              esc(desc.slice(0, 60)) +
-              (desc.length > 60 ? "…" : "") +
-              "</span>"
-            : "") +
           "</div>" +
           "</div>" +
           '<div class="card-actions">' +
           cmLink("dialog", item.id) +
-          chev() +
+          '<button class="btn-show-dialog" onclick="openFlowModal(' +
+          item.id +
+          ');event.stopPropagation()">&#9654; Show dialog</button>' +
           "</div>" +
-          "</div>" +
-          '<div class="card-detail">' +
-          (desc
-            ? '<div class="detail-section"><h4>Description</h4><p class="desc-text">' +
-              hl(desc, q) +
-              "</p></div>"
-            : "") +
-          '<div class="detail-section"><h4>Nodes (' +
-          nodeCnt +
-          ')</h4><div class="nodes-list">' +
-          nodesHtml +
-          "</div></div>" +
           "</div>" +
           "</div>"
         )
@@ -2667,37 +3724,249 @@
       }
 
       // ── Cross-navigation ────────────────────────────────────────────
-      function jumpToDialog(id, isTDialog) {
-        document
-          .querySelectorAll(".tab")
-          .forEach((t) => t.classList.remove("active"))
-        document
-          .querySelectorAll(".panel")
-          .forEach((p) => p.classList.remove("active"))
-        document.querySelector('[data-tab="dialogs"]').classList.add("active")
-        document.getElementById("panel-dialogs").classList.add("active")
-        const sid = String(id)
-        document.getElementById("g-search").value = sid
-        document.getElementById("clearSearch").classList.add("visible")
-        gQuery = sid
-        dFilter = "all"
-        document
-          .querySelectorAll("#panel-dialogs .pill")
-          .forEach((p) => p.classList.remove("active"))
-        document
-          .querySelector('#panel-dialogs [data-filter="all"]')
-          .classList.add("active")
-        applyDialogFilters()
-        // Also re-apply other panels so counts stay accurate
-        applyAllFilters()
-        applyArticleFilters()
-        setTimeout(() => {
-          const c = document.querySelector("#dialogList .card")
-          if (c) {
-            c.classList.add("open")
-            c.scrollIntoView({ behavior: "smooth", block: "start" })
+      function _navPushCurrent() {
+        if (_navBackMode) return
+        if (_navCurrentModal) {
+          if (_navCurrentModal.type === "flow" && flowNetwork) {
+            _navCurrentModal.viewport = {
+              position: flowNetwork.getViewPosition(),
+              scale: flowNetwork.getScale(),
+            }
           }
-        }, 60)
+          navHistory.push(Object.assign({}, _navCurrentModal))
+        }
+      }
+
+      function _navUpdateBackButtons() {
+        // Buttons are always visible; nothing to toggle.
+      }
+
+      function _navClear() {
+        navHistory = []
+        _navCurrentModal = null
+        _navUpdateBackButtons()
+      }
+
+      function navBack() {
+        const prev = navHistory.pop()
+        if (!prev) {
+          // No history — act as close for whichever modal is open
+          if (document.getElementById("flowModal").classList.contains("open")) {
+            closeFlowModal()
+            _navClear()
+          } else if (
+            document
+              .getElementById("dialogInfoModal")
+              .classList.contains("open")
+          ) {
+            closeDialogInfoModal()
+            _navClear()
+          } else if (
+            document
+              .getElementById("articleInfoModal")
+              .classList.contains("open")
+          ) {
+            closeArticleInfoModal()
+            _navClear()
+          }
+          return
+        }
+        _navBackMode = true
+        document.getElementById("articleInfoModal").classList.remove("open")
+        document.getElementById("dialogInfoModal").classList.remove("open")
+        document.getElementById("flowModal").classList.remove("open")
+        if (flowNetwork) {
+          flowNetwork.destroy()
+          flowNetwork = null
+        }
+        if (prev.type === "article") openArticleInfoModal(prev.id)
+        else if (prev.type === "dialog")
+          openDialogInfoModal(prev.id, prev.isTDialog)
+        else if (prev.type === "flow")
+          openFlowModal(prev.id, prev.selectedNodeId, prev.viewport)
+        _navBackMode = false
+        _navUpdateBackButtons()
+      }
+
+      function jumpToDialog(id, isTDialog) {
+        openDialogInfoModal(id, isTDialog)
+      }
+
+      function goToArticle(id) {
+        openArticleInfoModal(id)
+      }
+
+      function openArticleInfoModal(id) {
+        const art = articleMap.get(id)
+        if (!art) return
+
+        _navPushCurrent()
+        _navCurrentModal = { type: "article", id: id }
+
+        const kind = aKind(art)
+        const faq = aHasFaq(art)
+        const pq = aFaqQ(art)
+        const qCnt = art.Questions.length
+
+        document.getElementById("article-info-title").textContent =
+          pq || "Article #" + id
+        document.getElementById("article-info-subtitle").textContent =
+          "Article #" +
+          id +
+          " \u00b7 " +
+          qCnt +
+          " entit" +
+          (qCnt !== 1 ? "ies" : "y") +
+          (faq ? " \u00b7 FAQ" : "")
+        document.getElementById("article-info-actions").innerHTML =
+          cmOpenButton("article", id)
+
+        const makeChip = (qs) =>
+          '<span class="chip' +
+          (qs.IsFaq ? " is-faq" : "") +
+          '">' +
+          esc(qs.Text) +
+          "</span>"
+
+        let html =
+          '<div class="detail-section"><h4>Entities (' +
+          qCnt +
+          ")</h4>" +
+          '<div class="chip-grid">' +
+          art.Questions.map(makeChip).join("") +
+          "</div></div>"
+
+        if (kind === "answer") {
+          const raw = strip(aResponse(art) || "")
+          if (raw)
+            html +=
+              '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
+              esc(raw) +
+              "</div></div>"
+        } else {
+          const refs = art.Outputs.map((o) => {
+            if (o.Type === "DialogStart") {
+              const d = dialogMap.get(o.DialogId),
+                name = d ? esc(d.name) : "#" + o.DialogId
+              return (
+                '&#8594; <span class="jump-link" onclick="openDialogInfoModal(' +
+                o.DialogId +
+                ',false)">' +
+                name +
+                "</span>" +
+                ' <span class="meta-dim">(Dialog #' +
+                o.DialogId +
+                ")</span>"
+              )
+            }
+            if (o.Type === "TDialogStart") {
+              const tid = o.TDialogId || o.DialogId,
+                d = tDialogMap.get(tid),
+                name = d ? esc(d.name) : "#" + tid
+              return (
+                '&#8594; <span class="jump-link tlink" onclick="openDialogInfoModal(' +
+                tid +
+                ',true)">' +
+                name +
+                "</span>" +
+                ' <span class="meta-dim">(Transactional Dialog #' +
+                tid +
+                ")</span>"
+              )
+            }
+            return null
+          }).filter(Boolean)
+          if (refs.length)
+            html +=
+              '<div class="detail-section"><h4>Linked Dialog</h4><div class="dialog-link-row">' +
+              refs.join(" ") +
+              "</div></div>"
+        }
+
+        document.getElementById("article-info-body").innerHTML = html
+        document.getElementById("articleInfoModal").classList.add("open")
+        _navUpdateBackButtons()
+      }
+
+      function closeArticleInfoModal() {
+        document.getElementById("articleInfoModal").classList.remove("open")
+      }
+
+      function openDialogInfoModal(id, isTDialog) {
+        const item = isTDialog
+          ? tDialogMap.get(id)
+          : allDialogsCombined.find((d) => d.id === id)
+        if (!item) return
+
+        _navPushCurrent()
+        _navCurrentModal = { type: "dialog", id: id, isTDialog: !!isTDialog }
+
+        const modal = document.getElementById("dialogInfoModal")
+        const titleEl = document.getElementById("dialog-info-title")
+        const subtitleEl = document.getElementById("dialog-info-subtitle")
+        const actionsEl = document.getElementById("dialog-info-actions")
+        const bodyEl = document.getElementById("dialog-info-body")
+
+        if (isTDialog) {
+          titleEl.textContent = item.name || "Transactional Dialog"
+          subtitleEl.textContent = "Transactional Dialog #" + id
+          actionsEl.innerHTML = cmOpenButton("dialog", id)
+          bodyEl.innerHTML =
+            '<p style="color:var(--muted);font-size:0.82rem">No additional details available for Transactional Dialogs.</p>'
+        } else {
+          const nodeCnt = (item.nodes || []).length
+          const recCnt = (item.nodes || []).filter(
+            (n) => n.type === "Recognition",
+          ).length
+          titleEl.textContent = item.name || "Dialog"
+          subtitleEl.textContent =
+            "Dialog #" +
+            id +
+            " \u00b7 " +
+            nodeCnt +
+            " node" +
+            (nodeCnt !== 1 ? "s" : "") +
+            " \u00b7 " +
+            recCnt +
+            " Recognition"
+          actionsEl.innerHTML =
+            cmOpenButton("dialog", id) +
+            '<button class="btn-show-dialog" onclick="closeDialogInfoModal();openFlowModal(' +
+            id +
+            ')">&#9654; Show dialog</button>'
+
+          let html = ""
+
+          if (item.description) {
+            html +=
+              '<div class="detail-section"><h4>Description</h4><p class="desc-text">' +
+              esc(item.description) +
+              "</p></div>"
+          }
+
+          if (nodeCnt > 0) {
+            html +=
+              '<div class="detail-section"><h4>Nodes</h4><div style="display:flex;flex-direction:column;gap:8px">'
+            ;(item.nodes || []).forEach((node) => {
+              html += renderNodeHtml(node, item, "")
+            })
+            html += "</div></div>"
+          }
+
+          if (!html) {
+            html =
+              '<p style="color:var(--muted);font-size:0.82rem">No details available.</p>'
+          }
+
+          bodyEl.innerHTML = html
+        }
+
+        modal.classList.add("open")
+        _navUpdateBackButtons()
+      }
+
+      function closeDialogInfoModal() {
+        document.getElementById("dialogInfoModal").classList.remove("open")
       }
 
       // ── Global search ───────────────────────────────────────────────
@@ -2948,6 +4217,50 @@
         if (e.target === document.getElementById("exportModal"))
           closeExportModal()
       })
+      document.getElementById("flowModal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("flowModal")) {
+          closeFlowModal()
+          _navClear()
+        }
+      })
+      document
+        .getElementById("dialogInfoModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("dialogInfoModal")) {
+            closeDialogInfoModal()
+            _navClear()
+          }
+        })
+      document
+        .getElementById("articleInfoModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("articleInfoModal")) {
+            closeArticleInfoModal()
+            _navClear()
+          }
+        })
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          if (document.getElementById("flowModal").classList.contains("open")) {
+            closeFlowModal()
+            _navClear()
+          } else if (
+            document
+              .getElementById("dialogInfoModal")
+              .classList.contains("open")
+          ) {
+            closeDialogInfoModal()
+            _navClear()
+          } else if (
+            document
+              .getElementById("articleInfoModal")
+              .classList.contains("open")
+          ) {
+            closeArticleInfoModal()
+            _navClear()
+          }
+        }
+      })
       document.getElementById("copyExport").addEventListener("click", () => {
         const items = getActiveExportItems()
         const htmlStr = items
@@ -3086,6 +4399,7 @@
           dataSourceInfo = data.dataSource || null
           dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
           tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
+          articleMap = new Map((data.articles || []).map((a) => [a.Id, a]))
 
           const hasArticles = !!(data.files && data.files.articles)
           const hasDialogs = !!(data.files && data.files.dialogs)
@@ -3093,7 +4407,9 @@
           renderDataFolderState()
 
           if (reason === "select-folder") {
-            setDataFolderFeedback("Data folder selected. Scanning for supported sources…")
+            setDataFolderFeedback(
+              "Data folder selected. Scanning for supported sources…",
+            )
           }
 
           const summary = summarizeLoadedSources(data)
@@ -3123,7 +4439,8 @@
             document.getElementById("all-pagination").innerHTML = ""
             document.getElementById("a-pagination").innerHTML = ""
             document.getElementById("d-pagination").innerHTML = ""
-            document.getElementById("all-result-count").textContent = "0 results"
+            document.getElementById("all-result-count").textContent =
+              "0 results"
             document.getElementById("a-result-count").textContent = "0 articles"
             document.getElementById("d-result-count").textContent = "0 dialogs"
             document.getElementById("tab-all-count").textContent = "0"
@@ -3144,8 +4461,11 @@
           }
 
           allArticles = data.articles || []
-          const respCnt = allArticles.filter((a) => aKind(a) === "answer").length
-          document.getElementById("a-stat-total").textContent = allArticles.length
+          const respCnt = allArticles.filter(
+            (a) => aKind(a) === "answer",
+          ).length
+          document.getElementById("a-stat-total").textContent =
+            allArticles.length
           document.getElementById("a-stat-response").textContent = respCnt
           document.getElementById("a-stat-dialog").textContent =
             allArticles.length - respCnt
@@ -3162,53 +4482,32 @@
           )
           const recCnt = dialogs.reduce(
             (s, d) =>
-              s + (d.nodes || []).filter((n) => n.type === "Recognition").length,
+              s +
+              (d.nodes || []).filter((n) => n.type === "Recognition").length,
             0,
           )
           document.getElementById("d-stat-dialogs").textContent = dialogs.length
-          document.getElementById("d-stat-tdialogs").textContent = tDialogs.length
+          document.getElementById("d-stat-tdialogs").textContent =
+            tDialogs.length
           document.getElementById("d-stat-nodes").textContent = nodeCnt
           document.getElementById("d-stat-recognition").textContent = recCnt
 
           allCombinedItems = [
-            ...allArticles.map((a) => Object.assign({}, a, { _kind: "article" })),
+            ...allArticles.map((a) =>
+              Object.assign({}, a, { _kind: "article" }),
+            ),
             ...allDialogsCombined,
           ]
-          document.getElementById("all-stat-total").textContent = allCombinedItems.length
-          document.getElementById("all-stat-articles").textContent = allArticles.length
-          document.getElementById("all-stat-dialogs").textContent = dialogs.length
-          document.getElementById("all-stat-tdialogs").textContent = tDialogs.length
+          document.getElementById("all-stat-total").textContent =
+            allCombinedItems.length
+          document.getElementById("all-stat-articles").textContent =
+            allArticles.length
+          document.getElementById("all-stat-dialogs").textContent =
+            dialogs.length
+          document.getElementById("all-stat-tdialogs").textContent =
+            tDialogs.length
 
-          filteredAll = [...allCombinedItems]
-          filteredArticles = [...allArticles]
-          filteredDialogs = [...allDialogsCombined]
-          document.getElementById("all-result-count").textContent =
-            allCombinedItems.length + " results"
-          document.getElementById("a-result-count").textContent =
-            allArticles.length + " articles"
-          document.getElementById("d-result-count").textContent =
-            allDialogsCombined.length + " dialogs"
-          document.getElementById("tab-all-count").textContent = allCombinedItems.length
-          document.getElementById("tab-a-count").textContent = allArticles.length
-          document.getElementById("tab-d-count").textContent = allDialogsCombined.length
-          renderAllList()
-          renderArticleList()
-          renderDialogList()
-          document.getElementById("all-pagination").innerHTML = pagHtml(
-            allPage,
-            Math.ceil(allCombinedItems.length / PAGE_SIZE),
-            "goAllPage",
-          )
-          document.getElementById("a-pagination").innerHTML = pagHtml(
-            aPage,
-            Math.ceil(allArticles.length / PAGE_SIZE),
-            "goAPage",
-          )
-          document.getElementById("d-pagination").innerHTML = pagHtml(
-            dPage,
-            Math.ceil(allDialogsCombined.length / PAGE_SIZE),
-            "goDPage",
-          )
+          triggerSearch()
         } catch (err) {
           setDataFolderFeedback(
             "Error loading data: " + String(err),
@@ -3256,10 +4555,12 @@
       document
         .getElementById("selectDataFolderBtn")
         .addEventListener("click", handleSelectDataFolder)
-      document.getElementById("refreshDataBtn").addEventListener("click", () => {
-        setDataFolderFeedback("Refreshing data…")
-        loadData("manual-refresh")
-      })
+      document
+        .getElementById("refreshDataBtn")
+        .addEventListener("click", () => {
+          setDataFolderFeedback("Refreshing data…")
+          loadData("manual-refresh")
+        })
 
       ensureDataFolderWatcher()
       loadData()
@@ -3334,11 +4635,13 @@
           setDataFolderFeedback("Refreshing updated files…")
           await loadData("confirmed-refresh")
         })
-      document.getElementById("dataChangedModal").addEventListener("click", (e) => {
-        if (e.target === document.getElementById("dataChangedModal")) {
-          closeDataChangedModal()
-        }
-      })
+      document
+        .getElementById("dataChangedModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("dataChangedModal")) {
+            closeDataChangedModal()
+          }
+        })
 
       window.electronAPI
         .checkForUpdates()
