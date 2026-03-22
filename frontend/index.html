@@ -1489,6 +1489,8 @@
         font-weight: 700 !important;
         padding: 2px 10px;
         border-radius: 4px;
+        border: none;
+        cursor: pointer;
         font-size: 0.75rem;
         text-decoration: none !important;
       }
@@ -2073,12 +2075,9 @@
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" id="closeUpdateModal2">Later</button>
-          <a
-            id="updateModalDownloadBtn"
-            href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest"
-            class="btn-primary-download"
-            >&#x2B07;&nbsp;Download update</a
-          >
+          <button id="updateModalDownloadBtn" class="btn-primary-download">
+            &#x2B07;&nbsp;Download update
+          </button>
         </div>
       </div>
     </div>
@@ -4361,7 +4360,7 @@
           if (res.status === "available") {
             el.innerHTML = `&#x2B07; v${esc(
               res.version,
-            )} available \u2014 <a class="action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">Download</a>`
+            )} available \u2014 <button class="update-banner-download" style="vertical-align:middle" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')">Download</button>`
           } else if (res.status === "up-to-date") {
             el.innerHTML = `&#x2713; You\u2019re on the latest version.`
           } else if (res.status === "dev") {
@@ -4652,7 +4651,7 @@
           const banner = document.getElementById("updateBanner")
           document.getElementById("updateBannerText").innerHTML = `v${esc(
             res.version,
-          )} is available \u2014 <a class="update-banner-download action-link" href="https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest">&#x2B07; Download</a>`
+          )} is available \u2014 <button class="update-banner-download" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')">&#x2B07; Download</button>`
           banner.classList.add("visible")
           // Modal — skip if user already dismissed this version
           if (dismissedVersion !== res.version) {
