@@ -49,7 +49,41 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "v__VERSION__"
-          releaseBody: ""
+          releaseBody: |
+            ## Download
+
+            ### Windows (geen admin nodig, geen installatie) — aanbevolen
+            - Klik hieronder op **Assets** en download:  
+              `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`  
+            - Pak het zip-bestand uit en dubbelklik op `app.exe`.  
+            - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren.  
+
+            > ⚠️ Let op: de app is niet gecode‑signed. Windows Defender/SmartScreen kan een waarschuwing tonen.  
+            > Klik op **"Meer informatie" → "Toch uitvoeren"** om de app te starten.
+
+            ---
+
+            ### macOS
+            - Download het `.dmg`‑bestand.  
+            - Open het `.dmg`, sleep de app naar `Applications` en open hem via `Launchpad`/`Programma's`.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Zip portable Windows binary
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path "src-tauri/target/release" -Filter "app.exe" | Select-Object -First 1
+          $version = "${{ github.ref_name }}"
+          $zipName = "Conversational-AI-Dashboard-portable-${version}-x64.zip"
+          Compress-Archive -Path $exe.FullName -DestinationPath $zipName
+          echo "ZIP_PATH=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload portable zip to release
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_PATH }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
