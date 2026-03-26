@@ -55,7 +55,7 @@ jobs:
             ### Windows (geen admin nodig, geen installatie) — aanbevolen
             - Klik hieronder op **Assets** en download:  
               `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`  
-            - Pak het zip-bestand uit en dubbelklik op `CAIDashboard.exe`.  
+            - Pak het zip-bestand uit en dubbelklik op `app.exe`.  
             - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren.  
 
             > ⚠️ Let op: de app is niet gecode‑signed. Windows Defender/SmartScreen kan een waarschuwing tonen.  
@@ -77,7 +77,7 @@ jobs:
           $exe = Get-ChildItem -Path "src-tauri/target" -Recurse -Filter "CAIDashboard.exe" |
             Where-Object { $_.FullName -match "\\release\\" -and $_.FullName -notmatch "\\(deps|build|examples)\\" } |
             Select-Object -First 1
-          if (-not $exe) { Write-Error "app.exe not found"; exit 1 }
+          if (-not $exe) { Write-Error "CAIDashboard.exe not found"; exit 1 }
           Write-Host "Found binary: $($exe.FullName)"
           $version = "${{ github.ref_name }}"
           $zipName = "Conversational-AI-Dashboard-portable-${version}-x64.zip"
