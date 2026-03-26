@@ -74,7 +74,11 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path "src-tauri/target/release" -Filter "app.exe" | Select-Object -First 1
+          $exe = Get-ChildItem -Path "src-tauri/target" -Recurse -Filter "app.exe" |
+            Where-Object { $_.FullName -match "\\release\\" -and $_.FullName -notmatch "\\(deps|build|examples)\\" } |
+            Select-Object -First 1
+          if (-not $exe) { Write-Error "app.exe not found"; exit 1 }
+          Write-Host "Found binary: $($exe.FullName)"
           $version = "${{ github.ref_name }}"
           $zipName = "Conversational-AI-Dashboard-portable-${version}-x64.zip"
           Compress-Archive -Path $exe.FullName -DestinationPath $zipName
