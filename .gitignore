@@ -13,3 +13,7 @@ src-tauri/target/
 # Export data files — provided by the user, not committed
 *ArticlesExport*.json
 *DialogsExport*.json
+*EntitiesExport*.csv
+*InteractionLog*.json
+*InteractionLog*.csv
+*imitate*.png

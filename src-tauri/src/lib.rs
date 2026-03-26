@@ -15,12 +15,14 @@ const WATCH_EVENT_NAME: &str = "data-folder-updated";
 struct DataFiles {
     articles: Option<String>,
     dialogs: Option<String>,
+    entities: Option<String>,
 }
 
 #[derive(Serialize)]
 struct SourceFiles {
     articles: Option<String>,
     dialogs: Option<String>,
+    entities: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -48,6 +50,7 @@ struct AppData {
     dialogs: serde_json::Value,
     #[serde(rename = "tDialogs")]
     t_dialogs: serde_json::Value,
+    entities: serde_json::Value,
     files: DataFiles,
     #[serde(rename = "sourceFiles")]
     source_files: SourceFiles,
@@ -134,10 +137,14 @@ fn selected_folder_dirs(selected_folder: Option<&Path>) -> Vec<PathBuf> {
 }
 
 fn list_matching_files(dir: &Path, pattern: &str) -> Vec<PathBuf> {
+    list_matching_files_ext(dir, pattern, "json")
+}
+
+fn list_matching_files_ext(dir: &Path, pattern: &str, ext: &str) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
-
+    let suffix = format!(".{}", ext);
     entries
         .flatten()
         .filter_map(|entry| {
@@ -146,13 +153,24 @@ fn list_matching_files(dir: &Path, pattern: &str) -> Vec<PathBuf> {
                 return None;
             }
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.contains(pattern) && name.ends_with(".json") {
+            if name.contains(pattern) && name.ends_with(suffix.as_str()) {
                 Some(entry.path())
             } else {
                 None
             }
         })
         .collect()
+}
+
+fn find_entities_file(dirs: &[PathBuf]) -> Option<PathBuf> {
+    for dir in dirs {
+        let mut matches = list_matching_files_ext(dir, "EntitiesExport", "csv");
+        matches.sort_by(|left, right| file_sort_key(right).cmp(&file_sort_key(left)));
+        if let Some(path) = matches.into_iter().next() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn file_sort_key(path: &Path) -> (SystemTime, String) {
@@ -192,6 +210,58 @@ fn extract_articles(content: &str) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Array(vec![]))
 }
 
+fn extract_entities(content: &str) -> serde_json::Value {
+    // Pipe-delimited CSV with header:
+    // Name|Type|Description|Words|WordFixed|WordInBetween|WordOptionPosition|Expression
+    let mut lines = content.lines();
+    // Skip header row
+    let _ = lines.next();
+    // Use a Vec to preserve insertion order and a HashMap for O(1) lookup
+    let mut ordered: Vec<(String, String, Vec<serde_json::Value>)> = Vec::new();
+    let mut order_index: HashMap<String, usize> = HashMap::new();
+    for line in lines {
+        let cols: Vec<&str> = line.splitn(8, '|').collect();
+        if cols.len() < 4 {
+            continue;
+        }
+        let name = cols[0].trim().to_string();
+        let entity_type = cols[1].trim().to_string();
+        let words_text = cols[3].trim().to_string();
+        if name.is_empty() || words_text.is_empty() {
+            continue;
+        }
+        let word_fixed = cols.get(4).map(|s| s.trim()).unwrap_or("").to_string();
+        let word_in_between = cols.get(5).map(|s| s.trim()).unwrap_or("").to_string();
+        let word_option_position = cols.get(6).map(|s| s.trim()).unwrap_or("").to_string();
+        let expression = cols.get(7).map(|s| s.trim()).unwrap_or("").to_string();
+        let word_obj = serde_json::json!({
+            "text": words_text,
+            "wordFixed": word_fixed,
+            "wordInBetween": word_in_between,
+            "wordOptionPosition": word_option_position,
+            "expression": expression,
+        });
+        if let Some(&idx) = order_index.get(&name) {
+            ordered[idx].2.push(word_obj);
+        } else {
+            let idx = ordered.len();
+            order_index.insert(name.clone(), idx);
+            ordered.push((name, entity_type, vec![word_obj]));
+        }
+    }
+    let result: Vec<serde_json::Value> = ordered
+        .into_iter()
+        .map(|(name, entity_type, words)| {
+            serde_json::json!({
+                "name": name,
+                "type": entity_type,
+                "words": words,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(result)
+}
+
 fn extract_dialogs(content: &str) -> (serde_json::Value, serde_json::Value) {
     let json = serde_json::from_str::<serde_json::Value>(content)
         .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
@@ -222,10 +292,15 @@ fn matches_any_source(path: &Path) -> bool {
     let Some(name) = path.file_name().map(|value| value.to_string_lossy()) else {
         return false;
     };
-    name.ends_with(".json")
+    if name.ends_with(".json")
         && source_definitions()
             .iter()
             .any(|definition| name.contains(definition.pattern))
+    {
+        return true;
+    }
+    // Also watch for the optional EntitiesExport CSV
+    name.ends_with(".csv") && name.contains("EntitiesExport")
 }
 
 fn should_emit_for_event(event: &notify::Event) -> bool {
@@ -316,13 +391,16 @@ fn get_data(
     let mut articles = serde_json::Value::Array(vec![]);
     let mut dialogs = serde_json::Value::Array(vec![]);
     let mut t_dialogs = serde_json::Value::Array(vec![]);
+    let mut entities = serde_json::Value::Array(vec![]);
     let mut files = DataFiles {
         articles: None,
         dialogs: None,
+        entities: None,
     };
     let mut source_files = SourceFiles {
         articles: None,
         dialogs: None,
+        entities: None,
     };
 
     if let Some(path) = source_paths.get("articles") {
@@ -342,6 +420,15 @@ fn get_data(
             let filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
             files.dialogs = filename.clone();
             source_files.dialogs = filename;
+        }
+    }
+
+    if let Some(path) = find_entities_file(&dirs) {
+        if let Ok(content) = fs::read_to_string(&path) {
+            entities = extract_entities(&content);
+            let filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            files.entities = filename.clone();
+            source_files.entities = filename;
         }
     }
 
@@ -388,6 +475,7 @@ fn get_data(
         articles,
         dialogs,
         t_dialogs,
+        entities,
         files,
         source_files,
         data_source: DataSourceInfo {

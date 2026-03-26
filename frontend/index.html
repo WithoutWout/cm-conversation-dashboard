@@ -318,6 +318,11 @@
         flex-shrink: 0;
         gap: 2px;
       }
+      .tab[data-tab="entities"] {
+        margin-left: auto;
+        border-left: 1px solid var(--border);
+        padding-left: 18px;
+      }
       .tab {
         padding: 9px 15px;
         border: none;
@@ -1581,6 +1586,88 @@
       .btn-primary-download:hover {
         opacity: 0.85;
       }
+
+      /* ── Entity cards ─────────────────────────────────────────── */
+      .card.type-entity {
+        border-left-color: var(--orange);
+      }
+      .b-entity {
+        background: rgba(251, 146, 60, 0.1);
+        color: var(--orange);
+        border: 1px solid rgba(251, 146, 60, 0.2);
+      }
+      .card-id.id-orange {
+        color: var(--orange);
+        background: rgba(251, 146, 60, 0.09);
+        border-color: rgba(251, 146, 60, 0.22);
+      }
+      .entity-word-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .entity-word-chip {
+        font-size: 0.72rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 8px;
+        color: var(--text);
+      }
+      .entity-xref {
+        font-size: 0.75rem;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .entity-xref .jump-link {
+        color: var(--blue);
+        cursor: pointer;
+        text-decoration: underline;
+        text-decoration-color: transparent;
+        text-decoration-thickness: 1px;
+      }
+      .entity-xref .jump-link:hover {
+        text-decoration-color: var(--blue);
+      }
+      .entity-xref .jump-link.tlink {
+        color: var(--teal);
+      }
+      .entity-xref .jump-link.tlink:hover {
+        text-decoration-color: var(--teal);
+      }
+      .chip.is-entity-link {
+        cursor: pointer;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+      }
+      .chip.is-entity-link:hover {
+        border-color: rgba(251, 146, 60, 0.5);
+        color: var(--orange);
+        background: rgba(251, 146, 60, 0.07);
+      }
+      .flow-node-entity-chip.is-clickable {
+        cursor: pointer;
+        transition: border-color 0.12s, color 0.12s, background 0.12s;
+      }
+      .flow-node-entity-chip.is-clickable:hover {
+        border-color: rgba(251, 146, 60, 0.5);
+        color: var(--orange);
+        background: rgba(251, 146, 60, 0.1);
+      }
+      @keyframes flash-highlight-kf {
+        0%,
+        100% {
+          box-shadow: none;
+        }
+        20% {
+          box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.5);
+        }
+        60% {
+          box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.3);
+        }
+      }
+      .flash-highlight {
+        animation: flash-highlight-kf 1.2s ease;
+      }
     </style>
     <script src="vendor/vis-network.min.js"></script>
   </head>
@@ -1819,6 +1906,30 @@
           ><span class="ts-lbl"> recog</span>
         </div>
       </button>
+      <button class="tab" data-tab="entities">
+        <div class="tab-top">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+            />
+          </svg>
+          Entities <span class="tab-badge" id="tab-e-count">--</span>
+        </div>
+        <div class="tab-sub">
+          <span class="ts-val c-orange" id="e-stat-entities">--</span
+          ><span class="ts-lbl"> ent</span>
+          <span class="ts-sep">·</span>
+          <span class="ts-val c-muted" id="e-stat-words">--</span
+          ><span class="ts-lbl"> words</span>
+        </div>
+      </button>
     </div>
 
     <!-- ALL RESULTS PANEL -->
@@ -1909,6 +2020,74 @@
         </div>
       </div>
       <div class="pagination" id="d-pagination"></div>
+    </div>
+
+    <!-- ENTITIES PANEL -->
+    <div id="panel-entities" class="panel">
+      <div class="toolbar">
+        <div class="filter-pills">
+          <button class="pill active" data-filter="all">All</button>
+          <button class="pill" data-filter="articles">Used in articles</button>
+          <button class="pill" data-filter="dialogs">Used in dialogs</button>
+        </div>
+        <div class="sort-wrap">
+          <span class="sort-label">Sort:</span>
+          <select class="sort-select" id="e-sort">
+            <option value="name-asc">Name A&#x2192;Z</option>
+            <option value="name-desc">Name Z&#x2192;A</option>
+            <option value="words-desc">Words &#8595;</option>
+            <option value="words-asc">Words &#8593;</option>
+          </select>
+          <span class="result-count" id="e-result-count"></span>
+        </div>
+      </div>
+      <div class="list-wrap" id="entityList">
+        <div class="loading">
+          <div class="spinner"></div>
+          &nbsp;Loading…
+        </div>
+      </div>
+      <div class="pagination" id="e-pagination"></div>
+    </div>
+
+    <!-- ENTITY INFO MODAL -->
+    <div class="modal-overlay" id="entityInfoModal">
+      <div class="modal-box dialog-info-modal-box">
+        <div class="modal-header">
+          <button
+            id="entity-back-btn"
+            class="back-btn"
+            onclick="navBack()"
+            title="Back"
+          >
+            &#8592; Back
+          </button>
+          <div style="display: flex; flex-direction: column; gap: 3px">
+            <h3 id="entity-info-title">Entity</h3>
+            <span
+              id="entity-info-subtitle"
+              style="font-size: 0.72rem; color: var(--muted)"
+            ></span>
+          </div>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              margin-left: auto;
+            "
+          >
+            <div id="entity-info-actions" style="display: flex; gap: 6px"></div>
+            <button
+              class="close-btn"
+              onclick="closeEntityInfoModal(); _navClear()"
+            >
+              &#x2715;
+            </button>
+          </div>
+        </div>
+        <div class="dialog-info-modal-body" id="entity-info-body"></div>
+      </div>
     </div>
 
     <!-- SETTINGS MODAL -->
@@ -2388,6 +2567,14 @@
       let filteredAll = []
       let filteredArticles = []
       let filteredDialogs = []
+      let allEntities = []
+      let filteredEntities = []
+      let entityMap = new Map() // UPPERCASE_NAME → entity object
+      let entityWordMap = new Map() // lowercase word text → entity object
+      let matchingEntityNames = new Set() // entity names matched by current search query
+      let eFilter = "all"
+      let eSort = "name-asc"
+      let ePage = 1
 
       let dialogMap = new Map()
       let tDialogMap = new Map()
@@ -2470,6 +2657,8 @@
         const path =
           type === "article"
             ? cmBaseUrl + "/articles/" + id
+            : type === "entity"
+            ? cmBaseUrl + "/entities/"
             : cmBaseUrl + "/dialogs/" + id
         return (
           '<a class="action-link" href="' +
@@ -2484,6 +2673,8 @@
           const path =
             type === "article"
               ? cmBaseUrl + "/articles/" + id
+              : type === "entity"
+              ? cmBaseUrl + "/entities/"
               : cmBaseUrl + "/dialogs/" + id
           return (
             '<a class="btn-open-url" href="' +
@@ -2796,12 +2987,25 @@
               refs.join(" ") +
               "</div></div>"
         }
-        const makeChip = (qs) =>
-          '<span class="chip' +
-          (qs.IsFaq ? " is-faq" : "") +
-          '">' +
-          hl(qs.Text, q) +
-          "</span>"
+        const makeChip = (qs) => {
+          const linkedEntity = getEntityForChip(qs.Text)
+          return (
+            '<span class="chip' +
+            (qs.IsFaq ? " is-faq" : "") +
+            (linkedEntity ? " is-entity-link" : "") +
+            '"' +
+            (linkedEntity
+              ? " onclick=\"openEntityInfoModal('" +
+                esc(linkedEntity.name) +
+                '\')" title="Entity: ' +
+                esc(linkedEntity.name) +
+                '"'
+              : "") +
+            ">" +
+            hl(qs.Text, q) +
+            "</span>"
+          )
+        }
         const visibleChips = art.Questions.slice(0, ENTITY_PREVIEW)
           .map(makeChip)
           .join("")
@@ -3232,8 +3436,17 @@
               '<span class="flow-node-info-label">Entities</span>' +
               '<span class="flow-node-info-chips">'
             shown.forEach(function (e) {
-              html +=
-                '<span class="flow-node-entity-chip">' + esc(e) + "</span>"
+              const isClickable = entityMap.has(e.toUpperCase())
+              html += isClickable
+                ? '<span class="flow-node-entity-chip is-clickable" onclick="jumpToEntity(\'' +
+                  esc(e) +
+                  "')" +
+                  '" title="Go to entity ' +
+                  esc(e) +
+                  '">' +
+                  esc(e) +
+                  "</span>"
+                : '<span class="flow-node-entity-chip">' + esc(e) + "</span>"
             })
             if (extra > 0) {
               html +=
@@ -3605,6 +3818,15 @@
         if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text)))
           return true
         if (testRe(re, strip(aResponse(a) || ""))) return true
+        // Entity-word enrichment: match if any Question.Text maps to an entity
+        // whose word list contains the query
+        if (
+          matchingEntityNames.size > 0 &&
+          a.Questions.some((qs) =>
+            matchingEntityNames.has(qs.Text.toUpperCase()),
+          )
+        )
+          return true
         return false
       }
       function matchDialog(item, q) {
@@ -3624,6 +3846,25 @@
               return true
             return false
           })
+        )
+          return true
+        // Entity-word enrichment: match if any recognition node entity name maps
+        // to an entity whose word list contains the query
+        if (
+          matchingEntityNames.size > 0 &&
+          (item.nodes || []).some((n) =>
+            (n.links || []).some((link) => {
+              const condData = (link.condition && link.condition.data) || {}
+              return (
+                !condData.isFallback &&
+                (condData.questions || []).some((qo) =>
+                  qo.text
+                    ? matchingEntityNames.has(qo.text.toUpperCase())
+                    : false,
+                )
+              )
+            }),
+          )
         )
           return true
         return false
@@ -3813,6 +4054,270 @@
         document.getElementById("dialogList").scrollTop = 0
       }
 
+      // ── Entity chip resolution ────────────────────────────────────────
+      function getEntityForChip(text) {
+        // 1. Exact entity name match
+        const byName = entityMap.get(text.toUpperCase())
+        if (byName) return byName
+        // 2. Exact entity word match
+        const byWord = entityWordMap.get(text.toLowerCase())
+        if (byWord) return byWord
+        // 3. Token match: split phrase into words, check each (longest first)
+        if (entityWordMap.size === 0) return null
+        const tokens = text
+          .toLowerCase()
+          .split(/[\s\-_,;.!?]+/)
+          .filter((t) => t.length >= 3)
+          .sort((a, b) => b.length - a.length)
+        for (const token of tokens) {
+          const e = entityWordMap.get(token)
+          if (e) return e
+        }
+        return null
+      }
+
+      // ── Apply & render: Entities ────────────────────────────────────────
+      function matchEntity(entity, q) {
+        if (!q) return true
+        const re = buildSearchRegex(q)
+        if (!re) return false
+        if (testRe(re, entity.name)) return true
+        if (entity.words.some((w) => testRe(re, w.text))) return true
+        return false
+      }
+
+      function entityArticleXrefs(entity) {
+        const nameUpper = entity.name.toUpperCase()
+        return allArticles.filter((a) =>
+          a.Questions.some((qs) => qs.Text.toUpperCase() === nameUpper),
+        )
+      }
+
+      function entityDialogXrefs(entity) {
+        const nameUpper = entity.name.toUpperCase()
+        return allDialogsCombined.filter((item) =>
+          (item.nodes || []).some((n) =>
+            (n.links || []).some((link) => {
+              const condData = (link.condition && link.condition.data) || {}
+              return (
+                !condData.isFallback &&
+                (condData.questions || []).some(
+                  (qo) => qo.text && qo.text.toUpperCase() === nameUpper,
+                )
+              )
+            }),
+          ),
+        )
+      }
+
+      function renderEntityCard(entity, q) {
+        const wordCnt = entity.words.length
+        const artRefs = entityArticleXrefs(entity)
+        const dlgRefs = entityDialogXrefs(entity)
+
+        // Word chips (first 15 visible, rest in overflow)
+        const WORD_PREVIEW = 15
+        const visibleWords = entity.words.slice(0, WORD_PREVIEW)
+        const hiddenWords = entity.words.slice(WORD_PREVIEW)
+        const makeWordChip = (w) =>
+          '<span class="entity-word-chip">' + hl(w.text, q) + "</span>"
+        const overflowId = "ewof-" + esc(entity.name.replace(/\W/g, "_"))
+        const wordHtml =
+          hiddenWords.length > 0
+            ? visibleWords.map(makeWordChip).join("") +
+              '<div class="chip-overflow" id="' +
+              overflowId +
+              '">' +
+              hiddenWords.map(makeWordChip).join("") +
+              "</div>" +
+              '<button class="show-more-btn" onclick="toggleEntityOverflow(\'' +
+              overflowId +
+              "',this," +
+              hiddenWords.length +
+              ')">' +
+              "+" +
+              hiddenWords.length +
+              " more</button>"
+            : visibleWords.map(makeWordChip).join("")
+
+        // Cross-reference section
+        let xrefHtml = ""
+        if (artRefs.length || dlgRefs.length) {
+          xrefHtml =
+            '<div class="detail-section"><h4>Used by</h4><div class="entity-xref">'
+          if (artRefs.length) {
+            xrefHtml +=
+              "<strong>Articles:</strong> " +
+              artRefs
+                .slice(0, 20)
+                .map(
+                  (a) =>
+                    '<span class="jump-link" onclick="goToArticle(' +
+                    a.Id +
+                    ')">' +
+                    esc(aFaqQ(a) || "Article #" + a.Id) +
+                    " (#" +
+                    a.Id +
+                    ")</span>",
+                )
+                .join(", ") +
+              (artRefs.length > 20
+                ? ' <span class="meta-dim">+' +
+                  (artRefs.length - 20) +
+                  " more</span>"
+                : "") +
+              "<br>"
+          }
+          if (dlgRefs.length) {
+            xrefHtml +=
+              "<strong>Dialogs:</strong> " +
+              dlgRefs
+                .slice(0, 20)
+                .map(
+                  (d) =>
+                    '<span class="jump-link' +
+                    (d._kind === "tdialog" ? " tlink" : "") +
+                    '" onclick="jumpToDialog(' +
+                    d.id +
+                    "," +
+                    (d._kind === "tdialog" ? "true" : "false") +
+                    ')">' +
+                    esc(d.name || "#" + d.id) +
+                    ' <span class="meta-dim">(#' +
+                    d.id +
+                    ")</span></span>",
+                )
+                .join(", ") +
+              (dlgRefs.length > 20
+                ? ' <span class="meta-dim">+' +
+                  (dlgRefs.length - 20) +
+                  " more</span>"
+                : "")
+          }
+          xrefHtml += "</div></div>"
+        }
+
+        return (
+          '<div class="card type-entity">' +
+          '<div class="card-header" onclick="toggleCard(this)">' +
+          '<span class="card-id id-orange">' +
+          hl(entity.name, q) +
+          "</span>" +
+          '<div class="card-main">' +
+          '<div class="card-meta">' +
+          '<span class="badge b-entity">' +
+          esc(entity.type || "Standard") +
+          "</span>" +
+          '<span class="meta-dim">' +
+          wordCnt +
+          " word" +
+          (wordCnt !== 1 ? "s" : "") +
+          "</span>" +
+          (artRefs.length
+            ? '<span class="meta-dim">' +
+              artRefs.length +
+              " article" +
+              (artRefs.length !== 1 ? "s" : "") +
+              "</span>"
+            : "") +
+          (dlgRefs.length
+            ? '<span class="meta-dim">' +
+              dlgRefs.length +
+              " dialog" +
+              (dlgRefs.length !== 1 ? "s" : "") +
+              "</span>"
+            : "") +
+          "</div>" +
+          "</div>" +
+          "</div>" +
+          '<div class="card-detail">' +
+          '<div class="detail-section"><h4>Words (' +
+          wordCnt +
+          ")</h4>" +
+          '<div class="entity-word-grid">' +
+          wordHtml +
+          "</div></div>" +
+          xrefHtml +
+          "</div>" +
+          "</div>"
+        )
+      }
+
+      function applyEntityFilters() {
+        const q = gQuery
+        let result = allEntities.filter((entity) => {
+          if (eFilter === "articles" && entityArticleXrefs(entity).length === 0)
+            return false
+          if (eFilter === "dialogs" && entityDialogXrefs(entity).length === 0)
+            return false
+          return matchEntity(entity, q)
+        })
+        // Sort
+        if (eSort === "name-asc")
+          result = result.slice().sort((a, b) => a.name.localeCompare(b.name))
+        else if (eSort === "name-desc")
+          result = result.slice().sort((a, b) => b.name.localeCompare(a.name))
+        else if (eSort === "words-desc")
+          result = result
+            .slice()
+            .sort((a, b) => b.words.length - a.words.length)
+        else if (eSort === "words-asc")
+          result = result
+            .slice()
+            .sort((a, b) => a.words.length - b.words.length)
+        filteredEntities = result
+        ePage = 1
+        renderEntityList()
+        const tot = allEntities.length,
+          mat = filteredEntities.length
+        document.getElementById("e-result-count").textContent =
+          mat + (mat !== tot ? " of " + tot : "") + " entities"
+        document.getElementById("tab-e-count").textContent = mat
+        const totalWords = allEntities.reduce((s, e) => s + e.words.length, 0)
+        document.getElementById("e-stat-entities").textContent =
+          allEntities.length
+        document.getElementById("e-stat-words").textContent = totalWords
+        document.getElementById("e-pagination").innerHTML = pagHtml(
+          ePage,
+          Math.ceil(mat / PAGE_SIZE),
+          "goEPage",
+        )
+      }
+
+      function renderEntityList() {
+        const el = document.getElementById("entityList")
+        if (!allEntities.length) {
+          el.innerHTML =
+            '<div class="empty-state"><p>No EntitiesExport CSV file found in the selected folder.</p></div>'
+          return
+        }
+        const slice = filteredEntities.slice(
+          (ePage - 1) * PAGE_SIZE,
+          ePage * PAGE_SIZE,
+        )
+        if (!slice.length) {
+          el.innerHTML =
+            '<div class="empty-state"><p>No entities found.</p></div>'
+          return
+        }
+        el.innerHTML = slice
+          .map((entity) => renderEntityCard(entity, gQuery))
+          .join("")
+      }
+
+      function goEPage(p) {
+        const tot = Math.ceil(filteredEntities.length / PAGE_SIZE)
+        if (p < 1 || p > tot) return
+        ePage = p
+        renderEntityList()
+        document.getElementById("e-pagination").innerHTML = pagHtml(
+          p,
+          tot,
+          "goEPage",
+        )
+        document.getElementById("entityList").scrollTop = 0
+      }
+
       // ── Cross-navigation ────────────────────────────────────────────
       function _navPushCurrent() {
         if (_navBackMode) return
@@ -3837,6 +4342,13 @@
         _navUpdateBackButtons()
       }
 
+      function _closeAllModals() {
+        document.getElementById("articleInfoModal").classList.remove("open")
+        document.getElementById("dialogInfoModal").classList.remove("open")
+        document.getElementById("flowModal").classList.remove("open")
+        document.getElementById("entityInfoModal").classList.remove("open")
+      }
+
       function navBack() {
         const prev = navHistory.pop()
         if (!prev) {
@@ -3858,6 +4370,13 @@
           ) {
             closeArticleInfoModal()
             _navClear()
+          } else if (
+            document
+              .getElementById("entityInfoModal")
+              .classList.contains("open")
+          ) {
+            closeEntityInfoModal()
+            _navClear()
           }
           return
         }
@@ -3865,6 +4384,7 @@
         document.getElementById("articleInfoModal").classList.remove("open")
         document.getElementById("dialogInfoModal").classList.remove("open")
         document.getElementById("flowModal").classList.remove("open")
+        document.getElementById("entityInfoModal").classList.remove("open")
         if (flowNetwork) {
           flowNetwork.destroy()
           flowNetwork = null
@@ -3874,6 +4394,7 @@
           openDialogInfoModal(prev.id, prev.isTDialog)
         else if (prev.type === "flow")
           openFlowModal(prev.id, prev.selectedNodeId, prev.viewport)
+        else if (prev.type === "entity") openEntityInfoModal(prev.name)
         _navBackMode = false
         _navUpdateBackButtons()
       }
@@ -3886,11 +4407,51 @@
         openArticleInfoModal(id)
       }
 
+      function jumpToEntity(name) {
+        // Switch to Entities tab
+        document
+          .querySelectorAll(".tab")
+          .forEach((t) => t.classList.remove("active"))
+        document
+          .querySelectorAll(".panel")
+          .forEach((p) => p.classList.remove("active"))
+        const eTab = document.querySelector('.tab[data-tab="entities"]')
+        const ePanel = document.getElementById("panel-entities")
+        if (eTab) eTab.classList.add("active")
+        if (ePanel) ePanel.classList.add("active")
+        // Set search to the entity name
+        gQuery = name
+        const searchInput = document.getElementById("g-search")
+        if (searchInput) searchInput.value = name
+        const clearBtn = document.getElementById("search-clear")
+        if (clearBtn) clearBtn.style.display = name ? "" : "none"
+        triggerSearch()
+        // Scroll to and flash the matching entity card
+        requestAnimationFrame(() => {
+          const entityList = document.getElementById("entityList")
+          if (!entityList) return
+          const cards = entityList.querySelectorAll(".card.type-entity")
+          for (const card of cards) {
+            const idEl = card.querySelector(".card-id")
+            if (
+              idEl &&
+              idEl.textContent.trim().toUpperCase() === name.toUpperCase()
+            ) {
+              card.scrollIntoView({ behavior: "smooth", block: "center" })
+              card.classList.add("flash-highlight")
+              setTimeout(() => card.classList.remove("flash-highlight"), 1200)
+              break
+            }
+          }
+        })
+      }
+
       function openArticleInfoModal(id) {
         const art = articleMap.get(id)
         if (!art) return
 
         _navPushCurrent()
+        _closeAllModals()
         _navCurrentModal = { type: "article", id: id }
 
         const kind = aKind(art)
@@ -3911,12 +4472,25 @@
         document.getElementById("article-info-actions").innerHTML =
           cmOpenButton("article", id)
 
-        const makeChip = (qs) =>
-          '<span class="chip' +
-          (qs.IsFaq ? " is-faq" : "") +
-          '">' +
-          esc(qs.Text) +
-          "</span>"
+        const makeChip = (qs) => {
+          const linkedEntity = getEntityForChip(qs.Text)
+          return (
+            '<span class="chip' +
+            (qs.IsFaq ? " is-faq" : "") +
+            (linkedEntity ? " is-entity-link" : "") +
+            '"' +
+            (linkedEntity
+              ? " onclick=\"openEntityInfoModal('" +
+                esc(linkedEntity.name) +
+                '\')" title="Entity: ' +
+                esc(linkedEntity.name) +
+                '"'
+              : "") +
+            ">" +
+            esc(qs.Text) +
+            "</span>"
+          )
+        }
 
         let html =
           '<div class="detail-section"><h4>Entities (' +
@@ -3982,6 +4556,93 @@
         document.getElementById("articleInfoModal").classList.remove("open")
       }
 
+      function openEntityInfoModal(name) {
+        const entity = entityMap.get(name.toUpperCase())
+        if (!entity) return
+
+        _navPushCurrent()
+        _closeAllModals()
+        _navCurrentModal = { type: "entity", name: entity.name }
+
+        document.getElementById("entity-info-title").textContent = entity.name
+        document.getElementById("entity-info-subtitle").textContent =
+          (entity.type || "Standard") +
+          " entity \u00b7 " +
+          entity.words.length +
+          " word" +
+          (entity.words.length !== 1 ? "s" : "")
+        document.getElementById("entity-info-actions").innerHTML = cmOpenButton(
+          "entity",
+          null,
+        )
+
+        const artRefs = entityArticleXrefs(entity)
+        const dlgRefs = entityDialogXrefs(entity)
+
+        let html =
+          '<div class="detail-section"><h4>Words (' +
+          entity.words.length +
+          ')</h4><div class="entity-word-grid">'
+        entity.words.forEach((w) => {
+          html += '<span class="entity-word-chip">' + esc(w.text) + "</span>"
+        })
+        html += "</div></div>"
+
+        if (artRefs.length) {
+          html +=
+            '<div class="detail-section"><h4>Used in Articles (' +
+            artRefs.length +
+            ')</h4><div style="display:flex;flex-direction:column;gap:6px">'
+          artRefs.forEach((a) => {
+            const q = aFaqQ(a)
+            html +=
+              '<span class="jump-link" onclick="openArticleInfoModal(' +
+              a.Id +
+              ')">' +
+              esc(q || "Article #" + a.Id) +
+              ' <span class="meta-dim">(#' +
+              a.Id +
+              ")</span></span>"
+          })
+          html += "</div></div>"
+        }
+
+        if (dlgRefs.length) {
+          html +=
+            '<div class="detail-section"><h4>Used in Dialogs (' +
+            dlgRefs.length +
+            ')</h4><div style="display:flex;flex-direction:column;gap:6px">'
+          dlgRefs.forEach((d) => {
+            html +=
+              '<span class="jump-link' +
+              (d._kind === "tdialog" ? " tlink" : "") +
+              '" onclick="openDialogInfoModal(' +
+              d.id +
+              "," +
+              (d._kind === "tdialog" ? "true" : "false") +
+              ')">' +
+              esc(d.name || "#" + d.id) +
+              ' <span class="meta-dim">(#' +
+              d.id +
+              ")</span></span>"
+          })
+          html += "</div></div>"
+        }
+
+        if (!artRefs.length && !dlgRefs.length) {
+          html +=
+            '<p style="color:var(--muted);font-size:0.82rem">This entity is not referenced by any article or dialog.</p>'
+        }
+
+        document.getElementById("entity-info-body").innerHTML = html
+        document.getElementById("entityInfoModal").classList.add("open")
+        _navUpdateBackButtons()
+      }
+
+      function closeEntityInfoModal() {
+        document.getElementById("entityInfoModal").classList.remove("open")
+      }
+
       function openDialogInfoModal(id, isTDialog) {
         const item = isTDialog
           ? tDialogMap.get(id)
@@ -3989,6 +4650,7 @@
         if (!item) return
 
         _navPushCurrent()
+        _closeAllModals()
         _navCurrentModal = { type: "dialog", id: id, isTDialog: !!isTDialog }
 
         const modal = document.getElementById("dialogInfoModal")
@@ -4069,9 +4731,23 @@
       }
       function triggerSearch() {
         updateRegexIndicator()
+        // Pre-compute entity names whose word texts match the current query.
+        // Used by matchArticle, matchDialog, and applyEntityFilters.
+        matchingEntityNames = new Set()
+        if (gQuery && allEntities.length) {
+          const re = buildSearchRegex(gQuery)
+          if (re) {
+            allEntities.forEach((entity) => {
+              if (entity.words.some((w) => testRe(re, w.text))) {
+                matchingEntityNames.add(entity.name.toUpperCase())
+              }
+            })
+          }
+        }
         applyAllFilters()
         applyArticleFilters()
         applyDialogFilters()
+        applyEntityFilters()
       }
       let searchTimer
       document.getElementById("g-search").addEventListener("input", (e) => {
@@ -4160,6 +4836,16 @@
           applyDialogFilters()
         })
       })
+      document.querySelectorAll("#panel-entities .pill").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("#panel-entities .pill")
+            .forEach((p) => p.classList.remove("active"))
+          btn.classList.add("active")
+          eFilter = btn.dataset.filter
+          applyEntityFilters()
+        })
+      })
 
       // ── Sort selects ────────────────────────────────────────────────
       document.getElementById("all-sort").addEventListener("change", (e) => {
@@ -4173,6 +4859,10 @@
       document.getElementById("d-sort").addEventListener("change", (e) => {
         dSort = e.target.value
         applyDialogFilters()
+      })
+      document.getElementById("e-sort").addEventListener("change", (e) => {
+        eSort = e.target.value
+        applyEntityFilters()
       })
 
       // ── Export IDs modal ─────────────────────────────────────────────
@@ -4449,6 +5139,7 @@
         renderAllList()
         renderArticleList()
         renderDialogList()
+        renderEntityList()
       })
 
       document
@@ -4479,9 +5170,9 @@
 
       // Open CM.com links in browser or popup based on setting
       document.addEventListener("click", (e) => {
-        const a = e.target.closest("a.action-link")
+        const a = e.target.closest("a.action-link, a.btn-open-url")
         if (!a || !a.href) return
-        if (openMode === "browser") {
+        if (openMode === "browser" || a.classList.contains("btn-open-url")) {
           e.preventDefault()
           window.electronAPI.openUrl(a.href)
         }
@@ -4561,6 +5252,13 @@
             document.getElementById("d-stat-tdialogs").textContent = "0"
             document.getElementById("d-stat-nodes").textContent = "0"
             document.getElementById("d-stat-recognition").textContent = "0"
+            document.getElementById("tab-e-count").textContent = "0"
+            document.getElementById("e-stat-entities").textContent = "0"
+            document.getElementById("e-stat-words").textContent = "0"
+            document.getElementById("e-result-count").textContent = "0 entities"
+            document.getElementById("entityList").innerHTML =
+              '<div class="empty-state"><p>No EntitiesExport CSV file found in the selected folder.</p></div>'
+            document.getElementById("e-pagination").innerHTML = ""
             return
           }
 
@@ -4610,6 +5308,16 @@
             dialogs.length
           document.getElementById("all-stat-tdialogs").textContent =
             tDialogs.length
+
+          allEntities = data.entities || []
+          entityMap = new Map(allEntities.map((e) => [e.name.toUpperCase(), e]))
+          entityWordMap = new Map()
+          allEntities.forEach((e) => {
+            e.words.forEach((w) => {
+              const key = w.text.toLowerCase()
+              if (!entityWordMap.has(key)) entityWordMap.set(key, e)
+            })
+          })
 
           triggerSearch()
         } catch (err) {
