@@ -446,8 +446,41 @@
       .result-count {
         font-size: 0.71rem;
         color: var(--muted);
-        margin-left: auto;
         white-space: nowrap;
+      }
+      .sort-wrap {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .sort-label {
+        font-size: 0.7rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .sort-select {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        font-size: 0.72rem;
+        padding: 3px 24px 3px 7px;
+        cursor: pointer;
+        outline: none;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2364738b' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 7px center;
+        transition: border-color 0.15s;
+      }
+      .sort-select:hover {
+        border-color: var(--accent);
+      }
+      .sort-select:focus {
+        border-color: var(--accent);
       }
 
       /* === CARDS === */
@@ -1799,7 +1832,16 @@
             Transactional Dialogs
           </button>
         </div>
-        <span class="result-count" id="all-result-count"></span>
+        <div class="sort-wrap">
+          <span class="sort-label">Sort:</span>
+          <select class="sort-select" id="all-sort">
+            <option value="id-asc">ID &#8593;</option>
+            <option value="id-desc">ID &#8595;</option>
+            <option value="name-asc">Name A&#x2192;Z</option>
+            <option value="name-desc">Name Z&#x2192;A</option>
+          </select>
+          <span class="result-count" id="all-result-count"></span>
+        </div>
       </div>
       <div class="list-wrap" id="allList">
         <div class="loading">
@@ -1818,7 +1860,16 @@
           <button class="pill" data-filter="answer">Has response</button>
           <button class="pill" data-filter="dialog">Dialog link</button>
         </div>
-        <span class="result-count" id="a-result-count"></span>
+        <div class="sort-wrap">
+          <span class="sort-label">Sort:</span>
+          <select class="sort-select" id="a-sort">
+            <option value="id-asc">ID &#8593;</option>
+            <option value="id-desc">ID &#8595;</option>
+            <option value="name-asc">Question A&#x2192;Z</option>
+            <option value="name-desc">Question Z&#x2192;A</option>
+          </select>
+          <span class="result-count" id="a-result-count"></span>
+        </div>
       </div>
       <div class="list-wrap" id="articleList">
         <div class="loading">
@@ -1840,7 +1891,16 @@
           </button>
           <button class="pill" data-filter="recognition">Has responses</button>
         </div>
-        <span class="result-count" id="d-result-count"></span>
+        <div class="sort-wrap">
+          <span class="sort-label">Sort:</span>
+          <select class="sort-select" id="d-sort">
+            <option value="id-asc">ID &#8593;</option>
+            <option value="id-desc">ID &#8595;</option>
+            <option value="name-asc">Name A&#x2192;Z</option>
+            <option value="name-desc">Name Z&#x2192;A</option>
+          </select>
+          <span class="result-count" id="d-result-count"></span>
+        </div>
       </div>
       <div class="list-wrap" id="dialogList">
         <div class="loading">
@@ -2315,6 +2375,9 @@
       let allFilterPill = "all"
       let aFilter = "all"
       let dFilter = "all"
+      let allSort = "id-asc"
+      let aSort = "id-asc"
+      let dSort = "id-asc"
       let allPage = 1,
         aPage = 1,
         dPage = 1
@@ -2385,6 +2448,16 @@
           .replace(/%\{[^}]*\}/g, "")
           .replace(/\s+/g, " ")
           .trim()
+      }
+      function sortBy(arr, sort, idFn, nameFn) {
+        const s = arr.slice()
+        if (sort === "id-asc") s.sort((a, b) => idFn(a) - idFn(b))
+        else if (sort === "id-desc") s.sort((a, b) => idFn(b) - idFn(a))
+        else if (sort === "name-asc")
+          s.sort((a, b) => nameFn(a).localeCompare(nameFn(b)))
+        else if (sort === "name-desc")
+          s.sort((a, b) => nameFn(b).localeCompare(nameFn(a)))
+        return s
       }
       function chev() {
         return '<svg class="expand-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>'
@@ -3570,6 +3643,12 @@
             ? matchArticle(item, q)
             : matchDialog(item, q)
         })
+        filteredAll = sortBy(
+          filteredAll,
+          allSort,
+          (i) => (i._kind === "article" ? i.Id : i.id),
+          (i) => (i._kind === "article" ? aFaqQ(i) || "" : i.name || ""),
+        )
         allPage = 1
         renderAllList()
         const tot = allCombinedItems.length,
@@ -3623,6 +3702,12 @@
           if (aFilter === "dialog" && aKind(a) === "answer") return false
           return matchArticle(a, q)
         })
+        filteredArticles = sortBy(
+          filteredArticles,
+          aSort,
+          (a) => a.Id,
+          (a) => aFaqQ(a) || "",
+        )
         aPage = 1
         renderArticleList()
         const tot = allArticles.length,
@@ -3681,6 +3766,12 @@
             return false
           return matchDialog(item, q)
         })
+        filteredDialogs = sortBy(
+          filteredDialogs,
+          dSort,
+          (i) => i.id,
+          (i) => i.name || "",
+        )
         dPage = 1
         renderDialogList()
         const tot = allDialogsCombined.length,
@@ -4068,6 +4159,20 @@
           dFilter = btn.dataset.filter
           applyDialogFilters()
         })
+      })
+
+      // ── Sort selects ────────────────────────────────────────────────
+      document.getElementById("all-sort").addEventListener("change", (e) => {
+        allSort = e.target.value
+        applyAllFilters()
+      })
+      document.getElementById("a-sort").addEventListener("change", (e) => {
+        aSort = e.target.value
+        applyArticleFilters()
+      })
+      document.getElementById("d-sort").addEventListener("change", (e) => {
+        dSort = e.target.value
+        applyDialogFilters()
       })
 
       // ── Export IDs modal ─────────────────────────────────────────────
