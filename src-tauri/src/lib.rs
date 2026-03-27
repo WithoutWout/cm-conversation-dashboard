@@ -161,6 +161,7 @@ struct InteractionRow {
     link_click_info: String,
     feedback_info: String,
     output_metadata: String,
+    recognition_details: String,
 }
 
 #[derive(Serialize)]
@@ -723,6 +724,7 @@ CREATE TABLE IF NOT EXISTS interactions (
     link_click_info         TEXT,
     feedback_info           TEXT,
     output_metadata         TEXT,
+    recognition_details     TEXT,
     imported_at             INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_session_uuid  ON interactions(session_uuid);
@@ -736,6 +738,8 @@ fn open_db(path: &str) -> Result<Connection, String> {
         .map_err(|e| format!("PRAGMA error: {e}"))?;
     conn.execute_batch(DB_SCHEMA)
         .map_err(|e| format!("Schema error: {e}"))?;
+    // Migrate existing databases: add recognition_details column if absent
+    let _ = conn.execute_batch("ALTER TABLE interactions ADD COLUMN recognition_details TEXT");
     Ok(conn)
 }
 
@@ -940,6 +944,7 @@ fn import_interactions_csv(
     let c_tdialog_status  = col("TDialogStatus");
     let c_recog_type      = col("RecognitionType");
     let c_recog_quality   = col("RecognitionQuality");
+    let c_recog_details   = col("RecognitionDetails");
     let c_genai           = col("GenerativeAISources");
     let c_articles        = col("Articles");
     let c_faqs            = col("FaqsFound");
@@ -965,6 +970,7 @@ fn import_interactions_csv(
         c_main_type: Option<usize>, c_all_types: Option<usize>, c_value: Option<usize>,
         c_output: Option<usize>, c_article_ids: Option<usize>, c_dialog_paths: Option<usize>,
         c_tdialog_status: Option<usize>, c_recog_type: Option<usize>, c_recog_quality: Option<usize>,
+        c_recog_details: Option<usize>,
         c_genai: Option<usize>, c_articles: Option<usize>, c_faqs: Option<usize>,
         c_contexts: Option<usize>, c_pages: Option<usize>, c_link_click: Option<usize>,
         c_feedback: Option<usize>, c_output_meta: Option<usize>,
@@ -995,8 +1001,8 @@ fn import_interactions_csv(
                     recognition_type, recognition_quality,
                     generative_ai_sources, articles, faqs_found,
                     contexts, pages, link_click_info, feedback_info,
-                    output_metadata, imported_at
-                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)"#,
+                    output_metadata, recognition_details, imported_at
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)"#,
                 params![
                     log_id,
                     get_r(c_uuid),
@@ -1021,12 +1027,23 @@ fn import_interactions_csv(
                     get_r(c_link_click),
                     get_r(c_feedback),
                     get_r(c_output_meta),
+                    get_r(c_recog_details),
                     now_secs,
                 ],
             );
             match result {
                 Ok(1) => *inserted += 1,
-                Ok(_) => *skipped += 1,
+                Ok(_) => {
+                    // Row already exists — backfill recognition_details if it was NULL
+                    let rd = get_r(c_recog_details);
+                    if !rd.is_empty() {
+                        let _ = tx.execute(
+                            "UPDATE interactions SET recognition_details = ?1 WHERE log_id = ?2 AND (recognition_details IS NULL OR recognition_details = '')",
+                            params![rd, log_id],
+                        );
+                    }
+                    *skipped += 1
+                }
                 Err(e) => errors.push(format!("Row {log_id}: {e}")),
             }
         }
@@ -1042,6 +1059,7 @@ fn import_interactions_csv(
                         c_log_id, c_uuid, c_session, c_ts_start, c_ts_end, c_culture,
                         c_main_type, c_all_types, c_value, c_output, c_article_ids,
                         c_dialog_paths, c_tdialog_status, c_recog_type, c_recog_quality,
+                        c_recog_details,
                         c_genai, c_articles, c_faqs, c_contexts, c_pages, c_link_click,
                         c_feedback, c_output_meta,
                         &mut inserted, &mut skipped, &mut errors);
@@ -1059,6 +1077,7 @@ fn import_interactions_csv(
             c_log_id, c_uuid, c_session, c_ts_start, c_ts_end, c_culture,
             c_main_type, c_all_types, c_value, c_output, c_article_ids,
             c_dialog_paths, c_tdialog_status, c_recog_type, c_recog_quality,
+            c_recog_details,
             c_genai, c_articles, c_faqs, c_contexts, c_pages, c_link_click,
             c_feedback, c_output_meta,
             &mut inserted, &mut skipped, &mut errors);
@@ -1103,6 +1122,7 @@ struct GetSessionsArgs {
     query: Option<String>,
     query_regex: Option<bool>,   // treat query as a regex
     query_scope: Option<String>, // "both" | "user" | "bot"
+    query_ids: Option<bool>,     // also search article_ids and dialog_paths columns
 }
 
 #[tauri::command]
@@ -1121,6 +1141,7 @@ fn get_sessions(
     let query = args.query.as_deref().unwrap_or("").trim().to_string();
     let query_regex = args.query_regex.unwrap_or(false);
     let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
+    let query_ids = args.query_ids.unwrap_or(false);
 
     // Register a custom REGEXP function for this connection when regex mode is on
     if query_regex && !query.is_empty() {
@@ -1128,7 +1149,7 @@ fn get_sessions(
         use std::sync::Arc;
         // Compile the regex once and share it across all row evaluations via Arc
         let compiled = Arc::new(
-            Regex::new(&query).unwrap_or_else(|_| Regex::new("(?!)").unwrap())
+            Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?
         );
         conn.create_scalar_function(
             "regexp",
@@ -1175,7 +1196,7 @@ fn get_sessions(
     }
     if !query.is_empty() {
         let q = query.replace('\'', "''");
-        let cond = if query_regex {
+        let text_cond = if query_regex {
             match query_scope.as_str() {
                 "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', interaction_value))"),
                 "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', output_text))"),
@@ -1187,6 +1208,13 @@ fn get_sessions(
                 "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE '%{q}%')"),
                 _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE '%{q}%' OR output_text LIKE '%{q}%')"),
             }
+        };
+        let cond = if query_ids {
+            // Also match sessions where article_ids or dialog_paths reference the query term
+            let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE article_ids LIKE '%{q}%' OR dialog_paths LIKE '%{q}%')");
+            format!("({text_cond} OR {ids_subq})")
+        } else {
+            text_cond
         };
         conditions.push(cond);
     }
@@ -1210,7 +1238,8 @@ fn get_sessions(
             MIN(s.timestamp_start) as first_ts,
             MAX(s.timestamp_end) as last_ts,
             COUNT(*) as cnt,
-            MAX(CASE WHEN s.main_interaction_type = 'GenerativeAI' THEN 1 ELSE 0 END) as has_gen_ai,
+            MAX(CASE WHEN s.main_interaction_type = 'GenerativeAI'
+                          OR s.all_interaction_types LIKE '%GenerativeAI%' THEN 1 ELSE 0 END) as has_gen_ai,
             MIN(s.culture) as culture,
             (SELECT interaction_value FROM interactions i2
              WHERE i2.session_uuid = s.session_uuid
@@ -1268,7 +1297,7 @@ fn get_session_interactions(
                 recognition_type, recognition_quality,
                 generative_ai_sources, articles, faqs_found,
                 contexts, pages, link_click_info, feedback_info,
-                output_metadata
+                output_metadata, recognition_details
             FROM interactions
             WHERE session_uuid = ?1
             ORDER BY log_id ASC"#,
@@ -1301,6 +1330,7 @@ fn get_session_interactions(
                 link_click_info:         row.get::<_, String>(20).unwrap_or_default(),
                 feedback_info:           row.get::<_, String>(21).unwrap_or_default(),
                 output_metadata:         row.get::<_, String>(22).unwrap_or_default(),
+                recognition_details:     row.get::<_, String>(23).unwrap_or_default(),
             })
         })
         .map_err(|e| format!("Query error: {e}"))?

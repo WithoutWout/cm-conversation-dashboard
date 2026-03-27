@@ -494,12 +494,36 @@
         overflow-y: auto;
         padding: 6px 20px 10px;
       }
-      .list-wrap::-webkit-scrollbar {
-        width: 5px;
+      ::-webkit-scrollbar {
+        width: 7px;
+        height: 7px;
       }
-      .list-wrap::-webkit-scrollbar-thumb {
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
         background: var(--border);
-        border-radius: 3px;
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--muted);
+      }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--border) transparent;
+      }
+      .search-spinner-inline {
+        width: 13px;
+        height: 13px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        display: none;
+        flex-shrink: 0;
+      }
+      .search-spinner-inline.visible {
+        display: block;
       }
       .card {
         background: var(--surface);
@@ -1342,7 +1366,7 @@
       }
       /* === INSTRUCTIONS MODAL === */
       .instructions-modal-box {
-        width: 500px;
+        width: 560px;
         max-height: 82vh;
         display: flex;
         flex-direction: column;
@@ -1831,7 +1855,7 @@
         border: 1px solid var(--border);
         border-radius: 6px;
         color: var(--text);
-        padding: 6px 10px 6px 30px;
+        padding: 6px 26px 6px 30px;
         font-size: 0.8rem;
         outline: none;
         transition: border-color 0.15s;
@@ -2172,6 +2196,20 @@
       .chat-spacer {
         flex: 1;
       }
+      .halo-studio-link {
+        font-size: 0.72rem;
+        padding: 3px 8px;
+        border-radius: 4px;
+        background: color-mix(in srgb, var(--teal) 12%, transparent);
+        color: var(--teal);
+        text-decoration: none;
+        border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .halo-studio-link:hover {
+        background: color-mix(in srgb, var(--teal) 22%, transparent);
+      }
       .chat-filter-row {
         padding: 7px 20px;
         display: flex;
@@ -2204,7 +2242,7 @@
         border: 1px solid var(--border);
         border-radius: 6px;
         color: var(--text);
-        padding: 5px 9px 5px 27px;
+        padding: 5px 24px 5px 27px;
         font-size: 0.78rem;
         outline: none;
         transition: border-color 0.15s;
@@ -2214,6 +2252,60 @@
       }
       .chat-search::placeholder {
         color: var(--muted);
+      }
+      .chat-search.regex-error,
+      #convSearch.regex-error {
+        border-color: var(--red) !important;
+      }
+      .chat-sopt {
+        flex-shrink: 0;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.7rem;
+        font-family: monospace;
+        padding: 2px 5px;
+        line-height: 1.4;
+        transition: color 0.1s, border-color 0.1s, background 0.1s;
+      }
+      .chat-sopt:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .chat-sopt.on {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+      }
+      .chat-sopt.err {
+        color: var(--red);
+        border-color: var(--red);
+      }
+      .chat-match-banner {
+        font-size: 0.78rem;
+        color: var(--muted);
+        padding: 6px 10px;
+        background: var(--surface2);
+        border-radius: 6px;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .chat-show-all-btn {
+        background: none;
+        border: none;
+        color: var(--accent);
+        cursor: pointer;
+        font-size: 0.78rem;
+        padding: 0;
+        text-decoration: underline;
+      }
+      .chat-show-all-btn:hover {
+        opacity: 0.75;
       }
       .chat-thread {
         flex: 1;
@@ -2394,6 +2486,76 @@
         opacity: 0.6;
         pointer-events: none;
       }
+      /* Low-recognition highlight when filter is active */
+      .bubble.low-recog-highlight {
+        border-color: rgba(251, 146, 60, 0.6) !important;
+        background: rgba(251, 146, 60, 0.06) !important;
+        box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.3);
+      }
+      .bubble.low-recog-highlight.genai {
+        border-color: rgba(251, 146, 60, 0.6) !important;
+        background: rgba(251, 146, 60, 0.06) !important;
+      }
+      /* Entity match chips */
+      .entity-match-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: rgba(45, 212, 191, 0.08);
+        border: 1px solid rgba(45, 212, 191, 0.35);
+        border-radius: 5px;
+        color: var(--teal);
+        cursor: pointer;
+        font-size: 0.71rem;
+        font-family: inherit;
+        padding: 2px 8px;
+        transition: all 0.12s;
+      }
+      .entity-match-chip:hover {
+        background: rgba(45, 212, 191, 0.18);
+        border-color: rgba(45, 212, 191, 0.6);
+      }
+      .entity-match-chip .em-matched {
+        color: var(--muted);
+        font-size: 0.65rem;
+        font-style: italic;
+      }
+      .entity-match-chip-static {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        background: rgba(45, 212, 191, 0.05);
+        border: 1px solid rgba(45, 212, 191, 0.2);
+        border-radius: 5px;
+        color: var(--teal);
+        font-size: 0.71rem;
+        padding: 2px 8px;
+        opacity: 0.75;
+      }
+      .entity-match-chip-static .em-matched {
+        color: var(--muted);
+        font-size: 0.65rem;
+        font-style: italic;
+      }
+      /* Quality meter bar in bubble detail */
+      .recog-quality-meter {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .recog-quality-bar-track {
+        flex: 1;
+        height: 5px;
+        background: var(--border);
+        border-radius: 3px;
+        overflow: hidden;
+        max-width: 120px;
+      }
+      .recog-quality-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s;
+      }
       .bubble .chat-link {
         color: var(--accent);
         text-decoration: underline;
@@ -2445,7 +2607,10 @@
       }
       /* Settings modal — wider so all sections fit */
       #settingsModal .modal-box {
-        width: 580px;
+        width: 680px;
+      }
+      #settingsModal input[type="text"] {
+        width: 100%;
       }
       /* Settings tabs */
       .settings-tabs {
@@ -2698,12 +2863,13 @@
             <input
               id="g-search"
               type="text"
-              placeholder="Search articles, dialogs, responses, IDs…"
+              placeholder="Search… (press Enter)"
               autocomplete="off"
               spellcheck="false"
             />
             <button class="clear-btn" id="clearSearch">&#x2715;</button>
           </div>
+          <span class="search-spinner-inline" id="searchSpinner"></span>
           <div class="search-opts">
             <button
               class="sopt"
@@ -3051,6 +3217,7 @@
                   autocomplete="off"
                   spellcheck="false"
                 />
+                <button class="clear-btn" id="convClearSearch">&#x2715;</button>
               </div>
               <button
                 class="sopt"
@@ -3059,6 +3226,14 @@
                 data-tooltip="Use regular expression (.*)"
               >
                 .*
+              </button>
+              <button
+                class="sopt"
+                id="convOptIds"
+                title="Search Article &amp; Dialog IDs"
+                data-tooltip="Include Article &amp; Dialog IDs in search"
+              >
+                #ID
               </button>
               <div class="conv-scope-toggle">
                 <button
@@ -3157,7 +3332,16 @@
                 autocomplete="off"
                 spellcheck="false"
               />
+              <button class="clear-btn" id="chatClearSearch">&#x2715;</button>
             </div>
+            <button
+              class="chat-sopt"
+              id="chatOptRegex"
+              title="Regular expression"
+              data-tooltip="Use regular expression (.*) in chat search"
+            >
+              .*
+            </button>
           </div>
           <div class="chat-thread" id="chatThread">
             <div class="chat-empty">
@@ -3366,24 +3550,60 @@
           </div>
           <!-- TAB: Conversations -->
           <div class="settings-tab-panel" id="settings-panel-conversations">
-            <label>Conversations Database</label>
-            <p class="hint" style="margin-bottom: 8px">
-              The SQLite database file used to store imported conversation data.
-              Can be on a network share for shared team access.
+            <label for="setting-halo-url">Halo Studio URL</label>
+            <input
+              id="setting-halo-url"
+              type="text"
+              placeholder="https://www.cm.com/en-gb/app/halo-studio/{tenantId}/profile/{profileId}"
+              autocomplete="off"
+            />
+            <p class="hint">
+              The base URL up to and including the profile segment of your Halo
+              Studio environment. Conversation links are generated by appending
+              <code>/conversations/{sessionId}</code>.
             </p>
-            <div style="display: flex; gap: 8px; margin-bottom: 6px">
-              <button class="btn-secondary" id="settingsDbCreateBtn">
-                Create new…
-              </button>
-              <button class="btn-secondary" id="settingsDbOpenBtn">
-                Open existing…
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label>Conversations Database</label>
+              <p class="hint" style="margin-bottom: 8px">
+                The SQLite database file used to store imported conversation
+                data. Can be on a network share for shared team access.
+              </p>
+              <div style="display: flex; gap: 8px; margin-bottom: 6px">
+                <button class="btn-secondary" id="settingsDbCreateBtn">
+                  Create new…
+                </button>
+                <button class="btn-secondary" id="settingsDbOpenBtn">
+                  Open existing…
+                </button>
+              </div>
+              <p
+                class="hint"
+                id="settingsDbPath"
+                style="min-height: 1.2em; word-break: break-all"
+              ></p>
+            </div>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label>Interaction Log Import</label>
+              <p class="hint" style="margin-bottom: 8px">
+                Import daily interaction log exports (CSV) to populate the
+                Conversations view.
+              </p>
+              <button class="btn-link" id="openInteractionLogInstructionsBtn">
+                How to export the Interaction Log?
               </button>
             </div>
-            <p
-              class="hint"
-              id="settingsDbPath"
-              style="min-height: 1.2em; word-break: break-all"
-            ></p>
           </div>
         </div>
         <div class="modal-footer" style="justify-content: space-between">
@@ -3476,9 +3696,119 @@
               >
             </div>
           </div>
+
+          <hr class="instructions-divider" />
+
+          <p class="instructions-section-title">Entities</p>
+          <div class="instructions-steps">
+            <div class="instructions-step">
+              <span class="instructions-step-num">1</span>
+              <span class="instructions-step-text"
+                >In CM.com Conversational AI Cloud, open the
+                <code>Entities</code> section from the left navigation.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">2</span>
+              <span class="instructions-step-text"
+                >Click the three dots menu and select <code>Export</code>.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">3</span>
+              <span class="instructions-step-text"
+                >Save the downloaded <code>.csv</code> file in the same data
+                folder you selected in this app.</span
+              >
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" id="closeInstructions2">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- INTERACTION LOG INSTRUCTIONS MODAL -->
+    <div class="modal-overlay" id="interactionLogInstructionsModal">
+      <div class="modal-box instructions-modal-box">
+        <div class="modal-header">
+          <h3>How to Export the Interaction Log</h3>
+          <button class="close-btn" id="closeInteractionLogInstructions">
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <p class="hint">
+            The Interaction Log is exported one day at a time from the Analytics
+            section. Large exports may take a moment to generate.
+          </p>
+
+          <p class="instructions-section-title">Steps</p>
+          <div class="instructions-steps">
+            <div class="instructions-step">
+              <span class="instructions-step-num">1</span>
+              <span class="instructions-step-text"
+                >In CM.com Conversational AI Cloud, open
+                <code>Analytics</code> from the left navigation.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">2</span>
+              <span class="instructions-step-text"
+                >Click <code>Interactions Export</code>.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">3</span>
+              <span class="instructions-step-text"
+                >Select the day you want to export using the date picker.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">4</span>
+              <span class="instructions-step-text"
+                >Make sure <code>CSV</code> is selected as the export
+                format.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">5</span>
+              <span class="instructions-step-text"
+                >Click <code>Export</code> and wait for the download to
+                complete. Large days may take a while.</span
+              >
+            </div>
+            <div class="instructions-step">
+              <span class="instructions-step-num">6</span>
+              <span class="instructions-step-text"
+                >In the <strong>Conversations</strong> tab of this app, use the
+                <strong>Import CSV</strong> button to load the downloaded
+                file.</span
+              >
+            </div>
+          </div>
+
+          <div
+            style="
+              margin-top: 14px;
+              padding: 10px 12px;
+              background: rgba(251, 146, 60, 0.08);
+              border: 1px solid rgba(251, 146, 60, 0.3);
+              border-radius: 6px;
+              font-size: 0.78rem;
+              line-height: 1.5;
+              color: var(--orange);
+            "
+          >
+            &#x26A0;&nbsp; Only <strong>one day at a time</strong> can be
+            exported. Repeat the steps above for each day you need.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="closeInteractionLogInstructions2">
+            Close
+          </button>
         </div>
       </div>
     </div>
@@ -3781,9 +4111,9 @@
       let allFilterPill = "all"
       let aFilter = "all"
       let dFilter = "all"
-      let allSort = "id-asc"
-      let aSort = "id-asc"
-      let dSort = "id-asc"
+      let allSort = localStorage.getItem("cm-sort-all") || "id-desc"
+      let aSort = localStorage.getItem("cm-sort-articles") || "id-desc"
+      let dSort = localStorage.getItem("cm-sort-dialogs") || "id-desc"
       let allPage = 1,
         aPage = 1,
         dPage = 1
@@ -3806,9 +4136,12 @@
       let dialogMap = new Map()
       let tDialogMap = new Map()
       let articleMap = new Map()
+      let searchWorker = null
+      let searchSeq = 0
       const CM_DEFAULT_URL = ""
       const DATA_FOLDER_STORAGE_KEY = "cm-data-folder"
       let cmBaseUrl = localStorage.getItem("cm-base-url") || CM_DEFAULT_URL
+      let haloBaseUrl = localStorage.getItem("halo-base-url") || ""
       let openMode = localStorage.getItem("cm-open-mode") || "popup"
       let flowNetwork = null
       let flowDirection = localStorage.getItem("cm-flow-direction") || "LR"
@@ -3853,6 +4186,9 @@
       let activeInteractions = []
       let chatFilter = "all"
       let chatQuery = ""
+      let chatShowAll = false // when true, show full conversation even while searching
+      let convSearchIds = false // when true, also search article/dialog IDs
+      let chatSearchRegex = false // when true, treat chatQuery as a regex
       let convImporting = false
 
       // ── Helpers ─────────────────────────────────────────────────────
@@ -4312,6 +4648,11 @@
           "</div>" +
           '<div class="card-actions">' +
           cmLink("article", art.Id) +
+          '<button class="btn-show-dialog" onclick="searchConvsForId(' +
+          art.Id +
+          ');event.stopPropagation()" title="Search article ID ' +
+          art.Id +
+          ' in conversations">&#128172; Conversations</button>' +
           "</div>" +
           "</div>" +
           "</div>"
@@ -5004,6 +5345,11 @@
             "</div>" +
             '<div class="card-actions">' +
             cmLink("dialog", item.id) +
+            '<button class="btn-show-dialog" onclick="searchConvsForId(' +
+            item.id +
+            ');event.stopPropagation()" title="Search Transactional Dialog ID ' +
+            item.id +
+            ' in conversations">&#128172; Conversations</button>' +
             "</div>" +
             "</div>" +
             "</div>"
@@ -5051,6 +5397,11 @@
           '<button class="btn-show-dialog" onclick="openFlowModal(' +
           item.id +
           ');event.stopPropagation()">&#9654; Show dialog</button>' +
+          '<button class="btn-show-dialog" onclick="searchConvsForId(' +
+          item.id +
+          ');event.stopPropagation()" title="Search Dialog ID ' +
+          item.id +
+          ' in conversations">&#128172; Conversations</button>' +
           "</div>" +
           "</div>" +
           "</div>"
@@ -5125,36 +5476,7 @@
 
       // ── Apply & render: All ─────────────────────────────────────────
       function applyAllFilters() {
-        const q = gQuery
-        filteredAll = allCombinedItems.filter((item) => {
-          if (allFilterPill === "articles" && item._kind !== "article")
-            return false
-          if (allFilterPill === "dialogs" && item._kind !== "dialog")
-            return false
-          if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
-            return false
-          return item._kind === "article"
-            ? matchArticle(item, q)
-            : matchDialog(item, q)
-        })
-        filteredAll = sortBy(
-          filteredAll,
-          allSort,
-          (i) => (i._kind === "article" ? i.Id : i.id),
-          (i) => (i._kind === "article" ? aFaqQ(i) || "" : i.name || ""),
-        )
-        allPage = 1
-        renderAllList()
-        const tot = allCombinedItems.length,
-          mat = filteredAll.length
-        document.getElementById("all-result-count").textContent =
-          mat + (mat !== tot ? " of " + tot : "") + " results"
-        document.getElementById("tab-all-count").textContent = mat
-        document.getElementById("all-pagination").innerHTML = pagHtml(
-          allPage,
-          Math.ceil(mat / PAGE_SIZE),
-          "goAllPage",
-        )
+        triggerSearch()
       }
       function renderAllList() {
         const el = document.getElementById("allList")
@@ -5190,30 +5512,7 @@
 
       // ── Apply & render: Articles ────────────────────────────────────
       function applyArticleFilters() {
-        const q = gQuery
-        filteredArticles = allArticles.filter((a) => {
-          if (aFilter === "answer" && aKind(a) !== "answer") return false
-          if (aFilter === "dialog" && aKind(a) === "answer") return false
-          return matchArticle(a, q)
-        })
-        filteredArticles = sortBy(
-          filteredArticles,
-          aSort,
-          (a) => a.Id,
-          (a) => aFaqQ(a) || "",
-        )
-        aPage = 1
-        renderArticleList()
-        const tot = allArticles.length,
-          mat = filteredArticles.length
-        document.getElementById("a-result-count").textContent =
-          mat + (mat !== tot ? " of " + tot : "") + " articles"
-        document.getElementById("tab-a-count").textContent = mat
-        document.getElementById("a-pagination").innerHTML = pagHtml(
-          aPage,
-          Math.ceil(mat / PAGE_SIZE),
-          "goAPage",
-        )
+        triggerSearch()
       }
       function renderArticleList() {
         const el = document.getElementById("articleList")
@@ -5243,41 +5542,7 @@
 
       // ── Apply & render: Dialogs ─────────────────────────────────────
       function applyDialogFilters() {
-        const q = gQuery
-        filteredDialogs = allDialogsCombined.filter((item) => {
-          if (dFilter === "dialogs" && item._kind !== "dialog") return false
-          if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
-          if (dFilter === "recognition" && item._kind === "tdialog")
-            return false
-          if (
-            dFilter === "recognition" &&
-            !(item.nodes || []).some((n) =>
-              ((n.output && n.output.items) || []).some(
-                (i) => i.type === "Answer",
-              ),
-            )
-          )
-            return false
-          return matchDialog(item, q)
-        })
-        filteredDialogs = sortBy(
-          filteredDialogs,
-          dSort,
-          (i) => i.id,
-          (i) => i.name || "",
-        )
-        dPage = 1
-        renderDialogList()
-        const tot = allDialogsCombined.length,
-          mat = filteredDialogs.length
-        document.getElementById("d-result-count").textContent =
-          mat + (mat !== tot ? " of " + tot : "") + " dialogs"
-        document.getElementById("tab-d-count").textContent = mat
-        document.getElementById("d-pagination").innerHTML = pagHtml(
-          dPage,
-          Math.ceil(mat / PAGE_SIZE),
-          "goDPage",
-        )
+        triggerSearch()
       }
       function renderDialogList() {
         const el = document.getElementById("dialogList")
@@ -5497,44 +5762,7 @@
       }
 
       function applyEntityFilters() {
-        const q = gQuery
-        let result = allEntities.filter((entity) => {
-          if (eFilter === "articles" && entityArticleXrefs(entity).length === 0)
-            return false
-          if (eFilter === "dialogs" && entityDialogXrefs(entity).length === 0)
-            return false
-          return matchEntity(entity, q)
-        })
-        // Sort
-        if (eSort === "name-asc")
-          result = result.slice().sort((a, b) => a.name.localeCompare(b.name))
-        else if (eSort === "name-desc")
-          result = result.slice().sort((a, b) => b.name.localeCompare(a.name))
-        else if (eSort === "words-desc")
-          result = result
-            .slice()
-            .sort((a, b) => b.words.length - a.words.length)
-        else if (eSort === "words-asc")
-          result = result
-            .slice()
-            .sort((a, b) => a.words.length - b.words.length)
-        filteredEntities = result
-        ePage = 1
-        renderEntityList()
-        const tot = allEntities.length,
-          mat = filteredEntities.length
-        document.getElementById("e-result-count").textContent =
-          mat + (mat !== tot ? " of " + tot : "") + " entities"
-        document.getElementById("tab-e-count").textContent = mat
-        const totalWords = allEntities.reduce((s, e) => s + e.words.length, 0)
-        document.getElementById("e-stat-entities").textContent =
-          allEntities.length
-        document.getElementById("e-stat-words").textContent = totalWords
-        document.getElementById("e-pagination").innerHTML = pagHtml(
-          ePage,
-          Math.ceil(mat / PAGE_SIZE),
-          "goEPage",
-        )
+        triggerSearch()
       }
 
       function renderEntityList() {
@@ -5669,6 +5897,21 @@
         openArticleInfoModal(id)
       }
 
+      function searchConvsForId(id) {
+        switchView("conversations")
+        convQuery = String(id)
+        const input = document.getElementById("convSearch")
+        if (input) input.value = convQuery
+        const clearBtn = document.getElementById("convClearSearch")
+        if (clearBtn) clearBtn.style.display = ""
+        if (!convSearchIds) {
+          convSearchIds = true
+          document.getElementById("convOptIds").classList.add("on")
+        }
+        convPage = 1
+        loadSessions()
+      }
+
       function jumpToEntity(name) {
         // Switch to Entities tab
         document
@@ -5687,25 +5930,28 @@
         if (searchInput) searchInput.value = name
         const clearBtn = document.getElementById("search-clear")
         if (clearBtn) clearBtn.style.display = name ? "" : "none"
-        triggerSearch()
-        // Scroll to and flash the matching entity card
-        requestAnimationFrame(() => {
-          const entityList = document.getElementById("entityList")
-          if (!entityList) return
-          const cards = entityList.querySelectorAll(".card.type-entity")
-          for (const card of cards) {
-            const idEl = card.querySelector(".card-id")
-            if (
-              idEl &&
-              idEl.textContent.trim().toUpperCase() === name.toUpperCase()
-            ) {
-              card.scrollIntoView({ behavior: "smooth", block: "center" })
-              card.classList.add("flash-highlight")
-              setTimeout(() => card.classList.remove("flash-highlight"), 1200)
-              break
+        window.addEventListener(
+          "searchcomplete",
+          () => {
+            const entityList = document.getElementById("entityList")
+            if (!entityList) return
+            const cards = entityList.querySelectorAll(".card.type-entity")
+            for (const card of cards) {
+              const idEl = card.querySelector(".card-id")
+              if (
+                idEl &&
+                idEl.textContent.trim().toUpperCase() === name.toUpperCase()
+              ) {
+                card.scrollIntoView({ behavior: "smooth", block: "center" })
+                card.classList.add("flash-highlight")
+                setTimeout(() => card.classList.remove("flash-highlight"), 1200)
+                break
+              }
             }
-          }
-        })
+          },
+          { once: true },
+        )
+        triggerSearch()
       }
 
       function openArticleInfoModal(id) {
@@ -5991,36 +6237,125 @@
         inp.classList.toggle("regex-error", bad)
         btn.classList.toggle("err", bad)
       }
+      function showSearchLoading(visible) {
+        document
+          .getElementById("searchSpinner")
+          .classList.toggle("visible", visible)
+      }
       function triggerSearch() {
         updateRegexIndicator()
-        // Pre-compute entity names whose word texts match the current query.
-        // Used by matchArticle, matchDialog, and applyEntityFilters.
-        matchingEntityNames = new Set()
-        if (gQuery && allEntities.length) {
-          const re = buildSearchRegex(gQuery)
-          if (re) {
-            allEntities.forEach((entity) => {
-              if (entity.words.some((w) => testRe(re, w.text))) {
-                matchingEntityNames.add(entity.name.toUpperCase())
-              }
-            })
-          }
-        }
-        applyAllFilters()
-        applyArticleFilters()
-        applyDialogFilters()
-        applyEntityFilters()
+        if (gQuery) showSearchLoading(true)
+        searchWorker.postMessage({
+          type: "search",
+          id: ++searchSeq,
+          query: gQuery,
+          searchCase,
+          searchWord,
+          searchRegex,
+          searchContent,
+          allFilterPill,
+          aFilter,
+          dFilter,
+          eFilter,
+          allSort,
+          aSort,
+          dSort,
+          eSort,
+        })
       }
-      let searchTimer
+      function handleSearchResults(msg) {
+        if (msg.id !== searchSeq) return
+        filteredAll = msg.filteredAll
+        filteredArticles = msg.filteredArticles
+        filteredDialogs = msg.filteredDialogs
+        filteredEntities = msg.filteredEntities
+        matchingEntityNames = new Set(msg.matchingEntityNames)
+        allPage = 1
+        aPage = 1
+        dPage = 1
+        ePage = 1
+
+        renderAllList()
+        const totAll = allCombinedItems.length,
+          matAll = filteredAll.length
+        document.getElementById("all-result-count").textContent =
+          matAll + (matAll !== totAll ? " of " + totAll : "") + " results"
+        document.getElementById("tab-all-count").textContent = matAll
+        document.getElementById("all-pagination").innerHTML = pagHtml(
+          allPage,
+          Math.ceil(matAll / PAGE_SIZE),
+          "goAllPage",
+        )
+
+        renderArticleList()
+        const totA = allArticles.length,
+          matA = filteredArticles.length
+        document.getElementById("a-result-count").textContent =
+          matA + (matA !== totA ? " of " + totA : "") + " articles"
+        document.getElementById("tab-a-count").textContent = matA
+        document.getElementById("a-pagination").innerHTML = pagHtml(
+          aPage,
+          Math.ceil(matA / PAGE_SIZE),
+          "goAPage",
+        )
+
+        renderDialogList()
+        const totD = allDialogsCombined.length,
+          matD = filteredDialogs.length
+        document.getElementById("d-result-count").textContent =
+          matD + (matD !== totD ? " of " + totD : "") + " dialogs"
+        document.getElementById("tab-d-count").textContent = matD
+        document.getElementById("d-pagination").innerHTML = pagHtml(
+          dPage,
+          Math.ceil(matD / PAGE_SIZE),
+          "goDPage",
+        )
+
+        renderEntityList()
+        const totE = allEntities.length,
+          matE = filteredEntities.length
+        document.getElementById("e-result-count").textContent =
+          matE + (matE !== totE ? " of " + totE : "") + " entities"
+        document.getElementById("tab-e-count").textContent = matE
+        const totalWords = allEntities.reduce((s, e) => s + e.words.length, 0)
+        document.getElementById("e-stat-entities").textContent = totE
+        document.getElementById("e-stat-words").textContent = totalWords
+        document.getElementById("e-pagination").innerHTML = pagHtml(
+          ePage,
+          Math.ceil(matE / PAGE_SIZE),
+          "goEPage",
+        )
+
+        showSearchLoading(false)
+        window.dispatchEvent(new CustomEvent("searchcomplete"))
+      }
+      searchWorker = new Worker("search-worker.js")
+      searchWorker.onmessage = function (e) {
+        if (e.data.type === "results") handleSearchResults(e.data)
+      }
+      document.getElementById("g-search").addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return
+        e.target.value = ""
+        document.getElementById("clearSearch").classList.remove("visible")
+        gQuery = ""
+        triggerSearch()
+      })
+      let _searchDebounce = null
       document.getElementById("g-search").addEventListener("input", (e) => {
-        clearTimeout(searchTimer)
-        searchTimer = setTimeout(() => {
-          gQuery = e.target.value.trim()
-          document
-            .getElementById("clearSearch")
-            .classList.toggle("visible", gQuery.length > 0)
+        const val = e.target.value.trim()
+        document
+          .getElementById("clearSearch")
+          .classList.toggle("visible", val.length > 0)
+        clearTimeout(_searchDebounce)
+        if (!val) {
+          gQuery = ""
           triggerSearch()
-        }, 200)
+          return
+        }
+        _searchDebounce = setTimeout(() => {
+          gQuery = val
+          triggerSearch()
+        }, 500)
       })
       document.getElementById("clearSearch").addEventListener("click", () => {
         document.getElementById("g-search").value = ""
@@ -6112,14 +6447,17 @@
       // ── Sort selects ────────────────────────────────────────────────
       document.getElementById("all-sort").addEventListener("change", (e) => {
         allSort = e.target.value
+        localStorage.setItem("cm-sort-all", allSort)
         applyAllFilters()
       })
       document.getElementById("a-sort").addEventListener("change", (e) => {
         aSort = e.target.value
+        localStorage.setItem("cm-sort-articles", aSort)
         applyArticleFilters()
       })
       document.getElementById("d-sort").addEventListener("change", (e) => {
         dSort = e.target.value
+        localStorage.setItem("cm-sort-dialogs", dSort)
         applyDialogFilters()
       })
       document.getElementById("e-sort").addEventListener("change", (e) => {
@@ -6362,9 +6700,40 @@
             closeInstructions()
         })
 
+      // ── Interaction log instructions modal ───────────────────────────
+      function openInteractionLogInstructions() {
+        document
+          .getElementById("interactionLogInstructionsModal")
+          .classList.add("open")
+      }
+      function closeInteractionLogInstructions() {
+        document
+          .getElementById("interactionLogInstructionsModal")
+          .classList.remove("open")
+      }
+      document
+        .getElementById("openInteractionLogInstructionsBtn")
+        .addEventListener("click", openInteractionLogInstructions)
+      document
+        .getElementById("closeInteractionLogInstructions")
+        .addEventListener("click", closeInteractionLogInstructions)
+      document
+        .getElementById("closeInteractionLogInstructions2")
+        .addEventListener("click", closeInteractionLogInstructions)
+      document
+        .getElementById("interactionLogInstructionsModal")
+        .addEventListener("click", (e) => {
+          if (
+            e.target ===
+            document.getElementById("interactionLogInstructionsModal")
+          )
+            closeInteractionLogInstructions()
+        })
+
       // ── Settings modal ───────────────────────────────────────────────
       document.getElementById("settingsBtn").addEventListener("click", () => {
         document.getElementById("setting-base-url").value = cmBaseUrl
+        document.getElementById("setting-halo-url").value = haloBaseUrl
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
@@ -6409,6 +6778,12 @@
           .value.trim()
           .replace(/\/$/, "")
         localStorage.setItem("cm-base-url", cmBaseUrl)
+        haloBaseUrl = document
+          .getElementById("setting-halo-url")
+          .value.trim()
+          .replace(/\/$/, "")
+          .replace(/\/conversations$/i, "")
+        localStorage.setItem("halo-base-url", haloBaseUrl)
         openMode = document.querySelector(
           'input[name="open-mode"]:checked',
         ).value
@@ -6597,6 +6972,12 @@
             })
           })
 
+          searchWorker.postMessage({
+            type: "init",
+            articles: allCombinedItems.filter((i) => i._kind === "article"),
+            dialogs: allDialogsCombined,
+            entities: allEntities,
+          })
           triggerSearch()
         } catch (err) {
           setDataFolderFeedback(
@@ -6653,6 +7034,12 @@
         })
 
       ensureDataFolderWatcher()
+
+      // Sync sort selects to stored state
+      document.getElementById("all-sort").value = allSort
+      document.getElementById("a-sort").value = aSort
+      document.getElementById("d-sort").value = dSort
+
       loadData()
 
       window.electronAPI.getVersion().then((v) => {
@@ -7002,12 +7389,27 @@
 
       // ── Session list ────────────────────────────────────────────────
       async function loadSessions() {
+        const convSearchEl = document.getElementById("convSearch")
+        // Validate the regex on the JS side before sending to the backend,
+        // so an invalid pattern shows an error border instead of crashing.
+        if (convSearchRegex && convQuery) {
+          try {
+            new RegExp(convQuery, "i")
+            convSearchEl.classList.remove("regex-error")
+          } catch {
+            convSearchEl.classList.add("regex-error")
+            return
+          }
+        } else {
+          convSearchEl.classList.remove("regex-error")
+        }
         const args = {
           page: convPage,
           filter: convSessionFilter,
           query: convQuery || null,
           queryRegex: convSearchRegex,
           queryScope: convSearchScope,
+          queryIds: convSearchIds,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
         }
@@ -7125,10 +7527,23 @@
         clearTimeout(_convSearchTimer)
         _convSearchTimer = setTimeout(() => {
           convQuery = e.target.value.trim()
+          document
+            .getElementById("convClearSearch")
+            .classList.toggle("visible", convQuery.length > 0)
           convPage = 1
           loadSessions()
         }, 300)
       })
+
+      document
+        .getElementById("convClearSearch")
+        .addEventListener("click", () => {
+          document.getElementById("convSearch").value = ""
+          document.getElementById("convClearSearch").classList.remove("visible")
+          convQuery = ""
+          convPage = 1
+          loadSessions()
+        })
 
       // Conv search regex toggle
       document.getElementById("convOptRegex").addEventListener("click", () => {
@@ -7136,6 +7551,16 @@
         document
           .getElementById("convOptRegex")
           .classList.toggle("on", convSearchRegex)
+        convPage = 1
+        loadSessions()
+      })
+
+      // Conv search #ID toggle
+      document.getElementById("convOptIds").addEventListener("click", () => {
+        convSearchIds = !convSearchIds
+        document
+          .getElementById("convOptIds")
+          .classList.toggle("on", convSearchIds)
         convPage = 1
         loadSessions()
       })
@@ -7329,8 +7754,12 @@
       }
 
       function fmtCalDate(year, month, day) {
-        // month is 0-based
-        return new Date(year, month, day).toISOString().slice(0, 10)
+        // month is 0-based — use local time arithmetic to avoid UTC shift in UTC+ zones
+        const d = new Date(year, month, day)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0",
+        )}-${String(d.getDate()).padStart(2, "0")}`
       }
 
       function renderCalendar() {
@@ -7354,7 +7783,11 @@
         const canPrev = !minDate || prevFirst.slice(0, 7) >= minDate.slice(0, 7)
         const canNext = !maxDate || nextFirst.slice(0, 7) <= maxDate.slice(0, 7)
 
-        const today = new Date().toISOString().slice(0, 10)
+        const _t = new Date()
+        const today = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(
+          2,
+          "0",
+        )}-${String(_t.getDate()).padStart(2, "0")}`
 
         // Day-of-week headers (Mon-start)
         let daysHtml = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
@@ -7428,15 +7861,48 @@
       // Date filters handled by custom calendar picker (see initDatePicker / pickDay)
 
       // ── Chat thread ─────────────────────────────────────────────────
+      function showFullConversation() {
+        chatShowAll = true
+        renderChatThread()
+        // Defer scroll until after the browser has laid out the new content
+        requestAnimationFrame(() => {
+          const thread = document.getElementById("chatThread")
+          const firstMark = thread.querySelector("mark")
+          if (firstMark)
+            firstMark.scrollIntoView({ behavior: "smooth", block: "center" })
+        })
+      }
+
+      function showMatchedOnly() {
+        chatShowAll = false
+        renderChatThread()
+      }
+
       async function selectSession(uuid) {
         activeSessionUuid = uuid
         chatFilter = "all"
-        chatQuery = ""
+        chatShowAll = false
         // Reset chat filter pills
         document.querySelectorAll("[data-chat-filter]").forEach((b) => {
           b.classList.toggle("active", b.dataset.chatFilter === "all")
         })
-        document.getElementById("chatSearch").value = ""
+        // Pre-fill chat search from the active session-list query so matched
+        // Q&A turns are shown automatically when opening a result
+        if (convQuery) {
+          chatQuery = convQuery
+          document.getElementById("chatSearch").value = convQuery
+          document.getElementById("chatClearSearch").classList.add("visible")
+        } else {
+          chatQuery = ""
+          document.getElementById("chatSearch").value = ""
+          document.getElementById("chatClearSearch").classList.remove("visible")
+        }
+        // Sync regex mode from session-list search into chat search
+        chatSearchRegex = !!convSearchRegex
+        document
+          .getElementById("chatOptRegex")
+          .classList.toggle("on", chatSearchRegex)
+        updateChatRegexIndicator()
         // Highlight sidebar card
         document.querySelectorAll(".session-card").forEach((c) => {
           c.classList.toggle("active", c.dataset.uuid === uuid)
@@ -7453,12 +7919,19 @@
           const session = convSessions.find((s) => s.sessionUuid === uuid)
           const chatHeader = document.getElementById("chatHeader")
           if (session) {
+            const haloLink =
+              haloBaseUrl && session.hasGenAi
+                ? `<a class="btn-open-url halo-studio-link" href="${esc(
+                    haloBaseUrl + "/conversations/" + uuid,
+                  )}" title="Open this conversation in Halo Studio">Open in Halo Studio &#x2197;</a>`
+                : ""
             chatHeader.innerHTML = `
               <div class="chat-session-info" title="${esc(uuid)}">${esc(
               uuid.slice(0, 8),
             )}…${esc(uuid.slice(-8))}</div>
               <span class="chat-meta">${esc(fmtTs(session.firstTs))}</span>
               <div class="chat-spacer"></div>
+              ${haloLink}
               <span class="chat-meta">${
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
@@ -7568,17 +8041,21 @@
         return { body: safe, options, ctas }
       }
 
+      function buildChatSearchRegex(q) {
+        if (!q) return null
+        try {
+          const pat = chatSearchRegex
+            ? q
+            : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          return new RegExp(pat, "ig")
+        } catch (e) {
+          return null
+        }
+      }
       function chatHl(text) {
         const { body, options, ctas } = parseCmOutput(text)
         if (!chatQuery) return { body, options, ctas }
-        const q = chatQuery
-        const re = (() => {
-          try {
-            return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig")
-          } catch {
-            return null
-          }
-        })()
+        const re = buildChatSearchRegex(chatQuery)
         if (!re) return { body, options, ctas }
         const reG = new RegExp(
           re.source,
@@ -7609,7 +8086,13 @@
         const articleIds = parseJsonSafe(interaction.articleIds) || []
         const dialogPaths = parseJsonSafe(interaction.dialogPaths) || {}
         const faqsFound = parseJsonSafe(interaction.faqsFound)
-        const recogDetails = parseJsonSafe(interaction.recognitionDetails || "") // not stored but may be in future
+        const recognitionDetails = parseJsonSafe(
+          interaction.recognitionDetails || "",
+        )
+        const entityMatches =
+          recognitionDetails && Array.isArray(recognitionDetails.entityMatches)
+            ? recognitionDetails.entityMatches
+            : []
         const quality = interaction.recognitionQuality
 
         let html = ""
@@ -7662,10 +8145,46 @@
           html += `</div></div>`
         }
 
+        // Entity matches section
+        if (entityMatches.length) {
+          const base = (cmBaseUrl || "").replace(/\/$/, "")
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Entity matches</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
+          entityMatches.forEach((em) => {
+            const name = esc(em.displayName || em.name || "")
+            const matched = esc(em.match || "")
+            const entityId = em.entityId
+            const titleAttr = matched ? ` title="matched: ${matched}"` : ""
+            const matchedSpan = matched
+              ? ` <span class="em-matched">${matched}</span>`
+              : ""
+            if (base && entityId) {
+              const url = `${base}/entities/${entityId}`
+              const safeUrl = esc(url)
+              html += `<button class="entity-match-chip"${titleAttr} onclick="event.stopPropagation();window.electronAPI.openUrl('${safeUrl}');return false">&#x1F516; ${name}${matchedSpan}</button>`
+            } else {
+              html += `<span class="entity-match-chip-static"${titleAttr}>&#x1F516; ${name}${matchedSpan}</span>`
+            }
+          })
+          html += `</div></div>`
+        }
+
         if (quality > 0) {
-          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Recognition quality</span><span style="color:var(--text)">${quality.toFixed(
+          const qualColor =
+            quality <= 40
+              ? "var(--red)"
+              : quality <= 60
+              ? "var(--orange)"
+              : "var(--green)"
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Recognition quality</span>
+            <div class="recog-quality-meter">
+              <span style="color:${qualColor};font-weight:700;font-size:0.8rem">${quality.toFixed(
             1,
-          )}%</span></div>`
+          )}%</span>
+              <div class="recog-quality-bar-track"><div class="recog-quality-bar-fill" style="width:${Math.min(
+                quality,
+                100,
+              )}%;background:${qualColor}"></div></div>
+            </div></div>`
         }
 
         if (interaction.recognitionType) {
@@ -7707,85 +8226,129 @@
           })
         }
 
-        // Apply chat search filter
-        if (chatQuery) {
-          const ql = chatQuery.toLowerCase()
-          interactions = interactions.filter(
-            (i) =>
-              (i.interactionValue || "").toLowerCase().includes(ql) ||
-              (i.outputText || "").toLowerCase().includes(ql),
-          )
-        }
-
         if (!interactions.length) {
           thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
           return
         }
 
-        let html = ""
-        let i = 0
-        while (i < interactions.length) {
-          const row = interactions[i]
-          const t = row.mainInteractionType
+        const isGenAiRow = (r) =>
+          r.mainInteractionType === "GenerativeAI" ||
+          (r.allInteractionTypes || "").includes("GenerativeAI")
+        const hasBotOutput = (r) => Boolean(r.outputText)
 
-          // System events (Event, LinkClick, DataRetrieval with no user value and no output)
-          const isSystemOnly =
-            (t === "Event" || t === "LinkClick") &&
-            isInternalValue(row.interactionValue) &&
-            !row.outputText
-          if (isSystemOnly) {
-            let label =
+        // Build logical Q&A turns from the interaction list.
+        // A turn is one of:
+        //   { system: row, userRow: null, botRows: [] }  — a system event pill
+        //   { system: null, userRow: row|null, botRows: [] } — a Q&A turn
+        function buildChatTurns(arr) {
+          const turns = []
+          let i = 0
+          while (i < arr.length) {
+            const row = arr[i]
+            const t = row.mainInteractionType
+            const isSystemOnly =
+              (t === "Event" || t === "LinkClick") &&
+              isInternalValue(row.interactionValue) &&
+              !row.outputText
+            if (isSystemOnly) {
+              turns.push({ system: row, userRow: null, botRows: [] })
+              i++
+              continue
+            }
+            const userRow =
+              !isInternalValue(row.interactionValue) && row.interactionValue
+                ? row
+                : null
+            const botRows = []
+            let j = i
+            if (hasBotOutput(row)) {
+              botRows.push(row)
+              j++
+              while (j < arr.length) {
+                const next = arr[j]
+                if (
+                  !isInternalValue(next.interactionValue) &&
+                  next.interactionValue
+                )
+                  break
+                if (!hasBotOutput(next)) {
+                  j++
+                  continue
+                }
+                botRows.push(next)
+                j++
+              }
+            } else {
+              j = i + 1
+            }
+            turns.push({ system: null, userRow, botRows })
+            i = j
+          }
+          return turns
+        }
+
+        // Check whether a turn contains a match for chatQuery.
+        function turnMatches(turn) {
+          const re = buildChatSearchRegex(chatQuery)
+          const rows = turn.system
+            ? [turn.system]
+            : [turn.userRow, ...turn.botRows].filter(Boolean)
+          if (re) {
+            return rows.some((r) => {
+              re.lastIndex = 0
+              if (re.test(r.interactionValue || "")) return true
+              re.lastIndex = 0
+              if (re.test(r.outputText || "")) return true
+              if (convSearchIds) {
+                re.lastIndex = 0
+                if (re.test(r.articleIds || "")) return true
+                re.lastIndex = 0
+                if (re.test(r.dialogPaths || "")) return true
+              }
+              return false
+            })
+          }
+          // Fallback: plain case-insensitive substring
+          const ql = chatQuery.toLowerCase()
+          return rows.some((r) => {
+            if ((r.interactionValue || "").toLowerCase().includes(ql))
+              return true
+            if ((r.outputText || "").toLowerCase().includes(ql)) return true
+            if (convSearchIds) {
+              if ((r.articleIds || "").toLowerCase().includes(ql)) return true
+              if ((r.dialogPaths || "").toLowerCase().includes(ql)) return true
+            }
+            return false
+          })
+        }
+
+        // Render a single turn to an HTML string.
+        function renderTurn(turn) {
+          if (turn.system) {
+            const t = turn.system.mainInteractionType
+            const label =
               t === "Event"
-                ? "Event: " + esc(row.interactionValue || "")
+                ? "Event: " + esc(turn.system.interactionValue || "")
                 : "Link clicked"
-            html += `<div class="system-pill">${label}</div>`
-            i++
-            continue
+            return `<div class="system-pill">${label}</div>`
           }
 
-          // User message
-          if (!isInternalValue(row.interactionValue) && row.interactionValue) {
+          let html = ""
+          if (turn.userRow) {
             html += `<div class="user-group">
               <span class="user-label">User</span>
               <div class="bubble user">${
-                chatHl(row.interactionValue).body
+                chatHl(turn.userRow.interactionValue).body
               }</div>
               <span class="bubble-ts">${esc(
-                row.timestampStart ? row.timestampStart.slice(11, 16) : "",
+                turn.userRow.timestampStart
+                  ? turn.userRow.timestampStart.slice(11, 16)
+                  : "",
               )}</span>
             </div>`
           }
-
-          // Bot / GenAI group — collect consecutive bot messages
-          const botRows = []
-          let j = i
-          const isGenAiRow = (r) => r.mainInteractionType === "GenerativeAI"
-          const hasBotOutput = (r) => Boolean(r.outputText)
-          // Start a bot group if this row has output
-          if (hasBotOutput(row)) {
-            botRows.push(row)
-            j++
-            // Continue grouping consecutive bot-only rows (no user input)
-            while (j < interactions.length) {
-              const next = interactions[j]
-              if (
-                !isInternalValue(next.interactionValue) &&
-                next.interactionValue
-              )
-                break
-              if (!hasBotOutput(next)) {
-                j++
-                continue
-              }
-              botRows.push(next)
-              j++
-            }
-          } else {
-            j = i + 1
-          }
-
-          if (botRows.length) {
-            const hasAi = botRows.some(isGenAiRow)
+          if (turn.botRows.length) {
+            const hasAi = turn.botRows.some(isGenAiRow)
             const avatarClass = hasAi ? "genai" : ""
             const label = hasAi
               ? `Bot <span class="bot-name-badge">AI</span>`
@@ -7795,8 +8358,7 @@
                 <div class="bot-avatar ${avatarClass}">B</div>
                 <span class="bot-name">${label}</span>
               </div>`
-
-            botRows.forEach((br) => {
+            turn.botRows.forEach((br) => {
               const bubbleClass = isGenAiRow(br) ? "genai" : "bot"
               const detail = renderBubbleDetail(br)
               const { body, options, ctas } = chatHl(br.outputText)
@@ -7817,23 +8379,59 @@
                     })
                     .join("")}</div>`
                 : ""
-              html += `<div class="bubble ${bubbleClass}" onclick="toggleBubbleDetail(${br.logId})">
+              const q = br.recognitionQuality
+              const isLowRecog = q > 0 && q <= 60
+              const isLowRecogActive = convSessionFilter === "low_recog"
+              const highlightClass =
+                isLowRecog && isLowRecogActive ? " low-recog-highlight" : ""
+              const detailOpenClass =
+                isLowRecog && isLowRecogActive ? " open" : ""
+              html += `<div class="bubble ${bubbleClass}${highlightClass}" onclick="toggleBubbleDetail(${br.logId})">
                 ${body}${optionsHtml}${ctasHtml}
                 <span class="bubble-expand-hint">▾ details</span>
-                <div class="bubble-detail" data-logid="${br.logId}">${detail}</div>
+                <div class="bubble-detail${detailOpenClass}" data-logid="${br.logId}">${detail}</div>
               </div>`
             })
-
-            const tsRow = botRows[botRows.length - 1]
+            const tsRow = turn.botRows[turn.botRows.length - 1]
             html += `<span class="bubble-ts">${esc(
               tsRow.timestampStart ? tsRow.timestampStart.slice(11, 16) : "",
-            )}</span>`
-            html += `</div>`
+            )}</span></div>`
           }
-
-          i = j
+          return html
         }
 
+        const allTurns = buildChatTurns(interactions)
+
+        if (chatQuery && !chatShowAll) {
+          // Show only the Q&A turns that contain a match
+          const matched = allTurns.filter(turnMatches)
+          if (!matched.length) {
+            thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
+            return
+          }
+          const qaTurns = allTurns.filter((t) => !t.system)
+          const matchCount = matched.filter((t) => !t.system).length
+          thread.innerHTML =
+            `<div class="chat-match-banner">Showing ${matchCount} matched turn${
+              matchCount !== 1 ? "s" : ""
+            } of ${
+              qaTurns.length
+            } &nbsp;&middot;&nbsp; <button class="chat-show-all-btn" onclick="showFullConversation()">Show full conversation</button></div>` +
+            matched.map(renderTurn).join("")
+          return
+        }
+
+        // Render full conversation (optionally with a banner when a search is active)
+        let html = ""
+        if (chatQuery) {
+          const qaTurns = allTurns.filter((t) => !t.system)
+          html += `<div class="chat-match-banner">Full conversation (${
+            qaTurns.length
+          } turn${
+            qaTurns.length !== 1 ? "s" : ""
+          }) &nbsp;&middot;&nbsp; <button class="chat-show-all-btn" onclick="showMatchedOnly()">Show matched only</button></div>`
+        }
+        html += allTurns.map(renderTurn).join("")
         thread.innerHTML = html
       }
 
@@ -7850,14 +8448,47 @@
       })
 
       // Chat search
+      function updateChatRegexIndicator() {
+        const inp = document.getElementById("chatSearch")
+        const btn = document.getElementById("chatOptRegex")
+        const bad =
+          chatSearchRegex &&
+          chatQuery &&
+          buildChatSearchRegex(chatQuery) === null
+        inp.classList.toggle("regex-error", bad)
+        btn.classList.toggle("err", bad)
+      }
+      document.getElementById("chatOptRegex").addEventListener("click", () => {
+        chatSearchRegex = !chatSearchRegex
+        document
+          .getElementById("chatOptRegex")
+          .classList.toggle("on", chatSearchRegex)
+        updateChatRegexIndicator()
+        renderChatThread()
+      })
       let _chatSearchTimer = null
       document.getElementById("chatSearch").addEventListener("input", (e) => {
         clearTimeout(_chatSearchTimer)
         _chatSearchTimer = setTimeout(() => {
           chatQuery = e.target.value.trim()
+          chatShowAll = false // reset to matched-turns mode on each new query
+          document
+            .getElementById("chatClearSearch")
+            .classList.toggle("visible", chatQuery.length > 0)
+          updateChatRegexIndicator()
           renderChatThread()
         }, 200)
       })
+
+      document
+        .getElementById("chatClearSearch")
+        .addEventListener("click", () => {
+          document.getElementById("chatSearch").value = ""
+          document.getElementById("chatClearSearch").classList.remove("visible")
+          chatQuery = ""
+          chatShowAll = false
+          renderChatThread()
+        })
 
       // ── Init DB on load if path is stored ───────────────────────────
       if (convDbPath) {
