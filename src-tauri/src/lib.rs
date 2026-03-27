@@ -1,4 +1,5 @@
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -87,6 +88,95 @@ struct SourceDefinition {
     key: &'static str,
     label: &'static str,
     pattern: &'static str,
+}
+
+// ── Conversation DB state ───────────────────────────────────────────────────
+
+struct DbState {
+    conn: Option<Connection>,
+    path: Option<String>,
+}
+
+impl Default for DbState {
+    fn default() -> Self {
+        Self { conn: None, path: None }
+    }
+}
+
+type SharedDbState = Arc<Mutex<DbState>>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportResult {
+    inserted: i64,
+    skipped: i64,
+    purged: i64,
+    errors: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSummary {
+    session_uuid: String,
+    first_ts: String,
+    last_ts: String,
+    interaction_count: i64,
+    user_message_preview: String,
+    culture: String,
+    has_gen_ai: bool,
+    has_neg_feedback: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionsPage {
+    sessions: Vec<SessionSummary>,
+    total: i64,
+    page: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InteractionRow {
+    log_id: i64,
+    interaction_uuid: String,
+    session_uuid: String,
+    timestamp_start: String,
+    timestamp_end: String,
+    culture: String,
+    main_interaction_type: String,
+    all_interaction_types: String,
+    interaction_value: String,
+    output_text: String,
+    article_ids: String,
+    dialog_paths: String,
+    tdialog_status: String,
+    recognition_type: String,
+    recognition_quality: f64,
+    generative_ai_sources: String,
+    articles: String,
+    faqs_found: String,
+    contexts: String,
+    pages: String,
+    link_click_info: String,
+    feedback_info: String,
+    output_metadata: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileDialogResult {
+    ok: bool,
+    canceled: bool,
+    paths: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileSaveResult {
+    ok: bool,
+    canceled: bool,
+    path: Option<String>,
 }
 
 struct WatchState {
@@ -492,7 +582,7 @@ fn get_data(
 #[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) {
     use tauri_plugin_opener::OpenerExt;
-    if url.starts_with("https://") || url.starts_with("http://") {
+    if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("tel:") {
         let _ = app.opener().open_url(url, None::<String>);
     }
 }
@@ -606,6 +696,620 @@ fn get_version(app: tauri::AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+// ── DB helpers ───────────────────────────────────────────────────────────────
+
+const DB_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS interactions (
+    log_id                  INTEGER PRIMARY KEY,
+    interaction_uuid        TEXT NOT NULL,
+    session_uuid            TEXT NOT NULL,
+    timestamp_start         TEXT NOT NULL,
+    timestamp_end           TEXT,
+    culture                 TEXT,
+    main_interaction_type   TEXT,
+    all_interaction_types   TEXT,
+    interaction_value       TEXT,
+    output_text             TEXT,
+    article_ids             TEXT,
+    dialog_paths            TEXT,
+    tdialog_status          TEXT,
+    recognition_type        TEXT,
+    recognition_quality     REAL,
+    generative_ai_sources   TEXT,
+    articles                TEXT,
+    faqs_found              TEXT,
+    contexts                TEXT,
+    pages                   TEXT,
+    link_click_info         TEXT,
+    feedback_info           TEXT,
+    output_metadata         TEXT,
+    imported_at             INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_uuid  ON interactions(session_uuid);
+CREATE INDEX IF NOT EXISTS idx_timestamp     ON interactions(timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_type          ON interactions(main_interaction_type);
+"#;
+
+fn open_db(path: &str) -> Result<Connection, String> {
+    let conn = Connection::open(path).map_err(|e| format!("Cannot open DB: {e}"))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+        .map_err(|e| format!("PRAGMA error: {e}"))?;
+    conn.execute_batch(DB_SCHEMA)
+        .map_err(|e| format!("Schema error: {e}"))?;
+    Ok(conn)
+}
+
+/// Convert MM/DD/YYYY HH:MM:SS to ISO-8601 (YYYY-MM-DDTHH:MM:SS)
+fn parse_ts(s: &str) -> String {
+    // expected: "03/25/2026 09:30:22"
+    let s = s.trim();
+    if s.len() >= 19 {
+        let parts: Vec<&str> = s.splitn(2, ' ').collect();
+        if parts.len() == 2 {
+            let date_parts: Vec<&str> = parts[0].split('/').collect();
+            if date_parts.len() == 3 {
+                return format!(
+                    "{}-{}-{}T{}",
+                    date_parts[2], date_parts[0], date_parts[1], parts[1]
+                );
+            }
+        }
+    }
+    s.to_string()
+}
+
+fn purge_old(conn: &Connection) -> i64 {
+    // Keep 12 days of data
+    let cutoff = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        // 12 days in seconds
+        secs.saturating_sub(12 * 24 * 3600)
+    };
+    // timestamp_start stored as ISO text "YYYY-MM-DDTHH:MM:SS"
+    // We compare against an ISO cutoff string
+    let cutoff_dt = {
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(cutoff);
+        let secs = cutoff;
+        let s_secs = secs % 60;
+        let mins = secs / 60 % 60;
+        let hrs = secs / 3600 % 24;
+        let days_since_epoch = secs / 86400;
+        // Simple date calc from epoch
+        let mut year = 1970u32;
+        let mut rem_days = days_since_epoch as u32;
+        loop {
+            let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+            if rem_days < days_in_year { break; }
+            rem_days -= days_in_year;
+            year += 1;
+        }
+        let month_days: [u32; 12] = [31, if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let mut month = 1u32;
+        for &d in &month_days {
+            if rem_days < d { break; }
+            rem_days -= d;
+            month += 1;
+        }
+        let day = rem_days + 1;
+        let _ = t; // suppress unused
+        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", year, month, day, hrs, mins, s_secs)
+    };
+    conn.execute(
+        "DELETE FROM interactions WHERE timestamp_start < ?1",
+        params![cutoff_dt],
+    )
+    .unwrap_or(0) as i64
+}
+
+// ── Conversation Tauri commands ───────────────────────────────────────────────
+
+#[tauri::command]
+fn set_db_path(
+    db_state: State<SharedDbState>,
+    path: String,
+) -> Result<(), String> {
+    let conn = open_db(&path)?;
+    let mut state = db_state.lock().map_err(|e| e.to_string())?;
+    state.conn = Some(conn);
+    state.path = Some(path);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_db_path(db_state: State<SharedDbState>) -> Option<String> {
+    db_state.lock().ok().and_then(|s| s.path.clone())
+}
+
+#[tauri::command]
+async fn select_csv_files(app: AppHandle) -> FileDialogResult {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Vec<String>>();
+
+    app.dialog()
+        .file()
+        .add_filter("CSV files", &["csv"])
+        .pick_files(move |paths| {
+            let result = paths
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|p| p.into_path().ok())
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            let _ = tx.send(result);
+        });
+
+    match rx.await {
+        Ok(paths) if !paths.is_empty() => FileDialogResult { ok: true, canceled: false, paths },
+        _ => FileDialogResult { ok: false, canceled: true, paths: vec![] },
+    }
+}
+
+#[tauri::command]
+async fn select_db_save_path(app: AppHandle) -> FileSaveResult {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+
+    app.dialog()
+        .file()
+        .add_filter("SQLite Database", &["db"])
+        .set_file_name("conversations.db")
+        .save_file(move |path| {
+            let p = path.and_then(|fp| fp.into_path().ok());
+            let _ = tx.send(p);
+        });
+
+    match rx.await.ok().flatten() {
+        Some(path) => FileSaveResult {
+            ok: true,
+            canceled: false,
+            path: Some(path.to_string_lossy().into_owned()),
+        },
+        None => FileSaveResult { ok: false, canceled: true, path: None },
+    }
+}
+
+#[tauri::command]
+async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+
+    app.dialog()
+        .file()
+        .add_filter("SQLite Database", &["db"])
+        .pick_file(move |path| {
+            let p = path.and_then(|fp| fp.into_path().ok());
+            let _ = tx.send(p);
+        });
+
+    match rx.await.ok().flatten() {
+        Some(path) => FileSaveResult {
+            ok: true,
+            canceled: false,
+            path: Some(path.to_string_lossy().into_owned()),
+        },
+        None => FileSaveResult { ok: false, canceled: true, path: None },
+    }
+}
+
+#[tauri::command]
+fn import_interactions_csv(
+    db_state: State<SharedDbState>,
+    file_path: String,
+) -> Result<ImportResult, String> {
+    let mut state = db_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.conn.as_mut().ok_or("No database open. Set a database path first.")?;
+
+    let file = fs::File::open(&file_path).map_err(|e| format!("Cannot open CSV: {e}"))?;
+    let buf = std::io::BufReader::with_capacity(4 * 1024 * 1024, file);
+
+    let mut rdr = csv::ReaderBuilder::new()
+        .delimiter(b'|')
+        .quoting(true)
+        .double_quote(true)
+        .flexible(true)
+        .from_reader(buf);
+
+    // Build column index map from header
+    let headers = rdr.headers().map_err(|e| format!("Header error: {e}"))?.clone();
+    let col = |name: &str| -> Option<usize> {
+        headers.iter().position(|h| h.eq_ignore_ascii_case(name))
+    };
+
+    let c_log_id          = col("LogId");
+    let c_uuid            = col("InteractionUuid");
+    let c_session         = col("SessionUuid");
+    let c_ts_start        = col("TimestampStart");
+    let c_ts_end          = col("TimestampEnd");
+    let c_culture         = col("Culture");
+    let c_main_type       = col("MainInteractionType");
+    let c_all_types       = col("AllInteractionTypes");
+    let c_value           = col("InteractionValue");
+    let c_output          = col("OutputText");
+    let c_article_ids     = col("ArticleIds");
+    let c_dialog_paths    = col("DialogPaths");
+    let c_tdialog_status  = col("TDialogStatus");
+    let c_recog_type      = col("RecognitionType");
+    let c_recog_quality   = col("RecognitionQuality");
+    let c_genai           = col("GenerativeAISources");
+    let c_articles        = col("Articles");
+    let c_faqs            = col("FaqsFound");
+    let c_contexts        = col("Contexts");
+    let c_pages           = col("Pages");
+    let c_link_click      = col("LinkclickInfo");
+    let c_feedback        = col("FeedbackInfo");
+    let c_output_meta     = col("OutputMetadata");
+
+    let now_secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let mut inserted: i64 = 0;
+    let mut skipped: i64 = 0;
+    let mut errors: Vec<String> = Vec::new();
+    let mut batch: Vec<csv::StringRecord> = Vec::with_capacity(1000);
+
+    let flush_batch = |conn: &mut Connection, batch: &[csv::StringRecord], now_secs: i64,
+        c_log_id: Option<usize>, c_uuid: Option<usize>, c_session: Option<usize>,
+        c_ts_start: Option<usize>, c_ts_end: Option<usize>, c_culture: Option<usize>,
+        c_main_type: Option<usize>, c_all_types: Option<usize>, c_value: Option<usize>,
+        c_output: Option<usize>, c_article_ids: Option<usize>, c_dialog_paths: Option<usize>,
+        c_tdialog_status: Option<usize>, c_recog_type: Option<usize>, c_recog_quality: Option<usize>,
+        c_genai: Option<usize>, c_articles: Option<usize>, c_faqs: Option<usize>,
+        c_contexts: Option<usize>, c_pages: Option<usize>, c_link_click: Option<usize>,
+        c_feedback: Option<usize>, c_output_meta: Option<usize>,
+        inserted: &mut i64, skipped: &mut i64, errors: &mut Vec<String>|
+    {
+        let tx = match conn.transaction() {
+            Ok(t) => t,
+            Err(e) => { errors.push(format!("Transaction error: {e}")); return; }
+        };
+        for record in batch {
+            let get_r = |idx: Option<usize>| -> &str {
+                idx.and_then(|i| record.get(i)).unwrap_or("")
+            };
+            let log_id_str = get_r(c_log_id);
+            let log_id: i64 = match log_id_str.parse() {
+                Ok(v) => v,
+                Err(_) => { *skipped += 1; continue; }
+            };
+            let ts_start = parse_ts(get_r(c_ts_start));
+            let quality: f64 = get_r(c_recog_quality).parse().unwrap_or(0.0);
+            let result = tx.execute(
+                r#"INSERT OR IGNORE INTO interactions (
+                    log_id, interaction_uuid, session_uuid,
+                    timestamp_start, timestamp_end, culture,
+                    main_interaction_type, all_interaction_types,
+                    interaction_value, output_text,
+                    article_ids, dialog_paths, tdialog_status,
+                    recognition_type, recognition_quality,
+                    generative_ai_sources, articles, faqs_found,
+                    contexts, pages, link_click_info, feedback_info,
+                    output_metadata, imported_at
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)"#,
+                params![
+                    log_id,
+                    get_r(c_uuid),
+                    get_r(c_session),
+                    ts_start,
+                    parse_ts(get_r(c_ts_end)),
+                    get_r(c_culture),
+                    get_r(c_main_type),
+                    get_r(c_all_types),
+                    get_r(c_value),
+                    get_r(c_output),
+                    get_r(c_article_ids),
+                    get_r(c_dialog_paths),
+                    get_r(c_tdialog_status),
+                    get_r(c_recog_type),
+                    quality,
+                    get_r(c_genai),
+                    get_r(c_articles),
+                    get_r(c_faqs),
+                    get_r(c_contexts),
+                    get_r(c_pages),
+                    get_r(c_link_click),
+                    get_r(c_feedback),
+                    get_r(c_output_meta),
+                    now_secs,
+                ],
+            );
+            match result {
+                Ok(1) => *inserted += 1,
+                Ok(_) => *skipped += 1,
+                Err(e) => errors.push(format!("Row {log_id}: {e}")),
+            }
+        }
+        let _ = tx.commit();
+    };
+
+    for result in rdr.records() {
+        match result {
+            Ok(record) => {
+                batch.push(record);
+                if batch.len() >= 1000 {
+                    flush_batch(conn, &batch, now_secs,
+                        c_log_id, c_uuid, c_session, c_ts_start, c_ts_end, c_culture,
+                        c_main_type, c_all_types, c_value, c_output, c_article_ids,
+                        c_dialog_paths, c_tdialog_status, c_recog_type, c_recog_quality,
+                        c_genai, c_articles, c_faqs, c_contexts, c_pages, c_link_click,
+                        c_feedback, c_output_meta,
+                        &mut inserted, &mut skipped, &mut errors);
+                    batch.clear();
+                }
+            }
+            Err(e) => {
+                errors.push(format!("CSV parse error: {e}"));
+            }
+        }
+    }
+    // Flush remaining
+    if !batch.is_empty() {
+        flush_batch(conn, &batch, now_secs,
+            c_log_id, c_uuid, c_session, c_ts_start, c_ts_end, c_culture,
+            c_main_type, c_all_types, c_value, c_output, c_article_ids,
+            c_dialog_paths, c_tdialog_status, c_recog_type, c_recog_quality,
+            c_genai, c_articles, c_faqs, c_contexts, c_pages, c_link_click,
+            c_feedback, c_output_meta,
+            &mut inserted, &mut skipped, &mut errors);
+    }
+
+    let purged = purge_old(conn);
+
+    Ok(ImportResult { inserted, skipped, purged, errors })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DateRange {
+    min: String,
+    max: String,
+}
+
+#[tauri::command]
+fn get_date_range(db_state: State<SharedDbState>) -> Result<DateRange, String> {
+    let state = db_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.conn.as_ref().ok_or("No database open.")?;
+    let result: (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT MIN(DATE(timestamp_start)), MAX(DATE(timestamp_start)) FROM interactions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(DateRange {
+        min: result.0.unwrap_or_default(),
+        max: result.1.unwrap_or_default(),
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSessionsArgs {
+    page: Option<i64>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    filter: Option<String>, // "all" | "genai" | "neg_feedback" | "low_recog"
+    query: Option<String>,
+    query_regex: Option<bool>,   // treat query as a regex
+    query_scope: Option<String>, // "both" | "user" | "bot"
+}
+
+#[tauri::command]
+fn get_sessions(
+    db_state: State<SharedDbState>,
+    args: GetSessionsArgs,
+) -> Result<SessionsPage, String> {
+    let state = db_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.conn.as_ref().ok_or("No database open.")?;
+
+    let page = args.page.unwrap_or(1).max(1);
+    let limit = 50i64;
+    let offset = (page - 1) * limit;
+
+    let filter = args.filter.as_deref().unwrap_or("all");
+    let query = args.query.as_deref().unwrap_or("").trim().to_string();
+    let query_regex = args.query_regex.unwrap_or(false);
+    let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
+
+    // Register a custom REGEXP function for this connection when regex mode is on
+    if query_regex && !query.is_empty() {
+        use regex::Regex;
+        use std::sync::Arc;
+        // Compile the regex once and share it across all row evaluations via Arc
+        let compiled = Arc::new(
+            Regex::new(&query).unwrap_or_else(|_| Regex::new("(?!)").unwrap())
+        );
+        conn.create_scalar_function(
+            "regexp",
+            2,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            move |ctx: &rusqlite::functions::Context<'_>| {
+                let text: String = ctx.get(1).unwrap_or_default();
+                Ok(compiled.is_match(&text) as i32)
+            },
+        ).ok();
+    }
+
+    // Build WHERE clauses
+    // Always exclude sessions that have no real user input
+    let mut conditions: Vec<String> = vec![
+        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
+         WHERE interaction_value != '' \
+           AND interaction_value NOT LIKE '#%#' \
+           AND LOWER(interaction_value) != 'continue' \
+           AND main_interaction_type NOT IN ('Event', 'LinkClick'))".to_string(),
+    ];
+    if filter == "genai" {
+        conditions.push(
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE main_interaction_type = 'GenerativeAI')".to_string(),
+        );
+    } else if filter == "neg_feedback" {
+        conditions.push(
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE feedback_info LIKE '%\"score\": -1%' OR feedback_info LIKE '%\"score\":-1%')".to_string(),
+        );
+    } else if filter == "low_recog" {
+        conditions.push(
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < 60)".to_string(),
+        );
+    }
+    if let Some(ref df) = args.date_from {
+        if !df.is_empty() {
+            conditions.push(format!("timestamp_start >= '{}'", df.replace('\'', "")));
+        }
+    }
+    if let Some(ref dt) = args.date_to {
+        if !dt.is_empty() {
+            conditions.push(format!("timestamp_start <= '{}'", dt.replace('\'', "")));
+        }
+    }
+    if !query.is_empty() {
+        let q = query.replace('\'', "''");
+        let cond = if query_regex {
+            match query_scope.as_str() {
+                "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', interaction_value))"),
+                "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', output_text))"),
+                _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', interaction_value) OR regexp('{q}', output_text))"),
+            }
+        } else {
+            match query_scope.as_str() {
+                "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE '%{q}%')"),
+                "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE '%{q}%')"),
+                _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE '%{q}%' OR output_text LIKE '%{q}%')"),
+            }
+        };
+        conditions.push(cond);
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    // Count total sessions
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT session_uuid) FROM interactions {where_clause}"
+    );
+    let total: i64 = conn.query_row(&count_sql, [], |row| row.get(0)).unwrap_or(0);
+
+    // Get session summaries - use inner query to build per-session aggregates
+    let sql = format!(
+        r#"SELECT
+            s.session_uuid,
+            MIN(s.timestamp_start) as first_ts,
+            MAX(s.timestamp_end) as last_ts,
+            COUNT(*) as cnt,
+            MAX(CASE WHEN s.main_interaction_type = 'GenerativeAI' THEN 1 ELSE 0 END) as has_gen_ai,
+            MIN(s.culture) as culture,
+            (SELECT interaction_value FROM interactions i2
+             WHERE i2.session_uuid = s.session_uuid
+               AND i2.interaction_value != ''
+               AND i2.interaction_value NOT LIKE '#%#'
+               AND LOWER(i2.interaction_value) != 'continue'
+               AND i2.main_interaction_type NOT IN ('Event', 'LinkClick')
+             ORDER BY i2.log_id ASC LIMIT 1) as preview,
+            MAX(CASE WHEN s.feedback_info LIKE '%"score": -1%'
+                      OR s.feedback_info LIKE '%"score":-1%' THEN 1 ELSE 0 END) as has_neg_feedback
+        FROM interactions s
+        {where_clause}
+        GROUP BY s.session_uuid
+        ORDER BY first_ts DESC
+        LIMIT {limit} OFFSET {offset}"#
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query error: {e}"))?;
+    let sessions = stmt
+        .query_map([], |row| {
+            Ok(SessionSummary {
+                session_uuid: row.get::<_, String>(0)?,
+                first_ts: row.get::<_, String>(1).unwrap_or_default(),
+                last_ts: row.get::<_, String>(2).unwrap_or_default(),
+                interaction_count: row.get::<_, i64>(3)?,
+                has_gen_ai: row.get::<_, i64>(4)? == 1,
+                culture: row.get::<_, String>(5).unwrap_or_default(),
+                user_message_preview: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                has_neg_feedback: row.get::<_, i64>(7).unwrap_or(0) == 1,
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+
+    Ok(SessionsPage { sessions, total, page })
+}
+
+#[tauri::command]
+fn get_session_interactions(
+    db_state: State<SharedDbState>,
+    session_uuid: String,
+) -> Result<Vec<InteractionRow>, String> {
+    let state = db_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.conn.as_ref().ok_or("No database open.")?;
+
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT
+                log_id, interaction_uuid, session_uuid,
+                timestamp_start, timestamp_end, culture,
+                main_interaction_type, all_interaction_types,
+                interaction_value, output_text,
+                article_ids, dialog_paths, tdialog_status,
+                recognition_type, recognition_quality,
+                generative_ai_sources, articles, faqs_found,
+                contexts, pages, link_click_info, feedback_info,
+                output_metadata
+            FROM interactions
+            WHERE session_uuid = ?1
+            ORDER BY log_id ASC"#,
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![session_uuid], |row| {
+            Ok(InteractionRow {
+                log_id:                  row.get(0)?,
+                interaction_uuid:        row.get::<_, String>(1).unwrap_or_default(),
+                session_uuid:            row.get::<_, String>(2).unwrap_or_default(),
+                timestamp_start:         row.get::<_, String>(3).unwrap_or_default(),
+                timestamp_end:           row.get::<_, String>(4).unwrap_or_default(),
+                culture:                 row.get::<_, String>(5).unwrap_or_default(),
+                main_interaction_type:   row.get::<_, String>(6).unwrap_or_default(),
+                all_interaction_types:   row.get::<_, String>(7).unwrap_or_default(),
+                interaction_value:       row.get::<_, String>(8).unwrap_or_default(),
+                output_text:             row.get::<_, String>(9).unwrap_or_default(),
+                article_ids:             row.get::<_, String>(10).unwrap_or_default(),
+                dialog_paths:            row.get::<_, String>(11).unwrap_or_default(),
+                tdialog_status:          row.get::<_, String>(12).unwrap_or_default(),
+                recognition_type:        row.get::<_, String>(13).unwrap_or_default(),
+                recognition_quality:     row.get::<_, f64>(14).unwrap_or(0.0),
+                generative_ai_sources:   row.get::<_, String>(15).unwrap_or_default(),
+                articles:                row.get::<_, String>(16).unwrap_or_default(),
+                faqs_found:              row.get::<_, String>(17).unwrap_or_default(),
+                contexts:                row.get::<_, String>(18).unwrap_or_default(),
+                pages:                   row.get::<_, String>(19).unwrap_or_default(),
+                link_click_info:         row.get::<_, String>(20).unwrap_or_default(),
+                feedback_info:           row.get::<_, String>(21).unwrap_or_default(),
+                output_metadata:         row.get::<_, String>(22).unwrap_or_default(),
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(rows)
+}
+
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -614,6 +1318,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Mutex::new(WatchState::default())))
+        .manage(Arc::new(Mutex::new(DbState::default())) as SharedDbState)
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -629,7 +1334,16 @@ pub fn run() {
             open_url,
             select_data_folder,
             check_for_updates,
-            get_version
+            get_version,
+            set_db_path,
+            get_db_path,
+            select_csv_files,
+            select_db_save_path,
+            select_db_open_path,
+            import_interactions_csv,
+            get_sessions,
+            get_session_interactions,
+            get_date_range,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

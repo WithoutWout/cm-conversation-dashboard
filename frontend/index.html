@@ -1668,6 +1668,899 @@
       .flash-highlight {
         animation: flash-highlight-kf 1.2s ease;
       }
+
+      /* === VIEW SWITCHER === */
+      #view-content {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        overflow: hidden;
+      }
+      #view-content.hidden {
+        display: none;
+      }
+      .view-switcher {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+        margin: 0 4px;
+        padding: 0 4px;
+        align-self: stretch;
+      }
+      .view-btn {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.75rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        margin-bottom: -1px;
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .view-btn:hover {
+        color: var(--text);
+      }
+      .view-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+
+      /* === CONVERSATIONS VIEW === */
+      #view-conversations {
+        display: none;
+        flex: 1;
+        overflow: hidden;
+        flex-direction: column;
+      }
+      #view-conversations.active {
+        display: flex;
+      }
+      .conv-toolbar {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .conv-db-status {
+        font-size: 0.72rem;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .conv-db-status.connected {
+        color: var(--green);
+      }
+      .conv-db-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex-shrink: 0;
+      }
+      .conv-db-status.connected .conv-db-dot {
+        background: var(--green);
+      }
+      .conv-import-btn {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.73rem;
+        padding: 5px 11px;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .conv-import-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .conv-import-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .conv-drag-hint {
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      .conv-drag-hint.dragging {
+        color: var(--accent);
+      }
+      .conv-spacer {
+        flex: 1;
+      }
+      .conv-layout {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      /* === SESSION SIDEBAR === */
+      .conv-sidebar {
+        flex: 2 1 0;
+        min-width: 260px;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--surface);
+      }
+      .conv-sidebar-header {
+        padding: 10px 14px 0;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        flex-shrink: 0;
+      }
+      .conv-search-row {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+      }
+      .conv-search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+      }
+      .conv-search-wrap svg {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+        pointer-events: none;
+      }
+      .conv-search {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 6px 10px 6px 30px;
+        font-size: 0.8rem;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .conv-search:focus {
+        border-color: var(--accent);
+      }
+      .conv-search::placeholder {
+        color: var(--muted);
+      }
+      .conv-scope-toggle {
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .conv-scope-btn {
+        background: var(--bg);
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.65rem;
+        font-weight: 600;
+        padding: 4px 6px;
+        line-height: 1;
+        transition: all 0.15s;
+        border-right: 1px solid var(--border);
+      }
+      .conv-scope-btn:last-child {
+        border-right: none;
+      }
+      .conv-scope-btn:hover {
+        color: var(--text);
+      }
+      .conv-scope-btn.active {
+        background: rgba(124, 106, 247, 0.18);
+        color: var(--accent);
+      }
+      .conv-date-wrap {
+        position: relative;
+      }
+      .conv-date-range-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.75rem;
+        padding: 5px 10px;
+        cursor: pointer;
+        width: 100%;
+        box-sizing: border-box;
+        user-select: none;
+        transition: border-color 0.15s;
+      }
+      .conv-date-range-btn:hover,
+      .conv-date-range-btn.active {
+        border-color: var(--accent);
+      }
+      .conv-date-range-label {
+        flex: 1;
+        font-size: 0.72rem;
+        color: var(--text);
+      }
+      .range-clear {
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1;
+        padding: 0 2px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+      .range-clear:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
+      .conv-cal-popup {
+        position: absolute;
+        left: 0;
+        top: calc(100% + 4px);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
+        z-index: 200;
+        padding: 10px;
+        width: 234px;
+        display: none;
+      }
+      .conv-cal-popup.open {
+        display: block;
+      }
+      .cal-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .cal-nav button {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--text);
+        cursor: pointer;
+        padding: 1px 8px;
+        font-size: 0.85rem;
+      }
+      .cal-nav button:disabled {
+        opacity: 0.25;
+        cursor: default;
+      }
+      .cal-nav span {
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 1px;
+      }
+      .cal-dow {
+        font-size: 0.58rem;
+        color: var(--muted);
+        text-align: center;
+        padding: 2px 0;
+      }
+      .cal-day {
+        font-size: 0.67rem;
+        text-align: center;
+        padding: 4px 1px;
+        border-radius: 3px;
+        cursor: pointer;
+        color: var(--text);
+        transition: background 0.1s;
+      }
+      .cal-day:hover:not(.disabled) {
+        background: var(--surface2);
+      }
+      .cal-day.disabled {
+        color: var(--muted);
+        opacity: 0.3;
+        cursor: default;
+        pointer-events: none;
+      }
+      .cal-day.outside {
+        opacity: 0.22;
+      }
+      .cal-day.today {
+        font-weight: 700;
+      }
+      .cal-day.range-start,
+      .cal-day.range-end {
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      .cal-day.in-range {
+        background: color-mix(in srgb, var(--accent) 18%, transparent);
+        border-radius: 0;
+      }
+      .cal-hint {
+        font-size: 0.62rem;
+        color: var(--muted);
+        text-align: center;
+        margin: 5px 0 3px;
+        min-height: 1.1em;
+      }
+      .cal-footer {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 6px;
+      }
+      .cal-footer button {
+        font-size: 0.68rem;
+        padding: 3px 10px;
+        border-radius: 5px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+      }
+      .cal-footer button:hover {
+        color: var(--text);
+      }
+      .conv-filter-pills {
+        display: flex;
+        gap: 4px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+      .conv-pill {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.68rem;
+        padding: 2px 9px;
+        transition: all 0.15s;
+      }
+      .conv-pill:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .conv-pill.active {
+        background: rgba(124, 106, 247, 0.15);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .sessions-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 0;
+      }
+      .session-card {
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: background 0.1s;
+        user-select: none;
+      }
+      .session-card:hover {
+        background: var(--surface2);
+      }
+      .session-card.active {
+        background: rgba(124, 106, 247, 0.12);
+        border-left: 2px solid var(--accent);
+      }
+      .session-card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 3px;
+      }
+      .session-uuid {
+        font-family: monospace;
+        font-size: 0.65rem;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .session-badges {
+        display: flex;
+        gap: 3px;
+        flex-shrink: 0;
+      }
+      .session-badge {
+        font-size: 0.6rem;
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-weight: 700;
+      }
+      .session-badge.genai {
+        background: rgba(45, 212, 191, 0.18);
+        color: var(--teal);
+      }
+      .session-badge.neg-feedback {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--red);
+        font-size: 0.8rem;
+      }
+      .session-badge.lang {
+        background: var(--bg);
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+      .session-preview {
+        font-size: 0.75rem;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-bottom: 3px;
+        line-height: 1.4;
+      }
+      .session-meta {
+        font-size: 0.65rem;
+        color: var(--muted);
+        display: flex;
+        gap: 8px;
+      }
+      .sessions-pagination {
+        padding: 8px 20px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .sessions-empty {
+        padding: 32px 18px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.8rem;
+        line-height: 1.6;
+      }
+
+      /* === CHAT MAIN === */
+      .conv-main {
+        flex: 3 1 0;
+        min-width: 280px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .chat-header {
+        padding: 10px 20px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+        min-height: 46px;
+      }
+      .chat-session-info {
+        font-family: monospace;
+        font-size: 0.68rem;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .chat-meta {
+        font-size: 0.68rem;
+        color: var(--muted);
+      }
+      .chat-spacer {
+        flex: 1;
+      }
+      .chat-filter-row {
+        padding: 7px 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        background: var(--surface);
+      }
+      .chat-filter-pills {
+        display: flex;
+        gap: 4px;
+      }
+      .chat-search-wrap {
+        position: relative;
+        flex: 1;
+        max-width: 280px;
+      }
+      .chat-search-wrap svg {
+        position: absolute;
+        left: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+        pointer-events: none;
+      }
+      .chat-search {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 5px 9px 5px 27px;
+        font-size: 0.78rem;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .chat-search:focus {
+        border-color: var(--accent);
+      }
+      .chat-search::placeholder {
+        color: var(--muted);
+      }
+      .chat-thread {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .chat-empty {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 0.85rem;
+        text-align: center;
+        padding: 40px;
+        line-height: 1.7;
+      }
+      /* Bot group */
+      .bot-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .bot-group-header {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 2px;
+        padding-left: 2px;
+      }
+      .bot-avatar {
+        width: 26px;
+        height: 26px;
+        background: var(--accent);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.6rem;
+        font-weight: 800;
+        color: #fff;
+        flex-shrink: 0;
+      }
+      .bot-avatar.genai {
+        background: var(--teal);
+      }
+      .bot-name {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .bot-name-badge {
+        font-size: 0.6rem;
+        background: rgba(45, 212, 191, 0.15);
+        color: var(--teal);
+        border: 1px solid rgba(45, 212, 191, 0.3);
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-weight: 700;
+        margin-left: 4px;
+      }
+      /* Bubble base */
+      .bubble {
+        max-width: 72%;
+        padding: 10px 14px;
+        line-height: 1.55;
+        font-size: 0.84rem;
+        word-break: break-word;
+        position: relative;
+        cursor: pointer;
+        transition: box-shadow 0.15s;
+      }
+      .bubble:hover {
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+      }
+      /* Bot bubble */
+      .bubble.bot {
+        background: #2a2d3e;
+        border: 1px solid var(--border);
+        border-radius: 16px 16px 16px 4px;
+        color: var(--text);
+        align-self: flex-start;
+      }
+      /* GenAI bubble */
+      .bubble.genai {
+        background: rgba(45, 212, 191, 0.07);
+        border: 1px solid rgba(45, 212, 191, 0.25);
+        border-radius: 16px 16px 16px 4px;
+        color: var(--text);
+        align-self: flex-start;
+      }
+      /* User bubble */
+      .user-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        margin-bottom: 8px;
+      }
+      .user-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--blue);
+        padding-right: 4px;
+      }
+      .bubble.user {
+        background: rgba(96, 165, 250, 0.14);
+        border: 1px solid rgba(96, 165, 250, 0.3);
+        border-radius: 16px 16px 4px 16px;
+        color: var(--text);
+        align-self: flex-end;
+      }
+      /* System pill */
+      .system-pill {
+        align-self: center;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--muted);
+        font-size: 0.67rem;
+        padding: 2px 10px;
+        margin: 4px 0;
+      }
+      /* Bubble detail expansion */
+      .bubble-detail {
+        display: none;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      .bubble-detail.open {
+        display: block;
+      }
+      .bubble-detail-row {
+        margin-bottom: 5px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .bubble-detail-label {
+        font-size: 0.67rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        font-weight: 600;
+        margin-bottom: 2px;
+      }
+      .bubble-link-btn {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--accent);
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 2px 8px;
+        transition: all 0.12s;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .bubble-link-btn:hover {
+        border-color: var(--accent);
+        background: rgba(124, 106, 247, 0.1);
+      }
+      .bubble-expand-hint {
+        position: absolute;
+        bottom: 6px;
+        right: 10px;
+        font-size: 0.6rem;
+        color: var(--muted);
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      .bubble .chat-link {
+        color: var(--accent);
+        text-decoration: underline;
+        word-break: break-all;
+      }
+      .bubble .chat-link:hover {
+        opacity: 0.8;
+      }
+      .dialog-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 8px;
+      }
+      .dialog-option-chip {
+        display: inline-block;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 3px 10px;
+        font-size: 0.73rem;
+        cursor: default;
+        pointer-events: none;
+      }
+      .cta-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 8px;
+      }
+      .cta-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 4px 11px;
+        font-size: 0.73rem;
+        font-family: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      .cta-btn:hover {
+        opacity: 0.85;
+      }
+      /* Settings modal — wider so all sections fit */
+      #settingsModal .modal-box {
+        width: 580px;
+      }
+      /* Settings tabs */
+      .settings-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        padding: 0 18px;
+        margin-bottom: 0;
+      }
+      .settings-tab-btn {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-family: inherit;
+        font-weight: 500;
+        padding: 8px 14px;
+        margin-bottom: -1px;
+        transition: all 0.15s;
+      }
+      .settings-tab-btn:hover {
+        color: var(--text);
+      }
+      .settings-tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .settings-tab-panel {
+        display: none;
+      }
+      .settings-tab-panel.active {
+        display: block;
+      }
+      .bubble-ts {
+        font-size: 0.63rem;
+        color: var(--muted);
+        padding: 0 2px;
+        align-self: flex-end;
+        margin-top: -2px;
+      }
+
+      /* === DB SETUP MODAL === */
+      #dbSetupModal .modal-box {
+        max-width: 440px;
+      }
+      .db-setup-options {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .db-setup-option {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        cursor: pointer;
+        transition: all 0.15s;
+        text-align: left;
+      }
+      .db-setup-option:hover {
+        border-color: var(--accent);
+        background: rgba(124, 106, 247, 0.06);
+      }
+      .db-setup-option-title {
+        font-size: 0.84rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 3px;
+      }
+      .db-setup-option-desc {
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
+      /* Import toast */
+      .import-toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 16px;
+        font-size: 0.78rem;
+        color: var(--text);
+        z-index: 500;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        max-width: 360px;
+        animation: toast-in 0.25s ease;
+      }
+      .import-toast.success {
+        border-color: var(--green);
+      }
+      .import-toast.error {
+        border-color: var(--red);
+      }
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* Highlight search matches in chat */
+      .chat-thread mark {
+        background: rgba(124, 106, 247, 0.35);
+        color: inherit;
+        border-radius: 2px;
+      }
     </style>
     <script src="vendor/vis-network.min.js"></script>
   </head>
@@ -1693,6 +2586,47 @@
           <span class="brand-name">Conversational AI Cloud</span>
           <span class="brand-sub">Content Dashboard</span>
         </div>
+      </div>
+      <div class="view-switcher">
+        <button
+          class="view-btn active"
+          id="viewBtnContent"
+          onclick="switchView('content')"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+          </svg>
+          Content
+        </button>
+        <button
+          class="view-btn"
+          id="viewBtnConversations"
+          onclick="switchView('conversations')"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+            />
+          </svg>
+          Conversations
+        </button>
       </div>
       <div class="header-files" id="fileNames"></div>
       <button class="icon-btn" id="refreshBtn" title="Refresh data">
@@ -1745,139 +2679,334 @@
       </button>
     </header>
 
-    <!-- GLOBAL SEARCH -->
-    <div class="global-search-bar">
-      <div class="search-row">
-        <div class="search-wrap-global">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            id="g-search"
-            type="text"
-            placeholder="Search articles, dialogs, responses, IDs…"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button class="clear-btn" id="clearSearch">&#x2715;</button>
-        </div>
-        <div class="search-opts">
-          <button
-            class="sopt"
-            id="opt-case"
-            title="Case sensitive"
-            data-tooltip="Match case (Aa)"
-          >
-            Aa
-          </button>
-          <div class="sopt-sep"></div>
-          <button
-            class="sopt"
-            id="opt-word"
-            title="Whole word"
-            data-tooltip="Whole word only (\b)"
-          >
-            \b
-          </button>
-          <div class="sopt-sep"></div>
-          <button
-            class="sopt"
-            id="opt-regex"
-            title="Regular expression"
-            data-tooltip="Use regular expression (.*)"
-          >
-            .*
-          </button>
-          <div class="sopt-sep"></div>
-          <button
-            class="sopt on"
-            id="opt-content"
-            title="Responses only"
-            data-tooltip="Responses only — ignore IDs, titles &amp; entities"
-          >
-            &#xAC;T
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="app-loading-overlay" id="appLoadingOverlay">
-      <div class="app-loading-card">
-        <div class="spinner"></div>
-        <div class="app-loading-copy">
-          <span class="app-loading-title">Refreshing dashboard</span>
-          <span class="app-loading-text" id="appLoadingText"
-            >Loading export files…</span
-          >
-        </div>
-      </div>
-    </div>
-
-    <!-- TABS -->
-    <div class="tab-bar">
-      <button class="tab active" data-tab="all">
-        <div class="tab-top">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          All Results <span class="tab-badge" id="tab-all-count">--</span>
-        </div>
-        <div class="tab-sub">
-          <span class="ts-val c-blue" id="all-stat-articles">--</span
-          ><span class="ts-lbl"> art</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-accent" id="all-stat-dialogs">--</span
-          ><span class="ts-lbl"> dlg</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-teal" id="all-stat-tdialogs">--</span
-          ><span class="ts-lbl"> t.dlg</span>
-        </div>
-        <span id="all-stat-total" hidden>--</span>
-      </button>
-      <button class="tab" data-tab="articles">
-        <div class="tab-top">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path
-              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+    <div id="view-content">
+      <!-- GLOBAL SEARCH -->
+      <div class="global-search-bar">
+        <div class="search-row">
+          <div class="search-wrap-global">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              id="g-search"
+              type="text"
+              placeholder="Search articles, dialogs, responses, IDs…"
+              autocomplete="off"
+              spellcheck="false"
             />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-          Articles <span class="tab-badge" id="tab-a-count">--</span>
+            <button class="clear-btn" id="clearSearch">&#x2715;</button>
+          </div>
+          <div class="search-opts">
+            <button
+              class="sopt"
+              id="opt-case"
+              title="Case sensitive"
+              data-tooltip="Match case (Aa)"
+            >
+              Aa
+            </button>
+            <div class="sopt-sep"></div>
+            <button
+              class="sopt"
+              id="opt-word"
+              title="Whole word"
+              data-tooltip="Whole word only (\b)"
+            >
+              \b
+            </button>
+            <div class="sopt-sep"></div>
+            <button
+              class="sopt"
+              id="opt-regex"
+              title="Regular expression"
+              data-tooltip="Use regular expression (.*)"
+            >
+              .*
+            </button>
+            <div class="sopt-sep"></div>
+            <button
+              class="sopt on"
+              id="opt-content"
+              title="Responses only"
+              data-tooltip="Responses only — ignore IDs, titles &amp; entities"
+            >
+              &#xAC;T
+            </button>
+          </div>
         </div>
-        <div class="tab-sub">
-          <span class="ts-val c-accent" id="a-stat-response">--</span
-          ><span class="ts-lbl"> resp</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-orange" id="a-stat-dialog">--</span
-          ><span class="ts-lbl"> dlg-lnk</span>
+      </div>
+
+      <div class="app-loading-overlay" id="appLoadingOverlay">
+        <div class="app-loading-card">
+          <div class="spinner"></div>
+          <div class="app-loading-copy">
+            <span class="app-loading-title">Refreshing dashboard</span>
+            <span class="app-loading-text" id="appLoadingText"
+              >Loading export files…</span
+            >
+          </div>
         </div>
-        <span id="a-stat-total" hidden>--</span>
-      </button>
-      <button class="tab" data-tab="dialogs">
-        <div class="tab-top">
+      </div>
+
+      <!-- TABS -->
+      <div class="tab-bar">
+        <button class="tab active" data-tab="all">
+          <div class="tab-top">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            All Results <span class="tab-badge" id="tab-all-count">--</span>
+          </div>
+          <div class="tab-sub">
+            <span class="ts-val c-blue" id="all-stat-articles">--</span
+            ><span class="ts-lbl"> art</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-accent" id="all-stat-dialogs">--</span
+            ><span class="ts-lbl"> dlg</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-teal" id="all-stat-tdialogs">--</span
+            ><span class="ts-lbl"> t.dlg</span>
+          </div>
+          <span id="all-stat-total" hidden>--</span>
+        </button>
+        <button class="tab" data-tab="articles">
+          <div class="tab-top">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+            Articles <span class="tab-badge" id="tab-a-count">--</span>
+          </div>
+          <div class="tab-sub">
+            <span class="ts-val c-accent" id="a-stat-response">--</span
+            ><span class="ts-lbl"> resp</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-orange" id="a-stat-dialog">--</span
+            ><span class="ts-lbl"> dlg-lnk</span>
+          </div>
+          <span id="a-stat-total" hidden>--</span>
+        </button>
+        <button class="tab" data-tab="dialogs">
+          <div class="tab-top">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+              />
+            </svg>
+            Dialogs <span class="tab-badge" id="tab-d-count">--</span>
+          </div>
+          <div class="tab-sub">
+            <span class="ts-val c-accent" id="d-stat-dialogs">--</span
+            ><span class="ts-lbl"> dlg</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-teal" id="d-stat-tdialogs">--</span
+            ><span class="ts-lbl"> t.dlg</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-blue" id="d-stat-nodes">--</span
+            ><span class="ts-lbl"> nodes</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-green" id="d-stat-recognition">--</span
+            ><span class="ts-lbl"> recog</span>
+          </div>
+        </button>
+        <button class="tab" data-tab="entities">
+          <div class="tab-top">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polygon
+                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+              />
+            </svg>
+            Entities <span class="tab-badge" id="tab-e-count">--</span>
+          </div>
+          <div class="tab-sub">
+            <span class="ts-val c-orange" id="e-stat-entities">--</span
+            ><span class="ts-lbl"> ent</span>
+            <span class="ts-sep">·</span>
+            <span class="ts-val c-muted" id="e-stat-words">--</span
+            ><span class="ts-lbl"> words</span>
+          </div>
+        </button>
+      </div>
+
+      <!-- ALL RESULTS PANEL -->
+      <div id="panel-all" class="panel active">
+        <div class="toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all">All</button>
+            <button class="pill" data-filter="articles">Articles</button>
+            <button class="pill" data-filter="dialogs">Dialogs</button>
+            <button class="pill" data-filter="tdialogs">
+              Transactional Dialogs
+            </button>
+          </div>
+          <div class="sort-wrap">
+            <span class="sort-label">Sort:</span>
+            <select class="sort-select" id="all-sort">
+              <option value="id-asc">ID &#8593;</option>
+              <option value="id-desc">ID &#8595;</option>
+              <option value="name-asc">Name A&#x2192;Z</option>
+              <option value="name-desc">Name Z&#x2192;A</option>
+            </select>
+            <span class="result-count" id="all-result-count"></span>
+          </div>
+        </div>
+        <div class="list-wrap" id="allList">
+          <div class="loading">
+            <div class="spinner"></div>
+            &nbsp;Loading…
+          </div>
+        </div>
+        <div class="pagination" id="all-pagination"></div>
+      </div>
+
+      <!-- ARTICLES PANEL -->
+      <div id="panel-articles" class="panel">
+        <div class="toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all">All</button>
+            <button class="pill" data-filter="answer">Has response</button>
+            <button class="pill" data-filter="dialog">Dialog link</button>
+          </div>
+          <div class="sort-wrap">
+            <span class="sort-label">Sort:</span>
+            <select class="sort-select" id="a-sort">
+              <option value="id-asc">ID &#8593;</option>
+              <option value="id-desc">ID &#8595;</option>
+              <option value="name-asc">Question A&#x2192;Z</option>
+              <option value="name-desc">Question Z&#x2192;A</option>
+            </select>
+            <span class="result-count" id="a-result-count"></span>
+          </div>
+        </div>
+        <div class="list-wrap" id="articleList">
+          <div class="loading">
+            <div class="spinner"></div>
+            &nbsp;Loading…
+          </div>
+        </div>
+        <div class="pagination" id="a-pagination"></div>
+      </div>
+
+      <!-- DIALOGS PANEL -->
+      <div id="panel-dialogs" class="panel">
+        <div class="toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all">All</button>
+            <button class="pill" data-filter="dialogs">Dialogs</button>
+            <button class="pill" data-filter="tdialogs">
+              Transactional Dialogs
+            </button>
+            <button class="pill" data-filter="recognition">
+              Has responses
+            </button>
+          </div>
+          <div class="sort-wrap">
+            <span class="sort-label">Sort:</span>
+            <select class="sort-select" id="d-sort">
+              <option value="id-asc">ID &#8593;</option>
+              <option value="id-desc">ID &#8595;</option>
+              <option value="name-asc">Name A&#x2192;Z</option>
+              <option value="name-desc">Name Z&#x2192;A</option>
+            </select>
+            <span class="result-count" id="d-result-count"></span>
+          </div>
+        </div>
+        <div class="list-wrap" id="dialogList">
+          <div class="loading">
+            <div class="spinner"></div>
+            &nbsp;Loading…
+          </div>
+        </div>
+        <div class="pagination" id="d-pagination"></div>
+      </div>
+
+      <!-- ENTITIES PANEL -->
+      <div id="panel-entities" class="panel">
+        <div class="toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all">All</button>
+            <button class="pill" data-filter="articles">
+              Used in articles
+            </button>
+            <button class="pill" data-filter="dialogs">Used in dialogs</button>
+          </div>
+          <div class="sort-wrap">
+            <span class="sort-label">Sort:</span>
+            <select class="sort-select" id="e-sort">
+              <option value="name-asc">Name A&#x2192;Z</option>
+              <option value="name-desc">Name Z&#x2192;A</option>
+              <option value="words-desc">Words &#8595;</option>
+              <option value="words-asc">Words &#8593;</option>
+            </select>
+            <span class="result-count" id="e-result-count"></span>
+          </div>
+        </div>
+        <div class="list-wrap" id="entityList">
+          <div class="loading">
+            <div class="spinner"></div>
+            &nbsp;Loading…
+          </div>
+        </div>
+        <div class="pagination" id="e-pagination"></div>
+      </div>
+    </div>
+    <!-- end #view-content -->
+
+    <!-- CONVERSATIONS VIEW -->
+    <div id="view-conversations">
+      <!-- Toolbar -->
+      <div class="conv-toolbar" id="convToolbar">
+        <div class="conv-db-status" id="convDbStatus">
+          <div class="conv-db-dot"></div>
+          <span id="convDbStatusText"
+            >No database — click Settings ⚙ to configure</span
+          >
+        </div>
+        <button
+          class="conv-import-btn"
+          id="convImportBtn"
+          disabled
+          title="Import InteractionLog CSV files"
+        >
           <svg
             width="12"
             height="12"
@@ -1886,168 +3015,197 @@
             stroke="currentColor"
             stroke-width="2"
           >
-            <path
-              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-            />
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          Dialogs <span class="tab-badge" id="tab-d-count">--</span>
+          Import CSV…
+        </button>
+        <span class="conv-drag-hint" id="convDragHint"></span>
+        <div class="conv-spacer"></div>
+      </div>
+
+      <!-- Two-column layout -->
+      <div class="conv-layout" id="convLayout">
+        <!-- Left: session list -->
+        <div class="conv-sidebar">
+          <div class="conv-sidebar-header">
+            <div class="conv-search-row">
+              <div class="conv-search-wrap">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="text"
+                  class="conv-search"
+                  id="convSearch"
+                  placeholder="Search conversations…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+              <button
+                class="sopt"
+                id="convOptRegex"
+                title="Regular expression"
+                data-tooltip="Use regular expression (.*)"
+              >
+                .*
+              </button>
+              <div class="conv-scope-toggle">
+                <button
+                  class="conv-scope-btn"
+                  data-conv-scope="user"
+                  title="Search user messages"
+                >
+                  U
+                </button>
+                <button
+                  class="conv-scope-btn"
+                  data-conv-scope="bot"
+                  title="Search bot messages"
+                >
+                  B
+                </button>
+              </div>
+            </div>
+            <div class="conv-date-wrap" id="convDateWrap">
+              <div
+                class="conv-date-range-btn"
+                id="convDateRangeBtn"
+                onclick="toggleDatePicker()"
+              >
+                <span style="font-size: 0.85rem">&#128197;</span>
+                <span class="conv-date-range-label" id="convDateRangeLabel"
+                  >All dates</span
+                >
+                <span
+                  class="range-clear"
+                  id="convDateRangeClear"
+                  onclick="clearDateRange();event.stopPropagation()"
+                  style="display: none"
+                  title="Clear date filter"
+                  >&#xd7;</span
+                >
+              </div>
+              <div class="conv-cal-popup" id="convCalPopup"></div>
+            </div>
+            <div class="conv-filter-pills">
+              <button class="conv-pill active" data-conv-filter="all">
+                All
+              </button>
+              <button class="conv-pill" data-conv-filter="genai">
+                GenAI only
+              </button>
+              <button class="conv-pill" data-conv-filter="neg_feedback">
+                &#x1F44E; Negative feedback
+              </button>
+              <button class="conv-pill" data-conv-filter="low_recog">
+                &#x26A0;&#xFE0F; Low recognition
+              </button>
+            </div>
+          </div>
+          <div class="sessions-list" id="sessionsList"></div>
+          <div class="sessions-pagination" id="sessionsPagination"></div>
         </div>
-        <div class="tab-sub">
-          <span class="ts-val c-accent" id="d-stat-dialogs">--</span
-          ><span class="ts-lbl"> dlg</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-teal" id="d-stat-tdialogs">--</span
-          ><span class="ts-lbl"> t.dlg</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-blue" id="d-stat-nodes">--</span
-          ><span class="ts-lbl"> nodes</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-green" id="d-stat-recognition">--</span
-          ><span class="ts-lbl"> recog</span>
+
+        <!-- Right: chat thread -->
+        <div class="conv-main">
+          <div class="chat-header" id="chatHeader">
+            <div
+              class="chat-empty"
+              style="flex: none; padding: 0; font-size: 0.78rem"
+            >
+              Select a conversation
+            </div>
+          </div>
+          <div class="chat-filter-row" id="chatFilterRow" style="display: none">
+            <div class="chat-filter-pills">
+              <button class="conv-pill active" data-chat-filter="all">
+                All
+              </button>
+              <button class="conv-pill" data-chat-filter="bot">Bot</button>
+              <button class="conv-pill" data-chat-filter="user">User</button>
+              <button class="conv-pill" data-chat-filter="genai">GenAI</button>
+            </div>
+            <div class="chat-spacer"></div>
+            <div class="chat-search-wrap">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                class="chat-search"
+                id="chatSearch"
+                placeholder="Search in conversation…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+          </div>
+          <div class="chat-thread" id="chatThread">
+            <div class="chat-empty">
+              No conversation selected.<br />Choose one from the list on the
+              left.
+            </div>
+          </div>
         </div>
-      </button>
-      <button class="tab" data-tab="entities">
-        <div class="tab-top">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+      </div>
+    </div>
+    <!-- end #view-conversations -->
+
+    <!-- DB SETUP MODAL -->
+    <div class="modal-overlay" id="dbSetupModal">
+      <div class="modal-box" style="max-width: 440px">
+        <div class="modal-header">
+          <h3>Conversations Database</h3>
+          <button class="close-btn" id="closeDbSetupModal">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <p
+            style="
+              font-size: 0.82rem;
+              color: var(--muted);
+              margin-bottom: 4px;
+              line-height: 1.6;
+            "
           >
-            <polygon
-              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
-            />
-          </svg>
-          Entities <span class="tab-badge" id="tab-e-count">--</span>
-        </div>
-        <div class="tab-sub">
-          <span class="ts-val c-orange" id="e-stat-entities">--</span
-          ><span class="ts-lbl"> ent</span>
-          <span class="ts-sep">·</span>
-          <span class="ts-val c-muted" id="e-stat-words">--</span
-          ><span class="ts-lbl"> words</span>
-        </div>
-      </button>
-    </div>
-
-    <!-- ALL RESULTS PANEL -->
-    <div id="panel-all" class="panel active">
-      <div class="toolbar">
-        <div class="filter-pills">
-          <button class="pill active" data-filter="all">All</button>
-          <button class="pill" data-filter="articles">Articles</button>
-          <button class="pill" data-filter="dialogs">Dialogs</button>
-          <button class="pill" data-filter="tdialogs">
-            Transactional Dialogs
-          </button>
-        </div>
-        <div class="sort-wrap">
-          <span class="sort-label">Sort:</span>
-          <select class="sort-select" id="all-sort">
-            <option value="id-asc">ID &#8593;</option>
-            <option value="id-desc">ID &#8595;</option>
-            <option value="name-asc">Name A&#x2192;Z</option>
-            <option value="name-desc">Name Z&#x2192;A</option>
-          </select>
-          <span class="result-count" id="all-result-count"></span>
+            The Conversations view stores imported interaction data in a local
+            SQLite database. Choose a location for this file — it can be on a
+            network share so multiple users can access the same data.
+          </p>
+          <div class="db-setup-options">
+            <button class="db-setup-option" id="dbSetupCreateBtn">
+              <div class="db-setup-option-title">Create new database…</div>
+              <div class="db-setup-option-desc">
+                Choose a folder and filename to create a fresh database.
+              </div>
+            </button>
+            <button class="db-setup-option" id="dbSetupOpenBtn">
+              <div class="db-setup-option-title">Open existing database…</div>
+              <div class="db-setup-option-desc">
+                Connect to an existing conversations.db file.
+              </div>
+            </button>
+          </div>
         </div>
       </div>
-      <div class="list-wrap" id="allList">
-        <div class="loading">
-          <div class="spinner"></div>
-          &nbsp;Loading…
-        </div>
-      </div>
-      <div class="pagination" id="all-pagination"></div>
-    </div>
-
-    <!-- ARTICLES PANEL -->
-    <div id="panel-articles" class="panel">
-      <div class="toolbar">
-        <div class="filter-pills">
-          <button class="pill active" data-filter="all">All</button>
-          <button class="pill" data-filter="answer">Has response</button>
-          <button class="pill" data-filter="dialog">Dialog link</button>
-        </div>
-        <div class="sort-wrap">
-          <span class="sort-label">Sort:</span>
-          <select class="sort-select" id="a-sort">
-            <option value="id-asc">ID &#8593;</option>
-            <option value="id-desc">ID &#8595;</option>
-            <option value="name-asc">Question A&#x2192;Z</option>
-            <option value="name-desc">Question Z&#x2192;A</option>
-          </select>
-          <span class="result-count" id="a-result-count"></span>
-        </div>
-      </div>
-      <div class="list-wrap" id="articleList">
-        <div class="loading">
-          <div class="spinner"></div>
-          &nbsp;Loading…
-        </div>
-      </div>
-      <div class="pagination" id="a-pagination"></div>
-    </div>
-
-    <!-- DIALOGS PANEL -->
-    <div id="panel-dialogs" class="panel">
-      <div class="toolbar">
-        <div class="filter-pills">
-          <button class="pill active" data-filter="all">All</button>
-          <button class="pill" data-filter="dialogs">Dialogs</button>
-          <button class="pill" data-filter="tdialogs">
-            Transactional Dialogs
-          </button>
-          <button class="pill" data-filter="recognition">Has responses</button>
-        </div>
-        <div class="sort-wrap">
-          <span class="sort-label">Sort:</span>
-          <select class="sort-select" id="d-sort">
-            <option value="id-asc">ID &#8593;</option>
-            <option value="id-desc">ID &#8595;</option>
-            <option value="name-asc">Name A&#x2192;Z</option>
-            <option value="name-desc">Name Z&#x2192;A</option>
-          </select>
-          <span class="result-count" id="d-result-count"></span>
-        </div>
-      </div>
-      <div class="list-wrap" id="dialogList">
-        <div class="loading">
-          <div class="spinner"></div>
-          &nbsp;Loading…
-        </div>
-      </div>
-      <div class="pagination" id="d-pagination"></div>
-    </div>
-
-    <!-- ENTITIES PANEL -->
-    <div id="panel-entities" class="panel">
-      <div class="toolbar">
-        <div class="filter-pills">
-          <button class="pill active" data-filter="all">All</button>
-          <button class="pill" data-filter="articles">Used in articles</button>
-          <button class="pill" data-filter="dialogs">Used in dialogs</button>
-        </div>
-        <div class="sort-wrap">
-          <span class="sort-label">Sort:</span>
-          <select class="sort-select" id="e-sort">
-            <option value="name-asc">Name A&#x2192;Z</option>
-            <option value="name-desc">Name Z&#x2192;A</option>
-            <option value="words-desc">Words &#8595;</option>
-            <option value="words-asc">Words &#8593;</option>
-          </select>
-          <span class="result-count" id="e-result-count"></span>
-        </div>
-      </div>
-      <div class="list-wrap" id="entityList">
-        <div class="loading">
-          <div class="spinner"></div>
-          &nbsp;Loading…
-        </div>
-      </div>
-      <div class="pagination" id="e-pagination"></div>
     </div>
 
     <!-- ENTITY INFO MODAL -->
@@ -2097,100 +3255,135 @@
           <h3>Settings</h3>
           <button class="close-btn" id="closeSettings">&#x2715;</button>
         </div>
-        <div class="modal-body">
-          <label for="setting-base-url">CM.com Context URL</label>
-          <input
-            id="setting-base-url"
-            type="text"
-            placeholder="https://www.cm.com/en-gb/app/aicloud/{tenantId}/{org}/{channel}/{culture}"
-            autocomplete="off"
-          />
-          <p class="hint">
-            The base URL up to (and including) the culture segment of your AI
-            Cloud environment. Links are generated by appending the item path.
-          </p>
-          <p class="hint">Article: <code>{contextUrl}/articles/{id}</code></p>
-          <p class="hint">
-            Dialog:&nbsp; <code>{contextUrl}/dialogs/{id}</code>
-          </p>
-          <div style="margin-top: 14px">
-            <label>Open CM.com links</label>
-            <div class="radio-group">
-              <label class="radio-option"
-                ><input type="radio" name="open-mode" value="popup" /> In a
-                popup window</label
-              >
-              <label class="radio-option"
-                ><input type="radio" name="open-mode" value="browser" /> In
-                default browser</label
-              >
-            </div>
-          </div>
-          <div
-            style="
-              margin-top: 14px;
-              padding-top: 14px;
-              border-top: 1px solid var(--border);
-            "
-          >
-            <label>Data Folder</label>
-            <p class="hint" style="margin-bottom: 8px">
-              Select the folder that contains your CM.com export files. The
-              dashboard automatically uses the newest matching file for each
-              supported source and keeps watching the folder for updates.
+        <div class="settings-tabs">
+          <button class="settings-tab-btn active" data-settings-tab="content">
+            Content
+          </button>
+          <button class="settings-tab-btn" data-settings-tab="conversations">
+            Conversations
+          </button>
+        </div>
+        <div
+          class="modal-body"
+          style="max-height: calc(90vh - 160px); overflow-y: auto"
+        >
+          <!-- TAB: Content -->
+          <div class="settings-tab-panel active" id="settings-panel-content">
+            <label for="setting-base-url">CM.com Context URL</label>
+            <input
+              id="setting-base-url"
+              type="text"
+              placeholder="https://www.cm.com/en-gb/app/aicloud/{tenantId}/{org}/{channel}/{culture}"
+              autocomplete="off"
+            />
+            <p class="hint">
+              The base URL up to (and including) the culture segment of your AI
+              Cloud environment. Links are generated by appending the item path.
             </p>
-            <div style="display: flex; gap: 8px">
-              <button class="btn-secondary" id="selectDataFolderBtn">
-                Select Data Folder…
-              </button>
-              <button class="btn-secondary" id="refreshDataBtn">
-                Refresh Data
-              </button>
+            <p class="hint">Article: <code>{contextUrl}/articles/{id}</code></p>
+            <p class="hint">
+              Dialog:&nbsp; <code>{contextUrl}/dialogs/{id}</code>
+            </p>
+            <div style="margin-top: 14px">
+              <label>Open CM.com links</label>
+              <div class="radio-group">
+                <label class="radio-option"
+                  ><input type="radio" name="open-mode" value="popup" /> In a
+                  popup window</label
+                >
+                <label class="radio-option"
+                  ><input type="radio" name="open-mode" value="browser" /> In
+                  default browser</label
+                >
+              </div>
             </div>
-            <p
-              class="hint"
-              id="dataFolderCurrent"
-              style="margin-top: 8px; min-height: 1.2em"
-            ></p>
-            <p
-              class="hint"
-              id="dataFolderDetails"
-              style="margin-top: 4px; min-height: 1.2em"
-            ></p>
-            <p
-              class="hint"
-              id="dataFolderFeedback"
-              style="margin-top: 8px; min-height: 1.2em"
-            ></p>
-          </div>
-          <div
-            style="
-              margin-top: 14px;
-              padding-top: 14px;
-              border-top: 1px solid var(--border);
-            "
-          >
-            <label>App Updates</label>
             <div
               style="
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                margin-top: 6px;
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
               "
             >
-              <button class="btn-secondary" id="checkUpdateBtn">
-                Check for updates
-              </button>
-              <span
+              <label>Data Folder</label>
+              <p class="hint" style="margin-bottom: 8px">
+                Select the folder that contains your CM.com export files. The
+                dashboard automatically uses the newest matching file for each
+                supported source and keeps watching the folder for updates.
+              </p>
+              <div style="display: flex; gap: 8px">
+                <button class="btn-secondary" id="selectDataFolderBtn">
+                  Select Data Folder…
+                </button>
+                <button class="btn-secondary" id="refreshDataBtn">
+                  Refresh Data
+                </button>
+              </div>
+              <p
                 class="hint"
-                id="updateStatus"
-                style="min-height: 1.2em"
-              ></span>
+                id="dataFolderCurrent"
+                style="margin-top: 8px; min-height: 1.2em"
+              ></p>
+              <p
+                class="hint"
+                id="dataFolderDetails"
+                style="margin-top: 4px; min-height: 1.2em"
+              ></p>
+              <p
+                class="hint"
+                id="dataFolderFeedback"
+                style="margin-top: 8px; min-height: 1.2em"
+              ></p>
             </div>
-            <p class="hint" style="margin-top: 5px">
-              Current version: <span id="settingsCurrentVersion"></span>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label>App Updates</label>
+              <div
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  margin-top: 6px;
+                "
+              >
+                <button class="btn-secondary" id="checkUpdateBtn">
+                  Check for updates
+                </button>
+                <span
+                  class="hint"
+                  id="updateStatus"
+                  style="min-height: 1.2em"
+                ></span>
+              </div>
+              <p class="hint" style="margin-top: 5px">
+                Current version: <span id="settingsCurrentVersion"></span>
+              </p>
+            </div>
+          </div>
+          <!-- TAB: Conversations -->
+          <div class="settings-tab-panel" id="settings-panel-conversations">
+            <label>Conversations Database</label>
+            <p class="hint" style="margin-bottom: 8px">
+              The SQLite database file used to store imported conversation data.
+              Can be on a network share for shared team access.
             </p>
+            <div style="display: flex; gap: 8px; margin-bottom: 6px">
+              <button class="btn-secondary" id="settingsDbCreateBtn">
+                Create new…
+              </button>
+              <button class="btn-secondary" id="settingsDbOpenBtn">
+                Open existing…
+              </button>
+            </div>
+            <p
+              class="hint"
+              id="settingsDbPath"
+              style="min-height: 1.2em; word-break: break-all"
+            ></p>
           </div>
         </div>
         <div class="modal-footer" style="justify-content: space-between">
@@ -2535,6 +3728,18 @@
               : Promise.resolve(() => {}),
           checkForUpdates: () => invoke("check_for_updates"),
           getVersion: () => invoke("get_version"),
+          // Conversations DB commands
+          setDbPath: (path) => invoke("set_db_path", { path }),
+          getDbPath: () => invoke("get_db_path"),
+          selectCsvFiles: () => invoke("select_csv_files"),
+          selectDbSavePath: () => invoke("select_db_save_path"),
+          selectDbOpenPath: () => invoke("select_db_open_path"),
+          importInteractionsCsv: (filePath) =>
+            invoke("import_interactions_csv", { filePath }),
+          getSessions: (args) => invoke("get_sessions", { args }),
+          getSessionInteractions: (sessionUuid) =>
+            invoke("get_session_interactions", { sessionUuid }),
+          getDateRange: () => invoke("get_date_range"),
         }
       })()
       if (!window.electronAPI.selectDataFolder) {
@@ -2544,6 +3749,28 @@
       if (!window.electronAPI.onDataFolderUpdated) {
         window.electronAPI.onDataFolderUpdated = () => Promise.resolve(() => {})
       }
+      // Stub out conversation commands when running outside Tauri (dev preview)
+      const _convStub = () => Promise.resolve(null)
+      if (!window.electronAPI.setDbPath)
+        window.electronAPI.setDbPath = _convStub
+      if (!window.electronAPI.getDbPath)
+        window.electronAPI.getDbPath = _convStub
+      if (!window.electronAPI.selectCsvFiles)
+        window.electronAPI.selectCsvFiles = () =>
+          Promise.resolve({ ok: false, canceled: true, paths: [] })
+      if (!window.electronAPI.selectDbSavePath)
+        window.electronAPI.selectDbSavePath = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
+      if (!window.electronAPI.selectDbOpenPath)
+        window.electronAPI.selectDbOpenPath = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
+      if (!window.electronAPI.importInteractionsCsv)
+        window.electronAPI.importInteractionsCsv = _convStub
+      if (!window.electronAPI.getSessions)
+        window.electronAPI.getSessions = () =>
+          Promise.resolve({ sessions: [], total: 0, page: 1 })
+      if (!window.electronAPI.getSessionInteractions)
+        window.electronAPI.getSessionInteractions = () => Promise.resolve([])
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -2592,6 +3819,7 @@
       let navHistory = []
       let _navCurrentModal = null // { type: "article"|"dialog"|"flow", id, isTDialog? }
       let _navBackMode = false
+      let _navReturnView = null // view to restore when modal stack is fully closed
       let dataFolderPath = localStorage.getItem(DATA_FOLDER_STORAGE_KEY) || ""
       let dataSourceInfo = null
       let dataLoadInFlight = false
@@ -2601,6 +3829,31 @@
       let dataFolderFeedback = { text: "", color: "var(--muted)" }
       let pendingDataChangedFolder = ""
       let currentLoadingMessage = "Loading export files…"
+
+      // ── Conversations state ─────────────────────────────────────────
+      const CONV_DB_STORAGE_KEY = "cm-conv-db-path"
+      let convDbPath = localStorage.getItem(CONV_DB_STORAGE_KEY) || ""
+      let convSessions = []
+      let convSessionFilter = "all"
+      let convQuery = ""
+      let convSearchRegex = false
+      let convSearchScope = "both" // "both" | "user" | "bot"
+      let convDateFrom = ""
+      let convDateTo = ""
+      let convDateMin = "" // YYYY-MM-DD — earliest date in DB
+      let convDateMax = "" // YYYY-MM-DD — latest date in DB
+      let convPickStart = "" // YYYY-MM-DD — picker selection start
+      let convPickEnd = "" // YYYY-MM-DD — picker selection end
+      let convPickHover = "" // YYYY-MM-DD — hover preview day
+      let convPickMonth = null // Date() of first day of displayed month
+      let convPickPhase = 0 // 0 = idle/complete, 1 = awaiting end click
+      let convPage = 1
+      let convTotalSessions = 0
+      let activeSessionUuid = null
+      let activeInteractions = []
+      let chatFilter = "all"
+      let chatQuery = ""
+      let convImporting = false
 
       // ── Helpers ─────────────────────────────────────────────────────
       function esc(s) {
@@ -4321,6 +5574,10 @@
       // ── Cross-navigation ────────────────────────────────────────────
       function _navPushCurrent() {
         if (_navBackMode) return
+        // Record the originating view on the first push (only if not already set by the caller)
+        if (navHistory.length === 0 && !_navCurrentModal && !_navReturnView) {
+          _navReturnView = currentView
+        }
         if (_navCurrentModal) {
           if (_navCurrentModal.type === "flow" && flowNetwork) {
             _navCurrentModal.viewport = {
@@ -4340,6 +5597,11 @@
         navHistory = []
         _navCurrentModal = null
         _navUpdateBackButtons()
+        // Return to the view that was active when the modal was first opened
+        if (_navReturnView && _navReturnView !== currentView) {
+          switchView(_navReturnView)
+        }
+        _navReturnView = null
       }
 
       function _closeAllModals() {
@@ -5125,6 +6387,22 @@
           if (e.target === document.getElementById("settingsModal"))
             closeSettings()
         })
+
+      // Settings tabs
+      document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("[data-settings-tab]")
+            .forEach((b) => b.classList.remove("active"))
+          btn.classList.add("active")
+          document
+            .querySelectorAll(".settings-tab-panel")
+            .forEach((p) => p.classList.remove("active"))
+          document
+            .getElementById("settings-panel-" + btn.dataset.settingsTab)
+            .classList.add("active")
+        })
+      })
       document.getElementById("saveSettings").addEventListener("click", () => {
         cmBaseUrl = document
           .getElementById("setting-base-url")
@@ -5481,6 +6759,1114 @@
         .addEventListener("click", () => {
           document.getElementById("updateBanner").classList.remove("visible")
         })
+
+      // ═══════════════════════════════════════════════════════════════
+      // CONVERSATIONS VIEW
+      // ═══════════════════════════════════════════════════════════════
+
+      // ── View switcher ───────────────────────────────────────────────
+      let currentView = localStorage.getItem("cm-view") || "content"
+
+      function switchView(name) {
+        currentView = name
+        localStorage.setItem("cm-view", name)
+        document
+          .getElementById("view-content")
+          .classList.toggle("hidden", name !== "content")
+        const convEl = document.getElementById("view-conversations")
+        convEl.classList.toggle("active", name === "conversations")
+        document
+          .getElementById("viewBtnContent")
+          .classList.toggle("active", name === "content")
+        document
+          .getElementById("viewBtnConversations")
+          .classList.toggle("active", name === "conversations")
+        if (name === "conversations") {
+          onEnterConversationsView()
+        }
+      }
+
+      // Apply initial view on load
+      if (currentView === "conversations") {
+        // Defer until after all init runs
+        setTimeout(() => switchView("conversations"), 0)
+      }
+
+      // ── DB setup & status ───────────────────────────────────────────
+      function updateConvDbStatus() {
+        const el = document.getElementById("convDbStatus")
+        const txt = document.getElementById("convDbStatusText")
+        const btn = document.getElementById("convImportBtn")
+        if (convDbPath) {
+          el.classList.add("connected")
+          // Show just filename
+          const name = convDbPath.replace(/\\/g, "/").split("/").pop()
+          txt.textContent = name
+          btn.disabled = false
+        } else {
+          el.classList.remove("connected")
+          txt.textContent = "No database — configure in Settings ⚙"
+          btn.disabled = true
+        }
+        // Update settings panel path display
+        const settingsDbPath = document.getElementById("settingsDbPath")
+        if (settingsDbPath) {
+          settingsDbPath.textContent = convDbPath || "Not configured"
+        }
+      }
+
+      async function openDbAtPath(path) {
+        try {
+          await window.electronAPI.setDbPath(path)
+          convDbPath = path
+          localStorage.setItem(CONV_DB_STORAGE_KEY, path)
+          updateConvDbStatus()
+          // Fetch available date range to constrain the calendar picker
+          window.electronAPI
+            .getDateRange()
+            .then(({ min, max }) => initDatePicker(min, max))
+            .catch(() => {})
+          await loadSessions()
+          return true
+        } catch (e) {
+          showImportToast("error", "Could not open database: " + e)
+          return false
+        }
+      }
+
+      async function onEnterConversationsView() {
+        updateConvDbStatus()
+        // If a path is saved, try to open it
+        if (convDbPath) {
+          try {
+            await window.electronAPI.setDbPath(convDbPath)
+            window.electronAPI
+              .getDateRange()
+              .then(({ min, max }) => initDatePicker(min, max))
+              .catch(() => {})
+            await loadSessions()
+          } catch (_) {
+            // DB file may have moved; prompt
+            convDbPath = ""
+            localStorage.removeItem(CONV_DB_STORAGE_KEY)
+            updateConvDbStatus()
+            openDbSetupModal()
+          }
+        } else {
+          openDbSetupModal()
+        }
+      }
+
+      function openDbSetupModal() {
+        document.getElementById("dbSetupModal").classList.add("open")
+      }
+      function closeDbSetupModal() {
+        document.getElementById("dbSetupModal").classList.remove("open")
+      }
+      document
+        .getElementById("closeDbSetupModal")
+        .addEventListener("click", closeDbSetupModal)
+      document.getElementById("dbSetupModal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("dbSetupModal"))
+          closeDbSetupModal()
+      })
+
+      async function handleDbCreate() {
+        const res = await window.electronAPI.selectDbSavePath()
+        if (!res || !res.ok || !res.path) return
+        let p = res.path
+        if (!p.endsWith(".db")) p += ".db"
+        closeDbSetupModal()
+        await openDbAtPath(p)
+      }
+      async function handleDbOpen() {
+        const res = await window.electronAPI.selectDbOpenPath()
+        if (!res || !res.ok || !res.path) return
+        closeDbSetupModal()
+        await openDbAtPath(res.path)
+      }
+
+      document
+        .getElementById("dbSetupCreateBtn")
+        .addEventListener("click", handleDbCreate)
+      document
+        .getElementById("dbSetupOpenBtn")
+        .addEventListener("click", handleDbOpen)
+      document
+        .getElementById("settingsDbCreateBtn")
+        .addEventListener("click", handleDbCreate)
+      document
+        .getElementById("settingsDbOpenBtn")
+        .addEventListener("click", handleDbOpen)
+
+      // ── Toast notifications ─────────────────────────────────────────
+      let _toastTimer = null
+      function showImportToast(type, msg) {
+        const old = document.querySelector(".import-toast")
+        if (old) old.remove()
+        if (_toastTimer) clearTimeout(_toastTimer)
+        const el = document.createElement("div")
+        el.className = "import-toast " + type
+        el.textContent = msg
+        document.body.appendChild(el)
+        _toastTimer = setTimeout(() => el.remove(), 6000)
+      }
+
+      // ── CSV Import ──────────────────────────────────────────────────
+      async function doImport(filePaths) {
+        if (!convDbPath) {
+          openDbSetupModal()
+          return
+        }
+        if (convImporting) return
+        convImporting = true
+        const btn = document.getElementById("convImportBtn")
+        btn.disabled = true
+        btn.textContent = "Importing…"
+        let totalInserted = 0,
+          totalSkipped = 0,
+          totalPurged = 0
+        const allErrors = []
+        try {
+          for (const fp of filePaths) {
+            const res = await window.electronAPI.importInteractionsCsv(fp)
+            if (res) {
+              totalInserted += res.inserted || 0
+              totalSkipped += res.skipped || 0
+              totalPurged += res.purged || 0
+              if (res.errors && res.errors.length)
+                allErrors.push(...res.errors.slice(0, 3))
+            }
+          }
+          let msg = `Imported ${totalInserted} interactions`
+          if (totalSkipped > 0) msg += `, ${totalSkipped} duplicates skipped`
+          if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
+          showImportToast("success", msg)
+          await loadSessions()
+        } catch (e) {
+          showImportToast("error", "Import failed: " + e)
+        } finally {
+          convImporting = false
+          btn.disabled = false
+          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import CSV…`
+        }
+      }
+
+      document
+        .getElementById("convImportBtn")
+        .addEventListener("click", async () => {
+          const res = await window.electronAPI.selectCsvFiles()
+          if (res && res.ok && res.paths && res.paths.length) {
+            await doImport(res.paths)
+          }
+        })
+
+      // Drag-and-drop
+      const convView = document.getElementById("view-conversations")
+      const dragHint = document.getElementById("convDragHint")
+      convView.addEventListener("dragover", (e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = "copy"
+        dragHint.classList.add("dragging")
+        dragHint.textContent = "Drop to import…"
+      })
+      convView.addEventListener("dragleave", (e) => {
+        if (!convView.contains(e.relatedTarget)) {
+          dragHint.classList.remove("dragging")
+          dragHint.textContent = "or drag & drop CSV files here"
+        }
+      })
+      convView.addEventListener("drop", async (e) => {
+        e.preventDefault()
+        dragHint.classList.remove("dragging")
+        dragHint.textContent = ""
+        const files = Array.from(e.dataTransfer.files)
+        const csvFiles = files.filter((f) =>
+          f.name.toLowerCase().endsWith(".csv"),
+        )
+        if (!csvFiles.length) {
+          showImportToast("error", "No CSV files found in drop.")
+          return
+        }
+        // In Tauri webview, File objects expose .path (absolute path)
+        const paths = csvFiles.map((f) => f.path).filter(Boolean)
+        if (!paths.length) {
+          showImportToast(
+            "error",
+            "Cannot read file paths from drop. Use the Import button instead.",
+          )
+          return
+        }
+        await doImport(paths)
+      })
+
+      // ── Session list ────────────────────────────────────────────────
+      async function loadSessions() {
+        const args = {
+          page: convPage,
+          filter: convSessionFilter,
+          query: convQuery || null,
+          queryRegex: convSearchRegex,
+          queryScope: convSearchScope,
+          dateFrom: convDateFrom || null,
+          dateTo: convDateTo || null,
+        }
+        try {
+          const res = await window.electronAPI.getSessions(args)
+          convSessions = res.sessions || []
+          convTotalSessions = res.total || 0
+          renderSessionList()
+        } catch (e) {
+          document.getElementById(
+            "sessionsList",
+          ).innerHTML = `<div class="sessions-empty">Error loading sessions:<br>${esc(
+            String(e),
+          )}</div>`
+        }
+      }
+
+      function fmtTs(iso) {
+        if (!iso) return ""
+        // "2026-03-25T09:30:22" → "25 Mar 2026, 09:30"
+        const d = new Date(iso.replace("T", " ") + "Z")
+        if (isNaN(d)) return iso.replace("T", " ").slice(0, 16)
+        return d.toLocaleString("nl-NL", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      }
+
+      function renderSessionList() {
+        const list = document.getElementById("sessionsList")
+        if (!convSessions.length) {
+          list.innerHTML = `<div class="sessions-empty">No conversations found.<br>${
+            convDbPath
+              ? "Try importing a CSV file."
+              : "Configure a database first."
+          }</div>`
+          document.getElementById("sessionsPagination").innerHTML = ""
+          return
+        }
+        const q = convQuery
+        list.innerHTML = convSessions
+          .map((s) => {
+            const shortUuid = s.sessionUuid.slice(0, 8) + "…"
+            const isActive = s.sessionUuid === activeSessionUuid
+            const preview = hl(s.userMessagePreview || "(no user message)", q)
+            const ts = fmtTs(s.firstTs)
+            return `<div class="session-card${
+              isActive ? " active" : ""
+            }" data-uuid="${esc(s.sessionUuid)}" onclick="selectSession('${esc(
+              s.sessionUuid,
+            )}')">
+            <div class="session-card-top">
+              <span class="session-uuid" title="${esc(s.sessionUuid)}">${esc(
+              shortUuid,
+            )}</span>
+              <div class="session-badges">
+                ${
+                  s.hasNegFeedback
+                    ? '<span class="session-badge neg-feedback" title="Negative feedback">&#x1F44E;</span>'
+                    : ""
+                }
+                ${
+                  s.hasGenAi
+                    ? '<span class="session-badge genai">AI</span>'
+                    : ""
+                }
+                ${
+                  s.culture
+                    ? `<span class="session-badge lang">${esc(
+                        s.culture,
+                      )}</span>`
+                    : ""
+                }
+              </div>
+            </div>
+            <div class="session-preview">${preview}</div>
+            <div class="session-meta">
+              <span>${esc(ts)}</span>
+              <span>${s.interactionCount} interactions</span>
+            </div>
+          </div>`
+          })
+          .join("")
+
+        // Pagination
+        const totalPages = Math.ceil(convTotalSessions / 50)
+        const pag = document.getElementById("sessionsPagination")
+        pag.innerHTML = pagHtml(convPage, totalPages, "goConvPage")
+      }
+
+      function goConvPage(n) {
+        convPage = n
+        loadSessions()
+      }
+
+      // Conv filter pills
+      document.querySelectorAll("[data-conv-filter]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("[data-conv-filter]")
+            .forEach((b) => b.classList.remove("active"))
+          btn.classList.add("active")
+          convSessionFilter = btn.dataset.convFilter
+          convPage = 1
+          loadSessions()
+        })
+      })
+
+      // Conv search
+      let _convSearchTimer = null
+      document.getElementById("convSearch").addEventListener("input", (e) => {
+        clearTimeout(_convSearchTimer)
+        _convSearchTimer = setTimeout(() => {
+          convQuery = e.target.value.trim()
+          convPage = 1
+          loadSessions()
+        }, 300)
+      })
+
+      // Conv search regex toggle
+      document.getElementById("convOptRegex").addEventListener("click", () => {
+        convSearchRegex = !convSearchRegex
+        document
+          .getElementById("convOptRegex")
+          .classList.toggle("on", convSearchRegex)
+        convPage = 1
+        loadSessions()
+      })
+
+      // Conv search scope — U and B are independent toggles
+      // active U only → user, active B only → bot, both or neither → both
+      document.querySelectorAll("[data-conv-scope]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          btn.classList.toggle("active")
+          const uActive = document
+            .querySelector("[data-conv-scope='user']")
+            .classList.contains("active")
+          const bActive = document
+            .querySelector("[data-conv-scope='bot']")
+            .classList.contains("active")
+          if (uActive && !bActive) convSearchScope = "user"
+          else if (bActive && !uActive) convSearchScope = "bot"
+          else convSearchScope = "both"
+          convPage = 1
+          loadSessions()
+        })
+      })
+
+      // ── Date range picker ───────────────────────────────────────────
+      let _calHoverSetup = false
+
+      function initDatePicker(min, max) {
+        convDateMin = min || ""
+        convDateMax = max || ""
+        // Start calendar view at the most recent available month
+        if (convDateMax) {
+          const d = new Date(convDateMax + "T00:00:00")
+          convPickMonth = new Date(d.getFullYear(), d.getMonth(), 1)
+        } else {
+          const now = new Date()
+          convPickMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+        }
+        renderDateRangeBtn()
+        // Wire up hover delegation once (stable popup element, innerHTML is replaced)
+        if (!_calHoverSetup) {
+          _calHoverSetup = true
+          const popup = document.getElementById("convCalPopup")
+          popup.addEventListener("mouseover", (e) => {
+            const el = e.target.closest("[data-date]")
+            if (convPickPhase === 1) {
+              convPickHover = el ? el.dataset.date : ""
+              updateCalRangeClasses()
+            }
+          })
+          popup.addEventListener("mouseleave", () => {
+            if (convPickPhase === 1) {
+              convPickHover = ""
+              updateCalRangeClasses()
+            }
+          })
+        }
+      }
+
+      function toggleDatePicker() {
+        const popup = document.getElementById("convCalPopup")
+        const isOpen = popup.classList.toggle("open")
+        document
+          .getElementById("convDateRangeBtn")
+          .classList.toggle("active", isOpen)
+        if (isOpen) renderCalendar()
+      }
+
+      function closeDatePickerOutside(e) {
+        // e.target may be a detached node (innerHTML replaced mid-click) — ignore
+        if (!e.target.isConnected) return
+        const wrap = document.getElementById("convDateWrap")
+        if (wrap && !wrap.contains(e.target)) {
+          document.getElementById("convCalPopup").classList.remove("open")
+          document.getElementById("convDateRangeBtn").classList.remove("active")
+        }
+      }
+      document.addEventListener("click", closeDatePickerOutside)
+
+      function calPrevMonth() {
+        convPickMonth = new Date(
+          convPickMonth.getFullYear(),
+          convPickMonth.getMonth() - 1,
+          1,
+        )
+        renderCalendar()
+      }
+      function calNextMonth() {
+        convPickMonth = new Date(
+          convPickMonth.getFullYear(),
+          convPickMonth.getMonth() + 1,
+          1,
+        )
+        renderCalendar()
+      }
+
+      function pickDay(d) {
+        if (convPickPhase === 0) {
+          convPickStart = d
+          convPickEnd = ""
+          convPickPhase = 1
+        } else {
+          if (d === convPickStart) {
+            // Single-day range
+            convPickEnd = d
+          } else if (d < convPickStart) {
+            convPickEnd = convPickStart
+            convPickStart = d
+          } else {
+            convPickEnd = d
+          }
+          convPickPhase = 0
+          applyDateRange()
+          return
+        }
+        renderCalendar()
+        renderDateRangeBtn()
+      }
+
+      function updateCalRangeClasses() {
+        const popup = document.getElementById("convCalPopup")
+        if (!popup) return
+        let dispStart = convPickStart
+        let dispEnd = convPickEnd
+        if (convPickPhase === 1 && convPickHover) {
+          if (convPickHover >= convPickStart) {
+            dispEnd = convPickHover
+          } else {
+            dispStart = convPickHover
+            dispEnd = convPickStart
+          }
+        }
+        popup.querySelectorAll("[data-date]").forEach((el) => {
+          const d = el.dataset.date
+          el.classList.remove("range-start", "range-end", "in-range")
+          if (dispStart && d === dispStart) el.classList.add("range-start")
+          else if (dispEnd && d === dispEnd) el.classList.add("range-end")
+          else if (dispStart && dispEnd && d > dispStart && d < dispEnd)
+            el.classList.add("in-range")
+        })
+      }
+
+      function clearDateRange() {
+        convPickStart = ""
+        convPickEnd = ""
+        convPickHover = ""
+        convPickPhase = 0
+        convDateFrom = ""
+        convDateTo = ""
+        renderDateRangeBtn()
+        const popup = document.getElementById("convCalPopup")
+        popup.classList.remove("open")
+        document.getElementById("convDateRangeBtn").classList.remove("active")
+        convPage = 1
+        loadSessions()
+      }
+
+      function applyDateRange() {
+        const end = convPickEnd || convPickStart
+        convDateFrom = convPickStart + "T00:00:00"
+        convDateTo = end + "T23:59:59"
+        renderDateRangeBtn()
+        document.getElementById("convCalPopup").classList.remove("open")
+        document.getElementById("convDateRangeBtn").classList.remove("active")
+        convPage = 1
+        loadSessions()
+      }
+
+      function renderDateRangeBtn() {
+        const lbl = document.getElementById("convDateRangeLabel")
+        const clr = document.getElementById("convDateRangeClear")
+        if (!lbl) return
+        if (convPickStart) {
+          const fmtD = (s) => {
+            const d = new Date(s + "T00:00:00")
+            return d.toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "short",
+              year: "2-digit",
+            })
+          }
+          const end = convPickEnd || convPickStart
+          lbl.textContent =
+            convPickStart === end
+              ? fmtD(convPickStart)
+              : `${fmtD(convPickStart)} – ${fmtD(end)}`
+          clr.style.display = ""
+        } else {
+          lbl.textContent = "All dates"
+          clr.style.display = "none"
+        }
+      }
+
+      function fmtCalDate(year, month, day) {
+        // month is 0-based
+        return new Date(year, month, day).toISOString().slice(0, 10)
+      }
+
+      function renderCalendar() {
+        const popup = document.getElementById("convCalPopup")
+        if (!popup || !popup.classList.contains("open")) return
+        if (!convPickMonth) return
+
+        const y = convPickMonth.getFullYear()
+        const m = convPickMonth.getMonth()
+        const monthLabel = convPickMonth.toLocaleDateString("en-GB", {
+          month: "long",
+          year: "numeric",
+        })
+
+        const minDate = convDateMin || ""
+        const maxDate = convDateMax || ""
+
+        // Determine if prev/next navigation is possible
+        const prevFirst = fmtCalDate(y, m - 1, 1)
+        const nextFirst = fmtCalDate(y, m + 1, 1)
+        const canPrev = !minDate || prevFirst.slice(0, 7) >= minDate.slice(0, 7)
+        const canNext = !maxDate || nextFirst.slice(0, 7) <= maxDate.slice(0, 7)
+
+        const today = new Date().toISOString().slice(0, 10)
+
+        // Day-of-week headers (Mon-start)
+        let daysHtml = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+          .map((h) => `<div class="cal-dow">${h}</div>`)
+          .join("")
+
+        // Leading cells from previous month
+        const firstDow = (new Date(y, m, 1).getDay() + 6) % 7 // Mon=0
+        const prevLastDay = new Date(y, m, 0).getDate()
+        for (let i = firstDow - 1; i >= 0; i--) {
+          daysHtml += `<div class="cal-day outside disabled">${
+            prevLastDay - i
+          }</div>`
+        }
+
+        // Days in current month
+        const lastDay = new Date(y, m + 1, 0).getDate()
+        for (let day = 1; day <= lastDay; day++) {
+          const d = fmtCalDate(y, m, day)
+          const isDisabled =
+            (minDate && d < minDate) || (maxDate && d > maxDate)
+          let cls = "cal-day"
+          if (isDisabled) {
+            cls += " disabled"
+          } else {
+            if (d === today) cls += " today"
+            if (convPickStart && d === convPickStart) cls += " range-start"
+            else if (convPickEnd && d === convPickEnd) cls += " range-end"
+            else if (
+              convPickStart &&
+              convPickEnd &&
+              d > convPickStart &&
+              d < convPickEnd
+            )
+              cls += " in-range"
+          }
+          const handlers = isDisabled
+            ? ""
+            : `onclick="pickDay('${d}')" data-date="${d}"`
+          daysHtml += `<div class="${cls}" ${handlers}>${day}</div>`
+        }
+
+        // Trailing blank cells
+        const totalCells = firstDow + lastDay
+        const trailing = (7 - (totalCells % 7)) % 7
+        for (let day = 1; day <= trailing; day++) {
+          daysHtml += `<div class="cal-day outside disabled">${day}</div>`
+        }
+
+        const hint = convPickPhase === 1 ? "Click to select end date" : ""
+
+        popup.innerHTML = `
+          <div class="cal-nav">
+            <button onclick="calPrevMonth()" ${
+              canPrev ? "" : "disabled"
+            }>&#x2039;</button>
+            <span>${monthLabel}</span>
+            <button onclick="calNextMonth()" ${
+              canNext ? "" : "disabled"
+            }>&#x203a;</button>
+          </div>
+          <div class="cal-grid">${daysHtml}</div>
+          <div class="cal-hint" id="calHint">${hint}</div>
+          <div class="cal-footer">
+            <button onclick="clearDateRange()">Clear</button>
+          </div>`
+        // Apply hover preview classes after render
+        updateCalRangeClasses()
+      }
+
+      // Date filters handled by custom calendar picker (see initDatePicker / pickDay)
+
+      // ── Chat thread ─────────────────────────────────────────────────
+      async function selectSession(uuid) {
+        activeSessionUuid = uuid
+        chatFilter = "all"
+        chatQuery = ""
+        // Reset chat filter pills
+        document.querySelectorAll("[data-chat-filter]").forEach((b) => {
+          b.classList.toggle("active", b.dataset.chatFilter === "all")
+        })
+        document.getElementById("chatSearch").value = ""
+        // Highlight sidebar card
+        document.querySelectorAll(".session-card").forEach((c) => {
+          c.classList.toggle("active", c.dataset.uuid === uuid)
+        })
+        // Show filter row
+        document.getElementById("chatFilterRow").style.display = ""
+        // Load interactions
+        try {
+          activeInteractions = await window.electronAPI.getSessionInteractions(
+            uuid,
+          )
+          renderChatThread()
+          // Update header
+          const session = convSessions.find((s) => s.sessionUuid === uuid)
+          const chatHeader = document.getElementById("chatHeader")
+          if (session) {
+            chatHeader.innerHTML = `
+              <div class="chat-session-info" title="${esc(uuid)}">${esc(
+              uuid.slice(0, 8),
+            )}…${esc(uuid.slice(-8))}</div>
+              <span class="chat-meta">${esc(fmtTs(session.firstTs))}</span>
+              <div class="chat-spacer"></div>
+              <span class="chat-meta">${
+                session.interactionCount
+              } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
+            `
+          }
+        } catch (e) {
+          document.getElementById(
+            "chatThread",
+          ).innerHTML = `<div class="chat-empty">Error loading conversation:<br>${esc(
+            String(e),
+          )}</div>`
+        }
+      }
+
+      function isInternalValue(v) {
+        if (!v) return true
+        const t = v.trim()
+        if (!t) return true
+        if (t.toLowerCase() === "continue") return true
+        if (/^#[^#]+#$/.test(t)) return true // #VariableName#
+        return false
+      }
+
+      // ── CM.com output text formatter ───────────────────────────────────
+      // Returns { body: safeHtml, options: string[], ctas: {href,text,newTab}[] }
+      function parseCmOutput(text) {
+        if (!text) return { body: "", options: [], ctas: [] }
+
+        // Extract CTA buttons: {message:cta buttonLink="..."buttonText="..."buttonNewTab="..."}{/message:cta}
+        const ctas = []
+        const withoutCtas = text.replace(
+          /\{message:cta\s([^}]*)\}\{\/message:cta\}/gi,
+          (_, attrs) => {
+            const getAttr = (name) => {
+              const m2 = attrs.match(
+                new RegExp(
+                  name + '=["\u201C\u201D]([^"\u201C\u201D]*)["\u201C\u201D]',
+                  "i",
+                ),
+              )
+              return m2 ? m2[1].trim() : ""
+            }
+            const href = getAttr("buttonLink")
+            const btnText = getAttr("buttonText") || "CTA"
+            const newTab = getAttr("buttonNewTab").toUpperCase() !== "FALSE"
+            if (href) ctas.push({ href, text: btnText, newTab })
+            return ""
+          },
+        )
+
+        // Extract all %{DialogOption(label)} tokens (collect before any escaping)
+        const options = []
+        const withoutOptions = withoutCtas.replace(
+          /%\{DialogOption\(([^)]+)\)\}/g,
+          (_, label) => {
+            options.push(label.trim())
+            return ""
+          },
+        )
+
+        // Strip unsupported %{...} tokens (e.g. %{Image(1)}, %{Video(2)})
+        const withoutTokens = withoutOptions.replace(/%\{[^}]+\}/g, "")
+
+        // Remove list markers (* ) that prefixed each option
+        const withoutBullets = withoutTokens
+          .replace(/\*\s*$/gm, "")
+          .replace(/\*\s+/g, "")
+
+        // Handle <a href="..."> links — double-quoted CSV style: href=""url""
+        // We'll process links before HTML-escaping everything else
+        const LINK_RE =
+          /<a\s[^>]*href=["]{1,2}(https?:\/\/[^"]+)["]{1,2}[^>]*>([\s\S]*?)<\/a>/gi
+        const parts = []
+        let last = 0
+        let m
+        while ((m = LINK_RE.exec(withoutBullets)) !== null) {
+          // Escape the plain text before this match
+          parts.push(esc(withoutBullets.slice(last, m.index)))
+          const href = m[1] // already extracted raw URL
+          const linkText = m[2].replace(/<[^>]+>/g, "") // strip any inner tags
+          // Only allow http/https URLs
+          if (/^https?:\/\//i.test(href)) {
+            parts.push(
+              `<a class="chat-link" href="#" onclick="window.electronAPI.openUrl('${esc(
+                href,
+              )}');return false">${esc(linkText)}</a>`,
+            )
+          } else {
+            parts.push(esc(linkText))
+          }
+          last = m.index + m[0].length
+        }
+        parts.push(esc(withoutBullets.slice(last)))
+        let safe = parts.join("")
+
+        // __text__ → <strong> (only when there is actual content between the underscores)
+        // bare __ (possibly with spaces) → <br>
+        safe = safe.replace(/__([^_]+)__/g, "<strong>$1</strong>")
+
+        // Line breaks: bare __ or sequences of underscores/spaces → <br>
+        safe = safe.replace(/(_\s*){2,}/g, "<br>")
+        safe = safe.replace(/\s_\s/g, "<br>")
+
+        // Trim leading/trailing <br>
+        safe = safe.replace(/^(<br>)+|(<br>)+$/g, "").trim()
+
+        return { body: safe, options, ctas }
+      }
+
+      function chatHl(text) {
+        const { body, options, ctas } = parseCmOutput(text)
+        if (!chatQuery) return { body, options, ctas }
+        const q = chatQuery
+        const re = (() => {
+          try {
+            return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig")
+          } catch {
+            return null
+          }
+        })()
+        if (!re) return { body, options, ctas }
+        const reG = new RegExp(
+          re.source,
+          re.flags.includes("g") ? re.flags : re.flags + "g",
+        )
+        return {
+          body: body.replace(reG, (m) => `<mark>${m}</mark>`),
+          options,
+          ctas,
+        }
+      }
+
+      // Kept for backwards-compat (used nowhere in chat, but just in case)
+      function cmMarkdown(text) {
+        return parseCmOutput(text).body
+      }
+
+      function parseJsonSafe(s) {
+        if (!s) return null
+        try {
+          return JSON.parse(s)
+        } catch {
+          return null
+        }
+      }
+
+      function renderBubbleDetail(interaction) {
+        const articleIds = parseJsonSafe(interaction.articleIds) || []
+        const dialogPaths = parseJsonSafe(interaction.dialogPaths) || {}
+        const faqsFound = parseJsonSafe(interaction.faqsFound)
+        const recogDetails = parseJsonSafe(interaction.recognitionDetails || "") // not stored but may be in future
+        const quality = interaction.recognitionQuality
+
+        let html = ""
+
+        // Article links: qa-XXXX → article
+        const qaIds = articleIds
+          .filter((id) => id.startsWith("qa-"))
+          .map((id) => parseInt(id.slice(3)))
+          .filter(Boolean)
+        // Dialog links from article_ids: dn-DIALOGID-NODEID
+        // Also extract from dialogPaths
+        const dialogIds = new Set()
+        articleIds
+          .filter((id) => id.startsWith("dn-"))
+          .forEach((id) => {
+            const parts = id.split("-")
+            if (parts[1]) dialogIds.add(parseInt(parts[1]))
+          })
+        Object.values(dialogPaths).forEach((path) => {
+          const m = String(path).match(/^(\d+):/)
+          if (m) dialogIds.add(parseInt(m[1]))
+        })
+
+        if (qaIds.length) {
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
+          qaIds.forEach((id) => {
+            html += `<button class="bubble-link-btn" onclick="_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; Article ${id}</button>`
+          })
+          html += `</div></div>`
+        }
+
+        if (dialogIds.size) {
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Dialogs</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
+          dialogIds.forEach((id) => {
+            html += `<button class="bubble-link-btn" onclick="_navReturnView='conversations';switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)">&#x1F7E3; Dialog ${id}</button>`
+          })
+          html += `</div></div>`
+        }
+
+        if (
+          faqsFound &&
+          faqsFound.DataRetrievalResults &&
+          faqsFound.DataRetrievalResults.length
+        ) {
+          const ids = faqsFound.DataRetrievalResults.slice(0, 8)
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">GenAI source articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
+          ids.forEach((id) => {
+            html += `<button class="bubble-link-btn" onclick="_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; ${id}</button>`
+          })
+          html += `</div></div>`
+        }
+
+        if (quality > 0) {
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Recognition quality</span><span style="color:var(--text)">${quality.toFixed(
+            1,
+          )}%</span></div>`
+        }
+
+        if (interaction.recognitionType) {
+          html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Recognition type</span><span style="color:var(--text)">${esc(
+            interaction.recognitionType,
+          )}</span></div>`
+        }
+
+        if (!html)
+          html = `<span style="color:var(--muted);font-size:0.72rem">No linked articles or dialogs</span>`
+        return html
+      }
+
+      function toggleBubbleDetail(logId) {
+        const detail = document.querySelector(
+          `.bubble-detail[data-logid="${logId}"]`,
+        )
+        if (!detail) return
+        detail.classList.toggle("open")
+      }
+
+      function renderChatThread() {
+        const thread = document.getElementById("chatThread")
+        let interactions = activeInteractions
+
+        // Apply chat filter
+        if (chatFilter !== "all") {
+          interactions = interactions.filter((i) => {
+            const t = i.mainInteractionType
+            if (chatFilter === "genai") return t === "GenerativeAI"
+            if (chatFilter === "user")
+              return (
+                !isInternalValue(i.interactionValue) &&
+                Boolean(i.interactionValue)
+              )
+            if (chatFilter === "bot")
+              return Boolean(i.outputText) && t !== "GenerativeAI"
+            return true
+          })
+        }
+
+        // Apply chat search filter
+        if (chatQuery) {
+          const ql = chatQuery.toLowerCase()
+          interactions = interactions.filter(
+            (i) =>
+              (i.interactionValue || "").toLowerCase().includes(ql) ||
+              (i.outputText || "").toLowerCase().includes(ql),
+          )
+        }
+
+        if (!interactions.length) {
+          thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
+          return
+        }
+
+        let html = ""
+        let i = 0
+        while (i < interactions.length) {
+          const row = interactions[i]
+          const t = row.mainInteractionType
+
+          // System events (Event, LinkClick, DataRetrieval with no user value and no output)
+          const isSystemOnly =
+            (t === "Event" || t === "LinkClick") &&
+            isInternalValue(row.interactionValue) &&
+            !row.outputText
+          if (isSystemOnly) {
+            let label =
+              t === "Event"
+                ? "Event: " + esc(row.interactionValue || "")
+                : "Link clicked"
+            html += `<div class="system-pill">${label}</div>`
+            i++
+            continue
+          }
+
+          // User message
+          if (!isInternalValue(row.interactionValue) && row.interactionValue) {
+            html += `<div class="user-group">
+              <span class="user-label">User</span>
+              <div class="bubble user">${
+                chatHl(row.interactionValue).body
+              }</div>
+              <span class="bubble-ts">${esc(
+                row.timestampStart ? row.timestampStart.slice(11, 16) : "",
+              )}</span>
+            </div>`
+          }
+
+          // Bot / GenAI group — collect consecutive bot messages
+          const botRows = []
+          let j = i
+          const isGenAiRow = (r) => r.mainInteractionType === "GenerativeAI"
+          const hasBotOutput = (r) => Boolean(r.outputText)
+          // Start a bot group if this row has output
+          if (hasBotOutput(row)) {
+            botRows.push(row)
+            j++
+            // Continue grouping consecutive bot-only rows (no user input)
+            while (j < interactions.length) {
+              const next = interactions[j]
+              if (
+                !isInternalValue(next.interactionValue) &&
+                next.interactionValue
+              )
+                break
+              if (!hasBotOutput(next)) {
+                j++
+                continue
+              }
+              botRows.push(next)
+              j++
+            }
+          } else {
+            j = i + 1
+          }
+
+          if (botRows.length) {
+            const hasAi = botRows.some(isGenAiRow)
+            const avatarClass = hasAi ? "genai" : ""
+            const label = hasAi
+              ? `Bot <span class="bot-name-badge">AI</span>`
+              : "Bot"
+            html += `<div class="bot-group">
+              <div class="bot-group-header">
+                <div class="bot-avatar ${avatarClass}">B</div>
+                <span class="bot-name">${label}</span>
+              </div>`
+
+            botRows.forEach((br) => {
+              const bubbleClass = isGenAiRow(br) ? "genai" : "bot"
+              const detail = renderBubbleDetail(br)
+              const { body, options, ctas } = chatHl(br.outputText)
+              const optionsHtml = options.length
+                ? `<div class="dialog-options">${options
+                    .map(
+                      (o) =>
+                        `<span class="dialog-option-chip">${esc(o)}</span>`,
+                    )
+                    .join("")}</div>`
+                : ""
+              const ctasHtml = ctas.length
+                ? `<div class="cta-buttons">${ctas
+                    .map((c) => {
+                      const safeHref = esc(c.href)
+                      const safeText = esc(c.text)
+                      return `<button class="cta-btn" onclick="window.electronAPI.openUrl('${safeHref}');return false">&#x2197; ${safeText}</button>`
+                    })
+                    .join("")}</div>`
+                : ""
+              html += `<div class="bubble ${bubbleClass}" onclick="toggleBubbleDetail(${br.logId})">
+                ${body}${optionsHtml}${ctasHtml}
+                <span class="bubble-expand-hint">▾ details</span>
+                <div class="bubble-detail" data-logid="${br.logId}">${detail}</div>
+              </div>`
+            })
+
+            const tsRow = botRows[botRows.length - 1]
+            html += `<span class="bubble-ts">${esc(
+              tsRow.timestampStart ? tsRow.timestampStart.slice(11, 16) : "",
+            )}</span>`
+            html += `</div>`
+          }
+
+          i = j
+        }
+
+        thread.innerHTML = html
+      }
+
+      // Chat filter pills
+      document.querySelectorAll("[data-chat-filter]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll("[data-chat-filter]")
+            .forEach((b) => b.classList.remove("active"))
+          btn.classList.add("active")
+          chatFilter = btn.dataset.chatFilter
+          renderChatThread()
+        })
+      })
+
+      // Chat search
+      let _chatSearchTimer = null
+      document.getElementById("chatSearch").addEventListener("input", (e) => {
+        clearTimeout(_chatSearchTimer)
+        _chatSearchTimer = setTimeout(() => {
+          chatQuery = e.target.value.trim()
+          renderChatThread()
+        }, 200)
+      })
+
+      // ── Init DB on load if path is stored ───────────────────────────
+      if (convDbPath) {
+        window.electronAPI.setDbPath(convDbPath).catch(() => {
+          convDbPath = ""
+          localStorage.removeItem(CONV_DB_STORAGE_KEY)
+        })
+      }
+      updateConvDbStatus()
     </script>
   </body>
 </html>
