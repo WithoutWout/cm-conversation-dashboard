@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CM.com — Conversational AI Cloud Dashboard</title>
@@ -2163,6 +2163,212 @@
         line-height: 1.6;
       }
 
+      /* === CONTEXT FILTER BUTTON === */
+      .conv-ctx-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 0.75rem;
+        color: var(--muted);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: border-color 0.15s, color 0.15s;
+        position: relative;
+        white-space: nowrap;
+      }
+      .conv-ctx-btn:hover { border-color: var(--accent); color: var(--text); }
+      .conv-ctx-btn.has-filters {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(124,106,247,0.06);
+      }
+      .ctx-filter-badge {
+        background: var(--accent);
+        color: #fff;
+        border-radius: 10px;
+        font-size: 0.6rem;
+        font-weight: 700;
+        padding: 0 5px;
+        line-height: 1.5;
+      }
+
+      /* === CONTEXT FILTER MODAL === */
+      .ctx-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+      }
+      .ctx-modal-overlay.open { display: block; }
+      .ctx-modal-backdrop {
+        position: absolute;
+        inset: 0;
+      }
+      .ctx-modal-box {
+        position: absolute;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+        width: 340px;
+        max-width: calc(100vw - 24px);
+        max-height: 420px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .ctx-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px 8px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .ctx-modal-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .ctx-modal-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .ctx-clear-btn {
+        background: none;
+        border: none;
+        color: var(--red);
+        font-size: 0.7rem;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+        opacity: 0.8;
+      }
+      .ctx-clear-btn:hover { opacity: 1; background: rgba(239,68,68,0.1); }
+      .ctx-modal-close {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 1rem;
+        cursor: pointer;
+        padding: 2px 5px;
+        border-radius: 3px;
+        line-height: 1;
+      }
+      .ctx-modal-close:hover { color: var(--text); background: var(--surface2); }
+      .ctx-modal-search {
+        padding: 8px 12px 6px;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .ctx-modal-search input {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 5px 9px;
+        font-size: 0.73rem;
+        color: var(--text);
+        box-sizing: border-box;
+        outline: none;
+      }
+      .ctx-modal-search input:focus { border-color: var(--accent); }
+      .ctx-modal-body {
+        overflow-y: auto;
+        flex: 1;
+        padding: 8px 10px;
+      }
+      .ctx-group { margin-bottom: 10px; }
+      .ctx-group-name {
+        font-size: 0.62rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 5px;
+        padding: 0 1px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ctx-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .ctx-chip {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 0.69rem;
+        cursor: pointer;
+        color: var(--text);
+        transition: background 0.1s, border-color 0.1s;
+      }
+      .ctx-chip:hover { border-color: var(--accent); }
+      .ctx-chip.active {
+        background: rgba(124,106,247,0.15);
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .ctx-chip.val-true  { color: var(--green); }
+      .ctx-chip.val-false { color: var(--muted); }
+
+      /* === SESSION CONTEXT INFO BUTTON === */
+      .session-ctx-info-btn {
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.75rem;
+        padding: 1px 4px;
+        line-height: 1;
+        flex-shrink: 0;
+        transition: color 0.1s, border-color 0.1s;
+      }
+      .session-ctx-info-btn:hover {
+        color: var(--accent);
+        border-color: var(--border);
+      }
+
+      /* === SESSION CONTEXT DETAIL MODAL === */
+      .ctx-detail-modal-box {
+        width: 480px;
+        max-width: 95vw;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .ctx-detail-body { overflow-y: auto; flex: 1; padding: 12px; }
+      .ctx-detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.78rem;
+      }
+      .ctx-detail-table th {
+        text-align: left;
+        padding: 5px 8px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid var(--border);
+      }
+      .ctx-detail-table td {
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+      .ctx-detail-table tr:last-child td { border-bottom: none; }
+      .ctx-detail-table td:first-child { color: var(--muted); font-size: 0.72rem; }
+      .ctx-val-true  { color: var(--green); font-weight: 600; }
+      .ctx-val-false { color: var(--muted); }
+
       /* === CHAT MAIN === */
       .conv-main {
         flex: 3 1 0;
@@ -2434,6 +2640,55 @@
         padding: 2px 10px;
         margin: 4px 0;
       }
+      .link-click-pill {
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 6px 0;
+        color: var(--muted);
+        font-size: 0.68rem;
+      }
+      .link-click-pill::before,
+      .link-click-pill::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--border);
+        opacity: 0.6;
+      }
+      .link-click-pill-inner {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 3px 10px 3px 8px;
+        white-space: nowrap;
+        max-width: 55%;
+        overflow: hidden;
+      }
+      .link-click-pill-icon {
+        font-size: 0.72rem;
+        flex-shrink: 0;
+        opacity: 0.7;
+      }
+      .link-click-pill-label {
+        font-size: 0.64rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .link-click-url {
+        color: var(--accent);
+        font-size: 0.68rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0.85;
+      }
       /* Bubble detail expansion */
       .bubble-detail {
         display: none;
@@ -2568,7 +2823,8 @@
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
-        margin-top: 8px;
+        margin-top: 4px;
+        margin-left: 2px;
       }
       .dialog-option-chip {
         display: inline-block;
@@ -2585,7 +2841,8 @@
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
-        margin-top: 8px;
+        margin-top: 4px;
+        margin-left: 2px;
       }
       .cta-btn {
         display: inline-flex;
@@ -2604,6 +2861,62 @@
       }
       .cta-btn:hover {
         opacity: 0.85;
+      }
+      /* Ask-card (message:card.ask) */
+      .ask-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 5px;
+        margin-left: 2px;
+      }
+      .ask-card {
+        display: flex;
+        align-items: stretch;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        max-width: 300px;
+      }
+      .ask-card-img {
+        width: 84px;
+        flex-shrink: 0;
+        object-fit: cover;
+        display: block;
+      }
+      .ask-card-body {
+        flex: 1;
+        min-width: 0;
+        padding: 7px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        justify-content: center;
+      }
+      .ask-card-btn {
+        display: inline-block;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        padding: 3px 9px;
+        font-size: 0.72rem;
+        font-family: inherit;
+        font-weight: 600;
+        cursor: default;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        pointer-events: none;
+      }
+      .ask-card-ask {
+        font-size: 0.68rem;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       /* Settings modal — wider so all sections fit */
       #settingsModal .modal-box {
@@ -2863,7 +3176,7 @@
             <input
               id="g-search"
               type="text"
-              placeholder="Search… (press Enter)"
+              placeholder="Search…"
               autocomplete="off"
               spellcheck="false"
             />
@@ -3252,26 +3565,32 @@
                 </button>
               </div>
             </div>
-            <div class="conv-date-wrap" id="convDateWrap">
-              <div
-                class="conv-date-range-btn"
-                id="convDateRangeBtn"
-                onclick="toggleDatePicker()"
-              >
-                <span style="font-size: 0.85rem">&#128197;</span>
-                <span class="conv-date-range-label" id="convDateRangeLabel"
-                  >All dates</span
+            <div style="display:flex;align-items:center;gap:6px;padding:0 10px 0">
+              <div class="conv-date-wrap" id="convDateWrap" style="flex:1">
+                <div
+                  class="conv-date-range-btn"
+                  id="convDateRangeBtn"
+                  onclick="toggleDatePicker()"
                 >
-                <span
-                  class="range-clear"
-                  id="convDateRangeClear"
-                  onclick="clearDateRange();event.stopPropagation()"
-                  style="display: none"
-                  title="Clear date filter"
-                  >&#xd7;</span
-                >
+                  <span style="font-size: 0.85rem">&#128197;</span>
+                  <span class="conv-date-range-label" id="convDateRangeLabel"
+                    >All dates</span
+                  >
+                  <span
+                    class="range-clear"
+                    id="convDateRangeClear"
+                    onclick="clearDateRange();event.stopPropagation()"
+                    style="display: none"
+                    title="Clear date filter"
+                    >&#xd7;</span
+                  >
+                </div>
+                <div class="conv-cal-popup" id="convCalPopup"></div>
               </div>
-              <div class="conv-cal-popup" id="convCalPopup"></div>
+              <button class="conv-ctx-btn" id="convCtxToggle" onclick="toggleContextPanel()" title="Filter by context">
+                &#x1F3F7;
+                <span class="ctx-filter-badge" id="ctxFilterBadge" style="display:none">0</span>
+              </button>
             </div>
             <div class="conv-filter-pills">
               <button class="conv-pill active" data-conv-filter="all">
@@ -3979,6 +4298,38 @@
       </div>
     </div>
 
+    <!-- CONTEXT FILTER MODAL -->
+    <div class="ctx-modal-overlay" id="ctxModalOverlay">
+      <div class="ctx-modal-backdrop" onclick="closeContextPanel()"></div>
+      <div class="ctx-modal-box" id="ctxModalBox">
+        <div class="ctx-modal-header">
+          <span class="ctx-modal-title">&#x1F3F7; Filter by Context</span>
+          <div class="ctx-modal-actions">
+            <button class="ctx-clear-btn" id="ctxClearBtn" onclick="clearContextFilters()" style="display:none">&#x2715; Clear all</button>
+            <button class="ctx-modal-close" onclick="closeContextPanel()">&#x2715;</button>
+          </div>
+        </div>
+        <div class="ctx-modal-search">
+          <input type="text" id="ctxSearch" placeholder="Search contexts…" autocomplete="off" oninput="filterContextSearch(this.value)" />
+        </div>
+        <div class="ctx-modal-body" id="ctxModalBody"></div>
+      </div>
+    </div>
+
+    <!-- SESSION CONTEXT DETAIL MODAL -->
+    <div class="modal-overlay" id="sessionContextModal">
+      <div class="modal-box ctx-detail-modal-box">
+        <div class="modal-header">
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <h3>Session Contexts</h3>
+            <span id="sessionCtxModalTitle" style="font-size:0.72rem;color:var(--muted)"></span>
+          </div>
+          <button class="close-btn" onclick="closeSessionContextModal()">&#x2715;</button>
+        </div>
+        <div class="ctx-detail-body" id="sessionCtxModalBody"></div>
+      </div>
+    </div>
+
     <!-- FLOW MODAL -->
     <div class="modal-overlay" id="flowModal">
       <div class="modal-box flow-modal-box">
@@ -4070,6 +4421,7 @@
           getSessionInteractions: (sessionUuid) =>
             invoke("get_session_interactions", { sessionUuid }),
           getDateRange: () => invoke("get_date_range"),
+          getContextOptions: () => invoke("get_context_options"),
         }
       })()
       if (!window.electronAPI.selectDataFolder) {
@@ -4101,6 +4453,8 @@
           Promise.resolve({ sessions: [], total: 0, page: 1 })
       if (!window.electronAPI.getSessionInteractions)
         window.electronAPI.getSessionInteractions = () => Promise.resolve([])
+      if (!window.electronAPI.getContextOptions)
+        window.electronAPI.getContextOptions = () => Promise.resolve([])
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -4190,6 +4544,10 @@
       let convSearchIds = false // when true, also search article/dialog IDs
       let chatSearchRegex = false // when true, treat chatQuery as a regex
       let convImporting = false
+      let convContextFilters = [] // [{name, value}] — active context filters
+      let contextOptions = []     // [{name, value, count}] — all available context options
+      let contextOptionsLoaded = false
+      let contextPanelOpen = false
 
       // ── Helpers ─────────────────────────────────────────────────────
       function esc(s) {
@@ -5978,7 +6336,12 @@
           (qCnt !== 1 ? "ies" : "y") +
           (faq ? " \u00b7 FAQ" : "")
         document.getElementById("article-info-actions").innerHTML =
-          cmOpenButton("article", id)
+          cmOpenButton("article", id) +
+          '<button class="btn-show-dialog" onclick="closeArticleInfoModal();_navClear();searchConvsForId(' +
+          id +
+          ')" title="Search article ID ' +
+          id +
+          ' in conversations">&#128172; Conversations</button>'
 
         const makeChip = (qs) => {
           const linkedEntity = getEntityForChip(qs.Text)
@@ -6170,7 +6533,13 @@
         if (isTDialog) {
           titleEl.textContent = item.name || "Transactional Dialog"
           subtitleEl.textContent = "Transactional Dialog #" + id
-          actionsEl.innerHTML = cmOpenButton("dialog", id)
+          actionsEl.innerHTML =
+            cmOpenButton("dialog", id) +
+            '<button class="btn-show-dialog" onclick="closeDialogInfoModal();_navClear();searchConvsForId(' +
+            id +
+            ')" title="Search Transactional Dialog ID ' +
+            id +
+            ' in conversations">&#128172; Conversations</button>'
           bodyEl.innerHTML =
             '<p style="color:var(--muted);font-size:0.82rem">No additional details available for Transactional Dialogs.</p>'
         } else {
@@ -6193,7 +6562,12 @@
             cmOpenButton("dialog", id) +
             '<button class="btn-show-dialog" onclick="closeDialogInfoModal();openFlowModal(' +
             id +
-            ')">&#9654; Show dialog</button>'
+            ')">&#9654; Show dialog</button>' +
+            '<button class="btn-show-dialog" onclick="closeDialogInfoModal();_navClear();searchConvsForId(' +
+            id +
+            ')" title="Search Dialog ID ' +
+            id +
+            ' in conversations">&#128172; Conversations</button>'
 
           let html = ""
 
@@ -7208,6 +7582,7 @@
           convDbPath = path
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
           updateConvDbStatus()
+          contextOptionsLoaded = false // reset when DB changes
           // Fetch available date range to constrain the calendar picker
           window.electronAPI
             .getDateRange()
@@ -7329,6 +7704,7 @@
           if (totalSkipped > 0) msg += `, ${totalSkipped} duplicates skipped`
           if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
           showImportToast("success", msg)
+          contextOptionsLoaded = false // refresh context options on next panel open
           await loadSessions()
         } catch (e) {
           showImportToast("error", "Import failed: " + e)
@@ -7412,6 +7788,7 @@
           queryIds: convSearchIds,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
+          contextFilters: convContextFilters.length > 0 ? convContextFilters : null,
         }
         try {
           const res = await window.electronAPI.getSessions(args)
@@ -7486,6 +7863,11 @@
                       )}</span>`
                     : ""
                 }
+                ${
+                  s.contexts
+                    ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(s.sessionUuid)}');event.stopPropagation()" title="View session contexts">&#8505;</button>`
+                    : ""
+                }
               </div>
             </div>
             <div class="session-preview">${preview}</div>
@@ -7508,6 +7890,180 @@
         loadSessions()
       }
 
+      // ── Context filter modal ────────────────────────────────────────
+      let _ctxSearchQuery = ""
+
+      function _updateCtxFilterBadge() {
+        const badge = document.getElementById("ctxFilterBadge")
+        const count = convContextFilters.length
+        badge.textContent = count
+        badge.style.display = count > 0 ? "" : "none"
+        document
+          .getElementById("convCtxToggle")
+          .classList.toggle("has-filters", count > 0)
+      }
+
+      function _buildCtxModalHtml(searchQ) {
+        if (!contextOptions.length) {
+          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No context data found.<br>Import interaction data first.</div>'
+        }
+        const q = (searchQ || "").toLowerCase().trim()
+        const groups = {}
+        for (const o of contextOptions) {
+          if (q && !o.name.toLowerCase().includes(q) && !o.value.toLowerCase().includes(q)) continue
+          if (!groups[o.name]) groups[o.name] = []
+          groups[o.name].push(o)
+        }
+        if (!Object.keys(groups).length) {
+          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No matching contexts.</div>'
+        }
+        return Object.entries(groups)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, options]) => {
+            const chips = options
+              .map((o) => {
+                const active = convContextFilters.some(
+                  (f) => f.name === o.name && f.value === o.value,
+                )
+                const valClass =
+                  o.value === "true"
+                    ? " val-true"
+                    : o.value === "false"
+                      ? " val-false"
+                      : ""
+                return `<button class="ctx-chip${active ? " active" : ""}${valClass}" data-ctx-name="${esc(o.name)}" data-ctx-value="${esc(o.value)}" title="${esc(o.count)} sessions">${esc(o.value)}</button>`
+              })
+              .join("")
+            return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(name)}">${esc(name)}</div><div class="ctx-chips">${chips}</div></div>`
+          })
+          .join("")
+      }
+
+      function _renderCtxModal() {
+        document.getElementById("ctxModalBody").innerHTML = _buildCtxModalHtml(_ctxSearchQuery)
+        _attachCtxChipListeners()
+        document.getElementById("ctxClearBtn").style.display =
+          convContextFilters.length > 0 ? "" : "none"
+      }
+
+      function _attachCtxChipListeners() {
+        document.querySelectorAll("#ctxModalBody .ctx-chip").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            toggleContextOption(btn.dataset.ctxName, btn.dataset.ctxValue)
+          })
+        })
+      }
+
+      async function toggleContextPanel() {
+        const overlay = document.getElementById("ctxModalOverlay")
+        if (overlay.classList.contains("open")) {
+          closeContextPanel()
+          return
+        }
+        // Position the modal under the button
+        const btn = document.getElementById("convCtxToggle")
+        const box = document.getElementById("ctxModalBox")
+        const rect = btn.getBoundingClientRect()
+        const spaceBelow = window.innerHeight - rect.bottom
+        if (spaceBelow >= 300) {
+          box.style.top = (rect.bottom + 6) + "px"
+          box.style.bottom = ""
+        } else {
+          box.style.bottom = (window.innerHeight - rect.top + 6) + "px"
+          box.style.top = ""
+        }
+        // Align left edge with button, keep within viewport
+        let left = rect.left
+        if (left + 340 > window.innerWidth - 8) left = window.innerWidth - 348
+        box.style.left = Math.max(8, left) + "px"
+
+        overlay.classList.add("open")
+        document.getElementById("ctxSearch").value = ""
+        _ctxSearchQuery = ""
+
+        if (!contextOptionsLoaded) {
+          document.getElementById("ctxModalBody").innerHTML =
+            '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">Loading\u2026</div>'
+          try {
+            contextOptions = await window.electronAPI.getContextOptions()
+            contextOptionsLoaded = true
+          } catch (e) {
+            contextOptions = []
+          }
+        }
+        _renderCtxModal()
+        document.getElementById("ctxSearch").focus()
+      }
+
+      function closeContextPanel() {
+        document.getElementById("ctxModalOverlay").classList.remove("open")
+      }
+
+      function filterContextSearch(q) {
+        _ctxSearchQuery = q
+        _renderCtxModal()
+      }
+
+      function toggleContextOption(name, value) {
+        const idx = convContextFilters.findIndex(
+          (f) => f.name === name && f.value === value,
+        )
+        if (idx === -1) convContextFilters.push({ name, value })
+        else convContextFilters.splice(idx, 1)
+        _updateCtxFilterBadge()
+        _renderCtxModal()
+        convPage = 1
+        loadSessions()
+      }
+
+      function clearContextFilters() {
+        convContextFilters = []
+        _updateCtxFilterBadge()
+        _renderCtxModal()
+        convPage = 1
+        loadSessions()
+      }
+
+      // ── Session context detail modal ────────────────────────────────
+      function openSessionContextModal(uuid) {
+        const s = convSessions.find((x) => x.sessionUuid === uuid)
+        if (!s) return
+        let contexts = []
+        try {
+          contexts = s.contexts ? JSON.parse(s.contexts) : []
+        } catch (e) {}
+
+        document.getElementById("sessionCtxModalTitle").textContent =
+          uuid.slice(0, 8) + "\u2026 " + uuid.slice(-8)
+
+        const body = document.getElementById("sessionCtxModalBody")
+        if (!contexts.length) {
+          body.innerHTML =
+            '<div style="color:var(--muted);font-size:0.8rem;text-align:center;padding:24px">No context data available for this session.</div>'
+        } else {
+          const sorted = [...contexts].sort((a, b) =>
+            (a.name || "").localeCompare(b.name || ""),
+          )
+          const rows = sorted
+            .map((c) => {
+              const valClass =
+                c.value === "true"
+                  ? ' class="ctx-val-true"'
+                  : c.value === "false"
+                    ? ' class="ctx-val-false"'
+                    : ""
+              return `<tr><td>${esc(c.name)}</td><td${valClass}>${esc(c.value)}</td></tr>`
+            })
+            .join("")
+          body.innerHTML = `<table class="ctx-detail-table"><thead><tr><th>Context name</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`
+        }
+        document.getElementById("sessionContextModal").classList.add("open")
+      }
+
+      function closeSessionContextModal() {
+        document.getElementById("sessionContextModal").classList.remove("open")
+      }
+
       // Conv filter pills
       document.querySelectorAll("[data-conv-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -7524,12 +8080,13 @@
       // Conv search
       let _convSearchTimer = null
       document.getElementById("convSearch").addEventListener("input", (e) => {
+        // Show/hide the clear button immediately (no debounce)
+        document
+          .getElementById("convClearSearch")
+          .classList.toggle("visible", e.target.value.length > 0)
         clearTimeout(_convSearchTimer)
         _convSearchTimer = setTimeout(() => {
           convQuery = e.target.value.trim()
-          document
-            .getElementById("convClearSearch")
-            .classList.toggle("visible", convQuery.length > 0)
           convPage = 1
           loadSessions()
         }, 300)
@@ -7956,13 +8513,35 @@
       }
 
       // ── CM.com output text formatter ───────────────────────────────────
-      // Returns { body: safeHtml, options: string[], ctas: {href,text,newTab}[] }
-      function parseCmOutput(text) {
-        if (!text) return { body: "", options: [], ctas: [] }
+      // Returns { body: safeHtml, options: string[], ctas: {href,text,newTab}[], asks: {image,buttonText,ask}[] }
+      function parseCmOutput(text, botMode = true) {
+        if (!text) return { body: "", options: [], ctas: [], asks: [] }
+
+        // Extract card.ask cards: {message:card.ask image="..." buttonText="..." ask="..."}{/message:card.ask}
+        const asks = []
+        const withoutAsks = text.replace(
+          /\{message:card\.ask\s([^}]*)\}\{\/message:card\.ask\}/gi,
+          (_, attrs) => {
+            const getAttr = (name) => {
+              const m2 = attrs.match(
+                new RegExp(
+                  name + '=["\u201C\u201D]([^"\u201C\u201D]*)["\u201C\u201D]',
+                  'i',
+                ),
+              )
+              return m2 ? m2[1].trim() : ""
+            }
+            const image = getAttr("image")
+            const buttonText = getAttr("buttonText")
+            const askText = getAttr("ask")
+            if (buttonText || askText) asks.push({ image, buttonText, ask: askText })
+            return ""
+          },
+        )
 
         // Extract CTA buttons: {message:cta buttonLink="..."buttonText="..."buttonNewTab="..."}{/message:cta}
         const ctas = []
-        const withoutCtas = text.replace(
+        const withoutCtas = withoutAsks.replace(
           /\{message:cta\s([^}]*)\}\{\/message:cta\}/gi,
           (_, attrs) => {
             const getAttr = (name) => {
@@ -8000,6 +8579,12 @@
           .replace(/\*\s*$/gm, "")
           .replace(/\*\s+/g, "")
 
+        // Convert Markdown-style links [text](url) → <a href="url">text</a>
+        const withMdLinks = withoutBullets.replace(
+          /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+          (_, linkText, href) => `<a href="${href}">${linkText}</a>`,
+        )
+
         // Handle <a href="..."> links — double-quoted CSV style: href=""url""
         // We'll process links before HTML-escaping everything else
         const LINK_RE =
@@ -8007,9 +8592,9 @@
         const parts = []
         let last = 0
         let m
-        while ((m = LINK_RE.exec(withoutBullets)) !== null) {
+        while ((m = LINK_RE.exec(withMdLinks)) !== null) {
           // Escape the plain text before this match
-          parts.push(esc(withoutBullets.slice(last, m.index)))
+          parts.push(esc(withMdLinks.slice(last, m.index)))
           const href = m[1] // already extracted raw URL
           const linkText = m[2].replace(/<[^>]+>/g, "") // strip any inner tags
           // Only allow http/https URLs
@@ -8024,21 +8609,34 @@
           }
           last = m.index + m[0].length
         }
-        parts.push(esc(withoutBullets.slice(last)))
+        parts.push(esc(withMdLinks.slice(last)))
         let safe = parts.join("")
 
-        // __text__ → <strong> (only when there is actual content between the underscores)
-        // bare __ (possibly with spaces) → <br>
-        safe = safe.replace(/__([^_]+)__/g, "<strong>$1</strong>")
+        if (botMode) {
+          // __text__ → <strong> (only when there is actual content between the underscores)
+          // bare __ → <br><br>; single standalone _ → <br>
+          // Protect {{...}} blocks from underscore conversion first
+          const curlyPlaceholders = []
+          safe = safe.replace(/\{\{[^}]*\}\}/g, (match) => {
+            curlyPlaceholders.push(match)
+            return `\x00CURLY${curlyPlaceholders.length - 1}\x00`
+          })
 
-        // Line breaks: bare __ or sequences of underscores/spaces → <br>
-        safe = safe.replace(/(_\s*){2,}/g, "<br>")
-        safe = safe.replace(/\s_\s/g, "<br>")
+          safe = safe.replace(/__([^_]+)__/g, "<strong>$1</strong>")
 
-        // Trim leading/trailing <br>
-        safe = safe.replace(/^(<br>)+|(<br>)+$/g, "").trim()
+          // Line breaks: two or more underscores (bare) → double line break
+          safe = safe.replace(/(_\s*){2,}/g, "<br><br>")
+          // Single underscore not adjacent to another underscore → single line break
+          safe = safe.replace(/(?<!_)_(?!_)/g, "<br>")
 
-        return { body: safe, options, ctas }
+          // Restore {{...}} blocks
+          safe = safe.replace(/\x00CURLY(\d+)\x00/g, (_, i) => curlyPlaceholders[+i])
+
+          // Trim leading/trailing <br>
+          safe = safe.replace(/^(<br>)+|(<br>)+$/g, "").trim()
+        }
+
+        return { body: safe, options, ctas, asks }
       }
 
       function buildChatSearchRegex(q) {
@@ -8052,11 +8650,11 @@
           return null
         }
       }
-      function chatHl(text) {
-        const { body, options, ctas } = parseCmOutput(text)
-        if (!chatQuery) return { body, options, ctas }
+      function chatHl(text, botMode = true) {
+        const { body, options, ctas, asks } = parseCmOutput(text, botMode)
+        if (!chatQuery) return { body, options, ctas, asks }
         const re = buildChatSearchRegex(chatQuery)
-        if (!re) return { body, options, ctas }
+        if (!re) return { body, options, ctas, asks }
         const reG = new RegExp(
           re.source,
           re.flags.includes("g") ? re.flags : re.flags + "g",
@@ -8065,6 +8663,7 @@
           body: body.replace(reG, (m) => `<mark>${m}</mark>`),
           options,
           ctas,
+          asks,
         }
       }
 
@@ -8119,7 +8718,7 @@
         if (qaIds.length) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           qaIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; Article ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; Article ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -8127,7 +8726,7 @@
         if (dialogIds.size) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Dialogs</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           dialogIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="_navReturnView='conversations';switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)">&#x1F7E3; Dialog ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)">&#x1F7E3; Dialog ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -8140,7 +8739,7 @@
           const ids = faqsFound.DataRetrievalResults.slice(0, 8)
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">GenAI source articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           ids.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -8256,8 +8855,15 @@
               continue
             }
             const userRow =
-              !isInternalValue(row.interactionValue) && row.interactionValue
+              t !== "Event" &&
+              t !== "LinkClick" &&
+              !isInternalValue(row.interactionValue) &&
+              row.interactionValue
                 ? row
+                : null
+            const linkClicked =
+              t === "LinkClick" && row.interactionValue
+                ? row.interactionValue
                 : null
             const botRows = []
             let j = i
@@ -8281,7 +8887,7 @@
             } else {
               j = i + 1
             }
-            turns.push({ system: null, userRow, botRows })
+            turns.push({ system: null, userRow, botRows, linkClicked })
             i = j
           }
           return turns
@@ -8334,11 +8940,16 @@
           }
 
           let html = ""
+          if (turn.linkClicked) {
+            html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
+              turn.linkClicked,
+            )}</span></div></div>`
+          }
           if (turn.userRow) {
             html += `<div class="user-group">
               <span class="user-label">User</span>
               <div class="bubble user">${
-                chatHl(turn.userRow.interactionValue).body
+                chatHl(turn.userRow.interactionValue, false).body
               }</div>
               <span class="bubble-ts">${esc(
                 turn.userRow.timestampStart
@@ -8361,7 +8972,7 @@
             turn.botRows.forEach((br) => {
               const bubbleClass = isGenAiRow(br) ? "genai" : "bot"
               const detail = renderBubbleDetail(br)
-              const { body, options, ctas } = chatHl(br.outputText)
+              const { body, options, ctas, asks } = chatHl(br.outputText)
               const optionsHtml = options.length
                 ? `<div class="dialog-options">${options
                     .map(
@@ -8379,6 +8990,20 @@
                     })
                     .join("")}</div>`
                 : ""
+              const asksHtml = asks.length
+                ? `<div class="ask-cards">${asks
+                    .map((a) => {
+                      const imgHtml =
+                        a.image && /^https?:\/\//i.test(a.image)
+                          ? `<img class="ask-card-img" src="${esc(a.image)}" alt="" loading="lazy" />`
+                          : ""
+                      const askLabel = a.ask
+                        ? `<div class="ask-card-ask" title="${esc(a.ask)}">${esc(a.ask)}</div>`
+                        : ""
+                      return `<div class="ask-card">${imgHtml}<div class="ask-card-body"><button class="ask-card-btn">${esc(a.buttonText)}</button>${askLabel}</div></div>`
+                    })
+                    .join("")}</div>`
+                : ""
               const q = br.recognitionQuality
               const isLowRecog = q > 0 && q <= 60
               const isLowRecogActive = convSessionFilter === "low_recog"
@@ -8387,10 +9012,10 @@
               const detailOpenClass =
                 isLowRecog && isLowRecogActive ? " open" : ""
               html += `<div class="bubble ${bubbleClass}${highlightClass}" onclick="toggleBubbleDetail(${br.logId})">
-                ${body}${optionsHtml}${ctasHtml}
+                ${body}
                 <span class="bubble-expand-hint">▾ details</span>
                 <div class="bubble-detail${detailOpenClass}" data-logid="${br.logId}">${detail}</div>
-              </div>`
+              </div>${optionsHtml}${ctasHtml}${asksHtml}`
             })
             const tsRow = turn.botRows[turn.botRows.length - 1]
             html += `<span class="bubble-ts">${esc(

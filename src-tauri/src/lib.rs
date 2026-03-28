@@ -125,6 +125,22 @@ struct SessionSummary {
     culture: String,
     has_gen_ai: bool,
     has_neg_feedback: bool,
+    contexts: String, // JSON from most recent interaction that has context data
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextOption {
+    name: String,
+    value: String,
+    count: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextFilter {
+    name: String,
+    value: String,
 }
 
 #[derive(Serialize)]
@@ -1123,6 +1139,7 @@ struct GetSessionsArgs {
     query_regex: Option<bool>,   // treat query as a regex
     query_scope: Option<String>, // "both" | "user" | "bot"
     query_ids: Option<bool>,     // also search article_ids and dialog_paths columns
+    context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
 }
 
 #[tauri::command]
@@ -1219,6 +1236,39 @@ fn get_sessions(
         conditions.push(cond);
     }
 
+    // Context filters — group by name, OR values within a group, AND between groups
+    if let Some(ref ctx_filters) = args.context_filters {
+        if !ctx_filters.is_empty() {
+            use std::collections::HashMap;
+            let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+            for f in ctx_filters {
+                groups.entry(f.name.clone()).or_default().push(f.value.clone());
+            }
+            let exists_clauses: Vec<String> = groups
+                .iter()
+                .map(|(name, values)| {
+                    let n = name.replace('\'', "''");
+                    let in_list = values
+                        .iter()
+                        .map(|v| format!("'{}'", v.replace('\'', "''")))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "EXISTS (SELECT 1 FROM json_each(i.contexts) jc \
+                         WHERE json_extract(jc.value, '$.name') = '{n}' \
+                         AND json_extract(jc.value, '$.value') IN ({in_list}))"
+                    )
+                })
+                .collect();
+            if !exists_clauses.is_empty() {
+                let combined = exists_clauses.join(" AND ");
+                conditions.push(format!(
+                    "session_uuid IN (SELECT DISTINCT i.session_uuid FROM interactions i WHERE {combined})"
+                ));
+            }
+        }
+    }
+
     let where_clause = if conditions.is_empty() {
         String::new()
     } else {
@@ -1249,7 +1299,12 @@ fn get_sessions(
                AND i2.main_interaction_type NOT IN ('Event', 'LinkClick')
              ORDER BY i2.log_id ASC LIMIT 1) as preview,
             MAX(CASE WHEN s.feedback_info LIKE '%"score": -1%'
-                      OR s.feedback_info LIKE '%"score":-1%' THEN 1 ELSE 0 END) as has_neg_feedback
+                      OR s.feedback_info LIKE '%"score":-1%' THEN 1 ELSE 0 END) as has_neg_feedback,
+            (SELECT i2.contexts FROM interactions i2
+             WHERE i2.session_uuid = s.session_uuid
+               AND i2.contexts IS NOT NULL AND i2.contexts != ''
+               AND i2.contexts != '[]' AND i2.contexts != 'null'
+             ORDER BY i2.log_id DESC LIMIT 1) as contexts_snapshot
         FROM interactions s
         {where_clause}
         GROUP BY s.session_uuid
@@ -1269,6 +1324,7 @@ fn get_sessions(
                 culture: row.get::<_, String>(5).unwrap_or_default(),
                 user_message_preview: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
                 has_neg_feedback: row.get::<_, i64>(7).unwrap_or(0) == 1,
+                contexts: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
             })
         })
         .map_err(|e| format!("Query error: {e}"))?
@@ -1276,6 +1332,45 @@ fn get_sessions(
         .collect::<Vec<_>>();
 
     Ok(SessionsPage { sessions, total, page })
+}
+
+#[tauri::command]
+fn get_context_options(db_state: State<SharedDbState>) -> Result<Vec<ContextOption>, String> {
+    let state = db_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.conn.as_ref().ok_or("No database open.")?;
+
+    let mut stmt = conn
+        .prepare(
+            r#"SELECT
+                json_extract(c.value, '$.name')  as ctx_name,
+                json_extract(c.value, '$.value') as ctx_value,
+                COUNT(DISTINCT i.session_uuid)   as session_count
+            FROM interactions i, json_each(i.contexts) c
+            WHERE i.contexts IS NOT NULL
+              AND i.contexts != ''
+              AND i.contexts != '[]'
+              AND i.contexts != 'null'
+              AND json_extract(c.value, '$.name') IS NOT NULL
+            GROUP BY ctx_name, ctx_value
+            ORDER BY ctx_name ASC, ctx_value ASC
+            LIMIT 500"#,
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let opts = stmt
+        .query_map([], |row| {
+            Ok(ContextOption {
+                name:  row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                value: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                count: row.get::<_, i64>(2).unwrap_or(0),
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .filter(|o| !o.name.is_empty())
+        .collect();
+
+    Ok(opts)
 }
 
 #[tauri::command]
@@ -1374,6 +1469,7 @@ pub fn run() {
             get_sessions,
             get_session_interactions,
             get_date_range,
+            get_context_options,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")
