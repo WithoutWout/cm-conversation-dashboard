@@ -1,6 +1,6 @@
 [package]
 name = "CAIDashboard"
-version = "0.4.0"
+version = "0.4.1"
 description = "Desktop dashboard for inspecting CM.com Conversational AI Cloud content exports"
 authors = ["Wout van Os"]
 license = ""
