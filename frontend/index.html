@@ -2180,11 +2180,14 @@
         position: relative;
         white-space: nowrap;
       }
-      .conv-ctx-btn:hover { border-color: var(--accent); color: var(--text); }
+      .conv-ctx-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
       .conv-ctx-btn.has-filters {
         border-color: var(--accent);
         color: var(--accent);
-        background: rgba(124,106,247,0.06);
+        background: rgba(124, 106, 247, 0.06);
       }
       .ctx-filter-badge {
         background: var(--accent);
@@ -2203,7 +2206,9 @@
         inset: 0;
         z-index: 400;
       }
-      .ctx-modal-overlay.open { display: block; }
+      .ctx-modal-overlay.open {
+        display: block;
+      }
       .ctx-modal-backdrop {
         position: absolute;
         inset: 0;
@@ -2213,7 +2218,7 @@
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 10px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.28);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
         width: 340px;
         max-width: calc(100vw - 24px);
         max-height: 420px;
@@ -2249,7 +2254,10 @@
         border-radius: 3px;
         opacity: 0.8;
       }
-      .ctx-clear-btn:hover { opacity: 1; background: rgba(239,68,68,0.1); }
+      .ctx-clear-btn:hover {
+        opacity: 1;
+        background: rgba(239, 68, 68, 0.1);
+      }
       .ctx-modal-close {
         background: none;
         border: none;
@@ -2260,7 +2268,10 @@
         border-radius: 3px;
         line-height: 1;
       }
-      .ctx-modal-close:hover { color: var(--text); background: var(--surface2); }
+      .ctx-modal-close:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
       .ctx-modal-search {
         padding: 8px 12px 6px;
         flex-shrink: 0;
@@ -2277,13 +2288,17 @@
         box-sizing: border-box;
         outline: none;
       }
-      .ctx-modal-search input:focus { border-color: var(--accent); }
+      .ctx-modal-search input:focus {
+        border-color: var(--accent);
+      }
       .ctx-modal-body {
         overflow-y: auto;
         flex: 1;
         padding: 8px 10px;
       }
-      .ctx-group { margin-bottom: 10px; }
+      .ctx-group {
+        margin-bottom: 10px;
+      }
       .ctx-group-name {
         font-size: 0.62rem;
         font-weight: 600;
@@ -2296,7 +2311,11 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .ctx-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+      .ctx-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
       .ctx-chip {
         background: var(--surface2);
         border: 1px solid var(--border);
@@ -2307,15 +2326,21 @@
         color: var(--text);
         transition: background 0.1s, border-color 0.1s;
       }
-      .ctx-chip:hover { border-color: var(--accent); }
+      .ctx-chip:hover {
+        border-color: var(--accent);
+      }
       .ctx-chip.active {
-        background: rgba(124,106,247,0.15);
+        background: rgba(124, 106, 247, 0.15);
         border-color: var(--accent);
         color: var(--accent);
         font-weight: 600;
       }
-      .ctx-chip.val-true  { color: var(--green); }
-      .ctx-chip.val-false { color: var(--muted); }
+      .ctx-chip.val-true {
+        color: var(--green);
+      }
+      .ctx-chip.val-false {
+        color: var(--muted);
+      }
 
       /* === SESSION CONTEXT INFO BUTTON === */
       .session-ctx-info-btn {
@@ -2343,7 +2368,11 @@
         display: flex;
         flex-direction: column;
       }
-      .ctx-detail-body { overflow-y: auto; flex: 1; padding: 12px; }
+      .ctx-detail-body {
+        overflow-y: auto;
+        flex: 1;
+        padding: 12px;
+      }
       .ctx-detail-table {
         width: 100%;
         border-collapse: collapse;
@@ -2364,10 +2393,20 @@
         border-bottom: 1px solid var(--border);
         vertical-align: middle;
       }
-      .ctx-detail-table tr:last-child td { border-bottom: none; }
-      .ctx-detail-table td:first-child { color: var(--muted); font-size: 0.72rem; }
-      .ctx-val-true  { color: var(--green); font-weight: 600; }
-      .ctx-val-false { color: var(--muted); }
+      .ctx-detail-table tr:last-child td {
+        border-bottom: none;
+      }
+      .ctx-detail-table td:first-child {
+        color: var(--muted);
+        font-size: 0.72rem;
+      }
+      .ctx-val-true {
+        color: var(--green);
+        font-weight: 600;
+      }
+      .ctx-val-false {
+        color: var(--muted);
+      }
 
       /* === CHAT MAIN === */
       .conv-main {
@@ -3565,8 +3604,15 @@
                 </button>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;padding:0 10px 0">
-              <div class="conv-date-wrap" id="convDateWrap" style="flex:1">
+            <div
+              style="
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 0 10px 0;
+              "
+            >
+              <div class="conv-date-wrap" id="convDateWrap" style="flex: 1">
                 <div
                   class="conv-date-range-btn"
                   id="convDateRangeBtn"
@@ -3587,9 +3633,19 @@
                 </div>
                 <div class="conv-cal-popup" id="convCalPopup"></div>
               </div>
-              <button class="conv-ctx-btn" id="convCtxToggle" onclick="toggleContextPanel()" title="Filter by context">
+              <button
+                class="conv-ctx-btn"
+                id="convCtxToggle"
+                onclick="toggleContextPanel()"
+                title="Filter by context"
+              >
                 &#x1F3F7;
-                <span class="ctx-filter-badge" id="ctxFilterBadge" style="display:none">0</span>
+                <span
+                  class="ctx-filter-badge"
+                  id="ctxFilterBadge"
+                  style="display: none"
+                  >0</span
+                >
               </button>
             </div>
             <div class="conv-filter-pills">
@@ -4305,12 +4361,27 @@
         <div class="ctx-modal-header">
           <span class="ctx-modal-title">&#x1F3F7; Filter by Context</span>
           <div class="ctx-modal-actions">
-            <button class="ctx-clear-btn" id="ctxClearBtn" onclick="clearContextFilters()" style="display:none">&#x2715; Clear all</button>
-            <button class="ctx-modal-close" onclick="closeContextPanel()">&#x2715;</button>
+            <button
+              class="ctx-clear-btn"
+              id="ctxClearBtn"
+              onclick="clearContextFilters()"
+              style="display: none"
+            >
+              &#x2715; Clear all
+            </button>
+            <button class="ctx-modal-close" onclick="closeContextPanel()">
+              &#x2715;
+            </button>
           </div>
         </div>
         <div class="ctx-modal-search">
-          <input type="text" id="ctxSearch" placeholder="Search contexts…" autocomplete="off" oninput="filterContextSearch(this.value)" />
+          <input
+            type="text"
+            id="ctxSearch"
+            placeholder="Search contexts…"
+            autocomplete="off"
+            oninput="filterContextSearch(this.value)"
+          />
         </div>
         <div class="ctx-modal-body" id="ctxModalBody"></div>
       </div>
@@ -4320,11 +4391,16 @@
     <div class="modal-overlay" id="sessionContextModal">
       <div class="modal-box ctx-detail-modal-box">
         <div class="modal-header">
-          <div style="display:flex;flex-direction:column;gap:3px">
+          <div style="display: flex; flex-direction: column; gap: 3px">
             <h3>Session Contexts</h3>
-            <span id="sessionCtxModalTitle" style="font-size:0.72rem;color:var(--muted)"></span>
+            <span
+              id="sessionCtxModalTitle"
+              style="font-size: 0.72rem; color: var(--muted)"
+            ></span>
           </div>
-          <button class="close-btn" onclick="closeSessionContextModal()">&#x2715;</button>
+          <button class="close-btn" onclick="closeSessionContextModal()">
+            &#x2715;
+          </button>
         </div>
         <div class="ctx-detail-body" id="sessionCtxModalBody"></div>
       </div>
@@ -4545,7 +4621,7 @@
       let chatSearchRegex = false // when true, treat chatQuery as a regex
       let convImporting = false
       let convContextFilters = [] // [{name, value}] — active context filters
-      let contextOptions = []     // [{name, value, count}] — all available context options
+      let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
       let contextPanelOpen = false
 
@@ -7788,7 +7864,8 @@
           queryIds: convSearchIds,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
-          contextFilters: convContextFilters.length > 0 ? convContextFilters : null,
+          contextFilters:
+            convContextFilters.length > 0 ? convContextFilters : null,
         }
         try {
           const res = await window.electronAPI.getSessions(args)
@@ -7865,7 +7942,9 @@
                 }
                 ${
                   s.contexts
-                    ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(s.sessionUuid)}');event.stopPropagation()" title="View session contexts">&#8505;</button>`
+                    ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(
+                        s.sessionUuid,
+                      )}');event.stopPropagation()" title="View session contexts">&#8505;</button>`
                     : ""
                 }
               </div>
@@ -7910,7 +7989,12 @@
         const q = (searchQ || "").toLowerCase().trim()
         const groups = {}
         for (const o of contextOptions) {
-          if (q && !o.name.toLowerCase().includes(q) && !o.value.toLowerCase().includes(q)) continue
+          if (
+            q &&
+            !o.name.toLowerCase().includes(q) &&
+            !o.value.toLowerCase().includes(q)
+          )
+            continue
           if (!groups[o.name]) groups[o.name] = []
           groups[o.name].push(o)
         }
@@ -7929,18 +8013,27 @@
                   o.value === "true"
                     ? " val-true"
                     : o.value === "false"
-                      ? " val-false"
-                      : ""
-                return `<button class="ctx-chip${active ? " active" : ""}${valClass}" data-ctx-name="${esc(o.name)}" data-ctx-value="${esc(o.value)}" title="${esc(o.count)} sessions">${esc(o.value)}</button>`
+                    ? " val-false"
+                    : ""
+                return `<button class="ctx-chip${
+                  active ? " active" : ""
+                }${valClass}" data-ctx-name="${esc(
+                  o.name,
+                )}" data-ctx-value="${esc(o.value)}" title="${esc(
+                  o.count,
+                )} sessions">${esc(o.value)}</button>`
               })
               .join("")
-            return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(name)}">${esc(name)}</div><div class="ctx-chips">${chips}</div></div>`
+            return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
+              name,
+            )}">${esc(name)}</div><div class="ctx-chips">${chips}</div></div>`
           })
           .join("")
       }
 
       function _renderCtxModal() {
-        document.getElementById("ctxModalBody").innerHTML = _buildCtxModalHtml(_ctxSearchQuery)
+        document.getElementById("ctxModalBody").innerHTML =
+          _buildCtxModalHtml(_ctxSearchQuery)
         _attachCtxChipListeners()
         document.getElementById("ctxClearBtn").style.display =
           convContextFilters.length > 0 ? "" : "none"
@@ -7966,10 +8059,10 @@
         const rect = btn.getBoundingClientRect()
         const spaceBelow = window.innerHeight - rect.bottom
         if (spaceBelow >= 300) {
-          box.style.top = (rect.bottom + 6) + "px"
+          box.style.top = rect.bottom + 6 + "px"
           box.style.bottom = ""
         } else {
-          box.style.bottom = (window.innerHeight - rect.top + 6) + "px"
+          box.style.bottom = window.innerHeight - rect.top + 6 + "px"
           box.style.top = ""
         }
         // Align left edge with button, keep within viewport
@@ -8050,9 +8143,11 @@
                 c.value === "true"
                   ? ' class="ctx-val-true"'
                   : c.value === "false"
-                    ? ' class="ctx-val-false"'
-                    : ""
-              return `<tr><td>${esc(c.name)}</td><td${valClass}>${esc(c.value)}</td></tr>`
+                  ? ' class="ctx-val-false"'
+                  : ""
+              return `<tr><td>${esc(c.name)}</td><td${valClass}>${esc(
+                c.value,
+              )}</td></tr>`
             })
             .join("")
           body.innerHTML = `<table class="ctx-detail-table"><thead><tr><th>Context name</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`
@@ -8526,7 +8621,7 @@
               const m2 = attrs.match(
                 new RegExp(
                   name + '=["\u201C\u201D]([^"\u201C\u201D]*)["\u201C\u201D]',
-                  'i',
+                  "i",
                 ),
               )
               return m2 ? m2[1].trim() : ""
@@ -8534,7 +8629,8 @@
             const image = getAttr("image")
             const buttonText = getAttr("buttonText")
             const askText = getAttr("ask")
-            if (buttonText || askText) asks.push({ image, buttonText, ask: askText })
+            if (buttonText || askText)
+              asks.push({ image, buttonText, ask: askText })
             return ""
           },
         )
@@ -8630,7 +8726,10 @@
           safe = safe.replace(/(?<!_)_(?!_)/g, "<br>")
 
           // Restore {{...}} blocks
-          safe = safe.replace(/\x00CURLY(\d+)\x00/g, (_, i) => curlyPlaceholders[+i])
+          safe = safe.replace(
+            /\x00CURLY(\d+)\x00/g,
+            (_, i) => curlyPlaceholders[+i],
+          )
 
           // Trim leading/trailing <br>
           safe = safe.replace(/^(<br>)+|(<br>)+$/g, "").trim()
@@ -8995,12 +9094,18 @@
                     .map((a) => {
                       const imgHtml =
                         a.image && /^https?:\/\//i.test(a.image)
-                          ? `<img class="ask-card-img" src="${esc(a.image)}" alt="" loading="lazy" />`
+                          ? `<img class="ask-card-img" src="${esc(
+                              a.image,
+                            )}" alt="" loading="lazy" />`
                           : ""
                       const askLabel = a.ask
-                        ? `<div class="ask-card-ask" title="${esc(a.ask)}">${esc(a.ask)}</div>`
+                        ? `<div class="ask-card-ask" title="${esc(
+                            a.ask,
+                          )}">${esc(a.ask)}</div>`
                         : ""
-                      return `<div class="ask-card">${imgHtml}<div class="ask-card-body"><button class="ask-card-btn">${esc(a.buttonText)}</button>${askLabel}</div></div>`
+                      return `<div class="ask-card">${imgHtml}<div class="ask-card-body"><button class="ask-card-btn">${esc(
+                        a.buttonText,
+                      )}</button>${askLabel}</div></div>`
                     })
                     .join("")}</div>`
                 : ""
