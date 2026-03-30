@@ -209,7 +209,11 @@ function matchArticle(a, re, isPlain, needle) {
   }
   // Search response text (always searched)
   if (isPlain) {
-    if (searchCase ? testPlain(needle, a._searchResponse) : testPlainCI(needle, a._searchResponse))
+    if (
+      searchCase
+        ? testPlain(needle, a._searchResponse)
+        : testPlainCI(needle, a._searchResponse)
+    )
       return true
   } else {
     if (testRe(re, a._searchResponse)) return true
@@ -245,7 +249,9 @@ function matchDialog(item, re, isPlain, needle) {
   for (const sn of item._searchNodes) {
     if (!searchContent) {
       if (isPlain) {
-        if (searchCase ? testPlain(needle, sn.name) : testPlainCI(needle, sn.name))
+        if (
+          searchCase ? testPlain(needle, sn.name) : testPlainCI(needle, sn.name)
+        )
           return true
       } else {
         if (testRe(re, sn.name)) return true
@@ -253,7 +259,11 @@ function matchDialog(item, re, isPlain, needle) {
     }
     if (sn.answerText) {
       if (isPlain) {
-        if (searchCase ? testPlain(needle, sn.answerText) : testPlainCI(needle, sn.answerText))
+        if (
+          searchCase
+            ? testPlain(needle, sn.answerText)
+            : testPlainCI(needle, sn.answerText)
+        )
           return true
       } else {
         if (testRe(re, sn.answerText)) return true
@@ -340,8 +350,11 @@ self.onmessage = function (e) {
     if (q && workerEntities.length && (re || isPlain)) {
       for (const entity of workerEntities) {
         if (isPlain) {
-          if (entity._searchWords.some((w) =>
-            searchCase ? testPlain(needle, w) : testPlainCI(needle, w)))
+          if (
+            entity._searchWords.some((w) =>
+              searchCase ? testPlain(needle, w) : testPlainCI(needle, w),
+            )
+          )
             matchingEntityNames.add(entity._nameUpper)
         } else if (re) {
           if (entity._searchWords.some((w) => testRe(re, w)))
@@ -426,9 +439,15 @@ self.onmessage = function (e) {
       filteredEntities = workerEntities
     } else {
       filteredEntities = workerEntities.filter((entity) => {
-        if (eFilter === "articles" && !entityHasArticleXref.has(entity._nameUpper))
+        if (
+          eFilter === "articles" &&
+          !entityHasArticleXref.has(entity._nameUpper)
+        )
           return false
-        if (eFilter === "dialogs" && !entityHasDialogXref.has(entity._nameUpper))
+        if (
+          eFilter === "dialogs" &&
+          !entityHasDialogXref.has(entity._nameUpper)
+        )
           return false
         if (noQuery) return true
         if (!re && !isPlain) return false
