@@ -746,6 +746,9 @@ CREATE TABLE IF NOT EXISTS interactions (
 CREATE INDEX IF NOT EXISTS idx_session_uuid  ON interactions(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_timestamp     ON interactions(timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_type          ON interactions(main_interaction_type);
+CREATE INDEX IF NOT EXISTS idx_session_ts    ON interactions(session_uuid, timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_feedback      ON interactions(feedback_info) WHERE feedback_info IS NOT NULL AND feedback_info != '';
+CREATE INDEX IF NOT EXISTS idx_recog_quality ON interactions(recognition_quality) WHERE recognition_quality > 0;
 "#;
 
 fn open_db(path: &str) -> Result<Connection, String> {
@@ -1164,7 +1167,6 @@ fn get_sessions(
     if query_regex && !query.is_empty() {
         use regex::Regex;
         use std::sync::Arc;
-        // Compile the regex once and share it across all row evaluations via Arc
         let compiled = Arc::new(
             Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?
         );
@@ -1179,15 +1181,25 @@ fn get_sessions(
         ).ok();
     }
 
-    // Build WHERE clauses
+    // Collect parameterized values alongside conditions
+    let mut conditions: Vec<String> = Vec::new();
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut param_idx = 0usize;
+
+    // Helper to get next parameter placeholder
+    let next_param = |idx: &mut usize| -> String {
+        *idx += 1;
+        format!("?{}", *idx)
+    };
+
     // Always exclude sessions that have no real user input
-    let mut conditions: Vec<String> = vec![
+    conditions.push(
         "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
          WHERE interaction_value != '' \
            AND interaction_value NOT LIKE '#%#' \
            AND LOWER(interaction_value) != 'continue' \
            AND main_interaction_type NOT IN ('Event', 'LinkClick'))".to_string(),
-    ];
+    );
     if filter == "genai" {
         conditions.push(
             "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE main_interaction_type = 'GenerativeAI')".to_string(),
@@ -1203,37 +1215,69 @@ fn get_sessions(
     }
     if let Some(ref df) = args.date_from {
         if !df.is_empty() {
-            conditions.push(format!("timestamp_start >= '{}'", df.replace('\'', "")));
+            let p = next_param(&mut param_idx);
+            conditions.push(format!("timestamp_start >= {p}"));
+            param_values.push(Box::new(df.clone()));
         }
     }
     if let Some(ref dt) = args.date_to {
         if !dt.is_empty() {
-            conditions.push(format!("timestamp_start <= '{}'", dt.replace('\'', "")));
+            let p = next_param(&mut param_idx);
+            conditions.push(format!("timestamp_start <= {p}"));
+            param_values.push(Box::new(dt.clone()));
         }
     }
     if !query.is_empty() {
-        let q = query.replace('\'', "''");
-        let text_cond = if query_regex {
-            match query_scope.as_str() {
-                "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', interaction_value))"),
-                "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', output_text))"),
-                _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp('{q}', interaction_value) OR regexp('{q}', output_text))"),
-            }
+        if query_regex {
+            // Regex mode: use the registered REGEXP function
+            let p = next_param(&mut param_idx);
+            let text_cond = match query_scope.as_str() {
+                "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p}, interaction_value))"),
+                "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p}, output_text))"),
+                _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p}, interaction_value) OR regexp({p}, output_text))"),
+            };
+            param_values.push(Box::new(query.clone()));
+            let cond = if query_ids {
+                let p2 = next_param(&mut param_idx);
+                param_values.push(Box::new(query.clone()));
+                let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p2}, article_ids) OR regexp({p2}, dialog_paths))");
+                format!("({text_cond} OR {ids_subq})")
+            } else {
+                text_cond
+            };
+            conditions.push(cond);
         } else {
-            match query_scope.as_str() {
-                "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE '%{q}%')"),
-                "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE '%{q}%')"),
-                _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE '%{q}%' OR output_text LIKE '%{q}%')"),
-            }
-        };
-        let cond = if query_ids {
-            // Also match sessions where article_ids or dialog_paths reference the query term
-            let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE article_ids LIKE '%{q}%' OR dialog_paths LIKE '%{q}%')");
-            format!("({text_cond} OR {ids_subq})")
-        } else {
-            text_cond
-        };
-        conditions.push(cond);
+            // Plain text mode: parameterized LIKE query
+            let like_val = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+            let p = next_param(&mut param_idx);
+            let text_cond = match query_scope.as_str() {
+                "user" => {
+                    param_values.push(Box::new(like_val.clone()));
+                    format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\')")
+                }
+                "bot" => {
+                    param_values.push(Box::new(like_val.clone()));
+                    format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE {p} ESCAPE '\\')")
+                }
+                _ => {
+                    param_values.push(Box::new(like_val.clone()));
+                    let p2 = next_param(&mut param_idx);
+                    param_values.push(Box::new(like_val.clone()));
+                    format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\' OR output_text LIKE {p2} ESCAPE '\\')")
+                }
+            };
+            let cond = if query_ids {
+                let pi1 = next_param(&mut param_idx);
+                param_values.push(Box::new(like_val.clone()));
+                let pi2 = next_param(&mut param_idx);
+                param_values.push(Box::new(like_val.clone()));
+                let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')");
+                format!("({text_cond} OR {ids_subq})")
+            } else {
+                text_cond
+            };
+            conditions.push(cond);
+        }
     }
 
     // Context filters — group by name, OR values within a group, AND between groups
@@ -1247,15 +1291,20 @@ fn get_sessions(
             let exists_clauses: Vec<String> = groups
                 .iter()
                 .map(|(name, values)| {
-                    let n = name.replace('\'', "''");
-                    let in_list = values
+                    let pn = next_param(&mut param_idx);
+                    param_values.push(Box::new(name.clone()));
+                    let value_placeholders: Vec<String> = values
                         .iter()
-                        .map(|v| format!("'{}'", v.replace('\'', "''")))
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                        .map(|v| {
+                            let pv = next_param(&mut param_idx);
+                            param_values.push(Box::new(v.clone()));
+                            pv
+                        })
+                        .collect();
+                    let in_list = value_placeholders.join(", ");
                     format!(
                         "EXISTS (SELECT 1 FROM json_each(i.contexts) jc \
-                         WHERE json_extract(jc.value, '$.name') = '{n}' \
+                         WHERE json_extract(jc.value, '$.name') = {pn} \
                          AND json_extract(jc.value, '$.value') IN ({in_list}))"
                     )
                 })
@@ -1275,13 +1324,23 @@ fn get_sessions(
         format!("WHERE {}", conditions.join(" AND "))
     };
 
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+
     // Count total sessions
     let count_sql = format!(
         "SELECT COUNT(DISTINCT session_uuid) FROM interactions {where_clause}"
     );
-    let total: i64 = conn.query_row(&count_sql, [], |row| row.get(0)).unwrap_or(0);
+    let total: i64 = conn
+        .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
+        .unwrap_or(0);
 
-    // Get session summaries - use inner query to build per-session aggregates
+    // Get session summaries
+    let p_limit = next_param(&mut param_idx);
+    let p_offset = next_param(&mut param_idx);
+    param_values.push(Box::new(limit));
+    param_values.push(Box::new(offset));
+    let params_ref2: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
+
     let sql = format!(
         r#"SELECT
             s.session_uuid,
@@ -1309,12 +1368,12 @@ fn get_sessions(
         {where_clause}
         GROUP BY s.session_uuid
         ORDER BY first_ts DESC
-        LIMIT {limit} OFFSET {offset}"#
+        LIMIT {p_limit} OFFSET {p_offset}"#
     );
 
     let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query error: {e}"))?;
     let sessions = stmt
-        .query_map([], |row| {
+        .query_map(params_ref2.as_slice(), |row| {
             Ok(SessionSummary {
                 session_uuid: row.get::<_, String>(0)?,
                 first_ts: row.get::<_, String>(1).unwrap_or_default(),

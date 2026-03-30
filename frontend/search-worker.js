@@ -8,6 +8,17 @@
 let workerArticles = [] // items with _kind === "article"
 let workerDialogs = [] // allDialogsCombined (dialogs + tDialogs w/ _kind)
 let workerEntities = [] // allEntities
+let allItems = [] // pre-built articles + dialogs combined
+
+// ── Pre-computed search indexes (built on "init") ────────────────────────────
+// Maps item → pre-stripped searchable text so strip() isn't called per search.
+// Article: _searchId (string), _searchQuestions (uppercased texts), _searchResponse (stripped)
+// Dialog: _searchId (string), _searchName, _searchDesc, _searchNodes [{name, answerText}]
+// Entity: _searchName, _searchWords [lowercased texts]
+
+// Pre-computed entity cross-reference sets (built on init)
+let entityHasArticleXref = new Set() // entity names (upper) that have article xrefs
+let entityHasDialogXref = new Set() // entity names (upper) that have dialog xrefs
 
 // ── Search options (updated on each "search" message) ────────────────────────
 let searchCase = false
@@ -34,6 +45,17 @@ function testRe(re, str) {
   return re.test(str)
 }
 
+// Fast plain-text test: uses indexOf (much faster than regex for literal strings)
+function testPlain(needle, haystack) {
+  if (!needle || !haystack) return false
+  return haystack.indexOf(needle) !== -1
+}
+
+function testPlainCI(needleLower, haystack) {
+  if (!needleLower || !haystack) return false
+  return haystack.toLowerCase().indexOf(needleLower) !== -1
+}
+
 function strip(t) {
   return (t || "")
     .replace(/\{[^}]*\}/g, "")
@@ -55,109 +77,211 @@ function sortBy(arr, sort, idFn, nameFn) {
 
 // ── Article helpers ───────────────────────────────────────────────────────────
 function aKind(a) {
-  const types = a.Outputs.map((o) => o.Type)
-  if (types.includes("Answer")) return "answer"
-  if (types.includes("TDialogStart")) return "tdialog"
-  return "dialog"
+  return a._aKind // pre-computed on init
 }
 
 function aFaqQ(a) {
-  const f = a.Questions.find((q) => q.IsFaq)
-  return f ? f.Text : a.Questions[0] ? a.Questions[0].Text : null
+  return a._faqQ // pre-computed on init
 }
 
 function aResponse(a) {
+  return a._response // pre-computed on init
+}
+
+// ── Pre-computation on init ───────────────────────────────────────────────────
+
+function precomputeArticle(a) {
+  // Cache kind
+  const types = a.Outputs.map((o) => o.Type)
+  if (types.includes("Answer")) a._aKind = "answer"
+  else if (types.includes("TDialogStart")) a._aKind = "tdialog"
+  else a._aKind = "dialog"
+
+  // Cache FAQ question
+  const f = a.Questions.find((q) => q.IsFaq)
+  a._faqQ = f ? f.Text : a.Questions[0] ? a.Questions[0].Text : null
+
+  // Cache response text
   const o = a.Outputs.find((o) => o.Type === "Answer")
-  return o ? o.Text : null
+  a._response = o ? o.Text : null
+
+  // Pre-compute search fields
+  a._searchId = String(a.Id)
+  a._searchResponse = strip(a._response || "")
+  a._searchQuestionsUpper = a.Questions.map((qs) => qs.Text.toUpperCase())
 }
 
-// ── Entity cross-reference helpers ────────────────────────────────────────────
-function entityArticleXrefs(entity) {
-  const nameUpper = entity.name.toUpperCase()
-  return workerArticles.filter((a) =>
-    a.Questions.some((qs) => qs.Text.toUpperCase() === nameUpper),
+function precomputeDialog(item) {
+  item._searchId = String(item.id)
+  item._searchName = item.name || ""
+  item._searchDesc = item.description || ""
+
+  // Pre-compute per-node search data
+  const nodes = item.nodes || []
+  item._searchNodes = nodes.map((n) => {
+    const ans = ((n.output && n.output.items) || []).find(
+      (i) => i.type === "Answer",
+    )
+    return {
+      name: n.name || "",
+      answerText: ans ? strip((ans.data && ans.data.text) || "") : "",
+    }
+  })
+
+  // Pre-compute entity question texts for entity-word enrichment
+  item._entityQuestionTexts = []
+  for (const n of nodes) {
+    for (const link of n.links || []) {
+      const condData = (link.condition && link.condition.data) || {}
+      if (!condData.isFallback) {
+        for (const qo of condData.questions || []) {
+          if (qo.text) item._entityQuestionTexts.push(qo.text.toUpperCase())
+        }
+      }
+    }
+  }
+
+  // Pre-compute whether any node has an Answer output (for recognition filter)
+  item._hasAnswerOutput = nodes.some((n) =>
+    ((n.output && n.output.items) || []).some((i) => i.type === "Answer"),
   )
 }
 
-function entityDialogXrefs(entity) {
-  const nameUpper = entity.name.toUpperCase()
-  return workerDialogs.filter((item) =>
-    (item.nodes || []).some((n) =>
-      (n.links || []).some((link) => {
-        const condData = (link.condition && link.condition.data) || {}
-        return (
-          !condData.isFallback &&
-          (condData.questions || []).some(
-            (qo) => qo.text && qo.text.toUpperCase() === nameUpper,
-          )
-        )
-      }),
-    ),
-  )
+function precomputeEntity(entity) {
+  entity._searchName = entity.name
+  entity._searchWords = entity.words.map((w) => w.text)
+  entity._nameUpper = entity.name.toUpperCase()
 }
 
-// ── Match functions ───────────────────────────────────────────────────────────
+function buildEntityXrefSets() {
+  entityHasArticleXref = new Set()
+  entityHasDialogXref = new Set()
+
+  // Build a set of all question texts from articles (uppercased)
+  const articleQuestionTexts = new Set()
+  for (const a of workerArticles) {
+    for (const qs of a.Questions) {
+      articleQuestionTexts.add(qs.Text.toUpperCase())
+    }
+  }
+
+  // Build a set of all entity question texts from dialogs (uppercased)
+  const dialogEntityTexts = new Set()
+  for (const item of workerDialogs) {
+    for (const t of item._entityQuestionTexts || []) {
+      dialogEntityTexts.add(t)
+    }
+  }
+
+  for (const entity of workerEntities) {
+    const nameUpper = entity._nameUpper
+    if (articleQuestionTexts.has(nameUpper)) {
+      entityHasArticleXref.add(nameUpper)
+    }
+    if (dialogEntityTexts.has(nameUpper)) {
+      entityHasDialogXref.add(nameUpper)
+    }
+  }
+}
+
+// ── Match functions (receive pre-compiled regex) ──────────────────────────────
 let matchingEntityNames = new Set()
 
-function matchArticle(a, q) {
-  if (!q) return true
-  const re = buildSearchRegex(q)
-  if (!re) return false
-  if (!searchContent && testRe(re, String(a.Id))) return true
-  if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text)))
-    return true
-  if (testRe(re, strip(aResponse(a) || ""))) return true
+// Determine if we can use fast plain-text matching (no regex, no word boundary)
+function canUsePlainMatch() {
+  return !searchRegex && !searchWord
+}
+
+function matchArticle(a, re, isPlain, needle) {
+  if (!searchContent) {
+    if (isPlain) {
+      if (searchCase) {
+        if (testPlain(needle, a._searchId)) return true
+        if (a.Questions.some((qs) => testPlain(needle, qs.Text))) return true
+      } else {
+        if (testPlainCI(needle, a._searchId)) return true
+        if (a.Questions.some((qs) => testPlainCI(needle, qs.Text))) return true
+      }
+    } else {
+      if (testRe(re, a._searchId)) return true
+      if (a.Questions.some((qs) => testRe(re, qs.Text))) return true
+    }
+  }
+  // Search response text (always searched)
+  if (isPlain) {
+    if (searchCase ? testPlain(needle, a._searchResponse) : testPlainCI(needle, a._searchResponse))
+      return true
+  } else {
+    if (testRe(re, a._searchResponse)) return true
+  }
+  // Entity-word enrichment
   if (
     matchingEntityNames.size > 0 &&
-    a.Questions.some((qs) => matchingEntityNames.has(qs.Text.toUpperCase()))
+    a._searchQuestionsUpper.some((t) => matchingEntityNames.has(t))
   )
     return true
   return false
 }
 
-function matchDialog(item, q) {
-  if (!q) return true
-  const re = buildSearchRegex(q)
-  if (!re) return false
-  if (!searchContent && testRe(re, String(item.id))) return true
-  if (!searchContent && testRe(re, item.name || "")) return true
-  if (!searchContent && testRe(re, item.description || "")) return true
-  if (
-    (item.nodes || []).some((n) => {
-      if (!searchContent && testRe(re, n.name || "")) return true
-      const ans = ((n.output && n.output.items) || []).find(
-        (i) => i.type === "Answer",
-      )
-      if (ans && testRe(re, strip((ans.data && ans.data.text) || "")))
-        return true
-      return false
-    })
-  )
-    return true
+function matchDialog(item, re, isPlain, needle) {
+  if (!searchContent) {
+    if (isPlain) {
+      if (searchCase) {
+        if (testPlain(needle, item._searchId)) return true
+        if (testPlain(needle, item._searchName)) return true
+        if (testPlain(needle, item._searchDesc)) return true
+      } else {
+        if (testPlainCI(needle, item._searchId)) return true
+        if (testPlainCI(needle, item._searchName)) return true
+        if (testPlainCI(needle, item._searchDesc)) return true
+      }
+    } else {
+      if (testRe(re, item._searchId)) return true
+      if (testRe(re, item._searchName)) return true
+      if (testRe(re, item._searchDesc)) return true
+    }
+  }
+  // Check node content
+  for (const sn of item._searchNodes) {
+    if (!searchContent) {
+      if (isPlain) {
+        if (searchCase ? testPlain(needle, sn.name) : testPlainCI(needle, sn.name))
+          return true
+      } else {
+        if (testRe(re, sn.name)) return true
+      }
+    }
+    if (sn.answerText) {
+      if (isPlain) {
+        if (searchCase ? testPlain(needle, sn.answerText) : testPlainCI(needle, sn.answerText))
+          return true
+      } else {
+        if (testRe(re, sn.answerText)) return true
+      }
+    }
+  }
+  // Entity-word enrichment
   if (
     matchingEntityNames.size > 0 &&
-    (item.nodes || []).some((n) =>
-      (n.links || []).some((link) => {
-        const condData = (link.condition && link.condition.data) || {}
-        return (
-          !condData.isFallback &&
-          (condData.questions || []).some((qo) =>
-            qo.text ? matchingEntityNames.has(qo.text.toUpperCase()) : false,
-          )
-        )
-      }),
-    )
+    item._entityQuestionTexts.some((t) => matchingEntityNames.has(t))
   )
     return true
   return false
 }
 
-function matchEntity(entity, q) {
-  if (!q) return true
-  const re = buildSearchRegex(q)
-  if (!re) return false
-  if (testRe(re, entity.name)) return true
-  if (entity.words.some((w) => testRe(re, w.text))) return true
+function matchEntity(entity, re, isPlain, needle) {
+  if (isPlain) {
+    if (searchCase) {
+      if (testPlain(needle, entity._searchName)) return true
+      if (entity._searchWords.some((w) => testPlain(needle, w))) return true
+    } else {
+      if (testPlainCI(needle, entity._searchName)) return true
+      if (entity._searchWords.some((w) => testPlainCI(needle, w))) return true
+    }
+  } else {
+    if (testRe(re, entity._searchName)) return true
+    if (entity._searchWords.some((w) => testRe(re, w))) return true
+  }
   return false
 }
 
@@ -169,6 +293,17 @@ self.onmessage = function (e) {
     workerArticles = msg.articles || []
     workerDialogs = msg.dialogs || []
     workerEntities = msg.entities || []
+
+    // Pre-compute searchable fields once on data load
+    for (const a of workerArticles) precomputeArticle(a)
+    for (const d of workerDialogs) precomputeDialog(d)
+    for (const ent of workerEntities) precomputeEntity(ent)
+
+    // Pre-build combined array (avoids concat on every search)
+    allItems = workerArticles.concat(workerDialogs)
+
+    // Pre-build entity cross-reference sets
+    buildEntityXrefSets()
     return
   }
 
@@ -194,27 +329,48 @@ self.onmessage = function (e) {
 
     const q = query
 
+    // ── Build regex ONCE for this search ───────────────────────────────
+    const re = q ? buildSearchRegex(q) : null
+    const isPlain = q ? canUsePlainMatch() : false
+    // For plain-text mode, prepare the needle string
+    const needle = isPlain ? (searchCase ? q : q.toLowerCase()) : null
+
     // Pre-compute entity names matched by the current query
     matchingEntityNames = new Set()
-    if (q && workerEntities.length) {
-      const re = buildSearchRegex(q)
-      if (re) {
-        workerEntities.forEach((entity) => {
-          if (entity.words.some((w) => testRe(re, w.text)))
-            matchingEntityNames.add(entity.name.toUpperCase())
-        })
+    if (q && workerEntities.length && (re || isPlain)) {
+      for (const entity of workerEntities) {
+        if (isPlain) {
+          if (entity._searchWords.some((w) =>
+            searchCase ? testPlain(needle, w) : testPlainCI(needle, w)))
+            matchingEntityNames.add(entity._nameUpper)
+        } else if (re) {
+          if (entity._searchWords.some((w) => testRe(re, w)))
+            matchingEntityNames.add(entity._nameUpper)
+        }
       }
     }
 
+    // Short-circuit: no query and no filter → return everything
+    const noQuery = !q
+
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
-    let filteredAll = workerArticles.concat(workerDialogs).filter((item) => {
-      if (allFilterPill === "articles" && item._kind !== "article") return false
-      if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
-      if (allFilterPill === "tdialogs" && item._kind !== "tdialog") return false
-      return item._kind === "article"
-        ? matchArticle(item, q)
-        : matchDialog(item, q)
-    })
+    let filteredAll
+    if (noQuery && allFilterPill === "all") {
+      filteredAll = allItems
+    } else {
+      filteredAll = allItems.filter((item) => {
+        if (allFilterPill === "articles" && item._kind !== "article")
+          return false
+        if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
+        if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
+          return false
+        if (noQuery) return true
+        if (!re && !isPlain) return false
+        return item._kind === "article"
+          ? matchArticle(item, re, isPlain, needle)
+          : matchDialog(item, re, isPlain, needle)
+      })
+    }
     filteredAll = sortBy(
       filteredAll,
       allSort,
@@ -223,11 +379,18 @@ self.onmessage = function (e) {
     )
 
     // ── Filter: Articles ──────────────────────────────────────────────────
-    let filteredArticles = workerArticles.filter((a) => {
-      if (aFilter === "answer" && aKind(a) !== "answer") return false
-      if (aFilter === "dialog" && aKind(a) === "answer") return false
-      return matchArticle(a, q)
-    })
+    let filteredArticles
+    if (noQuery && aFilter === "all") {
+      filteredArticles = workerArticles
+    } else {
+      filteredArticles = workerArticles.filter((a) => {
+        if (aFilter === "answer" && aKind(a) !== "answer") return false
+        if (aFilter === "dialog" && aKind(a) === "answer") return false
+        if (noQuery) return true
+        if (!re && !isPlain) return false
+        return matchArticle(a, re, isPlain, needle)
+      })
+    }
     filteredArticles = sortBy(
       filteredArticles,
       aSort,
@@ -236,19 +399,20 @@ self.onmessage = function (e) {
     )
 
     // ── Filter: Dialogs ───────────────────────────────────────────────────
-    let filteredDialogs = workerDialogs.filter((item) => {
-      if (dFilter === "dialogs" && item._kind !== "dialog") return false
-      if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
-      if (dFilter === "recognition" && item._kind === "tdialog") return false
-      if (
-        dFilter === "recognition" &&
-        !(item.nodes || []).some((n) =>
-          ((n.output && n.output.items) || []).some((i) => i.type === "Answer"),
-        )
-      )
-        return false
-      return matchDialog(item, q)
-    })
+    let filteredDialogs
+    if (noQuery && dFilter === "all") {
+      filteredDialogs = workerDialogs
+    } else {
+      filteredDialogs = workerDialogs.filter((item) => {
+        if (dFilter === "dialogs" && item._kind !== "dialog") return false
+        if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
+        if (dFilter === "recognition" && item._kind === "tdialog") return false
+        if (dFilter === "recognition" && !item._hasAnswerOutput) return false
+        if (noQuery) return true
+        if (!re && !isPlain) return false
+        return matchDialog(item, re, isPlain, needle)
+      })
+    }
     filteredDialogs = sortBy(
       filteredDialogs,
       dSort,
@@ -257,13 +421,20 @@ self.onmessage = function (e) {
     )
 
     // ── Filter: Entities ──────────────────────────────────────────────────
-    let filteredEntities = workerEntities.filter((entity) => {
-      if (eFilter === "articles" && entityArticleXrefs(entity).length === 0)
-        return false
-      if (eFilter === "dialogs" && entityDialogXrefs(entity).length === 0)
-        return false
-      return matchEntity(entity, q)
-    })
+    let filteredEntities
+    if (noQuery && eFilter === "all") {
+      filteredEntities = workerEntities
+    } else {
+      filteredEntities = workerEntities.filter((entity) => {
+        if (eFilter === "articles" && !entityHasArticleXref.has(entity._nameUpper))
+          return false
+        if (eFilter === "dialogs" && !entityHasDialogXref.has(entity._nameUpper))
+          return false
+        if (noQuery) return true
+        if (!re && !isPlain) return false
+        return matchEntity(entity, re, isPlain, needle)
+      })
+    }
     if (eSort === "name-asc")
       filteredEntities = filteredEntities
         .slice()
