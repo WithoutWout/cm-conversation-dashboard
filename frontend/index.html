@@ -65,10 +65,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 13px;
-        font-weight: 800;
-        color: #fff;
-        letter-spacing: -0.5px;
+        overflow: hidden;
         flex-shrink: 0;
       }
       .brand-text {
@@ -3098,7 +3095,7 @@
     <!-- HEADER -->
     <header class="app-header">
       <div class="brand">
-        <div class="brand-logo">cm</div>
+        <div class="brand-logo" style="background-image:url('./cmwhitelogo.svg');background-size:contain;background-repeat:no-repeat;background-position:center"></div>
         <div class="brand-text">
           <span class="brand-name">Conversational AI Cloud</span>
           <span class="brand-sub">Content Dashboard</span>
@@ -4644,12 +4641,24 @@
           return null
         }
       }
+      // Cached highlight regex — avoids rebuilding per hl() call during render
+      let _hlCacheQ = null
+      let _hlCacheOpts = null
+      let _hlCacheRe = undefined // undefined = not yet computed
+      function _getHlRegex(q) {
+        const opts = "" + searchCase + searchWord + searchRegex
+        if (q === _hlCacheQ && opts === _hlCacheOpts) return _hlCacheRe
+        _hlCacheQ = q
+        _hlCacheOpts = opts
+        const re = buildSearchRegex(q)
+        _hlCacheRe = re ? new RegExp(re.source, re.flags + "g") : null
+        return _hlCacheRe
+      }
       function hl(text, q) {
         if (!q || text == null) return esc(text)
-        const re = buildSearchRegex(q)
-        if (!re) return esc(text)
+        const reG = _getHlRegex(q)
+        if (!reG) return esc(text)
         const e = esc(text)
-        const reG = new RegExp(re.source, re.flags + "g")
         return e.replace(reG, (m) => "<mark>" + m + "</mark>")
       }
       function strip(t) {
@@ -6337,7 +6346,7 @@
         const input = document.getElementById("convSearch")
         if (input) input.value = convQuery
         const clearBtn = document.getElementById("convClearSearch")
-        if (clearBtn) clearBtn.style.display = ""
+        if (clearBtn) clearBtn.classList.add("visible")
         if (!convSearchIds) {
           convSearchIds = true
           document.getElementById("convOptIds").classList.add("on")
@@ -8184,7 +8193,7 @@
           convQuery = e.target.value.trim()
           convPage = 1
           loadSessions()
-        }, 300)
+        }, 400)
       })
 
       document
