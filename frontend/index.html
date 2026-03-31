@@ -7433,9 +7433,11 @@
 
           searchWorker.postMessage({
             type: "init",
-            articles: allCombinedItems.filter((i) => i._kind === "article"),
-            dialogs: allDialogsCombined,
-            entities: allEntities,
+            json: JSON.stringify({
+              articles: allCombinedItems.filter((i) => i._kind === "article"),
+              dialogs: allDialogsCombined,
+              entities: allEntities,
+            }),
           })
           triggerSearch()
         } catch (err) {

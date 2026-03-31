@@ -300,9 +300,10 @@ self.onmessage = function (e) {
   const msg = e.data
 
   if (msg.type === "init") {
-    workerArticles = msg.articles || []
-    workerDialogs = msg.dialogs || []
-    workerEntities = msg.entities || []
+    const parsed = JSON.parse(msg.json)
+    workerArticles = parsed.articles || []
+    workerDialogs = parsed.dialogs || []
+    workerEntities = parsed.entities || []
 
     // Pre-compute searchable fields once on data load
     for (const a of workerArticles) precomputeArticle(a)
