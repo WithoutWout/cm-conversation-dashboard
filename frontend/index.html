@@ -4553,6 +4553,7 @@
       let filteredDialogs = []
       let allEntities = []
       let filteredEntities = []
+      let totalEntityWords = 0 // precomputed in loadData, never changes until reload
       let entityMap = new Map() // UPPERCASE_NAME → entity object
       let entityWordMap = new Map() // lowercase word text → entity object
       let matchingEntityNames = new Set() // entity names matched by current search query
@@ -4560,7 +4561,11 @@
       let eSort = "name-asc"
       let ePage = 1
 
-      let dialogMap = new Map()
+      // Lazy render flags: set for tabs that need re-render but aren't currently visible
+      let allListDirty = false
+      let articleListDirty = false
+      let dialogListDirty = false
+      let entityListDirty = false
       let tDialogMap = new Map()
       let articleMap = new Map()
       let searchWorker = null
@@ -6722,19 +6727,33 @@
           eSort,
         })
       }
-      function handleSearchResults(msg) {
+      async function handleSearchResults(msg) {
         if (msg.id !== searchSeq) return
-        filteredAll = msg.filteredAll
-        filteredArticles = msg.filteredArticles
-        filteredDialogs = msg.filteredDialogs
-        filteredEntities = msg.filteredEntities
+        const myId = msg.id
+
+        // Reconstruct filtered arrays from Int32Array index buffers.
+        // Array.from(typedArray, mapFn) avoids an intermediate array allocation.
+        filteredAll = Array.from(msg.filteredAllIdx, (i) => allCombinedItems[i])
+        filteredArticles = Array.from(
+          msg.filteredArticlesIdx,
+          (i) => allArticles[i],
+        )
+        filteredDialogs = Array.from(
+          msg.filteredDialogsIdx,
+          (i) => allDialogsCombined[i],
+        )
+        filteredEntities = Array.from(
+          msg.filteredEntitiesIdx,
+          (i) => allEntities[i],
+        )
         matchingEntityNames = new Set(msg.matchingEntityNames)
         allPage = 1
         aPage = 1
         dPage = 1
         ePage = 1
 
-        renderAllList()
+        // Phase 1 — fast scalar DOM writes: counts, badges, pagination.
+        // These are cheap and make the UI feel instantly responsive.
         const totAll = allCombinedItems.length,
           matAll = filteredAll.length
         document.getElementById("all-result-count").textContent =
@@ -6746,7 +6765,6 @@
           "goAllPage",
         )
 
-        renderArticleList()
         const totA = allArticles.length,
           matA = filteredArticles.length
         document.getElementById("a-result-count").textContent =
@@ -6758,7 +6776,6 @@
           "goAPage",
         )
 
-        renderDialogList()
         const totD = allDialogsCombined.length,
           matD = filteredDialogs.length
         document.getElementById("d-result-count").textContent =
@@ -6770,15 +6787,13 @@
           "goDPage",
         )
 
-        renderEntityList()
         const totE = allEntities.length,
           matE = filteredEntities.length
         document.getElementById("e-result-count").textContent =
           matE + (matE !== totE ? " of " + totE : "") + " entities"
         document.getElementById("tab-e-count").textContent = matE
-        const totalWords = allEntities.reduce((s, e) => s + e.words.length, 0)
         document.getElementById("e-stat-entities").textContent = totE
-        document.getElementById("e-stat-words").textContent = totalWords
+        document.getElementById("e-stat-words").textContent = totalEntityWords
         document.getElementById("e-pagination").innerHTML = pagHtml(
           ePage,
           Math.ceil(matE / PAGE_SIZE),
@@ -6786,6 +6801,35 @@
         )
 
         showSearchLoading(false)
+
+        // Phase 2 — yield to browser so counts/spinner update paint before cards.
+        await waitForNextPaint()
+
+        // A newer search may have arrived while we were yielding — bail out.
+        if (myId !== searchSeq) return
+
+        // Only render the currently visible tab; mark the rest dirty.
+        // Inactive tabs render lazily when the user switches to them.
+        allListDirty = true
+        articleListDirty = true
+        dialogListDirty = true
+        entityListDirty = true
+        const activeTab =
+          document.querySelector(".tab.active")?.dataset.tab || "all"
+        if (activeTab === "all") {
+          renderAllList()
+          allListDirty = false
+        } else if (activeTab === "articles") {
+          renderArticleList()
+          articleListDirty = false
+        } else if (activeTab === "dialogs") {
+          renderDialogList()
+          dialogListDirty = false
+        } else if (activeTab === "entities") {
+          renderEntityList()
+          entityListDirty = false
+        }
+
         window.dispatchEvent(new CustomEvent("searchcomplete"))
       }
       searchWorker = new Worker("search-worker.js")
@@ -6858,6 +6902,22 @@
           document
             .getElementById("panel-" + btn.dataset.tab)
             .classList.add("active")
+
+          // Flush any deferred render for the tab that just became visible
+          const t = btn.dataset.tab
+          if (t === "all" && allListDirty) {
+            renderAllList()
+            allListDirty = false
+          } else if (t === "articles" && articleListDirty) {
+            renderArticleList()
+            articleListDirty = false
+          } else if (t === "dialogs" && dialogListDirty) {
+            renderDialogList()
+            dialogListDirty = false
+          } else if (t === "entities" && entityListDirty) {
+            renderEntityList()
+            entityListDirty = false
+          }
         })
       })
 
@@ -7422,6 +7482,7 @@
             tDialogs.length
 
           allEntities = data.entities || []
+          totalEntityWords = allEntities.reduce((s, e) => s + e.words.length, 0)
           entityMap = new Map(allEntities.map((e) => [e.name.toUpperCase(), e]))
           entityWordMap = new Map()
           allEntities.forEach((e) => {

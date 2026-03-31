@@ -305,6 +305,12 @@ self.onmessage = function (e) {
     workerDialogs = parsed.dialogs || []
     workerEntities = parsed.entities || []
 
+    // Assign within-array indices so results can be returned as cheap int arrays
+    // instead of full Structured-Clone copies of every object.
+    for (let i = 0; i < workerArticles.length; i++) workerArticles[i]._widx = i
+    for (let i = 0; i < workerDialogs.length; i++) workerDialogs[i]._widx = i
+    for (let i = 0; i < workerEntities.length; i++) workerEntities[i]._widx = i
+
     // Pre-compute searchable fields once on data load
     for (const a of workerArticles) precomputeArticle(a)
     for (const d of workerDialogs) precomputeDialog(d)
@@ -312,6 +318,9 @@ self.onmessage = function (e) {
 
     // Pre-build combined array (avoids concat on every search)
     allItems = workerArticles.concat(workerDialogs)
+
+    // Assign global indices that mirror allCombinedItems order on the main thread
+    for (let i = 0; i < allItems.length; i++) allItems[i]._gidx = i
 
     // Pre-build entity cross-reference sets
     buildEntityXrefSets()
@@ -472,14 +481,28 @@ self.onmessage = function (e) {
         .slice()
         .sort((a, b) => a.words.length - b.words.length)
 
-    self.postMessage({
-      type: "results",
-      id,
-      filteredAll,
-      filteredArticles,
-      filteredDialogs,
-      filteredEntities,
-      matchingEntityNames: Array.from(matchingEntityNames),
-    })
+    // Send index arrays as Int32Array with buffer transfer — zero-copy, no Structured Clone.
+    // The main thread reconstructs filtered arrays from its own allCombinedItems etc.
+    const filteredAllIdx = new Int32Array(filteredAll.map((x) => x._gidx))
+    const filteredArticlesIdx = new Int32Array(filteredArticles.map((a) => a._widx))
+    const filteredDialogsIdx = new Int32Array(filteredDialogs.map((d) => d._widx))
+    const filteredEntitiesIdx = new Int32Array(filteredEntities.map((e) => e._widx))
+    self.postMessage(
+      {
+        type: "results",
+        id,
+        filteredAllIdx,
+        filteredArticlesIdx,
+        filteredDialogsIdx,
+        filteredEntitiesIdx,
+        matchingEntityNames: Array.from(matchingEntityNames),
+      },
+      [
+        filteredAllIdx.buffer,
+        filteredArticlesIdx.buffer,
+        filteredDialogsIdx.buffer,
+        filteredEntitiesIdx.buffer,
+      ],
+    )
   }
 }
