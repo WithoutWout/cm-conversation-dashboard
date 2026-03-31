@@ -1820,6 +1820,7 @@
         flex-direction: column;
         overflow: hidden;
         background: var(--surface);
+        position: relative;
       }
       .conv-sidebar-header {
         padding: 10px 14px 0;
@@ -2158,6 +2159,41 @@
         color: var(--muted);
         font-size: 0.8rem;
         line-height: 1.6;
+      }
+      /* Loading overlay scoped to the conversations left-panel */
+      .conv-search-loading-overlay {
+        display: none;
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+        align-items: center;
+        justify-content: center;
+      }
+      .conv-search-loading-overlay.visible {
+        display: flex;
+      }
+      .conv-search-loading-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.82rem;
+        color: var(--muted);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+      }
+      .conv-search-loading-box .mini-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        flex-shrink: 0;
       }
 
       /* === CONTEXT FILTER BUTTON === */
@@ -3661,6 +3697,12 @@
             </div>
           </div>
           <div class="sessions-list" id="sessionsList"></div>
+          <div class="conv-search-loading-overlay" id="convSearchLoadingOverlay">
+            <div class="conv-search-loading-box">
+              <div class="mini-spinner"></div>
+              Searching…
+            </div>
+          </div>
           <div class="sessions-pagination" id="sessionsPagination"></div>
         </div>
 
@@ -4548,11 +4590,13 @@
       let allArticles = []
       let allDialogsCombined = []
       let allCombinedItems = []
-      let filteredAll = []
-      let filteredArticles = []
-      let filteredDialogs = []
+      // Filtered results are stored as Int32Array index buffers, never expanded
+      // to full object arrays. Only the 50 items on the current page are resolved.
+      let filteredAll = new Int32Array(0)
+      let filteredArticles = new Int32Array(0)
+      let filteredDialogs = new Int32Array(0)
       let allEntities = []
-      let filteredEntities = []
+      let filteredEntities = new Int32Array(0)
       let totalEntityWords = 0 // precomputed in loadData, never changes until reload
       let entityMap = new Map() // UPPERCASE_NAME → entity object
       let entityWordMap = new Map() // lowercase word text → entity object
@@ -4949,23 +4993,11 @@
       }
 
       // ── Article helpers ─────────────────────────────────────────────
-      function aKind(a) {
-        const types = a.Outputs.map((o) => o.Type)
-        if (types.includes("Answer")) return "answer"
-        if (types.includes("TDialogStart")) return "tdialog"
-        return "dialog"
-      }
-      function aHasFaq(a) {
-        return a.Questions.some((q) => q.IsFaq)
-      }
-      function aFaqQ(a) {
-        const f = a.Questions.find((q) => q.IsFaq)
-        return f ? f.Text : a.Questions[0] ? a.Questions[0].Text : null
-      }
-      function aResponse(a) {
-        const o = a.Outputs.find((o) => o.Type === "Answer")
-        return o ? o.Text : null
-      }
+      // Fields are precomputed in loadData; these are now O(1) lookups.
+      function aKind(a) { return a._aKind }
+      function aHasFaq(a) { return a._hasFaq }
+      function aFaqQ(a) { return a._faqQ }
+      function aResponse(a) { return a._response }
 
       // ── Article card ────────────────────────────────────────────────
       function renderArticleCard(art, q) {
@@ -4981,7 +5013,7 @@
             : '<span class="badge b-dialog">Dialog Link</span>'
         let outputSection = ""
         if (kind === "answer") {
-          const raw = strip(aResponse(art) || "")
+          const raw = art._strippedResponse || ""
           if (raw)
             outputSection =
               '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
@@ -5066,7 +5098,7 @@
               " more</button>"
             : visibleChips
         const hoverTitle =
-          kind === "answer" ? strip(aResponse(art) || "").slice(0, 250) : ""
+          kind === "answer" ? (art._strippedResponse || "").slice(0, 250) : ""
         return (
           '<div class="card type-article">' +
           '<div class="card-header" onclick="goToArticle(' +
@@ -5928,9 +5960,9 @@
       }
       function renderAllList() {
         const el = document.getElementById("allList")
-        const slice = filteredAll.slice(
-          (allPage - 1) * PAGE_SIZE,
-          allPage * PAGE_SIZE,
+        const slice = Array.from(
+          filteredAll.subarray((allPage - 1) * PAGE_SIZE, allPage * PAGE_SIZE),
+          (i) => allCombinedItems[i],
         )
         if (!slice.length) {
           el.innerHTML =
@@ -5964,9 +5996,9 @@
       }
       function renderArticleList() {
         const el = document.getElementById("articleList")
-        const slice = filteredArticles.slice(
-          (aPage - 1) * PAGE_SIZE,
-          aPage * PAGE_SIZE,
+        const slice = Array.from(
+          filteredArticles.subarray((aPage - 1) * PAGE_SIZE, aPage * PAGE_SIZE),
+          (i) => allArticles[i],
         )
         if (!slice.length) {
           el.innerHTML =
@@ -5994,9 +6026,9 @@
       }
       function renderDialogList() {
         const el = document.getElementById("dialogList")
-        const slice = filteredDialogs.slice(
-          (dPage - 1) * PAGE_SIZE,
-          dPage * PAGE_SIZE,
+        const slice = Array.from(
+          filteredDialogs.subarray((dPage - 1) * PAGE_SIZE, dPage * PAGE_SIZE),
+          (i) => allDialogsCombined[i],
         )
         if (!slice.length) {
           el.innerHTML =
@@ -6220,9 +6252,9 @@
             '<div class="empty-state"><p>No EntitiesExport CSV file found in the selected folder.</p></div>'
           return
         }
-        const slice = filteredEntities.slice(
-          (ePage - 1) * PAGE_SIZE,
-          ePage * PAGE_SIZE,
+        const slice = Array.from(
+          filteredEntities.subarray((ePage - 1) * PAGE_SIZE, ePage * PAGE_SIZE),
+          (i) => allEntities[i],
         )
         if (!slice.length) {
           el.innerHTML =
@@ -6462,7 +6494,7 @@
           "</div></div>"
 
         if (kind === "answer") {
-          const raw = strip(aResponse(art) || "")
+          const raw = art._strippedResponse || ""
           if (raw)
             html +=
               '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
@@ -6731,21 +6763,12 @@
         if (msg.id !== searchSeq) return
         const myId = msg.id
 
-        // Reconstruct filtered arrays from Int32Array index buffers.
-        // Array.from(typedArray, mapFn) avoids an intermediate array allocation.
-        filteredAll = Array.from(msg.filteredAllIdx, (i) => allCombinedItems[i])
-        filteredArticles = Array.from(
-          msg.filteredArticlesIdx,
-          (i) => allArticles[i],
-        )
-        filteredDialogs = Array.from(
-          msg.filteredDialogsIdx,
-          (i) => allDialogsCombined[i],
-        )
-        filteredEntities = Array.from(
-          msg.filteredEntitiesIdx,
-          (i) => allEntities[i],
-        )
+        // Store typed index arrays directly — O(1), no object expansion.
+        // Render functions resolve only the current page slice (50 items max).
+        filteredAll = msg.filteredAllIdx
+        filteredArticles = msg.filteredArticlesIdx
+        filteredDialogs = msg.filteredDialogsIdx
+        filteredEntities = msg.filteredEntitiesIdx
         matchingEntityNames = new Set(msg.matchingEntityNames)
         allPage = 1
         aPage = 1
@@ -6988,24 +7011,16 @@
       function getActiveExportItems() {
         const activeTab = document.querySelector(".tab.active").dataset.tab
         if (activeTab === "articles")
-          return filteredArticles.map((a) => ({
-            kind: "article",
-            id: a.Id,
-            title: aFaqQ(a) || "(no question)",
-          }))
+          return Array.from(filteredArticles, (i) => allArticles[i]).map(
+            (a) => ({ kind: "article", id: a.Id, title: aFaqQ(a) || "(no question)" }),
+          )
         if (activeTab === "dialogs")
-          return filteredDialogs.map((d) => ({
-            kind: d._kind,
-            id: d.id,
-            title: d.name || "",
-          }))
-        return filteredAll.map((item) =>
+          return Array.from(filteredDialogs, (i) => allDialogsCombined[i]).map(
+            (d) => ({ kind: d._kind, id: d.id, title: d.name || "" }),
+          )
+        return Array.from(filteredAll, (i) => allCombinedItems[i]).map((item) =>
           item._kind === "article"
-            ? {
-                kind: "article",
-                id: item.Id,
-                title: aFaqQ(item) || "(no question)",
-              }
+            ? { kind: "article", id: item.Id, title: aFaqQ(item) || "(no question)" }
             : { kind: item._kind, id: item.id, title: item.name || "" },
         )
       }
@@ -7435,8 +7450,22 @@
           }
 
           allArticles = data.articles || []
+          // Precompute per-article derived fields once on load — keeps render
+          // helpers O(1) and avoids repeated Outputs/Questions array scans.
+          for (const a of allArticles) {
+            const types = a.Outputs.map((o) => o.Type)
+            a._aKind = types.includes("Answer") ? "answer" : types.includes("TDialogStart") ? "tdialog" : "dialog"
+            const faqQ = a.Questions.find((q) => q.IsFaq)
+            a._faqQ = faqQ ? faqQ.Text : a.Questions[0] ? a.Questions[0].Text : null
+            a._hasFaq = !!faqQ
+            const ans = a.Outputs.find((o) => o.Type === "Answer")
+            a._response = ans ? ans.Text : null
+            a._strippedResponse = a._response
+              ? a._response.replace(/\{[^}]*\}/g, "").replace(/%\{[^}]*\}/g, "").replace(/\s+/g, " ").trim()
+              : ""
+          }
           const respCnt = allArticles.filter(
-            (a) => aKind(a) === "answer",
+            (a) => a._aKind === "answer",
           ).length
           document.getElementById("a-stat-total").textContent =
             allArticles.length
@@ -7939,12 +7968,15 @@
           contextFilters:
             convContextFilters.length > 0 ? convContextFilters : null,
         }
+        document.getElementById("convSearchLoadingOverlay").classList.add("visible")
         try {
           const res = await window.electronAPI.getSessions(args)
           convSessions = res.sessions || []
           convTotalSessions = res.total || 0
+          document.getElementById("convSearchLoadingOverlay").classList.remove("visible")
           renderSessionList()
         } catch (e) {
+          document.getElementById("convSearchLoadingOverlay").classList.remove("visible")
           document.getElementById(
             "sessionsList",
           ).innerHTML = `<div class="sessions-empty">Error loading sessions:<br>${esc(

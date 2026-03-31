@@ -751,14 +751,49 @@ CREATE INDEX IF NOT EXISTS idx_feedback      ON interactions(feedback_info) WHER
 CREATE INDEX IF NOT EXISTS idx_recog_quality ON interactions(recognition_quality) WHERE recognition_quality > 0;
 "#;
 
+// FTS5 schema is kept separate so a missing fts5 module never prevents the DB from opening.
+const FTS_SCHEMA: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS interactions_fts USING fts5(
+    interaction_value,
+    output_text,
+    article_ids,
+    dialog_paths,
+    tokenize = 'unicode61 remove_diacritics 1'
+);
+"#;
+
 fn open_db(path: &str) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Cannot open DB: {e}"))?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+    // PRAGMA journal_mode returns a result row, so it must be run via query_row.
+    // PRAGMA synchronous is a pure setter and works via execute_batch.
+    conn.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()))
+        .map_err(|e| format!("PRAGMA error: {e}"))?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL;")
         .map_err(|e| format!("PRAGMA error: {e}"))?;
     conn.execute_batch(DB_SCHEMA)
         .map_err(|e| format!("Schema error: {e}"))?;
     // Migrate existing databases: add recognition_details column if absent
     let _ = conn.execute_batch("ALTER TABLE interactions ADD COLUMN recognition_details TEXT");
+    // Optional: FTS5 virtual table — failure here must never prevent the DB from opening.
+    if conn.execute_batch(FTS_SCHEMA).is_ok() {
+        // Populate FTS5 index if it is empty (first open after upgrade, or fresh DB).
+        let fts_empty: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='interactions_fts_data'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if fts_empty == 0 {
+            conn.execute_batch(
+                "INSERT OR IGNORE INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
+                 SELECT log_id, COALESCE(interaction_value,''), COALESCE(output_text,''), \
+                        COALESCE(article_ids,''), COALESCE(dialog_paths,'') \
+                 FROM interactions",
+            )
+            .ok();
+        }
+    }
     Ok(conn)
 }
 
@@ -821,6 +856,12 @@ fn purge_old(conn: &Connection) -> i64 {
         let _ = t; // suppress unused
         format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", year, month, day, hrs, mins, s_secs)
     };
+    // Remove stale FTS5 entries before deleting from interactions
+    let _ = conn.execute(
+        "DELETE FROM interactions_fts WHERE rowid IN \
+         (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
+        params![cutoff_dt],
+    );
     conn.execute(
         "DELETE FROM interactions WHERE timestamp_start < ?1",
         params![cutoff_dt],
@@ -1051,7 +1092,21 @@ fn import_interactions_csv(
                 ],
             );
             match result {
-                Ok(1) => *inserted += 1,
+                Ok(1) => {
+                    // Also index in FTS5
+                    let _ = tx.execute(
+                        "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            log_id,
+                            get_r(c_value),
+                            get_r(c_output),
+                            get_r(c_article_ids),
+                            get_r(c_dialog_paths),
+                        ],
+                    );
+                    *inserted += 1;
+                }
                 Ok(_) => {
                     // Row already exists — backfill recognition_details if it was NULL
                     let rd = get_r(c_recog_details);
@@ -1247,36 +1302,79 @@ fn get_sessions(
             };
             conditions.push(cond);
         } else {
-            // Plain text mode: parameterized LIKE query
-            let like_val = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-            let p = next_param(&mut param_idx);
-            let text_cond = match query_scope.as_str() {
-                "user" => {
-                    param_values.push(Box::new(like_val.clone()));
-                    format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\')")
+            // Plain text mode: try FTS5 full-text search; fall back to LIKE if unavailable.
+            let fts_available: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
+                    [],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+
+            if fts_available {
+                // Build a prefix-match FTS5 query: each whitespace-separated token becomes
+                // "token*" so partial words are found (similar to LIKE '%token%' for prefixes).
+                let fts_query: String = query
+                    .split_whitespace()
+                    .filter_map(|t| {
+                        // Strip FTS5 special characters to avoid parse errors.
+                        let clean: String = t
+                            .chars()
+                            .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
+                            .collect();
+                        if clean.is_empty() { None } else { Some(format!("{}*", clean)) }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !fts_query.is_empty() {
+                    let fts_match_expr = match (query_scope.as_str(), query_ids) {
+                        ("user", false) => format!("interaction_value : {fts_query}"),
+                        ("user", true)  => format!("{{interaction_value article_ids dialog_paths}} : {fts_query}"),
+                        ("bot",  false) => format!("output_text : {fts_query}"),
+                        ("bot",  true)  => format!("{{output_text article_ids dialog_paths}} : {fts_query}"),
+                        (_,      _)     => fts_query,
+                    };
+                    let p = next_param(&mut param_idx);
+                    param_values.push(Box::new(fts_match_expr));
+                    conditions.push(format!(
+                        "session_uuid IN (\
+                            SELECT DISTINCT i.session_uuid FROM interactions i \
+                            WHERE i.log_id IN (SELECT rowid FROM interactions_fts WHERE interactions_fts MATCH {p})\
+                        )"
+                    ));
                 }
-                "bot" => {
-                    param_values.push(Box::new(like_val.clone()));
-                    format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE {p} ESCAPE '\\')")
-                }
-                _ => {
-                    param_values.push(Box::new(like_val.clone()));
-                    let p2 = next_param(&mut param_idx);
-                    param_values.push(Box::new(like_val.clone()));
-                    format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\' OR output_text LIKE {p2} ESCAPE '\\')")
-                }
-            };
-            let cond = if query_ids {
-                let pi1 = next_param(&mut param_idx);
-                param_values.push(Box::new(like_val.clone()));
-                let pi2 = next_param(&mut param_idx);
-                param_values.push(Box::new(like_val.clone()));
-                let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')");
-                format!("({text_cond} OR {ids_subq})")
             } else {
-                text_cond
-            };
-            conditions.push(cond);
+                // FTS5 not available — fall back to LIKE (slower but always works).
+                let like_val = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+                let p = next_param(&mut param_idx);
+                let text_cond = match query_scope.as_str() {
+                    "user" => {
+                        param_values.push(Box::new(like_val.clone()));
+                        format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\')")
+                    }
+                    "bot" => {
+                        param_values.push(Box::new(like_val.clone()));
+                        format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE {p} ESCAPE '\\')")
+                    }
+                    _ => {
+                        param_values.push(Box::new(like_val.clone()));
+                        let p2 = next_param(&mut param_idx);
+                        param_values.push(Box::new(like_val.clone()));
+                        format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\' OR output_text LIKE {p2} ESCAPE '\\')")
+                    }
+                };
+                let cond = if query_ids {
+                    let pi1 = next_param(&mut param_idx);
+                    param_values.push(Box::new(like_val.clone()));
+                    let pi2 = next_param(&mut param_idx);
+                    param_values.push(Box::new(like_val.clone()));
+                    let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')");
+                    format!("({text_cond} OR {ids_subq})")
+                } else {
+                    text_cond
+                };
+                conditions.push(cond);
+            }
         }
     }
 

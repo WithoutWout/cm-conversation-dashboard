@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "CAIDashboard"
-version = "0.5.0"
+version = "0.5.2-beta.2"
 dependencies = [
  "csv",
  "log",
@@ -3588,11 +3588,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b838eba278d213a8beaf485bd313fd580ca4505a00d5871caeb1457c55322cae"
 dependencies = [
  "bitflags 2.11.0",
+ "chrono",
+ "csv",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
  "libsqlite3-sys",
+ "serde_json",
  "smallvec",
+ "time",
+ "url",
+ "uuid",
 ]
 
 [[package]]
