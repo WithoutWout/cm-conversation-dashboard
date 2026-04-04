@@ -962,6 +962,87 @@
         color: var(--teal);
       }
 
+      /* === CONTEXTUAL ANSWERS === */
+      .contextual-answers-toggle {
+        background: none;
+        border: 1px dashed var(--border);
+        border-radius: 5px;
+        padding: 3px 10px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.73rem;
+        transition: border-color 0.15s, color 0.15s;
+        margin-top: 6px;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .contextual-answers-toggle:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .contextual-answers-toggle .toggle-arrow {
+        display: inline-block;
+        transition: transform 0.15s;
+        font-size: 0.65em;
+      }
+      .contextual-answers-toggle.open .toggle-arrow {
+        transform: rotate(90deg);
+      }
+      .contextual-answers-list {
+        display: none;
+        flex-direction: column;
+        gap: 5px;
+        margin-top: 6px;
+      }
+      .contextual-answers-list.open {
+        display: flex;
+      }
+      .contextual-answer-item {
+        background: var(--bg);
+        border-left: 3px solid var(--accent);
+        border-radius: 0 5px 5px 0;
+        padding: 5px 9px;
+        font-size: 0.76rem;
+        color: #9aafcc;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .contextual-answer-item.unreachable {
+        border-left-color: var(--red);
+        opacity: 0.55;
+      }
+      .contextual-answer-item.ctx-filter-match {
+        border-left-color: var(--green);
+        box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.15);
+      }
+      .ctx-answer-meta {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-bottom: 4px;
+        flex-wrap: wrap;
+      }
+      .ctx-unreachable-badge {
+        font-size: 0.59rem;
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        color: var(--red);
+        border-radius: 4px;
+        padding: 1px 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+      }
+      .ctx-var-pill {
+        font-size: 0.62rem;
+        background: rgba(124, 106, 247, 0.1);
+        border: 1px solid rgba(124, 106, 247, 0.2);
+        border-radius: 4px;
+        padding: 1px 6px;
+        color: #a89ff5;
+      }
+
       .modal-box.dialog-info-modal-box {
         width: calc(100vw - 32px) !important;
         max-width: calc(100vw - 32px) !important;
@@ -3362,6 +3443,33 @@
             >
               &#xAC;T
             </button>
+            <div class="sopt-sep"></div>
+            <button
+              class="conv-ctx-btn"
+              id="contentCtxToggle"
+              onclick="toggleContentContextPanel()"
+              title="Filter by context"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                style="display: block"
+              >
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+              <span
+                class="ctx-filter-badge"
+                id="contentCtxFilterBadge"
+                style="display: none"
+                >0</span
+              >
+            </button>
           </div>
         </div>
       </div>
@@ -4522,6 +4630,45 @@
     </div>
 
     <!-- CONTEXT FILTER MODAL -->
+    <!-- CONTENT CONTEXT FILTER PANEL -->
+    <div class="ctx-modal-overlay" id="contentCtxModalOverlay">
+      <div
+        class="ctx-modal-backdrop"
+        onclick="closeContentContextPanel()"
+      ></div>
+      <div class="ctx-modal-box" id="contentCtxModalBox">
+        <div class="ctx-modal-header">
+          <span class="ctx-modal-title">&#x1F3F7; Filter by Context</span>
+          <div class="ctx-modal-actions">
+            <button
+              class="ctx-clear-btn"
+              id="contentCtxClearBtn"
+              onclick="clearContentContextFilters()"
+              style="display: none"
+            >
+              &#x2715; Clear all
+            </button>
+            <button
+              class="ctx-modal-close"
+              onclick="closeContentContextPanel()"
+            >
+              &#x2715;
+            </button>
+          </div>
+        </div>
+        <div class="ctx-modal-search">
+          <input
+            type="text"
+            id="contentCtxSearch"
+            placeholder="Search contexts…"
+            autocomplete="off"
+            oninput="filterContentContextSearch(this.value)"
+          />
+        </div>
+        <div class="ctx-modal-body" id="contentCtxModalBody"></div>
+      </div>
+    </div>
+
     <div class="ctx-modal-overlay" id="ctxModalOverlay">
       <div class="ctx-modal-backdrop" onclick="closeContextPanel()"></div>
       <div class="ctx-modal-box" id="ctxModalBox">
@@ -4804,6 +4951,9 @@
       let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
       let contextPanelOpen = false
+      let contentContextFilters = [] // [{name, value}] — active content context filters
+      let contentContextOptions = [] // [{name, value, count}] — built from export data
+      let _contentCtxSearchQuery = ""
 
       // ── Helpers ─────────────────────────────────────────────────────
       function esc(s) {
@@ -4872,15 +5022,28 @@
       function stripDisplay(t, links) {
         if (!t) return ""
         let text = t
-        // 1. Build link map from the article's Links[] array (TagId → {label, url})
+        // 1. Build link map — accepts both article format {TagId, Label, URL}
+        //    and dialog format {id, label, urlTemplate}
         const linkMap = new Map()
         ;(links || []).forEach((l) => {
-          if (l.TagId)
-            linkMap.set(l.TagId, { label: l.Label || null, url: l.URL || null })
+          const key = l.TagId !== undefined ? l.TagId : l.id
+          const label = l.Label || l.label || null
+          const url = l.URL || l.urlTemplate || null
+          if (key !== undefined) linkMap.set(key, { label, url })
         })
-        // 2. Strip CTA blocks (standalone buttons — separate from %{Link(N)} inline links)
-        text = text.replace(/\{message:cta\b[^}]*\}/g, "")
-        text = text.replace(/\{\/message:cta\}/g, "")
+        // 2. Convert CTA blocks to [buttonText](buttonLink) instead of stripping
+        text = text.replace(
+          /\{message:cta\b([^}]*)\}[\s\S]*?\{\/message:cta\}/g,
+          (_, attrs) => {
+            const linkMatch = attrs.match(/buttonLink="([^"]*)"/)
+            const textMatch = attrs.match(/buttonText="([^"]*)"/)
+            const url = linkMatch && linkMatch[1]
+            const label = textMatch && textMatch[1]
+            if (url && label) return "[" + label + "](" + url + ")"
+            if (url) return url
+            return ""
+          },
+        )
         // 3. Replace %{Link(N)} with [Label](URL) — both label and URL are shown in the UI
         text = text.replace(/%\{Link\((\d+)\)\}/g, (_, n) => {
           const link = linkMap.get(Number(n))
@@ -5030,6 +5193,13 @@
         const el = document.getElementById(id)
         const expanded = el.classList.toggle("expanded")
         btn.textContent = expanded ? "Show less" : "+" + hiddenCount + " more"
+      }
+      function toggleCtxAnswers(listId, btnId) {
+        const list = document.getElementById(listId)
+        const btn = document.getElementById(btnId)
+        if (!list || !btn) return
+        list.classList.toggle("open")
+        btn.classList.toggle("open")
       }
       function shortPath(path) {
         if (!path) return ""
@@ -5189,6 +5359,122 @@
             openDataChangedModal(pendingDataChangedFolder)
           },
         )
+      }
+
+      // ── Contextual answer helpers ────────────────────────────────────
+      // An article output has specific context if at least one ContextVariable
+      // has a value other than "any".
+      function articleOutputHasContext(o) {
+        const cvs = o.ContextVariables || []
+        return cvs.some((cv) => cv.Values && !cv.Values.includes("any"))
+      }
+      // A dialog output item has context if contextVariables is non-empty.
+      function dialogItemHasContext(item) {
+        return !!(item.contextVariables && item.contextVariables.length > 0)
+      }
+      // Returns true if the contextVars satisfy ALL active content context filters.
+      // Used to highlight contextual answers that match the active filter in modals.
+      function ctxVarsMatchFilters(contextVars, isArticle) {
+        if (!contentContextFilters.length) return false
+        const ctxSet = {}
+        if (isArticle) {
+          for (const cv of contextVars) {
+            const name = ctxVarMap.get(cv.Id)
+            if (!name) continue
+            const vals = []
+            for (const valStr of cv.Values || []) {
+              for (const v of valStr.split(",")) {
+                const t = v.trim()
+                if (t && t !== "any") vals.push(t)
+              }
+            }
+            if (vals.length) ctxSet[name] = vals
+          }
+        } else {
+          for (const cv of contextVars) {
+            const name = ctxVarMap.get(cv.id)
+            if (!name || !cv.value) continue
+            const vals = cv.value
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+            if (vals.length) ctxSet[name] = vals
+          }
+        }
+        return contentContextFilters.every((f) => {
+          const vals = ctxSet[f.name]
+          return vals && vals.includes(f.value)
+        })
+      }
+      // Build context-variable pills for display.
+      // isArticle=true → {Id, Values[]}, false → {id, value}
+      function renderCtxVarPills(contextVars, isArticle) {
+        const pills = []
+        if (isArticle) {
+          for (const cv of contextVars) {
+            if (!cv.Values.includes("any")) {
+              const name = ctxVarMap.get(cv.Id) || "Var #" + cv.Id
+              pills.push(
+                '<span class="ctx-var-pill">' +
+                  esc(name) +
+                  ": " +
+                  esc(cv.Values.join(", ")) +
+                  "</span>",
+              )
+            }
+          }
+        } else {
+          for (const cv of contextVars) {
+            const name = ctxVarMap.get(cv.id) || "Var #" + cv.id
+            pills.push(
+              '<span class="ctx-var-pill">' +
+                esc(name) +
+                ": " +
+                esc(cv.value || "") +
+                "</span>",
+            )
+          }
+        }
+        return pills.join("")
+      }
+      // Render a collapsible section of contextual answers.
+      // answersData: [{displayText, isUnreachable, contextVars, isArticle}]
+      function renderContextualAnswersList(answersData, q, toggleId) {
+        if (!answersData.length) return ""
+        const listId = "ctx-list-" + toggleId
+        const btnId = "ctx-btn-" + toggleId
+        let html =
+          '<button id="' +
+          btnId +
+          '" class="contextual-answers-toggle" onclick="toggleCtxAnswers(\'' +
+          listId +
+          "','" +
+          btnId +
+          "')\">" +
+          '<span class="toggle-arrow">&#9654;</span> ' +
+          answersData.length +
+          " contextual response" +
+          (answersData.length !== 1 ? "s" : "") +
+          "</button>"
+        html += '<div id="' + listId + '" class="contextual-answers-list">'
+        for (const ans of answersData) {
+          html +=
+            '<div class="contextual-answer-item' +
+            (ans.isUnreachable ? " unreachable" : "") +
+            (ans.isContextMatch ? " ctx-filter-match" : "") +
+            '">'
+          const pills = renderCtxVarPills(ans.contextVars, ans.isArticle)
+          if (ans.isUnreachable || pills) {
+            html += '<div class="ctx-answer-meta">'
+            if (ans.isUnreachable)
+              html += '<span class="ctx-unreachable-badge">Unreachable</span>'
+            html += pills + "</div>"
+          }
+          html += hlVar(hl(ans.displayText, q))
+          html += "</div>"
+        }
+        html += "</div>"
+        return html
       }
 
       // ── Article helpers ─────────────────────────────────────────────
@@ -5905,17 +6191,28 @@
       function renderNodeHtml(node, dialog, q) {
         const isRec = node.type === "Recognition"
         const items = (node.output && node.output.items) || []
-        const ansItem = items.find((i) => i.type === "Answer")
+        // Use the isDefault answer as the primary; fall back to first Answer
+        const defaultAnsItem =
+          items.find((i) => i.type === "Answer" && i.isDefault) ||
+          items.find((i) => i.type === "Answer")
+        const contextualAnsItems = items.filter(
+          (i) => i.type === "Answer" && !i.isDefault,
+        )
         const kbaRef = node.output && node.output.kbaIdReference
-        const kbaArt = !ansItem && kbaRef ? articleMap.get(kbaRef) : null
+        const kbaArt = !defaultAnsItem && kbaRef ? articleMap.get(kbaRef) : null
         const kbaAnsText =
           kbaArt &&
           kbaArt.Outputs &&
           kbaArt.Outputs.find((o) => o.Type === "Answer")
         const ansRawText = stripDisplay(
-          (ansItem && ansItem.data && ansItem.data.text) ||
+          (defaultAnsItem && defaultAnsItem.data && defaultAnsItem.data.text) ||
             (kbaAnsText && kbaAnsText.Text) ||
             "",
+          (defaultAnsItem &&
+            defaultAnsItem.data &&
+            defaultAnsItem.data.hyperlinks) ||
+            (kbaAnsText && kbaAnsText.Links) ||
+            [],
         )
         const ansRaw = ansRawText // used as plain text for hl(); hlVar applied at render
         const kbaRefLink = kbaArt
@@ -5927,6 +6224,25 @@
             kbaRef +
             "</a> "
           : ""
+        // Build contextual answers section for this node
+        const contextualAnsData = contextualAnsItems.map((item) => ({
+          displayText: stripDisplay(
+            (item.data && item.data.text) || "",
+            (item.data && item.data.hyperlinks) || [],
+          ),
+          isUnreachable: !dialogItemHasContext(item),
+          contextVars: item.contextVariables || [],
+          isArticle: false,
+          isContextMatch: ctxVarsMatchFilters(
+            item.contextVariables || [],
+            false,
+          ),
+        }))
+        const contextualAnsHtml = renderContextualAnswersList(
+          contextualAnsData,
+          q,
+          "node-" + node.id,
+        )
         const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
         const optHtml = (node.links || [])
           .flatMap((link) => {
@@ -6005,6 +6321,9 @@
               kbaRefLink +
               hlVar(hl(ansRaw, q)) +
               "</div>"
+            : "") +
+          (contextualAnsHtml
+            ? '<div style="margin:2px 0">' + contextualAnsHtml + "</div>"
             : "") +
           (optHtml ? '<div class="node-options">' + optHtml + "</div>" : "") +
           (routeHtml
@@ -6109,7 +6428,13 @@
         if (!searchContent && testRe(re, String(a.Id))) return true
         if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text)))
           return true
-        if (testRe(re, strip(aResponse(a) || ""))) return true
+        // Search all Answer outputs (default + contextual), including link labels and URLs
+        if (
+          a.Outputs.filter((o) => o.Type === "Answer").some((o) =>
+            testRe(re, stripDisplay(o.Text || "", o.Links || [])),
+          )
+        )
+          return true
         // Entity-word enrichment: match if any Question.Text maps to an entity
         // whose word list contains the query
         if (
@@ -6131,10 +6456,20 @@
         if (
           (item.nodes || []).some((n) => {
             if (!searchContent && testRe(re, n.name || "")) return true
-            const ans = ((n.output && n.output.items) || []).find(
-              (i) => i.type === "Answer",
+            // Search all Answer items (default + contextual), including link labels and URLs
+            if (
+              ((n.output && n.output.items) || [])
+                .filter((i) => i.type === "Answer")
+                .some((i) =>
+                  testRe(
+                    re,
+                    stripDisplay(
+                      (i.data && i.data.text) || "",
+                      (i.data && i.data.hyperlinks) || [],
+                    ),
+                  ),
+                )
             )
-            if (ans && testRe(re, strip((ans.data && ans.data.text) || "")))
               return true
             return false
           })
@@ -6690,7 +7025,7 @@
                 '"'
               : "") +
             ">" +
-            esc(qs.Text) +
+            hl(qs.Text, gQuery) +
             "</span>"
           )
         }
@@ -6708,8 +7043,27 @@
           if (raw)
             html +=
               '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
-              hlVar(esc(raw)) +
+              hlVar(hl(raw, gQuery)) +
               "</div></div>"
+          // Contextual responses (non-default Answer outputs)
+          const contextualOutputs = art.Outputs.filter(
+            (o) => o.Type === "Answer" && !o.IsDefault,
+          ).map((o) => ({
+            displayText: stripDisplay(o.Text, o.Links),
+            isUnreachable: !articleOutputHasContext(o),
+            contextVars: o.ContextVariables || [],
+            isArticle: true,
+            isContextMatch: ctxVarsMatchFilters(o.ContextVariables || [], true),
+          }))
+          if (contextualOutputs.length)
+            html +=
+              '<div class="detail-section">' +
+              renderContextualAnswersList(
+                contextualOutputs,
+                gQuery,
+                "art-" + id,
+              ) +
+              "</div>"
         } else {
           const refs = art.Outputs.map((o) => {
             if (o.Type === "DialogStart") {
@@ -6906,7 +7260,7 @@
           if (item.description) {
             html +=
               '<div class="detail-section"><h4>Description</h4><p class="desc-text">' +
-              esc(item.description) +
+              hl(item.description, gQuery) +
               "</p></div>"
           }
 
@@ -6914,7 +7268,7 @@
             html +=
               '<div class="detail-section"><h4>Nodes</h4><div style="display:flex;flex-direction:column;gap:8px">'
             ;(item.nodes || []).forEach((node) => {
-              html += renderNodeHtml(node, item, "")
+              html += renderNodeHtml(node, item, gQuery)
             })
             html += "</div></div>"
           }
@@ -6967,6 +7321,7 @@
           aSort,
           dSort,
           eSort,
+          contentContextFilters,
         })
       }
       async function handleSearchResults(msg) {
@@ -7705,18 +8060,10 @@
               ? a.Questions[0].Text
               : null
             a._hasFaq = !!faqQ
-            const ans = a.Outputs.find((o) => o.Type === "Answer")
+            const ans =
+              a.Outputs.find((o) => o.Type === "Answer" && o.IsDefault) ||
+              a.Outputs.find((o) => o.Type === "Answer")
             a._response = ans ? ans.Text : null
-            a._strippedResponse = a._response
-              ? a._response
-                  .replace(/%\{[^}]*\}/g, " ")
-                  .replace(/\{[^}]*\}/g, (m) => {
-                    const urls = m.match(/https?:\/\/[^\s}"]+/g)
-                    return urls ? " " + urls.join(" ") + " " : " "
-                  })
-                  .replace(/\s+/g, " ")
-                  .trim()
-              : ""
             a._displayResponse = ans ? stripDisplay(ans.Text, ans.Links) : ""
           }
           const respCnt = allArticles.filter(
@@ -7756,6 +8103,9 @@
             ),
             ...allDialogsCombined,
           ]
+          buildContentContextOptions()
+          contentContextFilters = []
+          _updateContentCtxBadge()
           document.getElementById("all-stat-total").textContent =
             allCombinedItems.length
           document.getElementById("all-stat-articles").textContent =
@@ -8360,6 +8710,188 @@
       function goConvPage(n) {
         convPage = n
         loadSessions()
+      }
+
+      // ── Content Context filter ──────────────────────────────────────
+      function buildContentContextOptions() {
+        const counts = new Map() // key: "name|||value" → count
+        for (const a of allArticles) {
+          for (const o of a.Outputs) {
+            if (o.Type !== "Answer") continue
+            for (const cv of o.ContextVariables || []) {
+              if (!cv.Values || cv.Values.includes("any")) continue
+              const name = ctxVarMap.get(cv.Id)
+              if (!name) continue
+              for (const valStr of cv.Values) {
+                for (const v of valStr.split(",")) {
+                  const val = v.trim()
+                  if (!val || val === "any") continue
+                  const key = name + "|||" + val
+                  counts.set(key, (counts.get(key) || 0) + 1)
+                }
+              }
+            }
+          }
+        }
+        for (const d of allDialogsCombined) {
+          for (const node of d.nodes || []) {
+            for (const item of (node.output && node.output.items) || []) {
+              if (item.type !== "Answer") continue
+              for (const cv of item.contextVariables || []) {
+                const name = ctxVarMap.get(cv.id)
+                if (!name || !cv.value) continue
+                for (const v of cv.value.split(",")) {
+                  const val = v.trim()
+                  if (!val) continue
+                  const key = name + "|||" + val
+                  counts.set(key, (counts.get(key) || 0) + 1)
+                }
+              }
+            }
+          }
+        }
+        contentContextOptions = Array.from(counts.entries()).map(
+          ([key, count]) => {
+            const [name, value] = key.split("|||")
+            return { name, value, count }
+          },
+        )
+      }
+
+      function _updateContentCtxBadge() {
+        const badge = document.getElementById("contentCtxFilterBadge")
+        const count = contentContextFilters.length
+        badge.textContent = count
+        badge.style.display = count > 0 ? "" : "none"
+        document
+          .getElementById("contentCtxToggle")
+          .classList.toggle("has-filters", count > 0)
+      }
+
+      function _buildContentCtxModalHtml(searchQ) {
+        if (!contentContextOptions.length) {
+          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No context data found in content.</div>'
+        }
+        const q = (searchQ || "").toLowerCase().trim()
+        const groups = {}
+        for (const o of contentContextOptions) {
+          if (
+            q &&
+            !o.name.toLowerCase().includes(q) &&
+            !o.value.toLowerCase().includes(q)
+          )
+            continue
+          if (!groups[o.name]) groups[o.name] = []
+          groups[o.name].push(o)
+        }
+        if (!Object.keys(groups).length) {
+          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No matching contexts.</div>'
+        }
+        return Object.entries(groups)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, options]) => {
+            const chips = options
+              .map((o) => {
+                const active = contentContextFilters.some(
+                  (f) => f.name === o.name && f.value === o.value,
+                )
+                const valClass =
+                  o.value === "true"
+                    ? " val-true"
+                    : o.value === "false"
+                    ? " val-false"
+                    : ""
+                return `<button class="ctx-chip${
+                  active ? " active" : ""
+                }${valClass}" data-ctx-name="${esc(
+                  o.name,
+                )}" data-ctx-value="${esc(o.value)}" title="${esc(
+                  o.count,
+                )} items">${esc(o.value)}</button>`
+              })
+              .join("")
+            return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
+              name,
+            )}">${esc(name)}</div><div class="ctx-chips">${chips}</div></div>`
+          })
+          .join("")
+      }
+
+      function _renderContentCtxModal() {
+        document.getElementById("contentCtxModalBody").innerHTML =
+          _buildContentCtxModalHtml(_contentCtxSearchQuery)
+        _attachContentCtxChipListeners()
+        document.getElementById("contentCtxClearBtn").style.display =
+          contentContextFilters.length > 0 ? "" : "none"
+      }
+
+      function _attachContentCtxChipListeners() {
+        document
+          .querySelectorAll("#contentCtxModalBody .ctx-chip")
+          .forEach((btn) => {
+            btn.addEventListener("click", () => {
+              toggleContentContextOption(
+                btn.dataset.ctxName,
+                btn.dataset.ctxValue,
+              )
+            })
+          })
+      }
+
+      function toggleContentContextPanel() {
+        const overlay = document.getElementById("contentCtxModalOverlay")
+        if (overlay.classList.contains("open")) {
+          closeContentContextPanel()
+          return
+        }
+        const btn = document.getElementById("contentCtxToggle")
+        const box = document.getElementById("contentCtxModalBox")
+        const rect = btn.getBoundingClientRect()
+        const spaceBelow = window.innerHeight - rect.bottom
+        if (spaceBelow >= 300) {
+          box.style.top = rect.bottom + 6 + "px"
+          box.style.bottom = ""
+        } else {
+          box.style.bottom = window.innerHeight - rect.top + 6 + "px"
+          box.style.top = ""
+        }
+        let left = rect.left
+        if (left + 340 > window.innerWidth - 8) left = window.innerWidth - 348
+        box.style.left = Math.max(8, left) + "px"
+        overlay.classList.add("open")
+        document.getElementById("contentCtxSearch").value = ""
+        _contentCtxSearchQuery = ""
+        _renderContentCtxModal()
+        document.getElementById("contentCtxSearch").focus()
+      }
+
+      function closeContentContextPanel() {
+        document
+          .getElementById("contentCtxModalOverlay")
+          .classList.remove("open")
+      }
+
+      function filterContentContextSearch(q) {
+        _contentCtxSearchQuery = q
+        _renderContentCtxModal()
+      }
+
+      function toggleContentContextOption(name, value) {
+        const idx = contentContextFilters.findIndex(
+          (f) => f.name === name && f.value === value,
+        )
+        if (idx === -1) contentContextFilters.push({ name, value })
+        else contentContextFilters.splice(idx, 1)
+        _updateContentCtxBadge()
+        _renderContentCtxModal()
+        triggerSearch()
+      }
+
+      function clearContentContextFilters() {
+        contentContextFilters = []
+        _updateContentCtxBadge()
+        _renderContentCtxModal()
+        triggerSearch()
       }
 
       // ── Context filter modal ────────────────────────────────────────

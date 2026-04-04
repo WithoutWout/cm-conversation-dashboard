@@ -29,6 +29,7 @@ let searchCase = false
 let searchWord = false
 let searchRegex = false
 let searchContent = true
+let contentContextFilters = [] // [{name, value}] — active content context filters
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 function buildSearchRegex(q) {
@@ -79,9 +80,13 @@ function strip(t) {
   return (t || "")
     .replace(/%\{[^}]*\}/g, " ")
     .replace(/\{[^}]*\}/g, (m) => {
-      // Preserve URLs embedded in CM.com CTA/template blocks so they remain searchable
+      // Preserve URLs and button label text from CM.com CTA blocks so they remain searchable
+      const parts = []
       const urls = m.match(/https?:\/\/[^\s}"]+/g)
-      return urls ? " " + urls.join(" ") + " " : " "
+      if (urls) parts.push(...urls)
+      const btnText = m.match(/buttonText="([^"]*)"/)
+      if (btnText && btnText[1]) parts.push(btnText[1])
+      return parts.length ? " " + parts.join(" ") + " " : " "
     })
     .replace(/\s+/g, " ")
     .trim()
@@ -144,6 +149,49 @@ function precomputeArticle(a) {
   a._searchResponseRaw = a._response || ""
   a._searchResponseExpanded = expandVarNames(expandedWithLinks)
   a._searchQuestionsUpper = a.Questions.map((qs) => qs.Text.toUpperCase())
+
+  // Index ALL Answer outputs (contextual alternatives not covered above)
+  const _primaryAnsIdx = a.Outputs.findIndex((o) => o.Type === "Answer")
+  a._searchCtxAnswers = []
+  for (let _oi = 0; _oi < a.Outputs.length; _oi++) {
+    const _co = a.Outputs[_oi]
+    if (_co.Type !== "Answer" || _oi === _primaryAnsIdx) continue
+    const _lm = new Map()
+    ;(_co.Links || []).forEach((l) => {
+      if (l.TagId && l.Label) _lm.set(l.TagId, l.Label)
+    })
+    const _exp = (_co.Text || "").replace(
+      /%\{Link\((\d+)\)\}/g,
+      (_, n) => _lm.get(Number(n)) || "Link " + n,
+    )
+    a._searchCtxAnswers.push({
+      s: strip(_exp),
+      r: _co.Text || "",
+      e: expandVarNames(_exp),
+    })
+  }
+
+  // Build context sets for contextual Answer outputs
+  a._ctxSets = []
+  for (const o of a.Outputs) {
+    if (o.Type !== "Answer") continue
+    const cvs = o.ContextVariables || []
+    if (!cvs.some((cv) => cv.Values && !cv.Values.includes("any"))) continue
+    const ctxSet = {}
+    for (const cv of cvs) {
+      const name = ctxVarMap.get(cv.Id)
+      if (!name) continue
+      const vals = []
+      for (const valStr of cv.Values) {
+        for (const v of valStr.split(",")) {
+          const t = v.trim()
+          if (t && t !== "any") vals.push(t)
+        }
+      }
+      if (vals.length) ctxSet[name] = vals
+    }
+    if (Object.keys(ctxSet).length) a._ctxSets.push(ctxSet)
+  }
 }
 
 function precomputeDialog(item) {
@@ -154,15 +202,41 @@ function precomputeDialog(item) {
   // Pre-compute per-node search data
   const nodes = item.nodes || []
   item._searchNodes = nodes.map((n) => {
-    const ans = ((n.output && n.output.items) || []).find(
+    const nodeAnsItems = ((n.output && n.output.items) || []).filter(
       (i) => i.type === "Answer",
     )
+    const ans = nodeAnsItems[0] || null
     const rawText = (ans && ans.data && ans.data.text) || ""
+    // Expand %{Link(N)} tokens for the primary answer using its hyperlinks
+    const _primaryLm = new Map()
+    ;((ans && ans.data && ans.data.hyperlinks) || []).forEach((h) => {
+      if (h.id !== undefined && h.label) _primaryLm.set(h.id, h.label)
+    })
+    const _primaryExp = rawText.replace(
+      /%\{Link\((\d+)\)\}/g,
+      (_, n) => _primaryLm.get(Number(n)) || "Link " + n,
+    )
+    // Build search entries for all non-primary Answer items (contextual alternatives)
+    const ctxAnswerTexts = []
+    for (let _i = 1; _i < nodeAnsItems.length; _i++) {
+      const _ci = nodeAnsItems[_i]
+      const _rawT = (_ci.data && _ci.data.text) || ""
+      const _lm = new Map()
+      ;((_ci.data && _ci.data.hyperlinks) || []).forEach((h) => {
+        if (h.id !== undefined && h.label) _lm.set(h.id, h.label)
+      })
+      const _exp = _rawT.replace(
+        /%\{Link\((\d+)\)\}/g,
+        (_, n) => _lm.get(Number(n)) || "Link " + n,
+      )
+      ctxAnswerTexts.push({ s: strip(_exp), r: _rawT, e: expandVarNames(_exp) })
+    }
     return {
       name: n.name || "",
-      answerText: ans ? strip(rawText) : "",
+      answerText: ans ? strip(_primaryExp) : "",
       answerTextRaw: rawText,
-      answerTextExpanded: expandVarNames(rawText),
+      answerTextExpanded: expandVarNames(_primaryExp),
+      ctxAnswerTexts,
     }
   })
 
@@ -183,6 +257,27 @@ function precomputeDialog(item) {
   item._hasAnswerOutput = nodes.some((n) =>
     ((n.output && n.output.items) || []).some((i) => i.type === "Answer"),
   )
+
+  // Build context sets for contextual Answer items in nodes
+  item._ctxSets = []
+  for (const n of nodes) {
+    for (const oi of (n.output && n.output.items) || []) {
+      if (oi.type !== "Answer") continue
+      const cvs = oi.contextVariables || []
+      if (!cvs.length) continue
+      const ctxSet = {}
+      for (const cv of cvs) {
+        const name = ctxVarMap.get(cv.id)
+        if (!name || !cv.value) continue
+        const vals = cv.value
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean)
+        if (vals.length) ctxSet[name] = vals
+      }
+      if (Object.keys(ctxSet).length) item._ctxSets.push(ctxSet)
+    }
+  }
 }
 
 function precomputeEntity(entity) {
@@ -230,6 +325,18 @@ function canUsePlainMatch() {
   return !searchRegex && !searchWord
 }
 
+// Returns true if item passes the active content context filter set.
+// An item passes if it has at least one ctxSet satisfying ALL active filters.
+function matchesContentContext(item) {
+  if (!contentContextFilters.length) return true
+  return (item._ctxSets || []).some((ctxSet) =>
+    contentContextFilters.every((f) => {
+      const vals = ctxSet[f.name]
+      return vals && vals.includes(f.value)
+    }),
+  )
+}
+
 function matchArticle(a, re, isPlain, needle) {
   if (!searchContent) {
     if (isPlain) {
@@ -264,6 +371,23 @@ function matchArticle(a, re, isPlain, needle) {
       testRe(re, a._searchResponseExpanded)
     )
       return true
+  }
+  // Search contextual / alternative Answer outputs
+  for (const ca of a._searchCtxAnswers || []) {
+    if (isPlain) {
+      if (
+        searchCase
+          ? testPlain(needle, ca.s) ||
+            testPlain(needle, ca.r) ||
+            testPlain(needle, ca.e)
+          : testPlainCI(needle, ca.s) ||
+            testPlainCI(needle, ca.r) ||
+            testPlainCI(needle, ca.e)
+      )
+        return true
+    } else {
+      if (testRe(re, ca.s) || testRe(re, ca.r) || testRe(re, ca.e)) return true
+    }
   }
   // Entity-word enrichment
   if (
@@ -322,6 +446,24 @@ function matchDialog(item, re, isPlain, needle) {
           testRe(re, sn.answerTextRaw) ||
           testRe(re, sn.answerTextExpanded)
         )
+          return true
+      }
+    }
+    // Search contextual / alternative Answer items in this node
+    for (const ca of sn.ctxAnswerTexts || []) {
+      if (isPlain) {
+        if (
+          searchCase
+            ? testPlain(needle, ca.s) ||
+              testPlain(needle, ca.r) ||
+              testPlain(needle, ca.e)
+            : testPlainCI(needle, ca.s) ||
+              testPlainCI(needle, ca.r) ||
+              testPlainCI(needle, ca.e)
+        )
+          return true
+      } else {
+        if (testRe(re, ca.s) || testRe(re, ca.r) || testRe(re, ca.e))
           return true
       }
     }
@@ -408,6 +550,7 @@ self.onmessage = function (e) {
     searchWord = msg.searchWord
     searchRegex = msg.searchRegex
     searchContent = msg.searchContent
+    contentContextFilters = msg.contentContextFilters || []
 
     const q = query
 
@@ -437,10 +580,11 @@ self.onmessage = function (e) {
 
     // Short-circuit: no query and no filter → return everything
     const noQuery = !q
+    const hasCtxFilter = contentContextFilters.length > 0
 
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
     let filteredAll
-    if (noQuery && allFilterPill === "all") {
+    if (noQuery && !hasCtxFilter && allFilterPill === "all") {
       filteredAll = allItems
     } else {
       filteredAll = allItems.filter((item) => {
@@ -449,6 +593,7 @@ self.onmessage = function (e) {
         if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
         if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
           return false
+        if (!matchesContentContext(item)) return false
         if (noQuery) return true
         if (!re && !isPlain) return false
         return item._kind === "article"
@@ -465,12 +610,13 @@ self.onmessage = function (e) {
 
     // ── Filter: Articles ──────────────────────────────────────────────────
     let filteredArticles
-    if (noQuery && aFilter === "all") {
+    if (noQuery && !hasCtxFilter && aFilter === "all") {
       filteredArticles = workerArticles
     } else {
       filteredArticles = workerArticles.filter((a) => {
         if (aFilter === "answer" && aKind(a) !== "answer") return false
         if (aFilter === "dialog" && aKind(a) === "answer") return false
+        if (!matchesContentContext(a)) return false
         if (noQuery) return true
         if (!re && !isPlain) return false
         return matchArticle(a, re, isPlain, needle)
@@ -485,7 +631,7 @@ self.onmessage = function (e) {
 
     // ── Filter: Dialogs ───────────────────────────────────────────────────
     let filteredDialogs
-    if (noQuery && dFilter === "all") {
+    if (noQuery && !hasCtxFilter && dFilter === "all") {
       filteredDialogs = workerDialogs
     } else {
       filteredDialogs = workerDialogs.filter((item) => {
@@ -493,6 +639,7 @@ self.onmessage = function (e) {
         if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
         if (dFilter === "recognition" && item._kind === "tdialog") return false
         if (dFilter === "recognition" && !item._hasAnswerOutput) return false
+        if (!matchesContentContext(item)) return false
         if (noQuery) return true
         if (!re && !isPlain) return false
         return matchDialog(item, re, isPlain, needle)
