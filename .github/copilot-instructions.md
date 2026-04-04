@@ -4,7 +4,7 @@
 
 Tauri desktop dashboard for inspecting and navigating CM.com Conversational AI Cloud content exports. It reads two JSON files from a user-selected folder and renders a searchable, filterable UI in a single window.
 
-**Stack:** Tauri v2 (Rust backend + vanilla JS frontend), vanilla JS, no bundler, no framework, no external CSS.
+**Stack:** Tauri v2 (Rust backend + vanilla JS frontend), vanilla JS, no bundler, no framework.
 
 Libraries may be used, but must be vendored locally (e.g. `frontend/vendor/`) so the app works fully offline. Never load dependencies from a CDN.
 
@@ -214,6 +214,16 @@ let openMode // "popup" | "browser"
 - Page size: `PAGE_SIZE = 50`
 - `pagHtml(cur, total, callbackName)` renders numbered page buttons
 - Pagination links use `onclick="goAllPage(n)"` etc. (inline handlers, intentional)
+
+---
+
+## Search types
+
+There are three distinct search types in the app:
+
+1. **Content search** — Searches Dialogs and Articles and their content. This is the main search bar under the Content tab.
+2. **Conversations search** — Searches conversations and their context (e.g. filter by context). This search can be very resource-intensive and should be treated accordingly (e.g. debounce, lazy loading, worker offloading, only load necessary data when user presses the search button or 'Enter').
+3. **Chat search** — Searches within a single chat. A chat is first found and opened via the Conversations search; the Chat search then operates within that opened conversation.
 
 ---
 

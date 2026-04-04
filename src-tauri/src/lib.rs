@@ -52,6 +52,10 @@ struct AppData {
     #[serde(rename = "tDialogs")]
     t_dialogs: serde_json::Value,
     entities: serde_json::Value,
+    #[serde(rename = "convVars")]
+    conv_vars: serde_json::Value,
+    #[serde(rename = "ctxVars")]
+    ctx_vars: serde_json::Value,
     files: DataFiles,
     #[serde(rename = "sourceFiles")]
     source_files: SourceFiles,
@@ -369,7 +373,7 @@ fn extract_entities(content: &str) -> serde_json::Value {
     serde_json::Value::Array(result)
 }
 
-fn extract_dialogs(content: &str) -> (serde_json::Value, serde_json::Value) {
+fn extract_dialogs(content: &str) -> (serde_json::Value, serde_json::Value, serde_json::Value, serde_json::Value) {
     let json = serde_json::from_str::<serde_json::Value>(content)
         .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
     let dialogs = json
@@ -384,7 +388,15 @@ fn extract_dialogs(content: &str) -> (serde_json::Value, serde_json::Value) {
             .unwrap_or(serde_json::Value::Array(vec![])),
         None => serde_json::Value::Array(vec![]),
     };
-    (dialogs, t_dialogs)
+    let conv_vars = json
+        .get("conversationVariables")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![]));
+    let ctx_vars = json
+        .get("contextVariables")
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![]));
+    (dialogs, t_dialogs, conv_vars, ctx_vars)
 }
 
 fn emit_watch_event(app: &AppHandle, folder: &Path, reason: &str) {
@@ -499,6 +511,8 @@ fn get_data(
     let mut dialogs = serde_json::Value::Array(vec![]);
     let mut t_dialogs = serde_json::Value::Array(vec![]);
     let mut entities = serde_json::Value::Array(vec![]);
+    let mut conv_vars = serde_json::Value::Array(vec![]);
+    let mut ctx_vars = serde_json::Value::Array(vec![]);
     let mut files = DataFiles {
         articles: None,
         dialogs: None,
@@ -521,9 +535,11 @@ fn get_data(
 
     if let Some(path) = source_paths.get("dialogs") {
         if let Ok(content) = fs::read_to_string(path) {
-            let (loaded_dialogs, loaded_t_dialogs) = extract_dialogs(&content);
+            let (loaded_dialogs, loaded_t_dialogs, loaded_conv_vars, loaded_ctx_vars) = extract_dialogs(&content);
             dialogs = loaded_dialogs;
             t_dialogs = loaded_t_dialogs;
+            conv_vars = loaded_conv_vars;
+            ctx_vars = loaded_ctx_vars;
             let filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
             files.dialogs = filename.clone();
             source_files.dialogs = filename;
@@ -583,6 +599,8 @@ fn get_data(
         dialogs,
         t_dialogs,
         entities,
+        conv_vars,
+        ctx_vars,
         files,
         source_files,
         data_source: DataSourceInfo {
@@ -749,6 +767,13 @@ CREATE INDEX IF NOT EXISTS idx_type          ON interactions(main_interaction_ty
 CREATE INDEX IF NOT EXISTS idx_session_ts    ON interactions(session_uuid, timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_feedback      ON interactions(feedback_info) WHERE feedback_info IS NOT NULL AND feedback_info != '';
 CREATE INDEX IF NOT EXISTS idx_recog_quality ON interactions(recognition_quality) WHERE recognition_quality > 0;
+CREATE TABLE IF NOT EXISTS context_index (
+    name         TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    session_uuid TEXT NOT NULL,
+    PRIMARY KEY (name, value, session_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_index(session_uuid);
 "#;
 
 // FTS5 schema is kept separate so a missing fts5 module never prevents the DB from opening.
@@ -774,19 +799,43 @@ fn open_db(path: &str) -> Result<Connection, String> {
         .map_err(|e| format!("Schema error: {e}"))?;
     // Migrate existing databases: add recognition_details column if absent
     let _ = conn.execute_batch("ALTER TABLE interactions ADD COLUMN recognition_details TEXT");
+    // Backfill context_index from existing interactions (one-time migration).
+    // Uses json_each, but only runs once — subsequent imports maintain the index incrementally.
+    let ctx_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM context_index", [], |r| r.get(0))
+        .unwrap_or(0);
+    if ctx_count == 0 {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO context_index(name, value, session_uuid) \
+             SELECT json_extract(c.value, '$.name'), \
+                    json_extract(c.value, '$.value'), \
+                    i.session_uuid \
+             FROM interactions i, json_each(i.contexts) c \
+             WHERE i.contexts IS NOT NULL \
+               AND i.contexts != '' \
+               AND i.contexts != '[]' \
+               AND i.contexts != 'null' \
+               AND json_extract(c.value, '$.name') IS NOT NULL \
+               AND json_extract(c.value, '$.name') != ''",
+        ).ok();
+    }
+
     // Optional: FTS5 virtual table — failure here must never prevent the DB from opening.
     if conn.execute_batch(FTS_SCHEMA).is_ok() {
-        // Populate FTS5 index if it is empty (first open after upgrade, or fresh DB).
-        let fts_empty: i64 = conn
+        // Populate FTS5 index if it has no rows yet (first open after upgrade, or fresh DB).
+        // We count rows in the FTS table itself, not in sqlite_master, because the shadow
+        // tables are always created together with the virtual table — checking sqlite_master
+        // would always return 1 and the bulk-insert would never run.
+        let fts_row_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='interactions_fts_data'",
+                "SELECT COUNT(*) FROM interactions_fts",
                 [],
                 |r| r.get(0),
             )
             .unwrap_or(0);
-        if fts_empty == 0 {
+        if fts_row_count == 0 {
             conn.execute_batch(
-                "INSERT OR IGNORE INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
+                "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
                  SELECT log_id, COALESCE(interaction_value,''), COALESCE(output_text,''), \
                         COALESCE(article_ids,''), COALESCE(dialog_paths,'') \
                  FROM interactions",
@@ -872,15 +921,20 @@ fn purge_old(conn: &Connection) -> i64 {
 // ── Conversation Tauri commands ───────────────────────────────────────────────
 
 #[tauri::command]
-fn set_db_path(
-    db_state: State<SharedDbState>,
+async fn set_db_path(
+    db_state: State<'_, SharedDbState>,
     path: String,
 ) -> Result<(), String> {
-    let conn = open_db(&path)?;
-    let mut state = db_state.lock().map_err(|e| e.to_string())?;
-    state.conn = Some(conn);
-    state.path = Some(path);
-    Ok(())
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = open_db(&path)?;
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        state.conn = Some(conn);
+        state.path = Some(path);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -966,11 +1020,13 @@ async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
 }
 
 #[tauri::command]
-fn import_interactions_csv(
-    db_state: State<SharedDbState>,
+async fn import_interactions_csv(
+    db_state: State<'_, SharedDbState>,
     file_path: String,
 ) -> Result<ImportResult, String> {
-    let mut state = db_state.lock().map_err(|e| e.to_string())?;
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+    let mut state = db.lock().map_err(|e| e.to_string())?;
     let conn = state.conn.as_mut().ok_or("No database open. Set a database path first.")?;
 
     let file = fs::File::open(&file_path).map_err(|e| format!("Cannot open CSV: {e}"))?;
@@ -1105,6 +1161,25 @@ fn import_interactions_csv(
                             get_r(c_dialog_paths),
                         ],
                     );
+                    // Index context (name, value) pairs for fast context-filter lookups
+                    let ctx_str = get_r(c_contexts);
+                    if !ctx_str.is_empty() && ctx_str != "[]" && ctx_str != "null" {
+                        let session_id = get_r(c_session);
+                        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(ctx_str) {
+                            if let Some(items) = arr.as_array() {
+                                for item in items {
+                                    let name  = item.get("name") .and_then(|v| v.as_str()).unwrap_or("");
+                                    let value = item.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                                    if !name.is_empty() {
+                                        let _ = tx.execute(
+                                            "INSERT OR IGNORE INTO context_index(name, value, session_uuid) VALUES (?1, ?2, ?3)",
+                                            params![name, value, session_id],
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
                     *inserted += 1;
                 }
                 Ok(_) => {
@@ -1160,6 +1235,9 @@ fn import_interactions_csv(
     let purged = purge_old(conn);
 
     Ok(ImportResult { inserted, skipped, purged, errors })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -1170,8 +1248,10 @@ struct DateRange {
 }
 
 #[tauri::command]
-fn get_date_range(db_state: State<SharedDbState>) -> Result<DateRange, String> {
-    let state = db_state.lock().map_err(|e| e.to_string())?;
+async fn get_date_range(db_state: State<'_, SharedDbState>) -> Result<DateRange, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+    let state = db.lock().map_err(|e| e.to_string())?;
     let conn = state.conn.as_ref().ok_or("No database open.")?;
     let result: (Option<String>, Option<String>) = conn
         .query_row(
@@ -1184,6 +1264,9 @@ fn get_date_range(db_state: State<SharedDbState>) -> Result<DateRange, String> {
         min: result.0.unwrap_or_default(),
         max: result.1.unwrap_or_default(),
     })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Deserialize)]
@@ -1192,20 +1275,24 @@ struct GetSessionsArgs {
     page: Option<i64>,
     date_from: Option<String>,
     date_to: Option<String>,
-    filter: Option<String>, // "all" | "genai" | "neg_feedback" | "low_recog"
+    filter: Option<String>, // "all" | "genai" | "neg_feedback" | "low_recog" | "zero_recog"
     query: Option<String>,
     query_regex: Option<bool>,   // treat query as a regex
     query_scope: Option<String>, // "both" | "user" | "bot"
     query_ids: Option<bool>,     // also search article_ids and dialog_paths columns
+    query_ids_only: Option<bool>, // search ONLY article_ids and dialog_paths, not message text
+    low_recog_threshold: Option<i64>, // threshold for "low recognition" filter (default 60, range 1–99)
     context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
 }
 
 #[tauri::command]
-fn get_sessions(
-    db_state: State<SharedDbState>,
+async fn get_sessions(
+    db_state: State<'_, SharedDbState>,
     args: GetSessionsArgs,
 ) -> Result<SessionsPage, String> {
-    let state = db_state.lock().map_err(|e| e.to_string())?;
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+    let state = db.lock().map_err(|e| e.to_string())?;
     let conn = state.conn.as_ref().ok_or("No database open.")?;
 
     let page = args.page.unwrap_or(1).max(1);
@@ -1217,6 +1304,8 @@ fn get_sessions(
     let query_regex = args.query_regex.unwrap_or(false);
     let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
     let query_ids = args.query_ids.unwrap_or(false);
+    let query_ids_only = args.query_ids_only.unwrap_or(false);
+    let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
 
     // Register a custom REGEXP function for this connection when regex mode is on
     if query_regex && !query.is_empty() {
@@ -1265,7 +1354,11 @@ fn get_sessions(
         );
     } else if filter == "low_recog" {
         conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < 60)".to_string(),
+            format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < {low_recog_threshold})")
+        );
+    } else if filter == "zero_recog" {
+        conditions.push(
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality = 0)".to_string(),
         );
     }
     if let Some(ref df) = args.date_from {
@@ -1283,7 +1376,18 @@ fn get_sessions(
         }
     }
     if !query.is_empty() {
-        if query_regex {
+        if query_ids_only {
+            // IDs-only mode: search article_ids and dialog_paths exclusively
+            let like_val = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
+            let pi1 = next_param(&mut param_idx);
+            param_values.push(Box::new(like_val.clone()));
+            let pi2 = next_param(&mut param_idx);
+            param_values.push(Box::new(like_val.clone()));
+            conditions.push(format!(
+                "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
+                 WHERE article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')"
+            ));
+        } else if query_regex {
             // Regex mode: use the registered REGEXP function
             let p = next_param(&mut param_idx);
             let text_cond = match query_scope.as_str() {
@@ -1400,18 +1504,15 @@ fn get_sessions(
                         })
                         .collect();
                     let in_list = value_placeholders.join(", ");
+                    // Use context_index (pre-computed at import) instead of json_each for speed
                     format!(
-                        "EXISTS (SELECT 1 FROM json_each(i.contexts) jc \
-                         WHERE json_extract(jc.value, '$.name') = {pn} \
-                         AND json_extract(jc.value, '$.value') IN ({in_list}))"
+                        "session_uuid IN (SELECT DISTINCT session_uuid FROM context_index \
+                         WHERE name = {pn} AND value IN ({in_list}))"
                     )
                 })
                 .collect();
             if !exists_clauses.is_empty() {
-                let combined = exists_clauses.join(" AND ");
-                conditions.push(format!(
-                    "session_uuid IN (SELECT DISTINCT i.session_uuid FROM interactions i WHERE {combined})"
-                ));
+                conditions.extend(exists_clauses);
             }
         }
     }
@@ -1489,37 +1590,34 @@ fn get_sessions(
         .collect::<Vec<_>>();
 
     Ok(SessionsPage { sessions, total, page })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn get_context_options(db_state: State<SharedDbState>) -> Result<Vec<ContextOption>, String> {
-    let state = db_state.lock().map_err(|e| e.to_string())?;
+async fn get_context_options(db_state: State<'_, SharedDbState>) -> Result<Vec<ContextOption>, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+    let state = db.lock().map_err(|e| e.to_string())?;
     let conn = state.conn.as_ref().ok_or("No database open.")?;
 
     let mut stmt = conn
         .prepare(
-            r#"SELECT
-                json_extract(c.value, '$.name')  as ctx_name,
-                json_extract(c.value, '$.value') as ctx_value,
-                COUNT(DISTINCT i.session_uuid)   as session_count
-            FROM interactions i, json_each(i.contexts) c
-            WHERE i.contexts IS NOT NULL
-              AND i.contexts != ''
-              AND i.contexts != '[]'
-              AND i.contexts != 'null'
-              AND json_extract(c.value, '$.name') IS NOT NULL
-            GROUP BY ctx_name, ctx_value
-            ORDER BY ctx_name ASC, ctx_value ASC
-            LIMIT 500"#,
+            "SELECT name, value, COUNT(DISTINCT session_uuid) as session_count \
+             FROM context_index \
+             GROUP BY name, value \
+             ORDER BY name ASC, value ASC \
+             LIMIT 500",
         )
         .map_err(|e| format!("Prepare error: {e}"))?;
 
     let opts = stmt
         .query_map([], |row| {
             Ok(ContextOption {
-                name:  row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                value: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                count: row.get::<_, i64>(2).unwrap_or(0),
+                name:  row.get(0)?,
+                value: row.get(1)?,
+                count: row.get(2)?,
             })
         })
         .map_err(|e| format!("Query error: {e}"))?
@@ -1528,14 +1626,19 @@ fn get_context_options(db_state: State<SharedDbState>) -> Result<Vec<ContextOpti
         .collect();
 
     Ok(opts)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn get_session_interactions(
-    db_state: State<SharedDbState>,
+async fn get_session_interactions(
+    db_state: State<'_, SharedDbState>,
     session_uuid: String,
 ) -> Result<Vec<InteractionRow>, String> {
-    let state = db_state.lock().map_err(|e| e.to_string())?;
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+    let state = db.lock().map_err(|e| e.to_string())?;
     let conn = state.conn.as_ref().ok_or("No database open.")?;
 
     let mut stmt = conn
@@ -1590,6 +1693,9 @@ fn get_session_interactions(
         .collect();
 
     Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────

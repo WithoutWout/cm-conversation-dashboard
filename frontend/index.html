@@ -833,6 +833,17 @@
         max-height: 160px;
         overflow-y: auto;
       }
+      .var-token {
+        color: var(--green);
+        font-family: monospace;
+        font-size: 0.82em;
+      }
+      .url-token {
+        color: var(--accent);
+        font-family: monospace;
+        font-size: 0.8em;
+        word-break: break-all;
+      }
       .dialog-link-row {
         display: flex;
         align-items: center;
@@ -1834,26 +1845,39 @@
         gap: 4px;
         align-items: center;
       }
+      .conv-opt-disabled {
+        opacity: 0.3;
+        cursor: not-allowed !important;
+        pointer-events: none;
+      }
+      .conv-id-warning {
+        display: none;
+        font-size: 0.72rem;
+        color: var(--orange);
+        padding: 3px 10px 0;
+      }
+      .conv-id-warning.visible {
+        display: block;
+      }
       .conv-search-wrap {
-        position: relative;
+        display: flex;
+        align-items: stretch;
         flex: 1;
         min-width: 0;
       }
-      .conv-search-wrap svg {
-        position: absolute;
-        left: 9px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: var(--muted);
-        pointer-events: none;
+      .conv-search-inner {
+        position: relative;
+        flex: 1;
+        min-width: 0;
       }
       .conv-search {
         width: 100%;
         background: var(--bg);
         border: 1px solid var(--border);
-        border-radius: 6px;
+        border-right: none;
+        border-radius: 6px 0 0 6px;
         color: var(--text);
-        padding: 6px 26px 6px 30px;
+        padding: 6px 26px 6px 10px;
         font-size: 0.8rem;
         outline: none;
         transition: border-color 0.15s;
@@ -1863,6 +1887,45 @@
       }
       .conv-search::placeholder {
         color: var(--muted);
+      }
+      .conv-search-submit {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 0 6px 6px 0;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 0 10px;
+        transition: background 0.15s, color 0.15s;
+      }
+      .conv-search-submit:hover {
+        background: var(--surface);
+        color: var(--accent);
+      }
+      .conv-search-submit:active {
+        opacity: 0.75;
+      }
+      .conv-search-submit.loading {
+        cursor: default;
+        pointer-events: none;
+      }
+      .conv-submit-spinner {
+        display: none;
+        width: 13px;
+        height: 13px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+      }
+      .conv-search-submit.loading .conv-submit-icon {
+        display: none;
+      }
+      .conv-search-submit.loading .conv-submit-spinner {
+        display: block;
       }
       .conv-scope-toggle {
         display: flex;
@@ -2184,7 +2247,7 @@
         gap: 10px;
         font-size: 0.82rem;
         color: var(--muted);
-        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
       }
       .conv-search-loading-box .mini-spinner {
         width: 16px;
@@ -3131,7 +3194,15 @@
     <!-- HEADER -->
     <header class="app-header">
       <div class="brand">
-        <div class="brand-logo" style="background-image:url('./cmwhitelogo.svg');background-size:contain;background-repeat:no-repeat;background-position:center"></div>
+        <div
+          class="brand-logo"
+          style="
+            background-image: url('./cmwhitelogo.svg');
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+          "
+        ></div>
         <div class="brand-text">
           <span class="brand-name">Conversational AI Cloud</span>
           <span class="brand-sub">Content Dashboard</span>
@@ -3582,27 +3653,47 @@
         <div class="conv-sidebar">
           <div class="conv-sidebar-header">
             <div class="conv-search-row">
+              <button
+                class="sopt"
+                id="convOptIds"
+                title="Search IDs only"
+                data-tooltip="Search Article &amp; Dialog IDs exclusively"
+              >
+                #ID
+              </button>
               <div class="conv-search-wrap">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
+                <div class="conv-search-inner">
+                  <input
+                    type="text"
+                    class="conv-search"
+                    id="convSearch"
+                    placeholder="Search conversations…"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button class="clear-btn" id="convClearSearch">
+                    &#x2715;
+                  </button>
+                </div>
+                <button
+                  id="convSearchSubmit"
+                  class="conv-search-submit"
+                  title="Search (Enter)"
                 >
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <input
-                  type="text"
-                  class="conv-search"
-                  id="convSearch"
-                  placeholder="Search conversations…"
-                  autocomplete="off"
-                  spellcheck="false"
-                />
-                <button class="clear-btn" id="convClearSearch">&#x2715;</button>
+                  <svg
+                    class="conv-submit-icon"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                  >
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                  <div class="conv-submit-spinner"></div>
+                </button>
               </div>
               <button
                 class="sopt"
@@ -3611,14 +3702,6 @@
                 data-tooltip="Use regular expression (.*)"
               >
                 .*
-              </button>
-              <button
-                class="sopt"
-                id="convOptIds"
-                title="Search Article &amp; Dialog IDs"
-                data-tooltip="Include Article &amp; Dialog IDs in search"
-              >
-                #ID
               </button>
               <div class="conv-scope-toggle">
                 <button
@@ -3636,6 +3719,9 @@
                   B
                 </button>
               </div>
+            </div>
+            <div class="conv-id-warning" id="convIdWarning">
+              &#x26A0; ID search expects a numeric value.
             </div>
             <div
               style="
@@ -3672,7 +3758,21 @@
                 onclick="toggleContextPanel()"
                 title="Filter by context"
               >
-                &#x1F3F7;
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  style="display: block"
+                >
+                  <polygon
+                    points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
+                  />
+                </svg>
                 <span
                   class="ctx-filter-badge"
                   id="ctxFilterBadge"
@@ -3694,10 +3794,16 @@
               <button class="conv-pill" data-conv-filter="low_recog">
                 &#x26A0;&#xFE0F; Low recognition
               </button>
+              <button class="conv-pill" data-conv-filter="zero_recog">
+                &#x25CB; Zero recognition
+              </button>
             </div>
           </div>
           <div class="sessions-list" id="sessionsList"></div>
-          <div class="conv-search-loading-overlay" id="convSearchLoadingOverlay">
+          <div
+            class="conv-search-loading-overlay"
+            id="convSearchLoadingOverlay"
+          >
             <div class="conv-search-loading-box">
               <div class="mini-spinner"></div>
               Searching…
@@ -3976,6 +4082,28 @@
               Studio environment. Conversation links are generated by appending
               <code>/conversations/{sessionId}</code>.
             </p>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label for="setting-low-recog-threshold"
+                >Low recognition threshold (%)</label
+              >
+              <input
+                id="setting-low-recog-threshold"
+                type="number"
+                min="1"
+                max="99"
+                style="width: 80px"
+              />
+              <p class="hint" style="margin-top: 4px">
+                Sessions with a recognition score below this value are flagged
+                as low recognition (1&ndash;99).
+              </p>
+            </div>
             <div
               style="
                 margin-top: 14px;
@@ -4612,12 +4740,18 @@
       let entityListDirty = false
       let tDialogMap = new Map()
       let articleMap = new Map()
+      let convVarMap = new Map() // ConversationVariable id → name
+      let ctxVarMap = new Map() // ContextVariable id → name
       let searchWorker = null
       let searchSeq = 0
       const CM_DEFAULT_URL = ""
       const DATA_FOLDER_STORAGE_KEY = "cm-data-folder"
       let cmBaseUrl = localStorage.getItem("cm-base-url") || CM_DEFAULT_URL
       let haloBaseUrl = localStorage.getItem("halo-base-url") || ""
+      let lowRecogThreshold = parseInt(
+        localStorage.getItem("conv-low-recog-threshold") || "60",
+        10,
+      )
       let openMode = localStorage.getItem("cm-open-mode") || "popup"
       let flowNetwork = null
       let flowDirection = localStorage.getItem("cm-flow-direction") || "LR"
@@ -4712,10 +4846,75 @@
       }
       function strip(t) {
         return (t || "")
-          .replace(/\{[^}]*\}/g, "")
-          .replace(/%\{[^}]*\}/g, "")
+          .replace(/%\{[^}]*\}/g, " ")
+          .replace(/\{[^}]*\}/g, (m) => {
+            // Preserve URLs embedded in CM.com CTA/template blocks so they remain visible/searchable
+            const urls = m.match(/https?:\/\/[^\s}"]+/g)
+            return urls ? " " + urls.join(" ") + " " : " "
+          })
           .replace(/\s+/g, " ")
           .trim()
+      }
+      function expandVarNames(text) {
+        if (!text) return ""
+        // Output [Name] so strip() doesn't remove it (strip only removes %{…} and {…})
+        return text
+          .replace(/%\{ConversationVariable\((\d+)\)\}/g, (_, id) => {
+            const name = convVarMap.get(Number(id))
+            return name ? "[" + name + "]" : ""
+          })
+          .replace(/%\{ContextVariable\((\d+)\)\}/g, (_, id) => {
+            const name = ctxVarMap.get(Number(id))
+            return name ? "[" + name + "]" : ""
+          })
+          .replace(/%\{([^}]+)\}/g, (_, token) => "[" + token + "]")
+      }
+      function stripDisplay(t, links) {
+        if (!t) return ""
+        let text = t
+        // 1. Build link map from the article's Links[] array (TagId → {label, url})
+        const linkMap = new Map()
+        ;(links || []).forEach((l) => {
+          if (l.TagId)
+            linkMap.set(l.TagId, { label: l.Label || null, url: l.URL || null })
+        })
+        // 2. Strip CTA blocks (standalone buttons — separate from %{Link(N)} inline links)
+        text = text.replace(/\{message:cta\b[^}]*\}/g, "")
+        text = text.replace(/\{\/message:cta\}/g, "")
+        // 3. Replace %{Link(N)} with [Label](URL) — both label and URL are shown in the UI
+        text = text.replace(/%\{Link\((\d+)\)\}/g, (_, n) => {
+          const link = linkMap.get(Number(n))
+          if (!link) return "[Link " + n + "]"
+          const label = link.label || link.url || "Link " + n
+          return link.url
+            ? "[" + label + "](" + link.url + ")"
+            : "[" + label + "]"
+        })
+        // 4. Replace %{Image(N)} with a neutral placeholder
+        text = text.replace(/%\{Image\((\d+)\)\}/g, "[Image]")
+        // 5. Expand named vars, strip remaining template blocks
+        return strip(expandVarNames(text))
+      }
+      // Wraps [VarName] tokens in a green span. [Label](URL) link tokens get the
+      // label in green and the URL in accent colour. Must be called on already HTML-escaped strings.
+      // Single-pass replacement prevents double-wrapping when (URL) follows a [Label].
+      function hlVar(html) {
+        return html.replace(
+          /\[([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g,
+          (_, inner, url) => {
+            if (url)
+              return (
+                '<span class="var-token">' +
+                inner +
+                '</span>(<span class="url-token">' +
+                url +
+                "</span>)"
+              )
+            if (/^https?:\/\//.test(inner))
+              return '<span class="url-token">[' + inner + "]</span>"
+            return '<span class="var-token">[' + inner + "]</span>"
+          },
+        )
       }
       function sortBy(arr, sort, idFn, nameFn) {
         const s = arr.slice()
@@ -4994,10 +5193,18 @@
 
       // ── Article helpers ─────────────────────────────────────────────
       // Fields are precomputed in loadData; these are now O(1) lookups.
-      function aKind(a) { return a._aKind }
-      function aHasFaq(a) { return a._hasFaq }
-      function aFaqQ(a) { return a._faqQ }
-      function aResponse(a) { return a._response }
+      function aKind(a) {
+        return a._aKind
+      }
+      function aHasFaq(a) {
+        return a._hasFaq
+      }
+      function aFaqQ(a) {
+        return a._faqQ
+      }
+      function aResponse(a) {
+        return a._response
+      }
 
       // ── Article card ────────────────────────────────────────────────
       function renderArticleCard(art, q) {
@@ -5013,11 +5220,11 @@
             : '<span class="badge b-dialog">Dialog Link</span>'
         let outputSection = ""
         if (kind === "answer") {
-          const raw = art._strippedResponse || ""
+          const raw = art._displayResponse || ""
           if (raw)
             outputSection =
               '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
-              hl(raw, q) +
+              hlVar(hl(raw, q)) +
               "</div></div>"
         } else {
           const refs = art.Outputs.map((o) => {
@@ -5098,7 +5305,7 @@
               " more</button>"
             : visibleChips
         const hoverTitle =
-          kind === "answer" ? (art._strippedResponse || "").slice(0, 250) : ""
+          kind === "answer" ? (art._displayResponse || "").slice(0, 250) : ""
         return (
           '<div class="card type-article">' +
           '<div class="card-header" onclick="goToArticle(' +
@@ -5705,11 +5912,12 @@
           kbaArt &&
           kbaArt.Outputs &&
           kbaArt.Outputs.find((o) => o.Type === "Answer")
-        const ansRaw = strip(
+        const ansRawText = stripDisplay(
           (ansItem && ansItem.data && ansItem.data.text) ||
             (kbaAnsText && kbaAnsText.Text) ||
             "",
         )
+        const ansRaw = ansRawText // used as plain text for hl(); hlVar applied at render
         const kbaRefLink = kbaArt
           ? '<a class="node-kba-ref" onclick="closeDialogInfoModal();goToArticle(' +
             kbaRef +
@@ -5795,7 +6003,7 @@
           (ansRaw
             ? '<div class="node-answer">' +
               kbaRefLink +
-              hl(ansRaw, q) +
+              hlVar(hl(ansRaw, q)) +
               "</div>"
             : "") +
           (optHtml ? '<div class="node-options">' + optHtml + "</div>" : "") +
@@ -6386,7 +6594,9 @@
         if (clearBtn) clearBtn.classList.add("visible")
         if (!convSearchIds) {
           convSearchIds = true
-          document.getElementById("convOptIds").classList.add("on")
+          convSearchRegex = false
+          document.getElementById("convOptRegex").classList.remove("on")
+          syncIdMode()
         }
         convPage = 1
         loadSessions()
@@ -6494,11 +6704,11 @@
           "</div></div>"
 
         if (kind === "answer") {
-          const raw = art._strippedResponse || ""
+          const raw = art._displayResponse || ""
           if (raw)
             html +=
               '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
-              esc(raw) +
+              hlVar(esc(raw)) +
               "</div></div>"
         } else {
           const refs = art.Outputs.map((o) => {
@@ -7012,7 +7222,11 @@
         const activeTab = document.querySelector(".tab.active").dataset.tab
         if (activeTab === "articles")
           return Array.from(filteredArticles, (i) => allArticles[i]).map(
-            (a) => ({ kind: "article", id: a.Id, title: aFaqQ(a) || "(no question)" }),
+            (a) => ({
+              kind: "article",
+              id: a.Id,
+              title: aFaqQ(a) || "(no question)",
+            }),
           )
         if (activeTab === "dialogs")
           return Array.from(filteredDialogs, (i) => allDialogsCombined[i]).map(
@@ -7020,7 +7234,11 @@
           )
         return Array.from(filteredAll, (i) => allCombinedItems[i]).map((item) =>
           item._kind === "article"
-            ? { kind: "article", id: item.Id, title: aFaqQ(item) || "(no question)" }
+            ? {
+                kind: "article",
+                id: item.Id,
+                title: aFaqQ(item) || "(no question)",
+              }
             : { kind: item._kind, id: item.id, title: item.name || "" },
         )
       }
@@ -7268,6 +7486,8 @@
       document.getElementById("settingsBtn").addEventListener("click", () => {
         document.getElementById("setting-base-url").value = cmBaseUrl
         document.getElementById("setting-halo-url").value = haloBaseUrl
+        document.getElementById("setting-low-recog-threshold").value =
+          lowRecogThreshold
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
@@ -7318,6 +7538,20 @@
           .replace(/\/$/, "")
           .replace(/\/conversations$/i, "")
         localStorage.setItem("halo-base-url", haloBaseUrl)
+        lowRecogThreshold = Math.min(
+          99,
+          Math.max(
+            1,
+            parseInt(
+              document.getElementById("setting-low-recog-threshold").value,
+              10,
+            ) || 60,
+          ),
+        )
+        localStorage.setItem(
+          "conv-low-recog-threshold",
+          String(lowRecogThreshold),
+        )
         openMode = document.querySelector(
           'input[name="open-mode"]:checked',
         ).value
@@ -7450,19 +7684,40 @@
           }
 
           allArticles = data.articles || []
+          // Populate variable maps before precomputing article display fields
+          convVarMap = new Map()
+          ctxVarMap = new Map()
+          ;(data.convVars || []).forEach((v) => convVarMap.set(v.id, v.name))
+          ;(data.ctxVars || []).forEach((v) => ctxVarMap.set(v.id, v.name))
           // Precompute per-article derived fields once on load — keeps render
           // helpers O(1) and avoids repeated Outputs/Questions array scans.
           for (const a of allArticles) {
             const types = a.Outputs.map((o) => o.Type)
-            a._aKind = types.includes("Answer") ? "answer" : types.includes("TDialogStart") ? "tdialog" : "dialog"
+            a._aKind = types.includes("Answer")
+              ? "answer"
+              : types.includes("TDialogStart")
+              ? "tdialog"
+              : "dialog"
             const faqQ = a.Questions.find((q) => q.IsFaq)
-            a._faqQ = faqQ ? faqQ.Text : a.Questions[0] ? a.Questions[0].Text : null
+            a._faqQ = faqQ
+              ? faqQ.Text
+              : a.Questions[0]
+              ? a.Questions[0].Text
+              : null
             a._hasFaq = !!faqQ
             const ans = a.Outputs.find((o) => o.Type === "Answer")
             a._response = ans ? ans.Text : null
             a._strippedResponse = a._response
-              ? a._response.replace(/\{[^}]*\}/g, "").replace(/%\{[^}]*\}/g, "").replace(/\s+/g, " ").trim()
+              ? a._response
+                  .replace(/%\{[^}]*\}/g, " ")
+                  .replace(/\{[^}]*\}/g, (m) => {
+                    const urls = m.match(/https?:\/\/[^\s}"]+/g)
+                    return urls ? " " + urls.join(" ") + " " : " "
+                  })
+                  .replace(/\s+/g, " ")
+                  .trim()
               : ""
+            a._displayResponse = ans ? stripDisplay(ans.Text, ans.Links) : ""
           }
           const respCnt = allArticles.filter(
             (a) => a._aKind === "answer",
@@ -7527,6 +7782,8 @@
               articles: allCombinedItems.filter((i) => i._kind === "article"),
               dialogs: allDialogsCombined,
               entities: allEntities,
+              convVars: data.convVars || [],
+              ctxVars: data.ctxVars || [],
             }),
           })
           triggerSearch()
@@ -7943,40 +8200,72 @@
       // ── Session list ────────────────────────────────────────────────
       async function loadSessions() {
         const convSearchEl = document.getElementById("convSearch")
-        // Validate the regex on the JS side before sending to the backend,
-        // so an invalid pattern shows an error border instead of crashing.
-        if (convSearchRegex && convQuery) {
-          try {
-            new RegExp(convQuery, "i")
+        const idWarning = document.getElementById("convIdWarning")
+
+        // In #ID mode: validate that the query is numeric; warn and abort if not
+        if (convSearchIds && convQuery) {
+          if (/^\d+$/.test(convQuery)) {
+            idWarning.classList.remove("visible")
             convSearchEl.classList.remove("regex-error")
-          } catch {
+          } else {
+            idWarning.classList.add("visible")
             convSearchEl.classList.add("regex-error")
             return
           }
         } else {
-          convSearchEl.classList.remove("regex-error")
+          idWarning.classList.remove("visible")
+          // Validate regex on the JS side before sending to the backend
+          if (convSearchRegex && convQuery) {
+            try {
+              new RegExp(convQuery, "i")
+              convSearchEl.classList.remove("regex-error")
+            } catch {
+              convSearchEl.classList.add("regex-error")
+              return
+            }
+          } else {
+            convSearchEl.classList.remove("regex-error")
+          }
         }
+
         const args = {
           page: convPage,
           filter: convSessionFilter,
           query: convQuery || null,
-          queryRegex: convSearchRegex,
-          queryScope: convSearchScope,
+          queryRegex: convSearchIds ? false : convSearchRegex,
+          queryScope: convSearchIds ? "both" : convSearchScope,
           queryIds: convSearchIds,
+          queryIdsOnly: convSearchIds,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
           contextFilters:
             convContextFilters.length > 0 ? convContextFilters : null,
+          lowRecogThreshold,
         }
-        document.getElementById("convSearchLoadingOverlay").classList.add("visible")
+        const _submitBtn = document.getElementById("convSearchSubmit")
+        _submitBtn.classList.add("loading")
+        document
+          .getElementById("convSearchLoadingOverlay")
+          .classList.add("visible")
+        // Yield two animation frames so WebKit paints the loading state before
+        // the Tauri invoke occupies the IPC channel (macOS WKWebView paint fix).
+        await new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        )
         try {
           const res = await window.electronAPI.getSessions(args)
           convSessions = res.sessions || []
           convTotalSessions = res.total || 0
-          document.getElementById("convSearchLoadingOverlay").classList.remove("visible")
+          _submitBtn.classList.remove("loading")
+          document
+            .getElementById("convSearchLoadingOverlay")
+            .classList.remove("visible")
           renderSessionList()
         } catch (e) {
-          document.getElementById("convSearchLoadingOverlay").classList.remove("visible")
+          _submitBtn.classList.remove("loading")
+          document
+            .getElementById("convSearchLoadingOverlay")
+            .classList.remove("visible")
           document.getElementById(
             "sessionsList",
           ).innerHTML = `<div class="sessions-empty">Error loading sessions:<br>${esc(
@@ -8210,7 +8499,6 @@
         _updateCtxFilterBadge()
         _renderCtxModal()
         convPage = 1
-        loadSessions()
       }
 
       function clearContextFilters() {
@@ -8218,7 +8506,6 @@
         _updateCtxFilterBadge()
         _renderCtxModal()
         convPage = 1
-        loadSessions()
       }
 
       // ── Session context detail modal ────────────────────────────────
@@ -8277,19 +8564,28 @@
       })
 
       // Conv search
-      let _convSearchTimer = null
       document.getElementById("convSearch").addEventListener("input", (e) => {
-        // Show/hide the clear button immediately (no debounce)
+        // Show/hide the clear button immediately; search fires on Enter or icon click
         document
           .getElementById("convClearSearch")
           .classList.toggle("visible", e.target.value.length > 0)
-        clearTimeout(_convSearchTimer)
-        _convSearchTimer = setTimeout(() => {
+      })
+
+      document.getElementById("convSearch").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
           convQuery = e.target.value.trim()
           convPage = 1
           loadSessions()
-        }, 400)
+        }
       })
+
+      document
+        .getElementById("convSearchSubmit")
+        .addEventListener("click", () => {
+          convQuery = document.getElementById("convSearch").value.trim()
+          convPage = 1
+          loadSessions()
+        })
 
       document
         .getElementById("convClearSearch")
@@ -8298,11 +8594,28 @@
           document.getElementById("convClearSearch").classList.remove("visible")
           convQuery = ""
           convPage = 1
-          loadSessions()
         })
 
-      // Conv search regex toggle
+      // Helper: apply disabled state to regex/scope buttons when #ID mode is active
+      function syncIdMode() {
+        const idBtn = document.getElementById("convOptIds")
+        const regexBtn = document.getElementById("convOptRegex")
+        const scopeBtns = document.querySelectorAll("[data-conv-scope]")
+        idBtn.classList.toggle("on", convSearchIds)
+        if (convSearchIds) {
+          regexBtn.classList.add("conv-opt-disabled")
+          scopeBtns.forEach((b) => b.classList.add("conv-opt-disabled"))
+        } else {
+          regexBtn.classList.remove("conv-opt-disabled")
+          scopeBtns.forEach((b) => b.classList.remove("conv-opt-disabled"))
+          // Hide warning when leaving ID mode
+          document.getElementById("convIdWarning").classList.remove("visible")
+        }
+      }
+
+      // Conv search regex toggle — no-op when #ID mode is active
       document.getElementById("convOptRegex").addEventListener("click", () => {
+        if (convSearchIds) return
         convSearchRegex = !convSearchRegex
         document
           .getElementById("convOptRegex")
@@ -8311,20 +8624,22 @@
         loadSessions()
       })
 
-      // Conv search #ID toggle
+      // Conv search #ID toggle — only toggles mode, does NOT fire search
       document.getElementById("convOptIds").addEventListener("click", () => {
         convSearchIds = !convSearchIds
-        document
-          .getElementById("convOptIds")
-          .classList.toggle("on", convSearchIds)
+        if (convSearchIds) {
+          // Force regex off when entering ID mode
+          convSearchRegex = false
+          document.getElementById("convOptRegex").classList.remove("on")
+        }
         convPage = 1
-        loadSessions()
+        syncIdMode()
       })
 
-      // Conv search scope — U and B are independent toggles
-      // active U only → user, active B only → bot, both or neither → both
+      // Conv search scope — U and B are independent toggles; no-op in #ID mode
       document.querySelectorAll("[data-conv-scope]").forEach((btn) => {
         btn.addEventListener("click", () => {
+          if (convSearchIds) return
           btn.classList.toggle("active")
           const uActive = document
             .querySelector("[data-conv-scope='user']")
@@ -8481,7 +8796,6 @@
         document.getElementById("convCalPopup").classList.remove("open")
         document.getElementById("convDateRangeBtn").classList.remove("active")
         convPage = 1
-        loadSessions()
       }
 
       function renderDateRangeBtn() {

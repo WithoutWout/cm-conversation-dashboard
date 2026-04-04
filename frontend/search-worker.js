@@ -20,6 +20,10 @@ let allItems = [] // pre-built articles + dialogs combined
 let entityHasArticleXref = new Set() // entity names (upper) that have article xrefs
 let entityHasDialogXref = new Set() // entity names (upper) that have dialog xrefs
 
+// Variable name maps (id → name), populated on "init" from dialogs export
+let convVarMap = new Map() // ConversationVariable id → name
+let ctxVarMap = new Map() // ContextVariable id → name
+
 // ── Search options (updated on each "search" message) ────────────────────────
 let searchCase = false
 let searchWord = false
@@ -56,10 +60,29 @@ function testPlainCI(needleLower, haystack) {
   return haystack.toLowerCase().indexOf(needleLower) !== -1
 }
 
+// Expand %{ConversationVariable(N)} and %{ContextVariable(N)} to their names
+// so users can search by variable name instead of numeric ID.
+function expandVarNames(text) {
+  if (!text) return ""
+  return text
+    .replace(/%\{ConversationVariable\((\d+)\)\}/g, (_, id) => {
+      const name = convVarMap.get(Number(id))
+      return name ? "%{" + name + "}" : ""
+    })
+    .replace(/%\{ContextVariable\((\d+)\)\}/g, (_, id) => {
+      const name = ctxVarMap.get(Number(id))
+      return name ? "%{" + name + "}" : ""
+    })
+}
+
 function strip(t) {
   return (t || "")
-    .replace(/\{[^}]*\}/g, "")
-    .replace(/%\{[^}]*\}/g, "")
+    .replace(/%\{[^}]*\}/g, " ")
+    .replace(/\{[^}]*\}/g, (m) => {
+      // Preserve URLs embedded in CM.com CTA/template blocks so they remain searchable
+      const urls = m.match(/https?:\/\/[^\s}"]+/g)
+      return urls ? " " + urls.join(" ") + " " : " "
+    })
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -105,9 +128,21 @@ function precomputeArticle(a) {
   const o = a.Outputs.find((o) => o.Type === "Answer")
   a._response = o ? o.Text : null
 
+  // Build per-article link label map (TagId → Label) for expanding %{Link(N)}
+  const linkMap = new Map()
+  ;((o && o.Links) || []).forEach((l) => {
+    if (l.TagId && l.Label) linkMap.set(l.TagId, l.Label)
+  })
+  const expandedWithLinks = (a._response || "").replace(
+    /%\{Link\((\d+)\)\}/g,
+    (_, n) => linkMap.get(Number(n)) || "Link " + n,
+  )
+
   // Pre-compute search fields
   a._searchId = String(a.Id)
   a._searchResponse = strip(a._response || "")
+  a._searchResponseRaw = a._response || ""
+  a._searchResponseExpanded = expandVarNames(expandedWithLinks)
   a._searchQuestionsUpper = a.Questions.map((qs) => qs.Text.toUpperCase())
 }
 
@@ -122,9 +157,12 @@ function precomputeDialog(item) {
     const ans = ((n.output && n.output.items) || []).find(
       (i) => i.type === "Answer",
     )
+    const rawText = (ans && ans.data && ans.data.text) || ""
     return {
       name: n.name || "",
-      answerText: ans ? strip((ans.data && ans.data.text) || "") : "",
+      answerText: ans ? strip(rawText) : "",
+      answerTextRaw: rawText,
+      answerTextExpanded: expandVarNames(rawText),
     }
   })
 
@@ -211,12 +249,21 @@ function matchArticle(a, re, isPlain, needle) {
   if (isPlain) {
     if (
       searchCase
-        ? testPlain(needle, a._searchResponse)
-        : testPlainCI(needle, a._searchResponse)
+        ? testPlain(needle, a._searchResponse) ||
+          testPlain(needle, a._searchResponseRaw) ||
+          testPlain(needle, a._searchResponseExpanded)
+        : testPlainCI(needle, a._searchResponse) ||
+          testPlainCI(needle, a._searchResponseRaw) ||
+          testPlainCI(needle, a._searchResponseExpanded)
     )
       return true
   } else {
-    if (testRe(re, a._searchResponse)) return true
+    if (
+      testRe(re, a._searchResponse) ||
+      testRe(re, a._searchResponseRaw) ||
+      testRe(re, a._searchResponseExpanded)
+    )
+      return true
   }
   // Entity-word enrichment
   if (
@@ -257,16 +304,25 @@ function matchDialog(item, re, isPlain, needle) {
         if (testRe(re, sn.name)) return true
       }
     }
-    if (sn.answerText) {
+    if (sn.answerText || sn.answerTextRaw) {
       if (isPlain) {
         if (
           searchCase
-            ? testPlain(needle, sn.answerText)
-            : testPlainCI(needle, sn.answerText)
+            ? testPlain(needle, sn.answerText) ||
+              testPlain(needle, sn.answerTextRaw) ||
+              testPlain(needle, sn.answerTextExpanded)
+            : testPlainCI(needle, sn.answerText) ||
+              testPlainCI(needle, sn.answerTextRaw) ||
+              testPlainCI(needle, sn.answerTextExpanded)
         )
           return true
       } else {
-        if (testRe(re, sn.answerText)) return true
+        if (
+          testRe(re, sn.answerText) ||
+          testRe(re, sn.answerTextRaw) ||
+          testRe(re, sn.answerTextExpanded)
+        )
+          return true
       }
     }
   }
@@ -304,6 +360,12 @@ self.onmessage = function (e) {
     workerArticles = parsed.articles || []
     workerDialogs = parsed.dialogs || []
     workerEntities = parsed.entities || []
+
+    // Build variable name maps so searches by name resolve to numeric ID refs
+    convVarMap = new Map()
+    ctxVarMap = new Map()
+    ;(parsed.convVars || []).forEach((v) => convVarMap.set(v.id, v.name))
+    ;(parsed.ctxVars || []).forEach((v) => ctxVarMap.set(v.id, v.name))
 
     // Assign within-array indices so results can be returned as cheap int arrays
     // instead of full Structured-Clone copies of every object.
@@ -484,9 +546,15 @@ self.onmessage = function (e) {
     // Send index arrays as Int32Array with buffer transfer — zero-copy, no Structured Clone.
     // The main thread reconstructs filtered arrays from its own allCombinedItems etc.
     const filteredAllIdx = new Int32Array(filteredAll.map((x) => x._gidx))
-    const filteredArticlesIdx = new Int32Array(filteredArticles.map((a) => a._widx))
-    const filteredDialogsIdx = new Int32Array(filteredDialogs.map((d) => d._widx))
-    const filteredEntitiesIdx = new Int32Array(filteredEntities.map((e) => e._widx))
+    const filteredArticlesIdx = new Int32Array(
+      filteredArticles.map((a) => a._widx),
+    )
+    const filteredDialogsIdx = new Int32Array(
+      filteredDialogs.map((d) => d._widx),
+    )
+    const filteredEntitiesIdx = new Int32Array(
+      filteredEntities.map((e) => e._widx),
+    )
     self.postMessage(
       {
         type: "results",
