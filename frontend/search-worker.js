@@ -192,6 +192,45 @@ function precomputeArticle(a) {
     }
     if (Object.keys(ctxSet).length) a._ctxSets.push(ctxSet)
   }
+
+  // Build aligned per-answer data: {s, r, e, ctxSet} for every Answer output.
+  // This links text and context conditions for the SAME answer so combined
+  // text+context filtering can require both to be satisfied by one answer.
+  a._answerItems = []
+  for (const _ao of a.Outputs) {
+    if (_ao.Type !== "Answer") continue
+    const _alm = new Map()
+    ;(_ao.Links || []).forEach((l) => {
+      if (l.TagId && l.Label) _alm.set(l.TagId, l.Label)
+    })
+    const _arT = _ao.Text || ""
+    const _aExp = _arT.replace(
+      /%\{Link\((\d+)\)\}/g,
+      (_, n) => _alm.get(Number(n)) || "Link " + n,
+    )
+    const _aCvs = _ao.ContextVariables || []
+    const _aCtx = {}
+    if (_aCvs.some((cv) => cv.Values && !cv.Values.includes("any"))) {
+      for (const cv of _aCvs) {
+        const name = ctxVarMap.get(cv.Id)
+        if (!name) continue
+        const vals = []
+        for (const valStr of cv.Values) {
+          for (const v of valStr.split(",")) {
+            const t = v.trim()
+            if (t && t !== "any") vals.push(t)
+          }
+        }
+        if (vals.length) _aCtx[name] = vals
+      }
+    }
+    a._answerItems.push({
+      s: strip(_aExp),
+      r: _arT,
+      e: expandVarNames(_aExp),
+      ctxSet: _aCtx,
+    })
+  }
 }
 
 function precomputeDialog(item) {
@@ -231,12 +270,44 @@ function precomputeDialog(item) {
       )
       ctxAnswerTexts.push({ s: strip(_exp), r: _rawT, e: expandVarNames(_exp) })
     }
+    // Build aligned per-answer items for this node: {s, r, e, ctxSet}
+    // so combined text+context matching can require both on the same answer.
+    const _nodeAnsItems = []
+    for (const _nai of nodeAnsItems) {
+      const _nlm = new Map()
+      ;((_nai.data && _nai.data.hyperlinks) || []).forEach((h) => {
+        if (h.id !== undefined && h.label) _nlm.set(h.id, h.label)
+      })
+      const _nrT = (_nai.data && _nai.data.text) || ""
+      const _nExp = _nrT.replace(
+        /%\{Link\((\d+)\)\}/g,
+        (_, n) => _nlm.get(Number(n)) || "Link " + n,
+      )
+      const _nCvs = _nai.contextVariables || []
+      const _nCtx = {}
+      for (const cv of _nCvs) {
+        const name = ctxVarMap.get(cv.id)
+        if (!name || !cv.value) continue
+        const vals = cv.value
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean)
+        if (vals.length) _nCtx[name] = vals
+      }
+      _nodeAnsItems.push({
+        s: strip(_nExp),
+        r: _nrT,
+        e: expandVarNames(_nExp),
+        ctxSet: _nCtx,
+      })
+    }
     return {
       name: n.name || "",
       answerText: ans ? strip(_primaryExp) : "",
       answerTextRaw: rawText,
       answerTextExpanded: expandVarNames(_primaryExp),
       ctxAnswerTexts,
+      _answerItems: _nodeAnsItems,
     }
   })
 
@@ -334,6 +405,50 @@ function matchesContentContext(item) {
       const vals = ctxSet[f.name]
       return vals && vals.includes(f.value)
     }),
+  )
+}
+
+// Check if a single answer's ctxSet satisfies all active content context filters.
+// An empty ctxSet (default/unconditional answer) never satisfies a non-empty filter.
+function ctxSetMatchesFilters(ctxSet) {
+  if (!contentContextFilters.length) return true
+  if (!Object.keys(ctxSet).length) return false
+  return contentContextFilters.every((f) => {
+    const vals = ctxSet[f.name]
+    return vals && vals.includes(f.value)
+  })
+}
+
+// Check if a single answer item matches the text query.
+function answerMatchesText(ai, re, isPlain, needle) {
+  if (isPlain) {
+    return searchCase
+      ? testPlain(needle, ai.s) ||
+          testPlain(needle, ai.r) ||
+          testPlain(needle, ai.e)
+      : testPlainCI(needle, ai.s) ||
+          testPlainCI(needle, ai.r) ||
+          testPlainCI(needle, ai.e)
+  }
+  return testRe(re, ai.s) || testRe(re, ai.r) || testRe(re, ai.e)
+}
+
+// Combined match: the SAME answer must satisfy both context filter AND text query.
+function matchArticleCombined(a, re, isPlain, needle) {
+  return (a._answerItems || []).some(
+    (ai) =>
+      ctxSetMatchesFilters(ai.ctxSet) &&
+      answerMatchesText(ai, re, isPlain, needle),
+  )
+}
+
+function matchDialogCombined(item, re, isPlain, needle) {
+  return (item._searchNodes || []).some((sn) =>
+    (sn._answerItems || []).some(
+      (ai) =>
+        ctxSetMatchesFilters(ai.ctxSet) &&
+        answerMatchesText(ai, re, isPlain, needle),
+    ),
   )
 }
 
@@ -593,6 +708,12 @@ self.onmessage = function (e) {
         if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
         if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
           return false
+        if (hasCtxFilter && !noQuery) {
+          if (!re && !isPlain) return false
+          return item._kind === "article"
+            ? matchArticleCombined(item, re, isPlain, needle)
+            : matchDialogCombined(item, re, isPlain, needle)
+        }
         if (!matchesContentContext(item)) return false
         if (noQuery) return true
         if (!re && !isPlain) return false
@@ -616,6 +737,10 @@ self.onmessage = function (e) {
       filteredArticles = workerArticles.filter((a) => {
         if (aFilter === "answer" && aKind(a) !== "answer") return false
         if (aFilter === "dialog" && aKind(a) === "answer") return false
+        if (hasCtxFilter && !noQuery) {
+          if (!re && !isPlain) return false
+          return matchArticleCombined(a, re, isPlain, needle)
+        }
         if (!matchesContentContext(a)) return false
         if (noQuery) return true
         if (!re && !isPlain) return false
@@ -639,6 +764,10 @@ self.onmessage = function (e) {
         if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
         if (dFilter === "recognition" && item._kind === "tdialog") return false
         if (dFilter === "recognition" && !item._hasAnswerOutput) return false
+        if (hasCtxFilter && !noQuery) {
+          if (!re && !isPlain) return false
+          return matchDialogCombined(item, re, isPlain, needle)
+        }
         if (!matchesContentContext(item)) return false
         if (noQuery) return true
         if (!re && !isPlain) return false
