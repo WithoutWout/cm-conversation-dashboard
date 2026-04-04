@@ -5156,6 +5156,18 @@
           "</a>"
         )
       }
+      function cmNodeLink(dialogId, nodeId) {
+        if (!cmBaseUrl) return ""
+        const path =
+          cmBaseUrl + "/dialogs/" + dialogId + "?currentNode=" + nodeId
+        return (
+          '<a class="action-link" href="' +
+          esc(path) +
+          '" title="Open node in CM.com" target="_blank">' +
+          extLinkSvg() +
+          "</a>"
+        )
+      }
       function cmOpenButton(type, id) {
         if (cmBaseUrl) {
           const path =
@@ -6032,6 +6044,19 @@
             '<span class="flow-node-info-name">' +
             esc(node.name) +
             "</span>" +
+            (cmBaseUrl
+              ? '<a class="action-link" href="' +
+                esc(
+                  cmBaseUrl +
+                    "/dialogs/" +
+                    flowCurrentDialogId +
+                    "?currentNode=" +
+                    nodeId,
+                ) +
+                '" title="Open node in CM.com" target="_blank" style="flex-shrink:0">' +
+                extLinkSvg() +
+                "</a>"
+              : "") +
             '<button class="flow-dir-btn" onclick="document.getElementById("flow-node-info").className="flow-node-info"" style="padding:2px 7px;flex-shrink:0" title="Dismiss">&#x2715;</button>' +
             "</div>" +
             '<div class="flow-node-info-body">'
@@ -6370,6 +6395,7 @@
           '<span class="node-name">' +
           hl(node.name, q) +
           "</span>" +
+          cmNodeLink(dialog.id, node.id) +
           "</div>" +
           (ansRaw
             ? '<div class="node-answer">' +

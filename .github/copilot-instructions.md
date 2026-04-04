@@ -145,6 +145,7 @@ Deep-link patterns:
 
 - Article: `{baseUrl}/articles/{id}`
 - Dialog: `{baseUrl}/dialogs/{id}`
+- Dialog node: `{baseUrl}/dialogs/{dialogId}?currentNode={nodeId}`
 
 `cmBaseUrl` is read from `localStorage["cm-base-url"]` or falls back to `CM_DEFAULT_URL` (empty string). CM.com links are only rendered when a context URL has been configured in Settings.
 
