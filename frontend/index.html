@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; frame-src https:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CM.com — Conversational AI Cloud Dashboard</title>
@@ -843,6 +843,53 @@
         font-family: monospace;
         font-size: 0.8em;
         word-break: break-all;
+      }
+      a.url-link {
+        text-decoration: underline;
+        cursor: pointer;
+      }
+      a.url-link:hover {
+        opacity: 0.8;
+      }
+      /* URL Preview Modal */
+      .url-preview-modal-box {
+        width: 92vw;
+        max-width: 1300px;
+        height: 88vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .url-preview-body {
+        flex: 1;
+        overflow: hidden;
+        position: relative;
+        background: #fff;
+        border-radius: 0 0 12px 12px;
+      }
+      .url-preview-body iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        display: block;
+      }
+      .url-preview-notice {
+        padding: 10px 18px;
+        font-size: 0.78rem;
+        color: var(--muted);
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .url-preview-notice span {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: monospace;
       }
       .dialog-link-row {
         display: flex;
@@ -2312,6 +2359,11 @@
         color: var(--red);
         font-size: 0.8rem;
       }
+      .session-badge.pos-feedback {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--green);
+        font-size: 0.8rem;
+      }
       .session-badge.lang {
         background: var(--bg);
         color: var(--muted);
@@ -3011,6 +3063,15 @@
       .bubble.low-recog-highlight.genai {
         border-color: rgba(251, 146, 60, 0.6) !important;
         background: rgba(251, 146, 60, 0.06) !important;
+      }
+      .bubble.zero-recog-highlight {
+        border-color: rgba(239, 68, 68, 0.65) !important;
+        background: rgba(239, 68, 68, 0.07) !important;
+        box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
+      }
+      .bubble.zero-recog-highlight.genai {
+        border-color: rgba(239, 68, 68, 0.65) !important;
+        background: rgba(239, 68, 68, 0.07) !important;
       }
       /* Entity match chips */
       .entity-match-chip {
@@ -3935,20 +3996,15 @@
               </button>
             </div>
             <div class="conv-filter-pills">
-              <button class="conv-pill active" data-conv-filter="all">
-                All
-              </button>
-              <button class="conv-pill" data-conv-filter="genai">
-                GenAI only
-              </button>
+              <button class="conv-pill" data-conv-filter="genai">GenAI</button>
               <button class="conv-pill" data-conv-filter="neg_feedback">
-                &#x1F44E; Negative feedback
+                &#x1F44E; feedback
               </button>
               <button class="conv-pill" data-conv-filter="low_recog">
-                &#x26A0;&#xFE0F; Low recognition
+                Low %
               </button>
               <button class="conv-pill" data-conv-filter="zero_recog">
-                &#x25CB; Zero recognition
+                Zero %
               </button>
             </div>
           </div>
@@ -4765,6 +4821,96 @@
       </div>
     </div>
 
+    <!-- URL PREVIEW MODAL -->
+    <div class="modal-overlay" id="urlPreviewModal">
+      <div class="modal-box url-preview-modal-box">
+        <div class="modal-header">
+          <div style="flex: 1; min-width: 0">
+            <h3>Preview</h3>
+            <span
+              id="urlPreviewTitle"
+              style="
+                font-size: 0.72rem;
+                color: var(--muted);
+                word-break: break-all;
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 60vw;
+              "
+            ></span>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center">
+            <button
+              class="btn-secondary"
+              onclick="openUrlPreviewWindow()"
+              title="Open in built-in window"
+              style="font-size: 0.8rem; padding: 4px 10px"
+            >
+              &#x2750; Open in window
+            </button>
+            <button
+              class="btn-secondary"
+              onclick="openUrlPreviewExternal()"
+              title="Open in browser"
+              style="font-size: 0.8rem; padding: 4px 10px"
+            >
+              &#x2197; Open in browser
+            </button>
+            <button class="close-btn" onclick="closeUrlPreview()">
+              &#x2715;
+            </button>
+          </div>
+        </div>
+        <div class="url-preview-body">
+          <iframe
+            id="urlPreviewFrame"
+            src=""
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+          ></iframe>
+          <div
+            id="urlPreviewBlocked"
+            style="
+              display: none;
+              position: absolute;
+              inset: 0;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              gap: 16px;
+              background: var(--surface);
+              padding: 32px;
+              text-align: center;
+            "
+          >
+            <div style="font-size: 2rem">&#x26D4;</div>
+            <div style="font-weight: 600; font-size: 0.95rem">
+              This page can&rsquo;t be previewed
+            </div>
+            <div
+              style="color: var(--muted); font-size: 0.83rem; max-width: 420px"
+            >
+              The site blocks embedding in iframes
+              (<code>frame-ancestors</code>). Open it in a dedicated window
+              instead.
+            </div>
+            <div style="display: flex; gap: 10px">
+              <button class="btn-primary" onclick="openUrlPreviewWindow()">
+                &#x2750; Open in window
+              </button>
+              <button class="btn-secondary" onclick="openUrlPreviewExternal()">
+                &#x2197; Open in browser
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="url-preview-notice" id="urlPreviewNotice">
+          <span id="urlPreviewUrl"></span>
+        </div>
+      </div>
+    </div>
+
     <!-- FLOW MODAL -->
     <div class="modal-overlay" id="flowModal">
       <div class="modal-box flow-modal-box">
@@ -4837,6 +4983,7 @@
               args: { selected_folder: selectedFolder || null },
             }),
           openUrl: (url) => invoke("open_url", { url }),
+          openPreviewWindow: (url) => invoke("open_preview_window", { url }),
           selectDataFolder: () => invoke("select_data_folder"),
           onDataFolderUpdated: (handler) =>
             listen
@@ -4984,6 +5131,7 @@
       let convPickPhase = 0 // 0 = idle/complete, 1 = awaiting end click
       let convPage = 1
       let convTotalSessions = 0
+      let convHasSearched = false // true once the user has explicitly triggered a search
       let activeSessionUuid = null
       let activeInteractions = []
       let chatFilter = "all"
@@ -5110,16 +5258,29 @@
         return html.replace(
           /\[([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g,
           (_, inner, url) => {
-            if (url)
+            if (url) {
+              // Strip <mark> tags injected by hl() before using URL in onclick
+              const cleanUrl = url.replace(/<\/?mark>/g, "")
               return (
                 '<span class="var-token">' +
                 inner +
-                '</span>(<span class="url-token">' +
+                '</span>(<a class="url-token url-link" href="#" onclick="previewUrl(\'' +
+                cleanUrl +
+                "');return false\">" +
                 url +
-                "</span>)"
+                "</a>)"
               )
-            if (/^https?:\/\//.test(inner))
-              return '<span class="url-token">[' + inner + "]</span>"
+            }
+            if (/^https?:\/\//.test(inner.replace(/<\/?mark>/g, ""))) {
+              const cleanInner = inner.replace(/<\/?mark>/g, "")
+              return (
+                '<a class="url-token url-link" href="#" onclick="previewUrl(\'' +
+                cleanInner +
+                "');return false\">[" +
+                inner +
+                "]</a>"
+              )
+            }
             return '<span class="var-token">[' + inner + "]</span>"
           },
         )
@@ -7015,6 +7176,7 @@
           syncIdMode()
         }
         convPage = 1
+        convHasSearched = true
         loadSessions()
       }
 
@@ -8461,6 +8623,14 @@
         }
       }
 
+      function showConvSearchPrompt() {
+        const list = document.getElementById("sessionsList")
+        if (list)
+          list.innerHTML = `<div class="sessions-empty">Enter a search term or press Search to load conversations.</div>`
+        const pag = document.getElementById("sessionsPagination")
+        if (pag) pag.innerHTML = ""
+      }
+
       async function onEnterConversationsView() {
         updateConvDbStatus()
         // If a path is saved, try to open it
@@ -8471,7 +8641,11 @@
               .getDateRange()
               .then(({ min, max }) => initDatePicker(min, max))
               .catch(() => {})
-            await loadSessions()
+            if (convHasSearched) {
+              await loadSessions()
+            } else {
+              showConvSearchPrompt()
+            }
           } catch (_) {
             // DB file may have moved; prompt
             convDbPath = ""
@@ -8570,6 +8744,7 @@
           if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
           showImportToast("success", msg)
           contextOptionsLoaded = false // refresh context options on next panel open
+          convHasSearched = true
           await loadSessions()
         } catch (e) {
           showImportToast("error", "Import failed: " + e)
@@ -8747,6 +8922,11 @@
               shortUuid,
             )}</span>
               <div class="session-badges">
+                ${
+                  s.hasPosFeedback
+                    ? '<span class="session-badge pos-feedback" title="Positive feedback">&#x1F44D;</span>'
+                    : ""
+                }
                 ${
                   s.hasNegFeedback
                     ? '<span class="session-badge neg-feedback" title="Negative feedback">&#x1F44E;</span>'
@@ -9163,16 +9343,26 @@
         document.getElementById("sessionContextModal").classList.remove("open")
       }
 
-      // Conv filter pills
+      // ── URL Preview Modal ────────────────────────────────────────────
+      function previewUrl(url) {
+        if (!/^https?:\/\//i.test(url)) return
+        window.electronAPI.openPreviewWindow(url)
+      }
+
+      // Conv filter pills — only update state; search fires on Enter / submit button
       document.querySelectorAll("[data-conv-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
+          const wasActive = btn.classList.contains("active")
           document
             .querySelectorAll("[data-conv-filter]")
             .forEach((b) => b.classList.remove("active"))
-          btn.classList.add("active")
-          convSessionFilter = btn.dataset.convFilter
+          if (!wasActive) {
+            btn.classList.add("active")
+            convSessionFilter = btn.dataset.convFilter
+          } else {
+            convSessionFilter = "all"
+          }
           convPage = 1
-          loadSessions()
         })
       })
 
@@ -9188,6 +9378,7 @@
         if (e.key === "Enter") {
           convQuery = e.target.value.trim()
           convPage = 1
+          convHasSearched = true
           loadSessions()
         }
       })
@@ -9197,6 +9388,7 @@
         .addEventListener("click", () => {
           convQuery = document.getElementById("convSearch").value.trim()
           convPage = 1
+          convHasSearched = true
           loadSessions()
         })
 
@@ -9234,7 +9426,7 @@
           .getElementById("convOptRegex")
           .classList.toggle("on", convSearchRegex)
         convPage = 1
-        loadSessions()
+        if (convHasSearched) loadSessions()
       })
 
       // Conv search #ID toggle — only toggles mode, does NOT fire search
@@ -9398,7 +9590,7 @@
         popup.classList.remove("open")
         document.getElementById("convDateRangeBtn").classList.remove("active")
         convPage = 1
-        loadSessions()
+        if (convHasSearched) loadSessions()
       }
 
       function applyDateRange() {
@@ -9727,7 +9919,7 @@
           // Only allow http/https URLs
           if (/^https?:\/\//i.test(href)) {
             parts.push(
-              `<a class="chat-link" href="#" onclick="window.electronAPI.openUrl('${esc(
+              `<a class="chat-link" href="#" onclick="previewUrl('${esc(
                 href,
               )}');return false">${esc(linkText)}</a>`,
             )
@@ -9897,9 +10089,11 @@
           html += `</div></div>`
         }
 
-        if (quality > 0) {
+        if (quality > 0 || (quality === 0 && interaction.recognitionType)) {
           const qualColor =
-            quality <= 40
+            quality === 0
+              ? "var(--red)"
+              : quality <= 40
               ? "var(--red)"
               : quality <= 60
               ? "var(--orange)"
@@ -10075,12 +10269,35 @@
               turn.linkClicked,
             )}</span></div></div>`
           }
+          const zeroRecogActive = convSessionFilter === "zero_recog"
+          const lowRecogActive = convSessionFilter === "low_recog"
+          const turnHasZeroRecog = turn.botRows.some(
+            (br) =>
+              br.recognitionQuality === 0 &&
+              br.recognitionType &&
+              br.recognitionType !== "GenerativeAI" &&
+              !isGenAiRow(br),
+          )
+          const turnHasLowRecog = turn.botRows.some(
+            (br) =>
+              br.recognitionQuality > 0 &&
+              br.recognitionQuality <= lowRecogThreshold &&
+              br.recognitionType !== "GenerativeAI" &&
+              !isGenAiRow(br),
+          )
+          const userHighlightClass =
+            zeroRecogActive && turnHasZeroRecog
+              ? " zero-recog-highlight"
+              : lowRecogActive && turnHasLowRecog
+              ? " low-recog-highlight"
+              : ""
+
           if (turn.userRow) {
             html += `<div class="user-group">
               <span class="user-label">User</span>
-              <div class="bubble user">${
-                chatHl(turn.userRow.interactionValue, false).body
-              }</div>
+              <div class="bubble user${userHighlightClass}">${
+              chatHl(turn.userRow.interactionValue, false).body
+            }</div>
               <span class="bubble-ts">${esc(
                 turn.userRow.timestampStart
                   ? turn.userRow.timestampStart.slice(11, 16)
@@ -10116,7 +10333,7 @@
                     .map((c) => {
                       const safeHref = esc(c.href)
                       const safeText = esc(c.text)
-                      return `<button class="cta-btn" onclick="window.electronAPI.openUrl('${safeHref}');return false">&#x2197; ${safeText}</button>`
+                      return `<button class="cta-btn" onclick="previewUrl('${safeHref}');return false">&#x2197; ${safeText}</button>`
                     })
                     .join("")}</div>`
                 : ""
@@ -10141,12 +10358,28 @@
                     .join("")}</div>`
                 : ""
               const q = br.recognitionQuality
-              const isLowRecog = q > 0 && q <= 60
-              const isLowRecogActive = convSessionFilter === "low_recog"
+              const hasRecogType = Boolean(br.recognitionType)
+              const isBrZeroRecog =
+                q === 0 &&
+                hasRecogType &&
+                br.recognitionType !== "GenerativeAI" &&
+                !isGenAiRow(br)
+              const isBrLowRecog =
+                q > 0 &&
+                q <= lowRecogThreshold &&
+                br.recognitionType !== "GenerativeAI" &&
+                !isGenAiRow(br)
               const highlightClass =
-                isLowRecog && isLowRecogActive ? " low-recog-highlight" : ""
+                zeroRecogActive && isBrZeroRecog
+                  ? " zero-recog-highlight"
+                  : lowRecogActive && isBrLowRecog
+                  ? " low-recog-highlight"
+                  : ""
               const detailOpenClass =
-                isLowRecog && isLowRecogActive ? " open" : ""
+                (zeroRecogActive && isBrZeroRecog) ||
+                (lowRecogActive && isBrLowRecog)
+                  ? " open"
+                  : ""
               html += `<div class="bubble ${bubbleClass}${highlightClass}" onclick="toggleBubbleDetail(${br.logId})">
                 ${body}
                 <span class="bubble-expand-hint">▾ details</span>
@@ -10194,6 +10427,20 @@
         }
         html += allTurns.map(renderTurn).join("")
         thread.innerHTML = html
+
+        // Scroll to the first highlighted interaction when a recog filter is active
+        if (
+          convSessionFilter === "zero_recog" ||
+          convSessionFilter === "low_recog"
+        ) {
+          requestAnimationFrame(() => {
+            const first = thread.querySelector(
+              ".zero-recog-highlight, .low-recog-highlight",
+            )
+            if (first)
+              first.scrollIntoView({ behavior: "smooth", block: "center" })
+          })
+        }
       }
 
       // Chat filter pills

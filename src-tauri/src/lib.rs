@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const WATCH_EVENT_NAME: &str = "data-folder-updated";
 
@@ -129,6 +129,7 @@ struct SessionSummary {
     culture: String,
     has_gen_ai: bool,
     has_neg_feedback: bool,
+    has_pos_feedback: bool,
     contexts: String, // JSON from most recent interaction that has context data
 }
 
@@ -623,6 +624,33 @@ fn open_url(app: tauri::AppHandle, url: String) {
 }
 
 #[tauri::command]
+fn open_preview_window(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err("Invalid URL: only http/https allowed".to_string());
+    }
+    let parsed: tauri::Url = url.parse().map_err(|e: <tauri::Url as std::str::FromStr>::Err| e.to_string())?;
+    let label = "url-preview";
+    // If a preview window is already open, close it first so we re-open fresh
+    if let Some(win) = app.get_webview_window(label) {
+        let _ = win.close();
+    }
+    let truncated;
+    let title = if url.len() > 80 {
+        truncated = format!("...{}", &url[url.len() - 80..]);
+        &truncated
+    } else {
+        &url
+    };
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::External(parsed))
+        .title(title)
+        .inner_size(1200.0, 800.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn select_data_folder(app: AppHandle) -> FolderSelectionResult {
     use tauri_plugin_dialog::DialogExt;
     use tokio::sync::oneshot;
@@ -711,16 +739,25 @@ async fn check_for_updates(app: tauri::AppHandle) -> UpdateResult {
         };
     }
 
-    if latest == current {
+    let current_ver = semver::Version::parse(&current).ok();
+    let latest_ver = semver::Version::parse(&latest).ok();
+
+    let is_newer = match (latest_ver, current_ver) {
+        (Some(l), Some(c)) => l > c,
+        // Fall back to string equality if either is unparseable
+        _ => latest != current,
+    };
+
+    if is_newer {
         UpdateResult {
-            status: "up-to-date".into(),
-            version: None,
+            status: "available".into(),
+            version: Some(latest),
             message: None,
         }
     } else {
         UpdateResult {
-            status: "available".into(),
-            version: Some(latest),
+            status: "up-to-date".into(),
+            version: None,
             message: None,
         }
     }
@@ -1354,11 +1391,11 @@ async fn get_sessions(
         );
     } else if filter == "low_recog" {
         conditions.push(
-            format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < {low_recog_threshold})")
+            format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < {low_recog_threshold} AND main_interaction_type != 'GenerativeAI' AND (recognition_type IS NULL OR recognition_type != 'GenerativeAI'))")
         );
     } else if filter == "zero_recog" {
         conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality = 0)".to_string(),
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality = 0 AND recognition_type IS NOT NULL AND recognition_type != '' AND recognition_type != 'GenerativeAI' AND main_interaction_type != 'GenerativeAI')".to_string(),
         );
     }
     if let Some(ref df) = args.date_from {
@@ -1558,6 +1595,8 @@ async fn get_sessions(
              ORDER BY i2.log_id ASC LIMIT 1) as preview,
             MAX(CASE WHEN s.feedback_info LIKE '%"score": -1%'
                       OR s.feedback_info LIKE '%"score":-1%' THEN 1 ELSE 0 END) as has_neg_feedback,
+            MAX(CASE WHEN s.feedback_info LIKE '%"score": 1%'
+                      OR s.feedback_info LIKE '%"score":1%' THEN 1 ELSE 0 END) as has_pos_feedback,
             (SELECT i2.contexts FROM interactions i2
              WHERE i2.session_uuid = s.session_uuid
                AND i2.contexts IS NOT NULL AND i2.contexts != ''
@@ -1582,7 +1621,8 @@ async fn get_sessions(
                 culture: row.get::<_, String>(5).unwrap_or_default(),
                 user_message_preview: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
                 has_neg_feedback: row.get::<_, i64>(7).unwrap_or(0) == 1,
-                contexts: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                has_pos_feedback: row.get::<_, i64>(8).unwrap_or(0) == 1,
+                contexts: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
             })
         })
         .map_err(|e| format!("Query error: {e}"))?
@@ -1720,6 +1760,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_data,
             open_url,
+            open_preview_window,
             select_data_folder,
             check_for_updates,
             get_version,
