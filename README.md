@@ -35,17 +35,17 @@ Built with **Tauri v2** (Rust backend + vanilla JS frontend). Works fully offlin
 
 ## Features
 
-| Area | Highlights |
-|------|-----------|
-| **Content** | Browse and search all Articles, Dialogs, Transactional Dialogs, and Entities from your export files |
-| **Search** | AND / OR / exact phrase syntax; case, word-boundary, and regex modes; responses-only toggle |
-| **Conversations** | Import CSV interaction logs into a local SQLite database; browse and search sessions |
-| **Chat** | Read individual conversation threads with rich bot output rendering (cards, CTAs, dialogs) |
-| **Flow Graph** | Interactive visual map of dialog node connections (powered by vis-network) |
-| **Context Filters** | Filter by contextual answer context variables in both Content and Conversations views |
-| **Export IDs** | Copy article/dialog IDs in Jira-ready rich hyperlink format |
-| **Deep Links** | Open any article, dialog, or dialog node directly in CM.com (when a context URL is configured) |
-| **Auto-updates** | Checks GitHub releases on startup and notifies when a new version is available |
+| Area                | Highlights                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------- |
+| **Content**         | Browse and search all Articles, Dialogs, Transactional Dialogs, and Entities from your export files |
+| **Search**          | AND / OR / exact phrase syntax; case, word-boundary, and regex modes; responses-only toggle         |
+| **Conversations**   | Import CSV interaction logs into a local SQLite database; browse and search sessions                |
+| **Chat**            | Read individual conversation threads with rich bot output rendering (cards, CTAs, dialogs)          |
+| **Flow Graph**      | Interactive visual map of dialog node connections (powered by vis-network)                          |
+| **Context Filters** | Filter by contextual answer context variables in both Content and Conversations views               |
+| **Export IDs**      | Copy article/dialog IDs in Jira-ready rich hyperlink format                                         |
+| **Deep Links**      | Open any article, dialog, or dialog node directly in CM.com (when a context URL is configured)      |
+| **Auto-updates**    | Checks GitHub releases on startup and notifies when a new version is available                      |
 
 ---
 
@@ -53,10 +53,10 @@ Built with **Tauri v2** (Rust backend + vanilla JS frontend). Works fully offlin
 
 Download the latest release for your platform from the [Releases page](https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest).
 
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | `.dmg` |
-| Windows | `.exe` installer (NSIS) |
+| Platform              | File                    |
+| --------------------- | ----------------------- |
+| macOS (Apple Silicon) | `.dmg`                  |
+| Windows               | `.exe` installer (NSIS) |
 
 > **macOS note:** The app is not yet notarised. On first launch, right-click the app → **Open** to bypass the Gatekeeper warning.
 
@@ -69,19 +69,22 @@ Download the latest release for your platform from the [Releases page](https://g
 You need up to three export files. Place them all in the same folder on your machine.
 
 **Articles** (required):
-1. In CM.com → *Articles*
+
+1. In CM.com → _Articles_
 2. Click ⋯ → **Export**
 3. Choose **Export JSON**
 4. Save the file — it will be named something like `*ArticlesExport*.json`
 
 **Dialogs** (required):
-1. In CM.com → *Dialogs*
+
+1. In CM.com → _Dialogs_
 2. Click ⋯ → **Export**
 3. Choose **Export JSON**
 4. Save the file — named `*DialogsExport*.json`
 
 **Entities** (optional, enriches search):
-1. In CM.com → *Entities*
+
+1. In CM.com → _Entities_
 2. Click **Export**
 3. Save the `.csv` file
 
@@ -105,23 +108,23 @@ The global search bar sits below the header and applies to whichever tab is curr
 
 #### Search syntax
 
-| Syntax | Meaning | Example |
-|--------|---------|---------|
-| `word1 word2` | AND — both must appear | `payment error` |
-| `word1 \| word2` | OR — either must appear | `payment \| betaling` |
-| `"exact phrase"` | Phrase — words must appear adjacent | `"opening hours"` |
-| combinations | Compose freely | `"opening hours" ticket \| reserveren` |
+| Syntax           | Meaning                             | Example                                |
+| ---------------- | ----------------------------------- | -------------------------------------- |
+| `word1 word2`    | AND — both must appear              | `payment error`                        |
+| `word1 \| word2` | OR — either must appear             | `payment \| betaling`                  |
+| `"exact phrase"` | Phrase — words must appear adjacent | `"opening hours"`                      |
+| combinations     | Compose freely                      | `"opening hours" ticket \| reserveren` |
 
 > Hover over the search bar to see a quick syntax reminder.
 
 #### Search modifiers (buttons to the right of the input)
 
-| Button | Default | Effect |
-|--------|---------|--------|
-| `Aa` | Off | Case-sensitive matching |
-| `\b` | Off | Whole-word matching only |
-| `.*` | Off | Full regex mode (input border turns red on invalid regex) |
-| `¬T` | **On** | Responses only — ignores IDs, titles, and entity names |
+| Button | Default | Effect                                                    |
+| ------ | ------- | --------------------------------------------------------- |
+| `Aa`   | Off     | Case-sensitive matching                                   |
+| `\b`   | Off     | Whole-word matching only                                  |
+| `.*`   | Off     | Full regex mode (input border turns red on invalid regex) |
+| `¬T`   | **On**  | Responses only — ignores IDs, titles, and entity names    |
 
 > **Entity enrichment:** when your query matches a word inside an entity, articles and dialogs that use that entity also appear in results — even if the query text isn't literally in the response.
 
@@ -133,12 +136,12 @@ The **funnel** button (right of the search options) opens the **Content Context 
 
 ### Tabs & Filters
 
-| Tab | Shows | Filter pills |
-|-----|-------|-------------|
-| **All Results** | Articles + Dialogs + Transactional Dialogs combined | All / Articles / Dialogs / Transactional Dialogs |
-| **Articles** | Articles only | All / Has response / Dialog link |
-| **Dialogs** | Dialogs + Transactional Dialogs | All / Dialogs / Transactional Dialogs / Has responses |
-| **Entities** | Entities only | All / Used in articles / Used in dialogs |
+| Tab             | Shows                                               | Filter pills                                          |
+| --------------- | --------------------------------------------------- | ----------------------------------------------------- |
+| **All Results** | Articles + Dialogs + Transactional Dialogs combined | All / Articles / Dialogs / Transactional Dialogs      |
+| **Articles**    | Articles only                                       | All / Has response / Dialog link                      |
+| **Dialogs**     | Dialogs + Transactional Dialogs                     | All / Dialogs / Transactional Dialogs / Has responses |
+| **Entities**    | Entities only                                       | All / Used in articles / Used in dialogs              |
 
 Each tab shows a result count and sub-stats (e.g. `12 art · 5 dlg · 2 t.dlg`).
 
@@ -162,6 +165,7 @@ Each article card shows:
 - **Contextual Responses** — collapsible section; each contextual variant shows its context-variable conditions as pills and its response text; items matching the active context filter glow green; items with no context conditions are flagged `Unreachable` in red
 
 **Action buttons** (top-right of expanded card):
+
 - **↗** — open in CM.com (requires a context URL in Settings)
 - **💬 Conversations** — switch to Conversations view with this article's ID pre-searched
 
@@ -170,15 +174,18 @@ Each article card shows:
 ### Dialog Cards
 
 **Dialog cards** (purple):
+
 - ID badge + name + `Dialog` badge + `N Recognition` badge + node count
 - Hover to preview the description
 
 **Transactional Dialog cards** (teal):
+
 - ID badge + name + `Transactional Dialog` badge
 
 **Expand a dialog card** to see all nodes with their type (Recognition / Output), response text, entity options and routing.
 
 **Action buttons:**
+
 - **↗** — open in CM.com
 - **▶ Show dialog** (Dialogs only) — opens the visual Flow Graph
 - **💬 Conversations** — pre-search conversations by this dialog's ID
@@ -197,11 +204,11 @@ Orange left border. Shows the entity name, type, word count, and how many articl
 
 Clicking the info button on a card opens a **full-screen detail modal**. All modals support **← Back** navigation and stack:
 
-| Modal | Contents |
-|-------|----------|
-| **Article Info** | All entities, full response, contextual responses |
-| **Dialog Info** | Description, all nodes with outputs, options, and routing; CM.com node deep-links |
-| **Entity Info** | All words, all referencing articles and dialogs |
+| Modal            | Contents                                                                          |
+| ---------------- | --------------------------------------------------------------------------------- |
+| **Article Info** | All entities, full response, contextual responses                                 |
+| **Dialog Info**  | Description, all nodes with outputs, options, and routing; CM.com node deep-links |
+| **Entity Info**  | All words, all referencing articles and dialogs                                   |
 
 > Press **ESC** to close the top-most modal.
 
@@ -275,20 +282,20 @@ The search bar at the top of the sidebar searches across all sessions. Press **E
 
 **Search syntax** — same as content search:
 
-| Syntax | Example |
-|--------|---------|
-| `word1 word2` (AND) | `payment failed` |
+| Syntax                | Example               |
+| --------------------- | --------------------- |
+| `word1 word2` (AND)   | `payment failed`      |
 | `word1 \| word2` (OR) | `payment \| betaling` |
-| `"exact phrase"` | `"where is my order"` |
-| Regex (`.*` toggle) | `\\bpayment\\b` |
+| `"exact phrase"`      | `"where is my order"` |
+| Regex (`.*` toggle)   | `\\bpayment\\b`       |
 
 **Search modifiers:**
 
-| Toggle | Effect |
-|--------|--------|
-| `#ID` | Search by Article or Dialog ID (numeric only); bypasses text search |
-| `.*` | Regex mode |
-| `U` / `B` | Restrict to User messages / Bot messages / both |
+| Toggle    | Effect                                                              |
+| --------- | ------------------------------------------------------------------- |
+| `#ID`     | Search by Article or Dialog ID (numeric only); bypasses text search |
+| `.*`      | Regex mode                                                          |
+| `U` / `B` | Restrict to User messages / Bot messages / both                     |
 
 #### Date range picker
 
@@ -296,16 +303,17 @@ Click the date button to open a calendar. Click once to set the start date, agai
 
 #### Session filter pills
 
-| Pill | Shows |
-|------|-------|
-| `GenAI` | Sessions handled by the GenAI engine |
-| `👎 feedback` | Sessions with negative feedback (double-click → 👍 positive) |
-| `Low %` | Sessions with a low recognition score (below the threshold in Settings) |
-| `Zero %` | Sessions with zero recognition score |
+| Pill          | Shows                                                                   |
+| ------------- | ----------------------------------------------------------------------- |
+| `GenAI`       | Sessions handled by the GenAI engine                                    |
+| `👎 feedback` | Sessions with negative feedback (double-click → 👍 positive)            |
+| `Low %`       | Sessions with a low recognition score (below the threshold in Settings) |
+| `Zero %`      | Sessions with zero recognition score                                    |
 
 #### Session cards
 
 Each card shows:
+
 - Truncated session UUID
 - Badges: `AI` (GenAI), 👎 / 👍 (feedback), culture code
 - First user-message preview (search terms highlighted)
@@ -333,6 +341,7 @@ Interactions are grouped into logical Q&A turns and rendered as a chat timeline:
 - **Dialog-started events**: `↳ Dialog started [name]`
 
 **Turn detail panel** — click any bot message bubble to expand it:
+
 - Referenced **Articles** and **Dialogs** — click to jump to their detail modal
 - **Entity matches** — entity name + matched word chips
 - **Recognition quality** — percentage with a color-coded bar (green / orange / red)
@@ -372,29 +381,29 @@ Open **⚙ Settings** from the header.
 
 ### Content tab
 
-| Setting | Description |
-|---------|-------------|
+| Setting                | Description                                                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **CM.com Context URL** | Base URL for your AI Cloud environment (e.g. `https://www.cm.com/en-gb/app/aicloud/{tenantId}/{projectName}/nl/`). Required to show deep-link buttons. |
-| **Open CM.com links** | Open links in a popup window within the app, or in the default system browser |
-| **Data Folder** | Select or refresh the folder containing your export files |
-| **App Updates** | Manually check for a new GitHub release |
+| **Open CM.com links**  | Open links in a popup window within the app, or in the default system browser                                                                          |
+| **Data Folder**        | Select or refresh the folder containing your export files                                                                                              |
+| **App Updates**        | Manually check for a new GitHub release                                                                                                                |
 
 ### Conversations tab
 
-| Setting | Description |
-|---------|-------------|
-| **Halo Studio URL** | Enables "Open in Halo Studio" buttons on sessions that have GenAI interactions |
-| **Low recognition threshold (%)** | Sessions below this value are flagged as `Low %` (default: 60) |
-| **Conversations Database** | Create a new SQLite database or open an existing one |
+| Setting                           | Description                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| **Halo Studio URL**               | Enables "Open in Halo Studio" buttons on sessions that have GenAI interactions |
+| **Low recognition threshold (%)** | Sessions below this value are flagged as `Low %` (default: 60)                 |
+| **Conversations Database**        | Create a new SQLite database or open an existing one                           |
 
 ---
 
 ## Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `ESC` | Close the top-most open modal, or clear the global search input if no modal is open |
-| `Enter` | Run conversation search (in the session search bar) |
+| Key     | Action                                                                              |
+| ------- | ----------------------------------------------------------------------------------- |
+| `ESC`   | Close the top-most open modal, or clear the global search input if no modal is open |
+| `Enter` | Run conversation search (in the session search bar)                                 |
 
 ---
 
@@ -403,6 +412,7 @@ Open **⚙ Settings** from the header.
 On startup the app silently checks [GitHub releases](https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest) for a newer version.
 
 When an update is available:
+
 - A green banner appears at the top of the window
 - An **Update Available** modal shows the version change
 - Click **↓ Download update** to open the releases page

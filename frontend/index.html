@@ -3687,7 +3687,10 @@
       <!-- GLOBAL SEARCH -->
       <div class="global-search-bar">
         <div class="search-row">
-          <div class="search-wrap-global" data-tooltip="space = AND · | = OR · &quot;...&quot; = exact phrase">
+          <div
+            class="search-wrap-global"
+            data-tooltip='space = AND · | = OR · "..." = exact phrase'
+          >
             <svg
               width="14"
               height="14"
@@ -4091,7 +4094,10 @@
               >
                 #ID
               </button>
-              <div class="conv-search-wrap" data-tooltip="space = AND · | = OR · &quot;...&quot; = exact phrase">
+              <div
+                class="conv-search-wrap"
+                data-tooltip='space = AND · | = OR · "..." = exact phrase'
+              >
                 <div class="conv-search-inner">
                   <input
                     type="text"
@@ -5453,9 +5459,7 @@
         if (!q) return []
         if (searchRegex) return [q]
         return [
-          ...new Set(
-            q.split("|").flatMap((g) => _tokenizeSegment(g.trim())),
-          ),
+          ...new Set(q.split("|").flatMap((g) => _tokenizeSegment(g.trim()))),
         ]
       }
       // Build a global-flag regex for a single escaped term.
@@ -10601,9 +10605,7 @@
         }
         // Parse into OR groups of AND terms; collect all unique terms for highlighting
         const terms = [
-          ...new Set(
-            q.split("|").flatMap((g) => _tokenizeSegment(g.trim())),
-          ),
+          ...new Set(q.split("|").flatMap((g) => _tokenizeSegment(g.trim()))),
         ]
         return terms
           .map((t) => {
