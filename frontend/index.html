@@ -966,6 +966,22 @@
         font-weight: 600;
         color: var(--text);
       }
+      .btn-node-convs {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.82rem;
+        padding: 0 2px;
+        line-height: 1;
+        margin-left: auto;
+        opacity: 0.55;
+        transition: opacity 0.15s;
+        flex-shrink: 0;
+      }
+      .btn-node-convs:hover {
+        opacity: 1;
+      }
       .node-answer {
         font-size: 0.74rem;
         color: #9aafcc;
@@ -2218,6 +2234,43 @@
       .conv-id-warning.visible {
         display: block;
       }
+      .conv-id-type-row {
+        display: none;
+        gap: 4px;
+        padding: 4px 10px 0;
+        align-items: center;
+      }
+      .conv-id-type-row.visible {
+        display: flex;
+      }
+      .conv-id-type-label {
+        font-size: 0.68rem;
+        color: var(--muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .conv-id-type-pill {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.68rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        line-height: 1.4;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .conv-id-type-pill:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .conv-id-type-pill.on {
+        background: rgba(124, 106, 247, 0.18);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
       .conv-search-wrap {
         display: flex;
         align-items: stretch;
@@ -2471,6 +2524,7 @@
         padding-bottom: 6px;
         border-bottom: 1px solid var(--border);
         flex-wrap: wrap;
+        align-items: center;
       }
       .conv-pill {
         background: none;
@@ -2579,6 +2633,13 @@
         gap: 4px;
         flex-wrap: wrap;
         border-top: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .conv-result-count {
+        font-size: 0.71rem;
+        color: var(--muted);
+        margin-left: auto;
+        white-space: nowrap;
         flex-shrink: 0;
       }
       .sessions-empty {
@@ -4089,8 +4150,8 @@
               <button
                 class="sopt"
                 id="convOptIds"
-                title="Search IDs only"
-                data-tooltip="Search Article &amp; Dialog IDs exclusively"
+                title="Search by ID"
+                data-tooltip="Search by Article ID, Dialog ID or Node ID"
               >
                 #ID
               </button>
@@ -4141,7 +4202,7 @@
               </button>
               <div class="conv-scope-toggle">
                 <button
-                  class="conv-scope-btn"
+                  class="conv-scope-btn active"
                   data-conv-scope="user"
                   title="Search user messages"
                 >
@@ -4158,6 +4219,30 @@
             </div>
             <div class="conv-id-warning" id="convIdWarning">
               &#x26A0; ID search expects a numeric value.
+            </div>
+            <div class="conv-id-type-row" id="convIdTypeRow">
+              <span class="conv-id-type-label">Search by:</span>
+              <button
+                class="conv-id-type-pill on"
+                data-id-type="article"
+                onclick="setConvIdType('article')"
+              >
+                Article ID
+              </button>
+              <button
+                class="conv-id-type-pill"
+                data-id-type="dialog"
+                onclick="setConvIdType('dialog')"
+              >
+                Dialog ID
+              </button>
+              <button
+                class="conv-id-type-pill"
+                data-id-type="node"
+                onclick="setConvIdType('node')"
+              >
+                Node ID
+              </button>
             </div>
             <div
               style="
@@ -4232,6 +4317,7 @@
               <button class="conv-pill" data-conv-filter="zero_recog">
                 Zero %
               </button>
+              <span class="conv-result-count" id="convResultCount"></span>
             </div>
           </div>
           <div class="sessions-list" id="sessionsList"></div>
@@ -5394,7 +5480,7 @@
       let convSessionFilter = "all"
       let convQuery = ""
       let convSearchRegex = false
-      let convSearchScope = "both" // "both" | "user" | "bot"
+      let convSearchScope = "user" // "both" | "user" | "bot"
       let convDateFrom = ""
       let convDateTo = ""
       let convDateMin = "" // YYYY-MM-DD — earliest date in DB
@@ -5404,6 +5490,7 @@
       let convPickHover = "" // YYYY-MM-DD — hover preview day
       let convPickMonth = null // Date() of first day of displayed month
       let convPickPhase = 0 // 0 = idle/complete, 1 = awaiting end click
+      let convDatePickerInited = false // true once defaults have been applied for the current DB
       let convPage = 1
       let convTotalSessions = 0
       let convHasSearched = false // true once the user has explicitly triggered a search
@@ -5413,6 +5500,7 @@
       let chatQuery = ""
       let chatShowAll = false // when true, show full conversation even while searching
       let convSearchIds = false // when true, also search article/dialog IDs
+      let convIdType = "article" // "article" | "dialog" | "node" — active ID search type
       let chatSearchRegex = false // when true, treat chatQuery as a regex
       let convImporting = false
       let convContextFilters = [] // [{name, value}] — active context filters
@@ -6176,7 +6264,7 @@
           cmLink("article", art.Id) +
           '<button class="btn-show-dialog" onclick="searchConvsForId(' +
           art.Id +
-          ');event.stopPropagation()" title="Search article ID ' +
+          ",'article');event.stopPropagation()\" title=\"Search Article ID " +
           art.Id +
           ' in conversations">&#128172; Conversations</button>' +
           "</div>" +
@@ -6910,6 +6998,15 @@
           hl(node.name, q) +
           "</span>" +
           cmNodeLink(dialog.id, node.id) +
+          '<button class="btn-node-convs" onclick="closeDialogInfoModal();_navClear();searchConvsForId(\'' +
+          dialog.id +
+          "-" +
+          node.id +
+          "','node')\" title=\"Search Node " +
+          dialog.id +
+          "-" +
+          node.id +
+          ' in conversations">&#128172;</button>' +
           "</div>" +
           (ansRaw
             ? '<div class="node-answer">' +
@@ -6949,7 +7046,7 @@
             cmLink("dialog", item.id) +
             '<button class="btn-show-dialog" onclick="searchConvsForId(' +
             item.id +
-            ');event.stopPropagation()" title="Search Transactional Dialog ID ' +
+            ",'dialog');event.stopPropagation()\" title=\"Search Transactional Dialog ID " +
             item.id +
             ' in conversations">&#128172; Conversations</button>' +
             "</div>" +
@@ -7001,7 +7098,7 @@
           ');event.stopPropagation()">&#9654; Show dialog</button>' +
           '<button class="btn-show-dialog" onclick="searchConvsForId(' +
           item.id +
-          ');event.stopPropagation()" title="Search Dialog ID ' +
+          ",'dialog');event.stopPropagation()\" title=\"Search Dialog ID " +
           item.id +
           ' in conversations">&#128172; Conversations</button>' +
           "</div>" +
@@ -7515,17 +7612,18 @@
         openArticleInfoModal(id)
       }
 
-      function searchConvsForId(id) {
+      function searchConvsForId(id, idType) {
         switchView("conversations")
         convQuery = String(id)
         const input = document.getElementById("convSearch")
         if (input) input.value = convQuery
         const clearBtn = document.getElementById("convClearSearch")
         if (clearBtn) clearBtn.classList.add("visible")
-        if (!convSearchIds) {
+        if (!convSearchIds || (idType && idType !== convIdType)) {
           convSearchIds = true
           convSearchRegex = false
           document.getElementById("convOptRegex").classList.remove("on")
+          if (idType) setConvIdType(idType)
           syncIdMode()
         }
         convPage = 1
@@ -7602,7 +7700,7 @@
           cmOpenButton("article", id) +
           '<button class="btn-show-dialog" onclick="closeArticleInfoModal();_navClear();searchConvsForId(' +
           id +
-          ')" title="Search article ID ' +
+          ",'article')\" title=\"Search Article ID " +
           id +
           ' in conversations">&#128172; Conversations</button>'
 
@@ -7819,7 +7917,7 @@
             cmOpenButton("dialog", id) +
             '<button class="btn-show-dialog" onclick="closeDialogInfoModal();_navClear();searchConvsForId(' +
             id +
-            ')" title="Search Transactional Dialog ID ' +
+            ",'dialog')\" title=\"Search Transactional Dialog ID " +
             id +
             ' in conversations">&#128172; Conversations</button>'
           bodyEl.innerHTML =
@@ -7847,7 +7945,7 @@
             ')">&#9654; Show dialog</button>' +
             '<button class="btn-show-dialog" onclick="closeDialogInfoModal();_navClear();searchConvsForId(' +
             id +
-            ')" title="Search Dialog ID ' +
+            ",'dialog')\" title=\"Search Dialog ID " +
             id +
             ' in conversations">&#128172; Conversations</button>'
 
@@ -8963,6 +9061,7 @@
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
           updateConvDbStatus()
           contextOptionsLoaded = false // reset when DB changes
+          convDatePickerInited = false // re-initialise picker defaults for new DB
           // Fetch available date range to constrain the calendar picker
           window.electronAPI
             .getDateRange()
@@ -8982,6 +9081,8 @@
           list.innerHTML = `<div class="sessions-empty">Enter a search term or press Search to load conversations.</div>`
         const pag = document.getElementById("sessionsPagination")
         if (pag) pag.innerHTML = ""
+        const countEl = document.getElementById("convResultCount")
+        if (countEl) countEl.textContent = ""
       }
 
       async function onEnterConversationsView() {
@@ -9355,12 +9456,22 @@
         const convSearchEl = document.getElementById("convSearch")
         const idWarning = document.getElementById("convIdWarning")
 
-        // In #ID mode: validate that the query is numeric; warn and abort if not
+        // In #ID mode: validate format based on the active id type
         if (convSearchIds && convQuery) {
-          if (/^\d+$/.test(convQuery)) {
+          const nodePattern = /^\d+-\d+$/
+          const numericPattern = /^\d+$/
+          const valid =
+            convIdType === "node"
+              ? nodePattern.test(convQuery)
+              : numericPattern.test(convQuery)
+          if (valid) {
             idWarning.classList.remove("visible")
             convSearchEl.classList.remove("regex-error")
           } else {
+            idWarning.textContent =
+              convIdType === "node"
+                ? "\u26A0 Node search expects DialogID-NodeID format (e.g. 6391-6)."
+                : "\u26A0 ID search expects a numeric value."
             idWarning.classList.add("visible")
             convSearchEl.classList.add("regex-error")
             return
@@ -9389,6 +9500,7 @@
           queryScope: convSearchIds ? "both" : convSearchScope,
           queryIds: convSearchIds,
           queryIdsOnly: convSearchIds,
+          queryIdType: convIdType,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
           contextFilters:
@@ -9422,6 +9534,8 @@
           document
             .getElementById("convSearchLoadingOverlay")
             .classList.remove("visible")
+          const _countEl = document.getElementById("convResultCount")
+          if (_countEl) _countEl.textContent = ""
           document.getElementById(
             "sessionsList",
           ).innerHTML = `<div class="sessions-empty">Error loading sessions:<br>${esc(
@@ -9446,6 +9560,7 @@
 
       function renderSessionList() {
         const list = document.getElementById("sessionsList")
+        const countEl = document.getElementById("convResultCount")
         if (!convSessions.length) {
           list.innerHTML = `<div class="sessions-empty">No conversations found.<br>${
             convDbPath
@@ -9453,6 +9568,7 @@
               : "Configure a database first."
           }</div>`
           document.getElementById("sessionsPagination").innerHTML = ""
+          if (countEl) countEl.textContent = ""
           return
         }
         const q = convQuery
@@ -9487,13 +9603,22 @@
                     ? '<span class="session-badge genai">AI</span>'
                     : ""
                 }
-                ${
-                  s.culture
-                    ? `<span class="session-badge lang">${esc(
-                        s.culture,
-                      )}</span>`
+                ${(() => {
+                  // Prefer translation_language context over culture when present
+                  let langCtxs = []
+                  try {
+                    langCtxs = s.contexts ? JSON.parse(s.contexts) : []
+                  } catch (_) {}
+                  const tlCtx = langCtxs.find(
+                    (c) => c.name === "translation_language",
+                  )
+                  const label = tlCtx ? tlCtx.value : s.culture
+                  return label
+                    ? `<span class="session-badge lang" title="${
+                        tlCtx ? "Translation: " + esc(label) : esc(label)
+                      }">${esc(label)}</span>`
                     : ""
-                }
+                })()}
                 ${
                   s.contexts
                     ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(
@@ -9511,6 +9636,13 @@
           </div>`
           })
           .join("")
+
+        // Result count
+        if (countEl) {
+          const n = convTotalSessions
+          countEl.textContent =
+            n.toLocaleString() + " result" + (n !== 1 ? "s" : "")
+        }
 
         // Pagination
         const totalPages = Math.ceil(convTotalSessions / 50)
@@ -9991,10 +10123,20 @@
 
       // Conv search
       document.getElementById("convSearch").addEventListener("input", (e) => {
+        const val = e.target.value
         // Show/hide the clear button immediately; search fires on Enter or icon click
         document
           .getElementById("convClearSearch")
-          .classList.toggle("visible", e.target.value.length > 0)
+          .classList.toggle("visible", val.length > 0)
+        // Auto-exit #ID mode when the user types something that can't be a valid ID
+        // (IDs are numeric; node IDs are digits-digits)
+        if (convSearchIds && val.length > 0) {
+          const looksLikeId = /^[\d-]*$/.test(val)
+          if (!looksLikeId) {
+            convSearchIds = false
+            syncIdMode()
+          }
+        }
       })
 
       document.getElementById("convSearch").addEventListener("keydown", (e) => {
@@ -10024,18 +10166,49 @@
           convPage = 1
         })
 
+      function setConvIdType(type) {
+        convIdType = type
+        document.querySelectorAll(".conv-id-type-pill").forEach((p) => {
+          p.classList.toggle("on", p.dataset.idType === type)
+        })
+        const placeholders = {
+          article: "Article ID…",
+          dialog: "Dialog ID…",
+          node: "DialogID-NodeID…",
+        }
+        const inp = document.getElementById("convSearch")
+        if (inp)
+          inp.placeholder = convSearchIds
+            ? placeholders[type] || "ID…"
+            : "Search…"
+        // Hide warning when switching type
+        document.getElementById("convIdWarning").classList.remove("visible")
+        document.getElementById("convSearch").classList.remove("regex-error")
+      }
+
       // Helper: apply disabled state to regex/scope buttons when #ID mode is active
       function syncIdMode() {
         const idBtn = document.getElementById("convOptIds")
         const regexBtn = document.getElementById("convOptRegex")
         const scopeBtns = document.querySelectorAll("[data-conv-scope]")
+        const typeRow = document.getElementById("convIdTypeRow")
+        const searchEl = document.getElementById("convSearch")
         idBtn.classList.toggle("on", convSearchIds)
         if (convSearchIds) {
           regexBtn.classList.add("conv-opt-disabled")
           scopeBtns.forEach((b) => b.classList.add("conv-opt-disabled"))
+          if (typeRow) typeRow.classList.add("visible")
+          const placeholders = {
+            article: "Article ID…",
+            dialog: "Dialog ID…",
+            node: "DialogID-NodeID…",
+          }
+          if (searchEl) searchEl.placeholder = placeholders[convIdType] || "ID…"
         } else {
           regexBtn.classList.remove("conv-opt-disabled")
           scopeBtns.forEach((b) => b.classList.remove("conv-opt-disabled"))
+          if (typeRow) typeRow.classList.remove("visible")
+          if (searchEl) searchEl.placeholder = "Search…"
           // Hide warning when leaving ID mode
           document.getElementById("convIdWarning").classList.remove("visible")
         }
@@ -10079,7 +10252,6 @@
           else if (bActive && !uActive) convSearchScope = "bot"
           else convSearchScope = "both"
           convPage = 1
-          loadSessions()
         })
       })
 
@@ -10089,21 +10261,23 @@
       function initDatePicker(min, max) {
         convDateMin = min || ""
         convDateMax = max || ""
-        // Start calendar view at the most recent available month
-        if (convDateMax) {
-          const d = new Date(convDateMax + "T00:00:00")
-          convPickMonth = new Date(d.getFullYear(), d.getMonth(), 1)
-          // Default selection: only the last available day
-          if (!convPickStart) {
+        // Only apply defaults once per DB connection — subsequent calls (e.g. on
+        // view switch) should refresh the available bounds without touching the
+        // user's current selection or calendar month position.
+        if (!convDatePickerInited) {
+          if (convDateMax) {
+            const d = new Date(convDateMax + "T00:00:00")
+            convPickMonth = new Date(d.getFullYear(), d.getMonth(), 1)
             convPickStart = convDateMax
             convPickEnd = convDateMax
             convPickPhase = 0
             convDateFrom = convDateMax + "T00:00:00"
             convDateTo = convDateMax + "T23:59:59"
+          } else {
+            const now = new Date()
+            convPickMonth = new Date(now.getFullYear(), now.getMonth(), 1)
           }
-        } else {
-          const now = new Date()
-          convPickMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+          convDatePickerInited = true
         }
         renderDateRangeBtn()
         // Wire up hover delegation once (stable popup element, innerHTML is replaced)

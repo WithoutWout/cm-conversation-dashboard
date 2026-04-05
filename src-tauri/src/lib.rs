@@ -1318,6 +1318,7 @@ struct GetSessionsArgs {
     query_scope: Option<String>, // "both" | "user" | "bot"
     query_ids: Option<bool>,     // also search article_ids and dialog_paths columns
     query_ids_only: Option<bool>, // search ONLY article_ids and dialog_paths, not message text
+    query_id_type: Option<String>, // "article" | "dialog" | "node" — which ID column/pattern to use
     low_recog_threshold: Option<i64>, // threshold for "low recognition" filter (default 60, range 1–99)
     context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
 }
@@ -1342,6 +1343,7 @@ async fn get_sessions(
     let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
     let query_ids = args.query_ids.unwrap_or(false);
     let query_ids_only = args.query_ids_only.unwrap_or(false);
+    let query_id_type = args.query_id_type.as_deref().unwrap_or("article").to_string();
     let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
 
     // Register a custom REGEXP function for this connection when regex mode is on
@@ -1418,16 +1420,46 @@ async fn get_sessions(
     }
     if !query.is_empty() {
         if query_ids_only {
-            // IDs-only mode: search article_ids and dialog_paths exclusively
-            let like_val = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-            let pi1 = next_param(&mut param_idx);
-            param_values.push(Box::new(like_val.clone()));
-            let pi2 = next_param(&mut param_idx);
-            param_values.push(Box::new(like_val.clone()));
-            conditions.push(format!(
-                "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
-                 WHERE article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')"
-            ));
+            // ID-type mode: search using the type-specific pattern
+            let cond = match query_id_type.as_str() {
+                "dialog" => {
+                    // Dialog ID appears as `"<id>:` in the dialog_paths JSON value.
+                    // Pattern: dialog_paths LIKE '%"<id>:%'
+                    let like_val = format!("%\"{}:%", query.replace('%', "\\%").replace('_', "\\_"));
+                    let p = next_param(&mut param_idx);
+                    param_values.push(Box::new(like_val));
+                    format!(
+                        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
+                         WHERE dialog_paths LIKE {p} ESCAPE '\\')"
+                    )
+                }
+                "node" => {
+                    // Node IDs are NOT globally unique — the same node.id can appear in
+                    // multiple dialogs. The interaction log uses the composite format
+                    // `dn-{dialogId}-{nodeId}` in article_ids (e.g. `dn-6391-6`).
+                    // The query is expected to be the composite "{dialogId}-{nodeId}" string
+                    // so we can search for the exact dn-{dialogId}-{nodeId} token.
+                    let escaped = query.replace('%', "\\%").replace('_', "\\_");
+                    let like_val = format!("%dn-{}%", escaped);
+                    let p = next_param(&mut param_idx);
+                    param_values.push(Box::new(like_val));
+                    format!(
+                        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
+                         WHERE article_ids LIKE {p} ESCAPE '\\')"
+                    )
+                }
+                _ => {
+                    // "article" (default): article ID stored as `qa-<id>` in article_ids.
+                    let like_val = format!("%qa-{}%", query.replace('%', "\\%").replace('_', "\\_"));
+                    let p = next_param(&mut param_idx);
+                    param_values.push(Box::new(like_val));
+                    format!(
+                        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
+                         WHERE article_ids LIKE {p} ESCAPE '\\')"
+                    )
+                }
+            };
+            conditions.push(cond);
         } else if query_regex {
             // Regex mode: use the registered REGEXP function
             let p = next_param(&mut param_idx);
