@@ -3091,6 +3091,94 @@
         flex-direction: column;
         gap: 4px;
       }
+      .chat-turn {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border-radius: 8px;
+        transition: background 0.1s;
+      }
+      /* Select mode: turns are clickable */
+      .chat-selecting .chat-turn {
+        cursor: pointer;
+        padding: 4px 6px;
+        margin: -4px -6px;
+      }
+      .chat-selecting .chat-turn:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .chat-turn.selected {
+        background: rgba(124, 106, 247, 0.1) !important;
+        outline: 1.5px solid rgba(124, 106, 247, 0.35);
+      }
+      /* Select mode indicator dot on selected turns */
+      .chat-turn.selected::before {
+        content: "";
+        position: absolute;
+        left: -14px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent);
+        flex-shrink: 0;
+      }
+      .chat-selecting .chat-thread {
+        padding-left: 28px;
+      }
+      /* Select button in chat header */
+      .btn-chat-select {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 3px 10px;
+        font-size: 0.72rem;
+        color: var(--muted);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+      }
+      .btn-chat-select:hover {
+        color: var(--text);
+        border-color: var(--text);
+      }
+      .btn-chat-select.active {
+        background: rgba(124, 106, 247, 0.15);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .btn-chat-copy-sel {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 4px 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-chat-copy-sel:hover {
+        opacity: 0.85;
+      }
+      .btn-chat-copy-sel.copied {
+        background: var(--green);
+      }
+      .btn-chat-sel-action {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.72rem;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .btn-chat-sel-action:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+      }
       .chat-empty {
         flex: 1;
         display: flex;
@@ -4650,6 +4738,29 @@
                 id="settingsDbPath"
                 style="min-height: 1.2em; word-break: break-all"
               ></p>
+            </div>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label>Chat Copy Format</label>
+              <p class="hint" style="margin-bottom: 6px">
+                How selected interactions are copied to the clipboard.
+              </p>
+              <div class="radio-group">
+                <label class="radio-option"
+                  ><input type="radio" name="chat-copy-format" value="table" />
+                  Table &mdash; two-column (user &nbsp;|&nbsp; bot), pasteable
+                  as a table in Teams</label
+                >
+                <label class="radio-option"
+                  ><input type="radio" name="chat-copy-format" value="prose" />
+                  Prose &mdash; bold user message, italic bot response</label
+                >
+              </div>
             </div>
             <div
               style="
@@ -8540,6 +8651,10 @@
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
+        const _cfRadio = document.querySelector(
+          `input[name="chat-copy-format"][value="${chatCopyFormat}"]`,
+        )
+        if (_cfRadio) _cfRadio.checked = true
         renderDataFolderState()
         setDataFolderFeedback(dataFolderFeedback.text, dataFolderFeedback.color)
         document.getElementById("settingsModal").classList.add("open")
@@ -8605,6 +8720,13 @@
           'input[name="open-mode"]:checked',
         ).value
         localStorage.setItem("cm-open-mode", openMode)
+        const _cfChecked = document.querySelector(
+          'input[name="chat-copy-format"]:checked',
+        )
+        if (_cfChecked) {
+          chatCopyFormat = _cfChecked.value
+          localStorage.setItem("chat-copy-format", chatCopyFormat)
+        }
         closeSettings()
         renderAllList()
         renderArticleList()
@@ -10072,6 +10194,245 @@
         document.getElementById("sessionContextModal").classList.remove("open")
       }
 
+      let chatSelectMode = false
+      const selectedTurnIds = new Set()
+      let chatCopyFormat = localStorage.getItem("chat-copy-format") || "table"
+
+      function onTurnClick(turnEl) {
+        if (!chatSelectMode) return
+        const id = turnEl.dataset.turnId
+        if (selectedTurnIds.has(id)) {
+          selectedTurnIds.delete(id)
+          turnEl.classList.remove("selected")
+        } else {
+          selectedTurnIds.add(id)
+          turnEl.classList.add("selected")
+        }
+        _updateChatSelectHeader()
+      }
+
+      function _updateChatSelectHeader() {
+        const count = selectedTurnIds.size
+        const copyBtn = document.getElementById("chatCopySelBtn")
+        const countEl = document.getElementById("chatSelCount")
+        if (copyBtn) {
+          copyBtn.style.display = count > 0 ? "" : "none"
+          copyBtn.innerHTML = `&#x2398; Copy ${count}`
+        }
+        if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
+      }
+
+      function enterChatSelectMode() {
+        chatSelectMode = true
+        document
+          .getElementById("chatThread")
+          .closest(".conv-main")
+          .classList.add("chat-selecting")
+        // Update header buttons
+        const selBtn = document.getElementById("chatSelectModeBtn")
+        if (selBtn) {
+          selBtn.textContent = "Cancel"
+          selBtn.classList.add("active")
+        }
+        const copyBtn = document.getElementById("chatCopySelBtn")
+        if (copyBtn) copyBtn.style.display = "none"
+        const selAllBtn = document.getElementById("chatSelAllBtn")
+        if (selAllBtn) selAllBtn.style.display = ""
+      }
+
+      function exitChatSelectMode() {
+        chatSelectMode = false
+        const convMain = document
+          .getElementById("chatThread")
+          .closest(".conv-main")
+        convMain.classList.remove("chat-selecting")
+        selectedTurnIds.clear()
+        document
+          .querySelectorAll(".chat-turn.selected")
+          .forEach((t) => t.classList.remove("selected"))
+        const selBtn = document.getElementById("chatSelectModeBtn")
+        if (selBtn) {
+          selBtn.textContent = "Select"
+          selBtn.classList.remove("active")
+        }
+        const copyBtn = document.getElementById("chatCopySelBtn")
+        if (copyBtn) copyBtn.style.display = "none"
+        const countEl = document.getElementById("chatSelCount")
+        if (countEl) countEl.textContent = ""
+        const selAllBtn = document.getElementById("chatSelAllBtn")
+        if (selAllBtn) selAllBtn.style.display = "none"
+      }
+
+      function toggleChatSelectMode() {
+        if (chatSelectMode) exitChatSelectMode()
+        else enterChatSelectMode()
+      }
+
+      function selectAllTurns() {
+        const thread = document.getElementById("chatThread")
+        thread.querySelectorAll(".chat-turn").forEach((el) => {
+          const id = el.dataset.turnId
+          selectedTurnIds.add(id)
+          el.classList.add("selected")
+        })
+        _updateChatSelectHeader()
+      }
+
+      function deselectAllTurns() {
+        const thread = document.getElementById("chatThread")
+        thread.querySelectorAll(".chat-turn").forEach((el) => {
+          el.classList.remove("selected")
+        })
+        selectedTurnIds.clear()
+        _updateChatSelectHeader()
+      }
+
+      function clearChatSelection() {
+        exitChatSelectMode()
+      }
+
+      function onTurnCheckboxChange() {} // noop, kept for safety
+
+      function copySelectedTurns(btn) {
+        const thread = document.getElementById("chatThread")
+        const selected = [...thread.querySelectorAll(".chat-turn.selected")]
+        if (!selected.length) return
+        // Re-query by stored IDs to ensure we copy even if DOM was rebuilt
+        const byId = selectedTurnIds.size
+          ? [...thread.querySelectorAll(".chat-turn")].filter((el) =>
+              selectedTurnIds.has(el.dataset.turnId),
+            )
+          : selected
+        _doCopyTurns(byId.length ? byId : selected, btn)
+      }
+
+      function _extractTurnContent(turn) {
+        const escHtml = (s) =>
+          s
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\n/g, "<br>")
+        let userText = ""
+        const botTexts = []
+        const userBubble = turn.querySelector(".user-group .bubble")
+        if (userBubble) {
+          const clone = userBubble.cloneNode(true)
+          clone.querySelector(".bubble-expand-hint")?.remove()
+          clone.querySelector(".bubble-detail")?.remove()
+          userText = (clone.innerText || clone.textContent || "").trim()
+        }
+        turn.querySelectorAll(".bot-group .bubble").forEach((b) => {
+          const clone = b.cloneNode(true)
+          clone.querySelector(".bubble-expand-hint")?.remove()
+          clone.querySelector(".bubble-detail")?.remove()
+          const txt = (clone.innerText || clone.textContent || "").trim()
+          if (txt) botTexts.push(txt)
+        })
+        const botText = botTexts.join("\n")
+        const plainParts = []
+        const htmlParts = []
+        if (userText) {
+          plainParts.push(userText)
+          htmlParts.push(`<p><strong>${escHtml(userText)}</strong></p>`)
+        }
+        if (botText) {
+          plainParts.push(botText)
+          htmlParts.push(`<p><em>${escHtml(botText)}</em></p>`)
+        }
+        return {
+          userText,
+          botText,
+          escHtml,
+          plain: plainParts.join("\n"),
+          html: htmlParts.join(""),
+        }
+      }
+
+      function _doCopyTurns(turns, btn) {
+        const contents = turns
+          .map((t) => _extractTurnContent(t))
+          .filter((c) => c.plain)
+        if (!contents.length) return
+        let plainText, htmlText
+        if (chatCopyFormat === "table") {
+          // TSV: quote cells that contain tabs, newlines, or double-quotes
+          const tsvCell = (s) =>
+            /[\t\n"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+          const escH = contents[0].escHtml
+          const tsvRows = []
+          const htmlRows = []
+          for (const c of contents) {
+            tsvRows.push(`${tsvCell(c.userText)}\t${tsvCell(c.botText)}`)
+            htmlRows.push(
+              `<tr><td style="padding:4px 8px;vertical-align:top">${escH(
+                c.userText,
+              )}</td><td style="padding:4px 8px;vertical-align:top">${escH(
+                c.botText,
+              )}</td></tr>`,
+            )
+          }
+          plainText = tsvRows.join("\n")
+          htmlText = `<html><body><table border="1" cellspacing="0" style="border-collapse:collapse">${htmlRows.join(
+            "",
+          )}</table></body></html>`
+        } else {
+          plainText = contents.map((c) => c.plain).join("\n\n")
+          htmlText = `<html><body>${contents
+            .map((c) => c.html)
+            .join("<br>")}</body></html>`
+        }
+        const origHtml = btn.innerHTML
+        const flash = () => {
+          btn.textContent = "✓ Copied!"
+          btn.classList.add("copied")
+          setTimeout(() => {
+            btn.innerHTML = origHtml
+            btn.classList.remove("copied")
+          }, 1600)
+        }
+        if (navigator.clipboard && typeof ClipboardItem !== "undefined") {
+          navigator.clipboard
+            .write([
+              new ClipboardItem({
+                "text/plain": new Blob([plainText], { type: "text/plain" }),
+                "text/html": new Blob([htmlText], { type: "text/html" }),
+              }),
+            ])
+            .then(flash)
+            .catch(() => {
+              navigator.clipboard
+                .writeText(plainText)
+                .then(flash)
+                .catch(() => {
+                  fallbackCopy(plainText)
+                  flash()
+                })
+            })
+        } else if (navigator.clipboard) {
+          navigator.clipboard
+            .writeText(plainText)
+            .then(flash)
+            .catch(() => {
+              fallbackCopy(plainText)
+              flash()
+            })
+        } else {
+          fallbackCopy(plainText)
+          flash()
+        }
+      }
+
+      function fallbackCopy(text) {
+        const ta = document.createElement("textarea")
+        ta.value = text
+        ta.style.cssText = "position:fixed;top:-9999px;left:-9999px"
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand("copy")
+        document.body.removeChild(ta)
+      }
+
       // ── URL Preview Modal ────────────────────────────────────────────
       function previewUrl(url) {
         if (!/^https?:\/\//i.test(url)) return
@@ -10561,6 +10922,7 @@
         activeSessionUuid = uuid
         chatFilter = "all"
         chatShowAll = false
+        clearChatSelection()
         // Reset chat filter pills
         document.querySelectorAll("[data-chat-filter]").forEach((b) => {
           b.classList.toggle("active", b.dataset.chatFilter === "all")
@@ -10614,6 +10976,14 @@
               <span class="chat-meta">${
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
+              <button class="btn-chat-copy-sel" id="chatCopySelBtn" style="display:none" onclick="copySelectedTurns(this)">&#x2398; Copy 0</button>
+              <span class="chat-meta" id="chatSelCount" style="min-width:6ch;text-align:right"></span>
+              <span class="btn-chat-sel-actions" id="chatSelAllBtn" style="display:none;font-size:0.72rem;color:var(--muted);display:none">
+                <button class="btn-chat-sel-action" onclick="selectAllTurns()">All</button>
+                <span style="opacity:0.4">/</span>
+                <button class="btn-chat-sel-action" onclick="deselectAllTurns()">None</button>
+              </span>
+              <button class="btn-chat-select" id="chatSelectModeBtn" onclick="toggleChatSelectMode()">Select</button>
             `
           }
         } catch (e) {
@@ -11102,8 +11472,18 @@
                 : "Link clicked"
             return `<div class="system-pill">${label}</div>`
           }
+          // Non-system turns are wrapped in .chat-turn; each gets a stable id for selection persistence
+          const turnId = String(
+            (turn.userRow || turn.botRows[0])?.logId ?? Math.random(),
+          )
+          const selectedCls = selectedTurnIds.has(turnId) ? " selected" : ""
+          const turnInner = renderTurnInner(turn)
+          return `<div class="chat-turn${selectedCls}" data-turn-id="${turnId}" onclick="onTurnClick(this)">${turnInner}</div>`
+        }
 
+        function renderTurnInner(turn) {
           let html = ""
+          // (closing brace for renderTurnInner is at end of turn content block)
           if (turn.linkClicked) {
             html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
               turn.linkClicked,
@@ -11243,7 +11623,7 @@
             )}</span></div>`
           }
           return html
-        }
+        } // end renderTurnInner
 
         const allTurns = buildChatTurns(interactions)
 
