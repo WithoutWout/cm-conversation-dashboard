@@ -1389,6 +1389,10 @@ async fn get_sessions(
         conditions.push(
             "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE feedback_info LIKE '%\"score\": -1%' OR feedback_info LIKE '%\"score\":-1%')".to_string(),
         );
+    } else if filter == "pos_feedback" {
+        conditions.push(
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE (feedback_info LIKE '%\"score\": 1%' OR feedback_info LIKE '%\"score\":1%') AND feedback_info NOT LIKE '%\"score\": -1%' AND feedback_info NOT LIKE '%\"score\":-1%')".to_string(),
+        );
     } else if filter == "low_recog" {
         conditions.push(
             format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < {low_recog_threshold} AND main_interaction_type != 'GenerativeAI' AND (recognition_type IS NULL OR recognition_type != 'GenerativeAI'))")
@@ -1738,6 +1742,155 @@ async fn get_session_interactions(
     .map_err(|e| e.to_string())?
 }
 
+// ── Database management commands ─────────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DayStats {
+    date: String,
+    count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DbDailyStats {
+    total: i64,
+    days: Vec<DayStats>,
+}
+
+#[tauri::command]
+async fn get_db_daily_stats(db_state: State<'_, SharedDbState>) -> Result<DbDailyStats, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
+            .unwrap_or(0);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT DATE(timestamp_start) AS day, COUNT(*) AS cnt \
+                 FROM interactions \
+                 GROUP BY day \
+                 ORDER BY day DESC",
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+
+        let days = stmt
+            .query_map([], |row| {
+                Ok(DayStats {
+                    date: row.get::<_, String>(0).unwrap_or_default(),
+                    count: row.get::<_, i64>(1).unwrap_or(0),
+                })
+            })
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .filter(|d| !d.date.is_empty())
+            .collect();
+
+        Ok(DbDailyStats { total, days })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteByDatesArgs {
+    dates: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteResult {
+    deleted: i64,
+}
+
+#[tauri::command]
+async fn delete_interactions_by_dates(
+    db_state: State<'_, SharedDbState>,
+    args: DeleteByDatesArgs,
+) -> Result<DeleteResult, String> {
+    if args.dates.is_empty() {
+        return Ok(DeleteResult { deleted: 0 });
+    }
+    // Validate each date looks like YYYY-MM-DD to prevent injection
+    for d in &args.dates {
+        if d.len() != 10 || !d.chars().all(|c| c.is_ascii_digit() || c == '-') {
+            return Err(format!("Invalid date format: {d}"));
+        }
+    }
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_mut().ok_or("No database open.")?;
+
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        // Collect log_ids to delete (for FTS cleanup)
+        let placeholders = args.dates.iter().enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            args.dates.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+
+        // Get log_ids to delete from FTS
+        let log_ids: Vec<i64> = {
+            let mut stmt = tx
+                .prepare(&format!(
+                    "SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders})"
+                ))
+                .map_err(|e| format!("Prepare error: {e}"))?;
+            let ids = stmt.query_map(params_refs.as_slice(), |row| row.get::<_, i64>(0))
+                .map_err(|e| format!("Query error: {e}"))?
+                .filter_map(|r| r.ok())
+                .collect();
+            ids
+        };
+
+        let params_refs2: Vec<&dyn rusqlite::types::ToSql> =
+            args.dates.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+
+        // Delete sessions from context_index that belong exclusively to the deleted date range
+        tx.execute_batch(&format!(
+            "DELETE FROM context_index WHERE session_uuid IN (\
+               SELECT DISTINCT session_uuid FROM interactions \
+               WHERE DATE(timestamp_start) IN ({placeholders}) \
+               AND session_uuid NOT IN (\
+                 SELECT DISTINCT session_uuid FROM interactions \
+                 WHERE DATE(timestamp_start) NOT IN ({placeholders})\
+               )\
+             )",
+        )).ok();
+
+        // Delete from interactions
+        let deleted = tx
+            .execute(
+                &format!("DELETE FROM interactions WHERE DATE(timestamp_start) IN ({placeholders})"),
+                params_refs2.as_slice(),
+            )
+            .map_err(|e| format!("Delete error: {e}"))? as i64;
+
+        // Clean up FTS index for deleted rows
+        for log_id in &log_ids {
+            let _ = tx.execute(
+                "DELETE FROM interactions_fts WHERE rowid = ?1",
+                params![log_id],
+            );
+        }
+
+        tx.commit().map_err(|e| format!("Commit error: {e}"))?;
+
+        Ok(DeleteResult { deleted })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1774,6 +1927,8 @@ pub fn run() {
             get_session_interactions,
             get_date_range,
             get_context_options,
+            get_db_daily_stats,
+            delete_interactions_by_dates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

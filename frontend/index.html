@@ -1979,6 +1979,167 @@
         opacity: 0.4;
         cursor: not-allowed;
       }
+      .conv-manage-btn {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.73rem;
+        padding: 5px 11px;
+        transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .conv-manage-btn:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .conv-manage-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      /* === MANAGE DB MODAL === */
+      .manage-db-modal-box {
+        width: 480px;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .manage-db-modal-box .modal-body {
+        overflow-y: auto;
+        flex: 1;
+        padding: 0;
+      }
+      .manage-db-summary {
+        display: flex;
+        gap: 18px;
+        padding: 14px 18px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+      .manage-db-stat {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .manage-db-stat-value {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .manage-db-stat-label {
+        font-size: 0.68rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .manage-db-days-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 18px 6px;
+      }
+      .manage-db-days-title {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .manage-db-select-links {
+        display: flex;
+        gap: 10px;
+      }
+      .manage-db-select-link {
+        font-size: 0.72rem;
+        color: var(--accent);
+        cursor: pointer;
+        background: none;
+        border: none;
+        padding: 0;
+        text-decoration: underline;
+      }
+      .manage-db-day-list {
+        padding: 0 18px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .manage-db-day-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      .manage-db-day-row:hover {
+        background: var(--surface2);
+      }
+      .manage-db-day-row input[type="checkbox"] {
+        accent-color: var(--accent);
+        width: 14px;
+        height: 14px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .manage-db-day-date {
+        font-size: 0.82rem;
+        color: var(--text);
+        font-family: monospace;
+        flex: 1;
+      }
+      .manage-db-day-count {
+        font-size: 0.75rem;
+        color: var(--muted);
+        background: var(--bg);
+        border-radius: 10px;
+        padding: 1px 8px;
+      }
+      .manage-db-empty {
+        padding: 24px 18px;
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-align: center;
+      }
+      .manage-db-confirm-zone {
+        background: rgba(248, 113, 113, 0.08);
+        border: 1px solid rgba(248, 113, 113, 0.25);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 0 18px 12px;
+        font-size: 0.8rem;
+        color: var(--text);
+        line-height: 1.5;
+        display: none;
+      }
+      .manage-db-confirm-zone.visible {
+        display: block;
+      }
+      .manage-db-confirm-zone strong {
+        color: var(--red);
+      }
+      .btn-danger {
+        background: var(--red);
+        border: none;
+        border-radius: 7px;
+        color: #fff;
+        padding: 7px 18px;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      .btn-danger:hover {
+        opacity: 0.85;
+      }
+      .btn-danger:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
       .conv-drag-hint {
         font-size: 0.7rem;
         color: var(--muted);
@@ -3857,6 +4018,26 @@
           </svg>
           Import CSV…
         </button>
+        <button
+          class="conv-manage-btn"
+          id="convManageDbBtn"
+          disabled
+          title="Manage database: view and delete data by day"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <ellipse cx="12" cy="5" rx="9" ry="3" />
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+          </svg>
+          Manage DB
+        </button>
         <span class="conv-drag-hint" id="convDragHint"></span>
         <div class="conv-spacer"></div>
       </div>
@@ -3997,7 +4178,11 @@
             </div>
             <div class="conv-filter-pills">
               <button class="conv-pill" data-conv-filter="genai">GenAI</button>
-              <button class="conv-pill" data-conv-filter="neg_feedback">
+              <button
+                class="conv-pill"
+                data-conv-filter="neg_feedback"
+                id="feedbackFilterPill"
+              >
                 &#x1F44E; feedback
               </button>
               <button class="conv-pill" data-conv-filter="low_recog">
@@ -4622,6 +4807,47 @@
       </div>
     </div>
 
+    <!-- MANAGE DB MODAL -->
+    <div class="modal-overlay" id="manageDbModal">
+      <div class="modal-box manage-db-modal-box">
+        <div class="modal-header">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="var(--accent)"
+            stroke-width="2"
+            style="flex-shrink: 0"
+          >
+            <ellipse cx="12" cy="5" rx="9" ry="3" />
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+          </svg>
+          <h3 style="flex: 1">Manage Database</h3>
+          <button class="close-btn" onclick="closeManageDbModal()">
+            &#x2715;
+          </button>
+        </div>
+        <div class="modal-body" id="manageDbBody">
+          <div class="manage-db-empty">Loading…</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeManageDbModal()">
+            Close
+          </button>
+          <button
+            class="btn-danger"
+            id="manageDbDeleteBtn"
+            disabled
+            onclick="manageDbDeleteSelected()"
+          >
+            Delete Selected Days
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- EXPORT IDs MODAL -->
     <div class="modal-overlay" id="exportModal">
       <div class="modal-box export-modal-box">
@@ -5004,6 +5230,9 @@
             invoke("get_session_interactions", { sessionUuid }),
           getDateRange: () => invoke("get_date_range"),
           getContextOptions: () => invoke("get_context_options"),
+          getDbDailyStats: () => invoke("get_db_daily_stats"),
+          deleteInteractionsByDates: (dates) =>
+            invoke("delete_interactions_by_dates", { args: { dates } }),
         }
       })()
       if (!window.electronAPI.selectDataFolder) {
@@ -5037,6 +5266,11 @@
         window.electronAPI.getSessionInteractions = () => Promise.resolve([])
       if (!window.electronAPI.getContextOptions)
         window.electronAPI.getContextOptions = () => Promise.resolve([])
+      if (!window.electronAPI.getDbDailyStats)
+        window.electronAPI.getDbDailyStats = () =>
+          Promise.resolve({ total: 0, days: [] })
+      if (!window.electronAPI.deleteInteractionsByDates)
+        window.electronAPI.deleteInteractionsByDates = _convStub
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -5842,8 +6076,8 @@
           (faq ? '<span class="badge b-faq">FAQ</span>' : "") +
           '<span class="meta-dim">' +
           qCnt +
-          " question" +
-          (qCnt !== 1 ? "s" : "") +
+          " entit" +
+          (qCnt !== 1 ? "ies" : "y") +
           "</span>" +
           "</div>" +
           "</div>" +
@@ -8713,6 +8947,14 @@
         _toastTimer = setTimeout(() => el.remove(), 6000)
       }
 
+      // ── DB busy state (disables Import + Manage DB during search/import) ──
+      function setConvDbBusy(busy) {
+        const importBtn = document.getElementById("convImportBtn")
+        const manageBtn = document.getElementById("convManageDbBtn")
+        if (importBtn) importBtn.disabled = busy || !convDbPath
+        if (manageBtn) manageBtn.disabled = busy || !convDbPath
+      }
+
       // ── CSV Import ──────────────────────────────────────────────────
       async function doImport(filePaths) {
         if (!convDbPath) {
@@ -8722,7 +8964,7 @@
         if (convImporting) return
         convImporting = true
         const btn = document.getElementById("convImportBtn")
-        btn.disabled = true
+        setConvDbBusy(true)
         btn.textContent = "Importing…"
         let totalInserted = 0,
           totalSkipped = 0,
@@ -8750,8 +8992,8 @@
           showImportToast("error", "Import failed: " + e)
         } finally {
           convImporting = false
-          btn.disabled = false
           btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import CSV…`
+          setConvDbBusy(false)
         }
       }
 
@@ -8763,6 +9005,192 @@
             await doImport(res.paths)
           }
         })
+
+      // ── Manage DB modal ─────────────────────────────────────────────
+      let _manageDbSelectedDates = new Set()
+      let _manageDbStats = null
+      let _manageDbConfirming = false
+
+      function openManageDbModal() {
+        _manageDbSelectedDates = new Set()
+        _manageDbConfirming = false
+        document.getElementById("manageDbModal").classList.add("open")
+        refreshManageDbModal()
+      }
+      function closeManageDbModal() {
+        document.getElementById("manageDbModal").classList.remove("open")
+      }
+      document
+        .getElementById("manageDbModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("manageDbModal"))
+            closeManageDbModal()
+        })
+
+      async function refreshManageDbModal() {
+        const body = document.getElementById("manageDbBody")
+        const deleteBtn = document.getElementById("manageDbDeleteBtn")
+        body.innerHTML = `<div class="manage-db-empty">Loading…</div>`
+        deleteBtn.disabled = true
+        try {
+          _manageDbStats = await window.electronAPI.getDbDailyStats()
+        } catch (e) {
+          body.innerHTML = `<div class="manage-db-empty" style="color:var(--red)">Error loading stats: ${esc(
+            String(e),
+          )}</div>`
+          return
+        }
+        renderManageDbBody()
+      }
+
+      function renderManageDbBody() {
+        const stats = _manageDbStats
+        const body = document.getElementById("manageDbBody")
+        const deleteBtn = document.getElementById("manageDbDeleteBtn")
+
+        if (!stats || stats.days.length === 0) {
+          body.innerHTML = `<div class="manage-db-empty">No data in the database yet.</div>`
+          deleteBtn.disabled = true
+          return
+        }
+
+        const selCount = _manageDbSelectedDates.size
+        deleteBtn.disabled = selCount === 0 || _manageDbConfirming
+        deleteBtn.textContent =
+          selCount > 0
+            ? `Delete ${selCount} day${selCount !== 1 ? "s" : ""}`
+            : "Delete Selected Days"
+
+        // Build confirm zone HTML
+        let confirmHtml = ""
+        if (_manageDbConfirming) {
+          const selDays = stats.days.filter((d) =>
+            _manageDbSelectedDates.has(d.date),
+          )
+          const totalRows = selDays.reduce((s, d) => s + d.count, 0)
+          const dateList = selDays
+            .map((d) => `<strong>${esc(d.date)}</strong>`)
+            .join(", ")
+          confirmHtml = `
+            <div class="manage-db-confirm-zone visible">
+              <strong>Permanently delete ${totalRows.toLocaleString()} interactions</strong>
+              on ${dateList}?<br/>This cannot be undone.
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn-danger" style="padding:5px 14px;font-size:0.78rem" onclick="manageDbConfirmDelete()">Yes, delete permanently</button>
+                <button class="btn-secondary" style="padding:5px 10px;font-size:0.78rem" onclick="manageDbCancelConfirm()">Cancel</button>
+              </div>
+            </div>`
+        }
+
+        // Day list
+        const rowsHtml = stats.days
+          .map((d) => {
+            const checked = _manageDbSelectedDates.has(d.date) ? "checked" : ""
+            return `
+            <label class="manage-db-day-row">
+              <input type="checkbox" ${checked} onchange="manageDbToggleDay('${esc(
+              d.date,
+            )}', this.checked)" />
+              <span class="manage-db-day-date">${esc(d.date)}</span>
+              <span class="manage-db-day-count">${d.count.toLocaleString()}</span>
+            </label>`
+          })
+          .join("")
+
+        body.innerHTML = `
+          <div class="manage-db-summary">
+            <div class="manage-db-stat">
+              <span class="manage-db-stat-value">${stats.total.toLocaleString()}</span>
+              <span class="manage-db-stat-label">Total interactions</span>
+            </div>
+            <div class="manage-db-stat">
+              <span class="manage-db-stat-value">${stats.days.length}</span>
+              <span class="manage-db-stat-label">Days stored</span>
+            </div>
+          </div>
+          <div class="manage-db-days-header">
+            <span class="manage-db-days-title">Days in database</span>
+            <div class="manage-db-select-links">
+              <button class="manage-db-select-link" onclick="manageDbSelectAll()">Select all</button>
+              <button class="manage-db-select-link" onclick="manageDbDeselectAll()">Deselect all</button>
+            </div>
+          </div>
+          <div class="manage-db-day-list">${rowsHtml}</div>
+          ${confirmHtml}`
+      }
+
+      function manageDbToggleDay(date, checked) {
+        if (checked) _manageDbSelectedDates.add(date)
+        else _manageDbSelectedDates.delete(date)
+        _manageDbConfirming = false
+        renderManageDbBody()
+      }
+      function manageDbSelectAll() {
+        if (_manageDbStats)
+          _manageDbStats.days.forEach((d) => _manageDbSelectedDates.add(d.date))
+        _manageDbConfirming = false
+        renderManageDbBody()
+      }
+      function manageDbDeselectAll() {
+        _manageDbSelectedDates.clear()
+        _manageDbConfirming = false
+        renderManageDbBody()
+      }
+      function manageDbDeleteSelected() {
+        if (_manageDbSelectedDates.size === 0) return
+        _manageDbConfirming = true
+        renderManageDbBody()
+        // Scroll to confirm zone
+        const body = document.getElementById("manageDbBody")
+        body.scrollTop = body.scrollHeight
+      }
+      function manageDbCancelConfirm() {
+        _manageDbConfirming = false
+        renderManageDbBody()
+      }
+      async function manageDbConfirmDelete() {
+        const dates = Array.from(_manageDbSelectedDates)
+        if (!dates.length) return
+        const deleteBtn = document.getElementById("manageDbDeleteBtn")
+        deleteBtn.disabled = true
+        const body = document.getElementById("manageDbBody")
+        try {
+          const res = await window.electronAPI.deleteInteractionsByDates(dates)
+          const deleted = res?.deleted ?? 0
+          showImportToast(
+            "success",
+            `Deleted ${deleted.toLocaleString()} interactions from ${
+              dates.length
+            } day${dates.length !== 1 ? "s" : ""}`,
+          )
+          _manageDbSelectedDates.clear()
+          _manageDbConfirming = false
+          // Re-apply date range and reload sessions
+          window.electronAPI
+            .getDateRange()
+            .then(({ min, max }) => initDatePicker(min, max))
+            .catch(() => {})
+          contextOptionsLoaded = false
+          if (convHasSearched) loadSessions()
+          await refreshManageDbModal()
+        } catch (e) {
+          showImportToast("error", "Delete failed: " + e)
+          _manageDbConfirming = false
+          renderManageDbBody()
+        }
+      }
+
+      document
+        .getElementById("convManageDbBtn")
+        .addEventListener("click", openManageDbModal)
+
+      // Keep Manage DB button in sync with Import button on DB connect/disconnect
+      const _origUpdateConvDbStatus = updateConvDbStatus
+      updateConvDbStatus = function () {
+        _origUpdateConvDbStatus()
+        const manageBtn = document.getElementById("convManageDbBtn")
+        if (manageBtn) manageBtn.disabled = !convDbPath
+      }
 
       // Drag-and-drop
       const convView = document.getElementById("view-conversations")
@@ -8850,6 +9278,7 @@
         }
         const _submitBtn = document.getElementById("convSearchSubmit")
         _submitBtn.classList.add("loading")
+        setConvDbBusy(true)
         document
           .getElementById("convSearchLoadingOverlay")
           .classList.add("visible")
@@ -8863,12 +9292,14 @@
           convSessions = res.sessions || []
           convTotalSessions = res.total || 0
           _submitBtn.classList.remove("loading")
+          setConvDbBusy(false)
           document
             .getElementById("convSearchLoadingOverlay")
             .classList.remove("visible")
           renderSessionList()
         } catch (e) {
           _submitBtn.classList.remove("loading")
+          setConvDbBusy(false)
           document
             .getElementById("convSearchLoadingOverlay")
             .classList.remove("visible")
@@ -9350,12 +9781,16 @@
       }
 
       // Conv filter pills — only update state; search fires on Enter / submit button
+      const feedbackPill = document.getElementById("feedbackFilterPill")
       document.querySelectorAll("[data-conv-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const wasActive = btn.classList.contains("active")
           document
             .querySelectorAll("[data-conv-filter]")
             .forEach((b) => b.classList.remove("active"))
+          // Reset feedback pill label/filter to negative
+          feedbackPill.dataset.convFilter = "neg_feedback"
+          feedbackPill.innerHTML = "&#x1F44E; feedback"
           if (!wasActive) {
             btn.classList.add("active")
             convSessionFilter = btn.dataset.convFilter
@@ -9364,6 +9799,28 @@
           }
           convPage = 1
         })
+      })
+
+      // Double-click feedback pill to toggle between neg and pos feedback
+      feedbackPill.addEventListener("dblclick", (e) => {
+        e.stopPropagation()
+        document
+          .querySelectorAll("[data-conv-filter]")
+          .forEach((b) => b.classList.remove("active"))
+        if (convSessionFilter === "pos_feedback") {
+          // Switch back to neg feedback
+          feedbackPill.dataset.convFilter = "neg_feedback"
+          feedbackPill.innerHTML = "&#x1F44E; feedback"
+          feedbackPill.classList.add("active")
+          convSessionFilter = "neg_feedback"
+        } else {
+          // Switch to pos feedback
+          feedbackPill.dataset.convFilter = "pos_feedback"
+          feedbackPill.innerHTML = "&#x1F44D; feedback"
+          feedbackPill.classList.add("active")
+          convSessionFilter = "pos_feedback"
+        }
+        convPage = 1
       })
 
       // Conv search
@@ -9470,6 +9927,14 @@
         if (convDateMax) {
           const d = new Date(convDateMax + "T00:00:00")
           convPickMonth = new Date(d.getFullYear(), d.getMonth(), 1)
+          // Default selection: only the last available day
+          if (!convPickStart) {
+            convPickStart = convDateMax
+            convPickEnd = convDateMax
+            convPickPhase = 0
+            convDateFrom = convDateMax + "T00:00:00"
+            convDateTo = convDateMax + "T23:59:59"
+          }
         } else {
           const now = new Date()
           convPickMonth = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -9590,7 +10055,6 @@
         popup.classList.remove("open")
         document.getElementById("convDateRangeBtn").classList.remove("active")
         convPage = 1
-        if (convHasSearched) loadSessions()
       }
 
       function applyDateRange() {
