@@ -3687,7 +3687,7 @@
       <!-- GLOBAL SEARCH -->
       <div class="global-search-bar">
         <div class="search-row">
-          <div class="search-wrap-global" data-tooltip="space = AND · | = OR">
+          <div class="search-wrap-global" data-tooltip="space = AND · | = OR · &quot;...&quot; = exact phrase">
             <svg
               width="14"
               height="14"
@@ -4091,7 +4091,7 @@
               >
                 #ID
               </button>
-              <div class="conv-search-wrap" data-tooltip="space = AND · | = OR">
+              <div class="conv-search-wrap" data-tooltip="space = AND · | = OR · &quot;...&quot; = exact phrase">
                 <div class="conv-search-inner">
                   <input
                     type="text"
@@ -5438,12 +5438,23 @@
       }
       // Parse a query string into OR groups of AND terms (mirrors the worker's parseOrGroups).
       // Returns flat unique list of all terms for highlighting.
+      // Tokenize a query segment into terms, respecting "quoted phrases" as single tokens.
+      function _tokenizeSegment(str) {
+        const tokens = []
+        const re = /"([^"]*)"|([^\s"]+)/g
+        let m
+        while ((m = re.exec(str)) !== null) {
+          const token = m[1] !== undefined ? m[1] : m[2]
+          if (token) tokens.push(token)
+        }
+        return tokens
+      }
       function parseQueryTermsForHl(q) {
         if (!q) return []
         if (searchRegex) return [q]
         return [
           ...new Set(
-            q.split("|").flatMap((g) => g.trim().split(/\s+/).filter(Boolean)),
+            q.split("|").flatMap((g) => _tokenizeSegment(g.trim())),
           ),
         ]
       }
@@ -10591,7 +10602,7 @@
         // Parse into OR groups of AND terms; collect all unique terms for highlighting
         const terms = [
           ...new Set(
-            q.split("|").flatMap((g) => g.trim().split(/\s+/).filter(Boolean)),
+            q.split("|").flatMap((g) => _tokenizeSegment(g.trim())),
           ),
         ]
         return terms
@@ -10620,7 +10631,7 @@
         }
         const orGroups = chatQuery
           .split("|")
-          .map((g) => g.trim().split(/\s+/).filter(Boolean))
+          .map((g) => _tokenizeSegment(g.trim()))
           .filter((g) => g.length)
         return orGroups.some((andTerms) =>
           andTerms.every((term) =>

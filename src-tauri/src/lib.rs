@@ -1447,6 +1447,30 @@ async fn get_sessions(
             };
             conditions.push(cond);
         } else {
+            // Tokenize a query segment into terms, respecting "quoted phrases" as single tokens.
+            // `"de Efteling" attractie` → ["de Efteling", "attractie"]
+            fn tokenize_segment(s: &str) -> Vec<String> {
+                let mut tokens = Vec::new();
+                let mut chars = s.chars().peekable();
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() {
+                        chars.next();
+                    } else if c == '"' {
+                        chars.next(); // consume opening quote
+                        let phrase: String = chars.by_ref().take_while(|&ch| ch != '"').collect();
+                        if !phrase.is_empty() {
+                            tokens.push(phrase);
+                        }
+                    } else {
+                        let word: String = chars.by_ref().take_while(|&ch| !ch.is_whitespace() && ch != '"').collect();
+                        if !word.is_empty() {
+                            tokens.push(word);
+                        }
+                    }
+                }
+                tokens
+            }
+
             // Plain text mode: try FTS5 full-text search; fall back to LIKE if unavailable.
             let fts_available: bool = conn
                 .query_row(
@@ -1458,17 +1482,31 @@ async fn get_sessions(
 
             if fts_available {
                 // Parse OR groups: split by '|', each group's tokens become FTS5 AND terms.
-                // "hello world | goodbye" → "(hello* world*) OR (goodbye*)"
+                // Quoted phrases ("de Efteling") are kept as single FTS5 PHRASE tokens.
                 let or_groups: Vec<Vec<String>> = query
                     .split('|')
                     .map(|g| {
-                        g.split_whitespace()
+                        tokenize_segment(g.trim())
+                            .into_iter()
                             .filter_map(|t| {
-                                let clean: String = t
-                                    .chars()
-                                    .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
-                                    .collect();
-                                if clean.is_empty() { None } else { Some(format!("{}*", clean)) }
+                                // If the token contains spaces it's a quoted phrase → use FTS5 phrase syntax: "word1 word2"
+                                if t.contains(' ') {
+                                    let phrase_terms: Vec<String> = t.split_whitespace()
+                                        .map(|w| {
+                                            w.chars()
+                                                .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
+                                                .collect::<String>()
+                                        })
+                                        .filter(|w| !w.is_empty())
+                                        .collect();
+                                    if phrase_terms.is_empty() { None } else { Some(format!("\"{}\"", phrase_terms.join(" "))) }
+                                } else {
+                                    let clean: String = t
+                                        .chars()
+                                        .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
+                                        .collect();
+                                    if clean.is_empty() { None } else { Some(format!("{}*", clean)) }
+                                }
                             })
                             .collect::<Vec<_>>()
                     })
@@ -1507,10 +1545,10 @@ async fn get_sessions(
                 }
             } else {
                 // FTS5 not available — fall back to LIKE per AND-term, OR between groups.
-                // "hello world | goodbye" → sessions matching (hello AND world) OR (goodbye).
+                // Quoted phrases are kept as single literal terms for LIKE matching.
                 let or_groups: Vec<Vec<String>> = query
                     .split('|')
-                    .map(|g| g.split_whitespace().map(|t| t.to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>())
+                    .map(|g| tokenize_segment(g.trim()).into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>())
                     .filter(|g| !g.is_empty())
                     .collect();
 

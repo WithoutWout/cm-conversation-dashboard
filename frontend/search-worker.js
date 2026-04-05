@@ -19,6 +19,7 @@ let allItems = [] // pre-built articles + dialogs combined
 // Pre-computed entity cross-reference sets (built on init)
 let entityHasArticleXref = new Set() // entity names (upper) that have article xrefs
 let entityHasDialogXref = new Set() // entity names (upper) that have dialog xrefs
+let entityByNameUpper = new Map() // entity name (upper) → entity object, for per-term lookups
 
 // Variable name maps (id → name), populated on "init" from dialogs export
 let convVarMap = new Map() // ConversationVariable id → name
@@ -47,12 +48,24 @@ function buildSearchRegex(q) {
 // Parse a query into OR groups of AND terms.
 // "hello world | goodbye" → [["hello","world"],["goodbye"]]
 // When in regex mode, return a single group with the raw query as one term.
+// Tokenize a query segment into terms, respecting "quoted phrases" as single tokens.
+function tokenizeSegment(str) {
+  const tokens = []
+  const re = /"([^"]*)"|([^\s"]+)/g
+  let m
+  while ((m = re.exec(str)) !== null) {
+    const token = m[1] !== undefined ? m[1] : m[2]
+    if (token) tokens.push(token)
+  }
+  return tokens
+}
+
 function parseOrGroups(q) {
   if (!q) return []
   if (searchRegex) return [[q]]
   return q
     .split("|")
-    .map((g) => g.trim().split(/\s+/).filter(Boolean))
+    .map((g) => tokenizeSegment(g.trim()))
     .filter((g) => g.length > 0)
 }
 
@@ -103,6 +116,16 @@ function testTerm(compiled, str) {
 // Test a single term against multiple field strings (any match = term is found).
 function termFoundInFields(compiled, fields) {
   return fields.some((f) => f != null && testTerm(compiled, f))
+}
+
+// Entity enrichment: does this specific compiled term match any word of any entity
+// in the given list of entity name uppers?
+function termMatchesEntityByNames(compiled, entityNameUppers) {
+  for (const nameUpper of entityNameUppers) {
+    const entity = entityByNameUpper.get(nameUpper)
+    if (entity && termFoundInFields(compiled, entity._searchWords)) return true
+  }
+  return false
 }
 
 // Check if ALL terms in an AND-group are each found somewhere in the given fields.
@@ -572,21 +595,23 @@ function articleFields(a) {
 function matchArticle(a) {
   // For each OR-group, all AND terms must each be found in at least one field.
   // Terms can be satisfied by DIFFERENT fields (e.g. one term in ID, another in response).
-  const hasEntityMatch =
-    matchingEntityNames.size > 0 &&
-    a._searchQuestionsUpper.some((t) => matchingEntityNames.has(t))
-
   const fields = articleFields(a)
+  // Entity enrichment: only the entity names actually referenced by this article.
+  const articleEntityNames =
+    matchingEntityNames.size > 0
+      ? a._searchQuestionsUpper.filter((t) => matchingEntityNames.has(t))
+      : []
 
-  return _orRegexGroups.some((andGroup) => {
-    // Each term in the AND-group must appear in at least one field of this article.
-    return andGroup.every((compiled) => {
-      if (termFoundInFields(compiled, fields)) return true
-      // Entity-word enrichment: if the entity matched, count it as a field hit
-      if (hasEntityMatch) return true
-      return false
-    })
-  })
+  return _orRegexGroups.some((andGroup) =>
+    // Each term in the AND-group must appear in at least one field of this article,
+    // OR that specific term must match a word in one of the article's entities.
+    andGroup.every(
+      (compiled) =>
+        termFoundInFields(compiled, fields) ||
+        (articleEntityNames.length > 0 &&
+          termMatchesEntityByNames(compiled, articleEntityNames)),
+    ),
+  )
 }
 
 // Returns all searchable field strings for a dialog item.
@@ -608,18 +633,19 @@ function dialogFields(item) {
 }
 
 function matchDialog(item) {
-  const hasEntityMatch =
-    matchingEntityNames.size > 0 &&
-    item._entityQuestionTexts.some((t) => matchingEntityNames.has(t))
-
   const fields = dialogFields(item)
+  const dialogEntityNames =
+    matchingEntityNames.size > 0
+      ? item._entityQuestionTexts.filter((t) => matchingEntityNames.has(t))
+      : []
 
   return _orRegexGroups.some((andGroup) =>
-    andGroup.every((compiled) => {
-      if (termFoundInFields(compiled, fields)) return true
-      if (hasEntityMatch) return true
-      return false
-    }),
+    andGroup.every(
+      (compiled) =>
+        termFoundInFields(compiled, fields) ||
+        (dialogEntityNames.length > 0 &&
+          termMatchesEntityByNames(compiled, dialogEntityNames)),
+    ),
   )
 }
 
@@ -663,6 +689,8 @@ self.onmessage = function (e) {
 
     // Pre-build entity cross-reference sets
     buildEntityXrefSets()
+    entityByNameUpper = new Map()
+    for (const ent of workerEntities) entityByNameUpper.set(ent._nameUpper, ent)
     return
   }
 
