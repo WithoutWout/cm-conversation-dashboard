@@ -109,6 +109,75 @@ impl Default for DbState {
 
 type SharedDbState = Arc<Mutex<DbState>>;
 
+// ── Flagged DB state ─────────────────────────────────────────────────────────
+
+struct FlaggedDbState {
+    conn: Option<Connection>,
+    path: Option<String>,
+}
+
+impl Default for FlaggedDbState {
+    fn default() -> Self {
+        Self { conn: None, path: None }
+    }
+}
+
+type SharedFlaggedDb = Arc<Mutex<FlaggedDbState>>;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FlaggedFolder {
+    folder_id: i64,
+    name: String,
+    created_at: String,
+    sort_order: i64,
+    session_count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FlaggedSessionSummary {
+    flag_id: i64,
+    session_uuid: String,
+    flagged_at: String,
+    source_db_path: String,
+    culture: String,
+    first_ts: String,
+    interaction_count: i64,
+    flagged_count: i64,
+    folder_id: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FlaggedInteractionRow {
+    log_id: i64,
+    interaction_uuid: String,
+    session_uuid: String,
+    timestamp_start: String,
+    timestamp_end: String,
+    culture: String,
+    main_interaction_type: String,
+    all_interaction_types: String,
+    interaction_value: String,
+    output_text: String,
+    article_ids: String,
+    dialog_paths: String,
+    tdialog_status: String,
+    recognition_type: String,
+    recognition_quality: f64,
+    generative_ai_sources: String,
+    articles: String,
+    faqs_found: String,
+    contexts: String,
+    pages: String,
+    link_click_info: String,
+    feedback_info: String,
+    output_metadata: String,
+    recognition_details: String,
+    is_flagged: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportResult {
@@ -812,6 +881,102 @@ CREATE TABLE IF NOT EXISTS context_index (
 );
 CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_index(session_uuid);
 "#;
+
+// ── Flagged DB schema ────────────────────────────────────────────────────────
+
+const FLAGGED_DB_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS flagged_folders (
+    folder_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS flagged_sessions (
+    flag_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_uuid      TEXT NOT NULL,
+    flagged_at        TEXT NOT NULL,
+    source_db_path    TEXT NOT NULL DEFAULT '',
+    culture           TEXT NOT NULL DEFAULT '',
+    first_ts          TEXT NOT NULL DEFAULT '',
+    interaction_count INTEGER NOT NULL DEFAULT 0,
+    folder_id         INTEGER REFERENCES flagged_folders(folder_id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS flagged_interactions (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    flag_id               INTEGER NOT NULL REFERENCES flagged_sessions(flag_id) ON DELETE CASCADE,
+    log_id                INTEGER,
+    interaction_uuid      TEXT NOT NULL DEFAULT '',
+    session_uuid          TEXT NOT NULL DEFAULT '',
+    timestamp_start       TEXT NOT NULL DEFAULT '',
+    timestamp_end         TEXT NOT NULL DEFAULT '',
+    culture               TEXT NOT NULL DEFAULT '',
+    main_interaction_type TEXT NOT NULL DEFAULT '',
+    all_interaction_types TEXT NOT NULL DEFAULT '',
+    interaction_value     TEXT NOT NULL DEFAULT '',
+    output_text           TEXT NOT NULL DEFAULT '',
+    article_ids           TEXT NOT NULL DEFAULT '',
+    dialog_paths          TEXT NOT NULL DEFAULT '',
+    tdialog_status        TEXT NOT NULL DEFAULT '',
+    recognition_type      TEXT NOT NULL DEFAULT '',
+    recognition_quality   REAL NOT NULL DEFAULT 0.0,
+    generative_ai_sources TEXT NOT NULL DEFAULT '',
+    articles              TEXT NOT NULL DEFAULT '',
+    faqs_found            TEXT NOT NULL DEFAULT '',
+    contexts              TEXT NOT NULL DEFAULT '',
+    pages                 TEXT NOT NULL DEFAULT '',
+    link_click_info       TEXT NOT NULL DEFAULT '',
+    feedback_info         TEXT NOT NULL DEFAULT '',
+    output_metadata       TEXT NOT NULL DEFAULT '',
+    recognition_details   TEXT NOT NULL DEFAULT '',
+    is_flagged            INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_fi_flag_id ON flagged_interactions(flag_id);
+"#;
+
+fn open_flagged_db(path: &str) -> Result<Connection, String> {
+    if let Some(parent) = Path::new(path).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let conn = Connection::open(path).map_err(|e| format!("Cannot open flagged DB: {e}"))?;
+    conn.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()))
+        .map_err(|e| format!("PRAGMA error: {e}"))?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+        .map_err(|e| format!("PRAGMA error: {e}"))?;
+    conn.execute_batch(FLAGGED_DB_SCHEMA)
+        .map_err(|e| format!("Schema error: {e}"))?;
+    // Migrations for existing DBs (ignore errors if column already exists)
+    let _ = conn.execute_batch("ALTER TABLE flagged_sessions ADD COLUMN folder_id INTEGER REFERENCES flagged_folders(folder_id) ON DELETE SET NULL");
+    Ok(conn)
+}
+
+fn now_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let s = secs % 60;
+    let m = (secs / 60) % 60;
+    let h = (secs / 3600) % 24;
+    let mut rem = secs / 86400;
+    let mut year = 1970u64;
+    loop {
+        let in_year: u64 = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
+        if rem < in_year { break; }
+        rem -= in_year;
+        year += 1;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1u64;
+    for &d in &month_days {
+        if rem < d { break; }
+        rem -= d;
+        month += 1;
+    }
+    let day = rem + 1;
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, h, m, s)
+}
 
 // FTS5 schema is kept separate so a missing fts5 module never prevents the DB from opening.
 const FTS_SCHEMA: &str = r#"
@@ -2061,6 +2226,405 @@ async fn delete_interactions_by_dates(
     .map_err(|e| e.to_string())?
 }
 
+// ── Flagged conversations commands ────────────────────────────────────────────
+
+#[tauri::command]
+async fn flag_session(
+    db_state: State<'_, SharedDbState>,
+    flagged_db: State<'_, SharedFlaggedDb>,
+    session_uuid: String,
+    flagged_log_ids: Vec<i64>,
+    source_db_path: String,
+) -> Result<i64, String> {
+    let db = db_state.inner().clone();
+    let fdb = flagged_db.inner().clone();
+    let flagged_set: std::collections::HashSet<i64> = flagged_log_ids.into_iter().collect();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. Read all interactions for the session from the regular DB
+        let (rows, culture, first_ts) = {
+            let state = db.lock().map_err(|e| e.to_string())?;
+            let conn = state.conn.as_ref().ok_or("No database open.")?;
+            let mut stmt = conn
+                .prepare(
+                    r#"SELECT
+                        log_id, interaction_uuid, session_uuid,
+                        timestamp_start, timestamp_end, culture,
+                        main_interaction_type, all_interaction_types,
+                        interaction_value, output_text,
+                        article_ids, dialog_paths, tdialog_status,
+                        recognition_type, recognition_quality,
+                        generative_ai_sources, articles, faqs_found,
+                        contexts, pages, link_click_info, feedback_info,
+                        output_metadata, recognition_details
+                    FROM interactions
+                    WHERE session_uuid = ?1
+                    ORDER BY log_id ASC"#,
+                )
+                .map_err(|e| format!("Prepare error: {e}"))?;
+            let rows: Vec<InteractionRow> = stmt
+                .query_map(params![session_uuid], |row| {
+                    Ok(InteractionRow {
+                        log_id:                  row.get(0)?,
+                        interaction_uuid:        row.get::<_, String>(1).unwrap_or_default(),
+                        session_uuid:            row.get::<_, String>(2).unwrap_or_default(),
+                        timestamp_start:         row.get::<_, String>(3).unwrap_or_default(),
+                        timestamp_end:           row.get::<_, String>(4).unwrap_or_default(),
+                        culture:                 row.get::<_, String>(5).unwrap_or_default(),
+                        main_interaction_type:   row.get::<_, String>(6).unwrap_or_default(),
+                        all_interaction_types:   row.get::<_, String>(7).unwrap_or_default(),
+                        interaction_value:       row.get::<_, String>(8).unwrap_or_default(),
+                        output_text:             row.get::<_, String>(9).unwrap_or_default(),
+                        article_ids:             row.get::<_, String>(10).unwrap_or_default(),
+                        dialog_paths:            row.get::<_, String>(11).unwrap_or_default(),
+                        tdialog_status:          row.get::<_, String>(12).unwrap_or_default(),
+                        recognition_type:        row.get::<_, String>(13).unwrap_or_default(),
+                        recognition_quality:     row.get::<_, f64>(14).unwrap_or(0.0),
+                        generative_ai_sources:   row.get::<_, String>(15).unwrap_or_default(),
+                        articles:                row.get::<_, String>(16).unwrap_or_default(),
+                        faqs_found:              row.get::<_, String>(17).unwrap_or_default(),
+                        contexts:                row.get::<_, String>(18).unwrap_or_default(),
+                        pages:                   row.get::<_, String>(19).unwrap_or_default(),
+                        link_click_info:         row.get::<_, String>(20).unwrap_or_default(),
+                        feedback_info:           row.get::<_, String>(21).unwrap_or_default(),
+                        output_metadata:         row.get::<_, String>(22).unwrap_or_default(),
+                        recognition_details:     row.get::<_, String>(23).unwrap_or_default(),
+                    })
+                })
+                .map_err(|e| format!("Query error: {e}"))?
+                .filter_map(|r| r.ok())
+                .collect();
+            let culture = rows.first().map(|r| r.culture.clone()).unwrap_or_default();
+            let first_ts = rows.first().map(|r| r.timestamp_start.clone()).unwrap_or_default();
+            (rows, culture, first_ts)
+        };
+
+        // 2. Write to flagged DB
+        let mut fstate = fdb.lock().map_err(|e| e.to_string())?;
+        let fconn = fstate.conn.as_mut().ok_or("Flagged database not initialized.")?;
+
+        let flagged_at = now_iso();
+        let interaction_count = rows.len() as i64;
+
+        fconn
+            .execute(
+                "INSERT INTO flagged_sessions (session_uuid, flagged_at, source_db_path, culture, first_ts, interaction_count) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![session_uuid, flagged_at, source_db_path, culture, first_ts, interaction_count],
+            )
+            .map_err(|e| format!("Insert session error: {e}"))?;
+
+        let flag_id = fconn.last_insert_rowid();
+
+        {
+            let tx = fconn.transaction().map_err(|e| format!("Transaction error: {e}"))?;
+            for row in &rows {
+                let is_flagged = if flagged_set.contains(&row.log_id) { 1i64 } else { 0i64 };
+                tx.execute(
+                    "INSERT INTO flagged_interactions \
+                     (flag_id, log_id, interaction_uuid, session_uuid, timestamp_start, timestamp_end, \
+                      culture, main_interaction_type, all_interaction_types, interaction_value, output_text, \
+                      article_ids, dialog_paths, tdialog_status, recognition_type, recognition_quality, \
+                      generative_ai_sources, articles, faqs_found, contexts, pages, link_click_info, \
+                      feedback_info, output_metadata, recognition_details, is_flagged) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)",
+                    params![
+                        flag_id,
+                        row.log_id,
+                        row.interaction_uuid,
+                        row.session_uuid,
+                        row.timestamp_start,
+                        row.timestamp_end,
+                        row.culture,
+                        row.main_interaction_type,
+                        row.all_interaction_types,
+                        row.interaction_value,
+                        row.output_text,
+                        row.article_ids,
+                        row.dialog_paths,
+                        row.tdialog_status,
+                        row.recognition_type,
+                        row.recognition_quality,
+                        row.generative_ai_sources,
+                        row.articles,
+                        row.faqs_found,
+                        row.contexts,
+                        row.pages,
+                        row.link_click_info,
+                        row.feedback_info,
+                        row.output_metadata,
+                        row.recognition_details,
+                        is_flagged,
+                    ],
+                )
+                .map_err(|e| format!("Insert interaction error: {e}"))?;
+            }
+            tx.commit().map_err(|e| format!("Commit error: {e}"))?;
+        }
+
+        Ok(flag_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Flagged folder commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+async fn get_flagged_folders(flagged_db: State<'_, SharedFlaggedDb>) -> Result<Vec<FlaggedFolder>, String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT ff.folder_id, ff.name, ff.created_at, ff.sort_order, \
+                        COUNT(fs.flag_id) AS session_count \
+                 FROM flagged_folders ff \
+                 LEFT JOIN flagged_sessions fs ON fs.folder_id = ff.folder_id \
+                 GROUP BY ff.folder_id \
+                 ORDER BY ff.sort_order ASC, ff.created_at ASC",
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(FlaggedFolder {
+                    folder_id:     row.get(0)?,
+                    name:          row.get::<_, String>(1).unwrap_or_default(),
+                    created_at:    row.get::<_, String>(2).unwrap_or_default(),
+                    sort_order:    row.get::<_, i64>(3).unwrap_or(0),
+                    session_count: row.get::<_, i64>(4).unwrap_or(0),
+                })
+            })
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn create_flagged_folder(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    name: String,
+) -> Result<FlaggedFolder, String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let now = now_iso();
+        conn.execute(
+            "INSERT INTO flagged_folders (name, created_at, sort_order) VALUES (?1, ?2, (SELECT COALESCE(MAX(sort_order),0)+1 FROM flagged_folders))",
+            params![name, now],
+        )
+        .map_err(|e| format!("Insert error: {e}"))?;
+        let folder_id = conn.last_insert_rowid();
+        let folder = conn
+            .query_row(
+                "SELECT folder_id, name, created_at, sort_order, 0 FROM flagged_folders WHERE folder_id = ?1",
+                params![folder_id],
+                |row| Ok(FlaggedFolder {
+                    folder_id:     row.get(0)?,
+                    name:          row.get::<_, String>(1).unwrap_or_default(),
+                    created_at:    row.get::<_, String>(2).unwrap_or_default(),
+                    sort_order:    row.get::<_, i64>(3).unwrap_or(0),
+                    session_count: 0,
+                }),
+            )
+            .map_err(|e| format!("Fetch error: {e}"))?;
+        Ok(folder)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn rename_flagged_folder(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    folder_id: i64,
+    name: String,
+) -> Result<(), String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        conn.execute(
+            "UPDATE flagged_folders SET name = ?1 WHERE folder_id = ?2",
+            params![name, folder_id],
+        )
+        .map_err(|e| format!("Update error: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn delete_flagged_folder(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    folder_id: i64,
+) -> Result<(), String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        // Sessions are moved to "unfiled" (folder_id = NULL) via ON DELETE SET NULL
+        conn.execute(
+            "DELETE FROM flagged_folders WHERE folder_id = ?1",
+            params![folder_id],
+        )
+        .map_err(|e| format!("Delete error: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn move_to_flagged_folder(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    flag_id: i64,
+    folder_id: Option<i64>,
+) -> Result<(), String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        conn.execute(
+            "UPDATE flagged_sessions SET folder_id = ?1 WHERE flag_id = ?2",
+            params![folder_id, flag_id],
+        )
+        .map_err(|e| format!("Update error: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_flagged_sessions(flagged_db: State<'_, SharedFlaggedDb>) -> Result<Vec<FlaggedSessionSummary>, String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT fs.flag_id, fs.session_uuid, fs.flagged_at, fs.source_db_path, \
+                        fs.culture, fs.first_ts, fs.interaction_count, \
+                        COALESCE((SELECT COUNT(*) FROM flagged_interactions fi \
+                                  WHERE fi.flag_id = fs.flag_id AND fi.is_flagged = 1), 0) AS flagged_count, \
+                        fs.folder_id \
+                 FROM flagged_sessions fs \
+                 ORDER BY fs.flagged_at DESC",
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(FlaggedSessionSummary {
+                    flag_id:           row.get(0)?,
+                    session_uuid:      row.get::<_, String>(1).unwrap_or_default(),
+                    flagged_at:        row.get::<_, String>(2).unwrap_or_default(),
+                    source_db_path:    row.get::<_, String>(3).unwrap_or_default(),
+                    culture:           row.get::<_, String>(4).unwrap_or_default(),
+                    first_ts:          row.get::<_, String>(5).unwrap_or_default(),
+                    interaction_count: row.get::<_, i64>(6).unwrap_or(0),
+                    flagged_count:     row.get::<_, i64>(7).unwrap_or(0),
+                    folder_id:         row.get::<_, Option<i64>>(8).unwrap_or(None),
+                })
+            })
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_flagged_session_interactions(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    flag_id: i64,
+) -> Result<Vec<FlaggedInteractionRow>, String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT
+                    log_id, interaction_uuid, session_uuid,
+                    timestamp_start, timestamp_end, culture,
+                    main_interaction_type, all_interaction_types,
+                    interaction_value, output_text,
+                    article_ids, dialog_paths, tdialog_status,
+                    recognition_type, recognition_quality,
+                    generative_ai_sources, articles, faqs_found,
+                    contexts, pages, link_click_info, feedback_info,
+                    output_metadata, recognition_details, is_flagged
+                FROM flagged_interactions
+                WHERE flag_id = ?1
+                ORDER BY id ASC"#,
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+        let rows = stmt
+            .query_map(params![flag_id], |row| {
+                Ok(FlaggedInteractionRow {
+                    log_id:                  row.get::<_, i64>(0).unwrap_or(0),
+                    interaction_uuid:        row.get::<_, String>(1).unwrap_or_default(),
+                    session_uuid:            row.get::<_, String>(2).unwrap_or_default(),
+                    timestamp_start:         row.get::<_, String>(3).unwrap_or_default(),
+                    timestamp_end:           row.get::<_, String>(4).unwrap_or_default(),
+                    culture:                 row.get::<_, String>(5).unwrap_or_default(),
+                    main_interaction_type:   row.get::<_, String>(6).unwrap_or_default(),
+                    all_interaction_types:   row.get::<_, String>(7).unwrap_or_default(),
+                    interaction_value:       row.get::<_, String>(8).unwrap_or_default(),
+                    output_text:             row.get::<_, String>(9).unwrap_or_default(),
+                    article_ids:             row.get::<_, String>(10).unwrap_or_default(),
+                    dialog_paths:            row.get::<_, String>(11).unwrap_or_default(),
+                    tdialog_status:          row.get::<_, String>(12).unwrap_or_default(),
+                    recognition_type:        row.get::<_, String>(13).unwrap_or_default(),
+                    recognition_quality:     row.get::<_, f64>(14).unwrap_or(0.0),
+                    generative_ai_sources:   row.get::<_, String>(15).unwrap_or_default(),
+                    articles:                row.get::<_, String>(16).unwrap_or_default(),
+                    faqs_found:              row.get::<_, String>(17).unwrap_or_default(),
+                    contexts:                row.get::<_, String>(18).unwrap_or_default(),
+                    pages:                   row.get::<_, String>(19).unwrap_or_default(),
+                    link_click_info:         row.get::<_, String>(20).unwrap_or_default(),
+                    feedback_info:           row.get::<_, String>(21).unwrap_or_default(),
+                    output_metadata:         row.get::<_, String>(22).unwrap_or_default(),
+                    recognition_details:     row.get::<_, String>(23).unwrap_or_default(),
+                    is_flagged:              row.get::<_, i64>(24).unwrap_or(0) != 0,
+                })
+            })
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn unflag_session(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    flag_id: i64,
+) -> Result<(), String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        conn.execute("DELETE FROM flagged_sessions WHERE flag_id = ?1", params![flag_id])
+            .map_err(|e| format!("Delete error: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2070,6 +2634,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Mutex::new(WatchState::default())))
         .manage(Arc::new(Mutex::new(DbState::default())) as SharedDbState)
+        .manage(Arc::new(Mutex::new(FlaggedDbState::default())) as SharedFlaggedDb)
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -2077,6 +2642,17 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            }
+            // Initialize flagged database in app data directory
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let flagged_path = data_dir.join("flagged.db");
+                let path_str = flagged_path.to_string_lossy().into_owned();
+                if let Ok(conn) = open_flagged_db(&path_str) {
+                    let state = app.state::<SharedFlaggedDb>();
+                    let mut lock = state.lock().expect("flagged db mutex");
+                    lock.conn = Some(conn);
+                    lock.path = Some(path_str);
+                }
             }
             Ok(())
         })
@@ -2099,6 +2675,15 @@ pub fn run() {
             get_context_options,
             get_db_daily_stats,
             delete_interactions_by_dates,
+            flag_session,
+            get_flagged_sessions,
+            get_flagged_session_interactions,
+            unflag_session,
+            get_flagged_folders,
+            create_flagged_folder,
+            rename_flagged_folder,
+            delete_flagged_folder,
+            move_to_flagged_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

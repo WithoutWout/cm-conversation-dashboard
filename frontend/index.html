@@ -1469,6 +1469,332 @@
         animation: spin 0.7s linear infinite;
       }
 
+      /* === FLAGGED VIEW === */
+      #view-flagged {
+        display: none;
+        flex: 1;
+        overflow: hidden;
+        flex-direction: column;
+      }
+      #view-flagged.active {
+        display: flex;
+      }
+      .flagged-layout {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+      }
+      .flagged-sidebar {
+        width: 320px;
+        min-width: 240px;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .flagged-sidebar-header {
+        padding: 10px 14px 8px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .flagged-sidebar-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .flagged-session-count {
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
+      .flagged-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 0;
+      }
+      .flagged-session-card {
+        padding: 10px 14px;
+        cursor: grab;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+        transition: background 0.1s;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        position: relative;
+        user-select: none;
+      }
+      .flagged-session-card.dragging {
+        opacity: 0.5;
+      }
+      .flagged-session-card:hover {
+        background: var(--surface2);
+      }
+      .flagged-session-card.active {
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.1);
+      }
+      .flagged-drag-ghost {
+        position: fixed;
+        padding: 5px 12px;
+        background: var(--accent);
+        color: #fff;
+        border-radius: 6px;
+        font-size: 0.73rem;
+        font-weight: 600;
+        pointer-events: none;
+        z-index: 9999;
+        opacity: 0.85;
+        white-space: nowrap;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      }
+      .flagged-session-card-uuid {
+        font-size: 0.72rem;
+        color: var(--muted);
+        font-family: monospace;
+      }
+      .flagged-session-card-meta {
+        font-size: 0.69rem;
+        color: var(--muted);
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .flagged-session-card-badges {
+        display: flex;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .flagged-badge {
+        background: var(--orange);
+        color: #fff;
+        font-size: 0.67rem;
+        font-weight: 600;
+        border-radius: 4px;
+        padding: 1px 6px;
+      }
+      .flagged-session-unflag {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.67rem;
+        border-radius: 4px;
+        padding: 1px 6px;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .flagged-session-card:hover .flagged-session-unflag {
+        opacity: 1;
+      }
+      .flagged-session-unflag:hover {
+        color: var(--red);
+        border-color: var(--red);
+      }
+      .flagged-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      /* flagged chat header now uses .chat-header styles */
+      /* Flagged-turn highlight — shown in the flagged view */
+      .flagged-mark {
+        outline: 2px solid var(--orange);
+        outline-offset: -1px;
+        border-radius: 10px;
+      }
+      /* Flagged folder nav */
+      .flagged-folder-nav {
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .flagged-folder-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 14px;
+        font-size: 0.76rem;
+        cursor: pointer;
+        color: var(--text);
+        border-radius: 0;
+        transition: background 0.1s;
+        position: relative;
+      }
+      .flagged-folder-row:hover {
+        background: var(--surface2);
+      }
+      .flagged-folder-row.active {
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.12);
+        font-weight: 600;
+      }
+      .flagged-folder-row.drag-over {
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.22);
+        outline: 2px dashed var(--accent);
+        outline-offset: -2px;
+      }
+      .flagged-folder-row-icon {
+        font-size: 0.85rem;
+        flex-shrink: 0;
+        pointer-events: none;
+      }
+      .flagged-folder-row-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
+      }
+      .flagged-folder-count {
+        font-size: 0.68rem;
+        color: var(--muted);
+        flex-shrink: 0;
+        pointer-events: none;
+      }
+      .flagged-folder-actions {
+        display: none;
+        gap: 3px;
+        margin-left: 4px;
+      }
+      .flagged-folder-row:hover .flagged-folder-actions {
+        display: flex;
+      }
+      .flagged-folder-action-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.72rem;
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+      .flagged-folder-action-btn:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
+      .flagged-folder-add-btn {
+        width: 100%;
+        background: none;
+        border: none;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.72rem;
+        padding: 5px 14px;
+        text-align: left;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .flagged-folder-add-btn:hover {
+        color: var(--accent);
+        background: var(--surface2);
+      }
+      /* Card move-to-folder control */
+      .flagged-card-folder-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .flagged-card-folder-select {
+        font-size: 0.67rem;
+        padding: 1px 4px;
+        border-radius: 3px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--muted);
+        cursor: pointer;
+        max-width: 130px;
+      }
+      .flagged-card-folder-select:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      /* Folder prompt mini-modal */
+      .folder-prompt-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        z-index: 500;
+        align-items: center;
+        justify-content: center;
+      }
+      .folder-prompt-overlay.open {
+        display: flex;
+      }
+      .folder-prompt-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px 22px;
+        min-width: 280px;
+        max-width: 360px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      }
+      .folder-prompt-title {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .folder-prompt-input {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 6px;
+        padding: 7px 10px;
+        font-size: 0.82rem;
+      }
+      .folder-prompt-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .folder-prompt-btns {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .folder-prompt-ok {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 18px;
+        font-size: 0.78rem;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .folder-prompt-ok:hover {
+        opacity: 0.88;
+      }
+      .folder-prompt-cancel {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 6px;
+        padding: 5px 14px;
+        font-size: 0.78rem;
+        cursor: pointer;
+      }
+      .folder-prompt-cancel:hover {
+        border-color: var(--text);
+        color: var(--text);
+      }
+
       /* === MODAL === */
       .modal-overlay {
         display: none;
@@ -3166,6 +3492,24 @@
       .btn-chat-copy-sel.copied {
         background: var(--green);
       }
+      .btn-chat-flag-sel {
+        background: var(--orange);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 4px 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-chat-flag-sel:hover {
+        opacity: 0.85;
+      }
+      .btn-chat-flag-sel:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
       .btn-chat-sel-action {
         background: none;
         border: none;
@@ -3632,6 +3976,7 @@
         padding: 0 2px;
         align-self: flex-end;
         margin-top: -2px;
+        user-select: none;
       }
 
       /* === DB SETUP MODAL === */
@@ -3779,6 +4124,26 @@
             />
           </svg>
           Conversations
+        </button>
+        <button
+          class="view-btn"
+          id="viewBtnFlagged"
+          onclick="switchView('flagged')"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
+            />
+            <line x1="4" y1="22" x2="4" y2="15" />
+          </svg>
+          Flagged
         </button>
       </div>
       <div class="header-files" id="fileNames"></div>
@@ -4482,6 +4847,88 @@
       </div>
     </div>
     <!-- end #view-conversations -->
+
+    <!-- FOLDER PROMPT MINI-MODAL -->
+    <div class="folder-prompt-overlay" id="folderPromptOverlay">
+      <div class="folder-prompt-box">
+        <div class="folder-prompt-title" id="folderPromptTitle">New Folder</div>
+        <input
+          class="folder-prompt-input"
+          id="folderPromptInput"
+          type="text"
+          maxlength="100"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="folder-prompt-btns">
+          <button class="folder-prompt-cancel" onclick="_folderPromptCancel()">
+            Cancel
+          </button>
+          <button class="folder-prompt-ok" onclick="_folderPromptOk()">
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONFIRM MINI-MODAL -->
+    <div class="folder-prompt-overlay" id="confirmOverlay">
+      <div class="folder-prompt-box">
+        <div class="folder-prompt-title" id="confirmOverlayTitle">
+          Are you sure?
+        </div>
+        <div class="folder-prompt-btns">
+          <button class="folder-prompt-cancel" onclick="_confirmCancel()">
+            Cancel
+          </button>
+          <button
+            class="folder-prompt-ok"
+            style="background: var(--red)"
+            onclick="_confirmOk()"
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FLAGGED VIEW -->
+    <div id="view-flagged">
+      <!-- Two-column layout mirroring conversations view -->
+      <div class="flagged-layout">
+        <!-- Left: flagged session list -->
+        <div class="flagged-sidebar">
+          <div class="flagged-sidebar-header">
+            <span class="flagged-sidebar-title"
+              >&#x2691; Flagged Conversations</span
+            >
+            <span class="flagged-session-count" id="flaggedCount"></span>
+          </div>
+          <!-- Folder navigation -->
+          <div class="flagged-folder-nav" id="flaggedFolderNav"></div>
+          <div id="flaggedList" class="flagged-list"></div>
+        </div>
+
+        <!-- Right: flagged chat thread -->
+        <div class="flagged-main conv-main">
+          <div class="chat-header" id="flaggedChatHeader">
+            <div
+              class="chat-empty"
+              style="flex: none; padding: 0; font-size: 0.78rem"
+            >
+              Select a flagged conversation
+            </div>
+          </div>
+          <div class="chat-thread" id="flaggedChatThread">
+            <div class="chat-empty">
+              No flagged conversation selected.<br />Choose one from the list on
+              the left.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- end #view-flagged -->
 
     <!-- DB SETUP MODAL -->
     <div class="modal-overlay" id="dbSetupModal">
@@ -5471,6 +5918,27 @@
           getDbDailyStats: () => invoke("get_db_daily_stats"),
           deleteInteractionsByDates: (dates) =>
             invoke("delete_interactions_by_dates", { args: { dates } }),
+          // Flagged conversations commands
+          flagSession: (sessionUuid, flaggedLogIds, sourceDbPath) =>
+            invoke("flag_session", {
+              sessionUuid,
+              flaggedLogIds,
+              sourceDbPath,
+            }),
+          getFlaggedSessions: () => invoke("get_flagged_sessions"),
+          getFlaggedSessionInteractions: (flagId) =>
+            invoke("get_flagged_session_interactions", { flagId }),
+          unflagSession: (flagId) => invoke("unflag_session", { flagId }),
+          // Flagged folder commands
+          getFlaggedFolders: () => invoke("get_flagged_folders"),
+          createFlaggedFolder: (name) =>
+            invoke("create_flagged_folder", { name }),
+          renameFlaggedFolder: (folderId, name) =>
+            invoke("rename_flagged_folder", { folderId, name }),
+          deleteFlaggedFolder: (folderId) =>
+            invoke("delete_flagged_folder", { folderId }),
+          moveToFlaggedFolder: (flagId, folderId) =>
+            invoke("move_to_flagged_folder", { flagId, folderId }),
         }
       })()
       if (!window.electronAPI.selectDataFolder) {
@@ -5509,6 +5977,25 @@
           Promise.resolve({ total: 0, days: [] })
       if (!window.electronAPI.deleteInteractionsByDates)
         window.electronAPI.deleteInteractionsByDates = _convStub
+      if (!window.electronAPI.flagSession)
+        window.electronAPI.flagSession = _convStub
+      if (!window.electronAPI.getFlaggedSessions)
+        window.electronAPI.getFlaggedSessions = () => Promise.resolve([])
+      if (!window.electronAPI.getFlaggedSessionInteractions)
+        window.electronAPI.getFlaggedSessionInteractions = () =>
+          Promise.resolve([])
+      if (!window.electronAPI.unflagSession)
+        window.electronAPI.unflagSession = _convStub
+      if (!window.electronAPI.getFlaggedFolders)
+        window.electronAPI.getFlaggedFolders = () => Promise.resolve([])
+      if (!window.electronAPI.createFlaggedFolder)
+        window.electronAPI.createFlaggedFolder = _convStub
+      if (!window.electronAPI.renameFlaggedFolder)
+        window.electronAPI.renameFlaggedFolder = _convStub
+      if (!window.electronAPI.deleteFlaggedFolder)
+        window.electronAPI.deleteFlaggedFolder = _convStub
+      if (!window.electronAPI.moveToFlaggedFolder)
+        window.electronAPI.moveToFlaggedFolder = _convStub
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -9122,6 +9609,873 @@
         })
 
       // ═══════════════════════════════════════════════════════════════
+      // FLAGGED VIEW
+      // ═══════════════════════════════════════════════════════════════
+
+      let activeFlagId = null
+      let flaggedSessions = []
+      let flaggedFolders = []
+      let activeFolderFilter = "all" // "all" | "unfiled" | <number folder_id>
+      let _flaggedViewContexts = [] // contexts collected from last-loaded flagged session
+
+      function onFlaggedSessionAdded() {
+        // Called from flagCurrentSession() after a successful flag
+        if (currentView === "flagged") loadFlaggedSessions()
+      }
+
+      async function loadFlaggedSessions() {
+        try {
+          ;[flaggedSessions, flaggedFolders] = await Promise.all([
+            window.electronAPI.getFlaggedSessions(),
+            window.electronAPI.getFlaggedFolders(),
+          ])
+        } catch (e) {
+          console.error("getFlaggedSessions error:", e)
+          flaggedSessions = []
+          flaggedFolders = []
+        }
+        renderFolderNav()
+        renderFlaggedList()
+      }
+
+      function renderFolderNav() {
+        const nav = document.getElementById("flaggedFolderNav")
+        if (!nav) return
+        const totalCount = flaggedSessions.length
+        const unfiledCount = flaggedSessions.filter((s) => !s.folderId).length
+
+        const allActiveCls = activeFolderFilter === "all" ? " active" : ""
+        const unfiledActiveCls =
+          activeFolderFilter === "unfiled" ? " active" : ""
+
+        let html = `
+          <div class="flagged-folder-row${allActiveCls}" onclick="setFolderFilter('all')"
+               data-folder-target="">
+            <span class="flagged-folder-row-icon">&#x2691;</span>
+            <span class="flagged-folder-row-name">All</span>
+            <span class="flagged-folder-count">${totalCount}</span>
+          </div>`
+
+        flaggedFolders.forEach((f) => {
+          const fActiveCls = activeFolderFilter === f.folderId ? " active" : ""
+          html += `
+            <div class="flagged-folder-row${fActiveCls}" onclick="setFolderFilter(${
+            f.folderId
+          })"
+                 data-folder-target="${f.folderId}">
+              <span class="flagged-folder-row-icon">&#128193;</span>
+              <span class="flagged-folder-row-name">${esc(f.name)}</span>
+              <span class="flagged-folder-count">${f.sessionCount}</span>
+              <span class="flagged-folder-actions">
+                <button class="flagged-folder-action-btn" title="Rename" onclick="renameFlaggedFolderPrompt(${
+                  f.folderId
+                },event)">&#9998;</button>
+                <button class="flagged-folder-action-btn" title="Delete folder (conversations move to Unfiled)" onclick="deleteFlaggedFolderConfirm(${
+                  f.folderId
+                },event)">&#128465;</button>
+              </span>
+            </div>`
+        })
+
+        html += `
+          <div class="flagged-folder-row${unfiledActiveCls}" onclick="setFolderFilter('unfiled')"
+               data-folder-target="">
+            <span class="flagged-folder-row-icon">&#128196;</span>
+            <span class="flagged-folder-row-name">Unfiled</span>
+            <span class="flagged-folder-count">${unfiledCount}</span>
+          </div>
+          <button class="flagged-folder-add-btn" onclick="createFlaggedFolderPrompt()">&#43; New Folder</button>`
+
+        nav.innerHTML = html
+      }
+
+      function setFolderFilter(val) {
+        activeFolderFilter = val
+        renderFolderNav()
+        renderFlaggedList()
+      }
+
+      // Mouse-based drag-and-drop (replaces HTML5 D&D which is unreliable in WKWebView)
+      const _mouseDrag = {
+        active: false,
+        flagId: null,
+        ghost: null,
+        initiated: false,
+        suppressNextClick: false,
+      }
+
+      function _startMouseDragFlagged(event, flagId) {
+        if (event.button !== 0) return
+        _mouseDrag.flagId = flagId
+        _mouseDrag.startX = event.clientX
+        _mouseDrag.startY = event.clientY
+        _mouseDrag.initiated = false
+        _mouseDrag.active = true
+        document.addEventListener("mousemove", _onDragMouseMove)
+        document.addEventListener("mouseup", _onDragMouseUp)
+      }
+
+      function _onDragMouseMove(event) {
+        if (!_mouseDrag.active) return
+        const dx = event.clientX - _mouseDrag.startX
+        const dy = event.clientY - _mouseDrag.startY
+        if (!_mouseDrag.initiated && Math.sqrt(dx * dx + dy * dy) > 6) {
+          _mouseDrag.initiated = true
+          // Create ghost label
+          const ghost = document.createElement("div")
+          ghost.className = "flagged-drag-ghost"
+          ghost.textContent = "Move to folder…"
+          document.body.appendChild(ghost)
+          _mouseDrag.ghost = ghost
+          // Dim the source card
+          const card = document.querySelector(
+            `.flagged-session-card[data-flag-id="${_mouseDrag.flagId}"]`,
+          )
+          if (card) card.classList.add("dragging")
+        }
+        if (_mouseDrag.initiated && _mouseDrag.ghost) {
+          _mouseDrag.ghost.style.left = event.clientX + 14 + "px"
+          _mouseDrag.ghost.style.top = event.clientY - 12 + "px"
+          // Highlight folder row under cursor
+          document.querySelectorAll(".flagged-folder-row").forEach((row) => {
+            const r = row.getBoundingClientRect()
+            const over =
+              event.clientX >= r.left &&
+              event.clientX <= r.right &&
+              event.clientY >= r.top &&
+              event.clientY <= r.bottom
+            row.classList.toggle("drag-over", over)
+          })
+        }
+      }
+
+      function _onDragMouseUp(event) {
+        document.removeEventListener("mousemove", _onDragMouseMove)
+        document.removeEventListener("mouseup", _onDragMouseUp)
+        if (!_mouseDrag.active) return
+        _mouseDrag.active = false
+        if (_mouseDrag.ghost) {
+          _mouseDrag.ghost.remove()
+          _mouseDrag.ghost = null
+        }
+        const card = document.querySelector(
+          `.flagged-session-card[data-flag-id="${_mouseDrag.flagId}"]`,
+        )
+        if (card) card.classList.remove("dragging")
+        document
+          .querySelectorAll(".flagged-folder-row")
+          .forEach((r) => r.classList.remove("drag-over"))
+        if (!_mouseDrag.initiated) return
+        // Suppress the click event that will fire right after mouseup
+        _mouseDrag.suppressNextClick = true
+        setTimeout(() => {
+          _mouseDrag.suppressNextClick = false
+        }, 0)
+        // Find which folder row the mouse is over
+        const el = document.elementFromPoint(event.clientX, event.clientY)
+        const row = el && el.closest(".flagged-folder-row")
+        if (!row) return
+        const folderTarget = row.dataset.folderTarget
+        const folderId =
+          folderTarget != null && folderTarget !== ""
+            ? Number(folderTarget)
+            : null
+        if (_mouseDrag.flagId != null)
+          moveToFlaggedFolderById(_mouseDrag.flagId, folderId)
+        _mouseDrag.flagId = null
+        _mouseDrag.initiated = false
+      }
+
+      function renderFlaggedList() {
+        const list = document.getElementById("flaggedList")
+        const countEl = document.getElementById("flaggedCount")
+
+        // Filter by active folder
+        let filtered = flaggedSessions
+        if (activeFolderFilter === "unfiled") {
+          filtered = flaggedSessions.filter((s) => !s.folderId)
+        } else if (typeof activeFolderFilter === "number") {
+          filtered = flaggedSessions.filter(
+            (s) => s.folderId === activeFolderFilter,
+          )
+        }
+
+        if (!filtered.length) {
+          list.innerHTML = `<div class="chat-empty" style="padding:30px;font-size:0.78rem">No flagged conversations${
+            activeFolderFilter !== "all" ? " in this folder" : " yet"
+          }.<br>${
+            activeFolderFilter === "all"
+              ? "Select interactions in a conversation and press &#x2691; Flag."
+              : ""
+          }</div>`
+          if (countEl) countEl.textContent = `${flaggedSessions.length} saved`
+          return
+        }
+        if (countEl) countEl.textContent = `${flaggedSessions.length} saved`
+
+        // Build folder <select> options for each card
+        const folderOptions = [
+          `<option value="">— unfiled —</option>`,
+          ...flaggedFolders.map(
+            (f) => `<option value="${f.folderId}">${esc(f.name)}</option>`,
+          ),
+        ].join("")
+
+        list.innerHTML = filtered
+          .map((s) => {
+            const uuidShort = `${esc(s.sessionUuid.slice(0, 8))}…${esc(
+              s.sessionUuid.slice(-8),
+            )}`
+            const flaggedAt = fmtTs(s.flaggedAt)
+            const dbName = s.sourceDbPath
+              ? esc(s.sourceDbPath.replace(/\\/g, "/").split("/").pop())
+              : ""
+            const activeCls = s.flagId === activeFlagId ? " active" : ""
+            const folderSelectVal = s.folderId ?? ""
+            const folderRow =
+              flaggedFolders.length > 0
+                ? `
+            <div class="flagged-card-folder-row">
+              <span style="font-size:0.67rem;color:var(--muted)">&#128193;</span>
+              <select class="flagged-card-folder-select" onchange="moveToFlaggedFolderById(${
+                s.flagId
+              },this.value===''?null:Number(this.value))" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
+                ${folderOptions.replace(
+                  `value="${folderSelectVal}"`,
+                  `value="${folderSelectVal}" selected`,
+                )}
+              </select>
+            </div>`
+                : ""
+            return `<div class="flagged-session-card${activeCls}" data-flag-id="${
+              s.flagId
+            }"
+              onmousedown="_startMouseDragFlagged(event,${s.flagId})"
+              onclick="selectFlaggedSession(${s.flagId})">
+            <span class="flagged-session-card-uuid" title="${esc(
+              s.sessionUuid,
+            )}">${uuidShort}</span>
+            <div class="flagged-session-card-badges">
+              <span class="flagged-badge">&#x2691; ${
+                s.flaggedCount
+              } flagged</span>
+            </div>
+            <div class="flagged-session-card-meta">
+              <span>${esc(flaggedAt)}</span>
+              ${s.culture ? `<span>${esc(s.culture)}</span>` : ""}
+              <span>${s.interactionCount} interactions</span>
+              ${
+                dbName
+                  ? `<span title="${esc(s.sourceDbPath)}">${dbName}</span>`
+                  : ""
+              }
+            </div>
+            ${folderRow}
+            <button class="flagged-session-unflag" onclick="unflagSession(${
+              s.flagId
+            },event)" onmousedown="event.stopPropagation()" title="Remove from Flagged">Remove</button>
+          </div>`
+          })
+          .join("")
+      }
+
+      async function selectFlaggedSession(flagId) {
+        // Suppress click if it was fired right after a completed mouse-drag
+        if (_mouseDrag.suppressNextClick) return
+        activeFlagId = flagId
+        exitFlaggedSelectMode()
+        // Highlight active card
+        document.querySelectorAll(".flagged-session-card").forEach((c) => {
+          c.classList.toggle("active", Number(c.dataset.flagId) === flagId)
+        })
+
+        const header = document.getElementById("flaggedChatHeader")
+        const thread = document.getElementById("flaggedChatThread")
+        header.innerHTML = `<span style="font-size:0.72rem;color:var(--muted)">Loading…</span>`
+        thread.innerHTML = ""
+
+        try {
+          const interactions =
+            await window.electronAPI.getFlaggedSessionInteractions(flagId)
+
+          // Collect unique contexts across all interactions
+          const seenCtxKey = new Set()
+          _flaggedViewContexts = []
+          interactions.forEach((r) => {
+            try {
+              const ctxs = r.contexts ? JSON.parse(r.contexts) : []
+              ctxs.forEach((c) => {
+                const key = `${c.name}|${c.value}`
+                if (!seenCtxKey.has(key)) {
+                  seenCtxKey.add(key)
+                  _flaggedViewContexts.push(c)
+                }
+              })
+            } catch {}
+          })
+
+          const session = flaggedSessions.find((s) => s.flagId === flagId)
+
+          if (session) {
+            const uuidShort = `${esc(session.sessionUuid.slice(0, 8))}…${esc(
+              session.sessionUuid.slice(-8),
+            )}`
+            const ctxBtn = _flaggedViewContexts.length
+              ? `<button class="session-ctx-info-btn" onclick="openFlaggedContextsModal()" title="View session contexts">&#8505;</button>`
+              : ""
+            header.innerHTML = `
+              <div class="chat-session-info" title="${esc(
+                session.sessionUuid,
+              )}">${uuidShort}</div>
+              <span class="chat-meta">${esc(fmtTs(session.firstTs))}</span>
+              ${ctxBtn}
+              <div class="chat-spacer"></div>
+              <span class="chat-meta">${
+                session.interactionCount
+              } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
+              <span class="chat-meta" style="color:var(--orange)">&#x2691; ${
+                session.flaggedCount
+              } flagged</span>
+              <button class="btn-chat-copy-sel" id="flaggedCopySelBtn" style="display:none" onclick="copyFlaggedSelectedTurns(this)">&#x2398; Copy 0</button>
+              <span class="chat-meta" id="flaggedSelCount" style="min-width:6ch;text-align:right"></span>
+              <span class="btn-chat-sel-actions" id="flaggedSelAllBtn" style="display:none">
+                <button class="btn-chat-sel-action" onclick="selectAllFlaggedTurns()">All</button>
+                <span style="opacity:0.4">/</span>
+                <button class="btn-chat-sel-action" onclick="deselectAllFlaggedTurns()">None</button>
+              </span>
+              <button class="btn-chat-select" id="flaggedSelectModeBtn" onclick="toggleFlaggedSelectMode()">Select</button>
+              <button class="btn-chat-select" style="color:var(--red);border-color:var(--red)" onclick="removeFlaggedConversation(${
+                session.flagId
+              })" title="Remove flag">&#x2715; Remove flag</button>
+            `
+          }
+
+          thread.innerHTML = renderFlaggedThread(interactions)
+        } catch (e) {
+          console.error("getFlaggedSessionInteractions error:", e)
+          header.innerHTML = `<span style="font-size:0.72rem;color:var(--red)">Error loading flagged conversation</span>`
+          thread.innerHTML = `<div class="chat-empty">Failed to load interactions.</div>`
+        }
+      }
+
+      // ── Flagged-view select mode ─────────────────────────────────────
+      let flaggedSelectMode = false
+      const flaggedSelectedTurnIds = new Set()
+
+      function onFlaggedTurnClick(turnEl, event) {
+        if (_longPressActivated) {
+          _longPressActivated = false
+          return
+        }
+        if (!flaggedSelectMode) {
+          if (event && event.detail >= 3) {
+            enterFlaggedSelectMode()
+            flaggedSelectedTurnIds.add(turnEl.dataset.turnId)
+            turnEl.classList.add("selected")
+            _updateFlaggedSelectHeader()
+          }
+          return
+        }
+        const id = turnEl.dataset.turnId
+        if (flaggedSelectedTurnIds.has(id)) {
+          flaggedSelectedTurnIds.delete(id)
+          turnEl.classList.remove("selected")
+        } else {
+          flaggedSelectedTurnIds.add(id)
+          turnEl.classList.add("selected")
+        }
+        _updateFlaggedSelectHeader()
+      }
+
+      function _updateFlaggedSelectHeader() {
+        const count = flaggedSelectedTurnIds.size
+        const copyBtn = document.getElementById("flaggedCopySelBtn")
+        const countEl = document.getElementById("flaggedSelCount")
+        if (copyBtn) {
+          copyBtn.style.display = count > 0 ? "" : "none"
+          copyBtn.innerHTML = `&#x2398; Copy ${count}`
+        }
+        if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
+      }
+
+      function enterFlaggedSelectMode() {
+        flaggedSelectMode = true
+        document
+          .getElementById("flaggedChatThread")
+          .closest(".conv-main")
+          .classList.add("chat-selecting")
+        const selBtn = document.getElementById("flaggedSelectModeBtn")
+        if (selBtn) {
+          selBtn.textContent = "Cancel"
+          selBtn.classList.add("active")
+        }
+        const copyBtn = document.getElementById("flaggedCopySelBtn")
+        if (copyBtn) copyBtn.style.display = "none"
+        const selAllBtn = document.getElementById("flaggedSelAllBtn")
+        if (selAllBtn) selAllBtn.style.display = ""
+      }
+
+      function exitFlaggedSelectMode() {
+        flaggedSelectMode = false
+        const convMain = document
+          .getElementById("flaggedChatThread")
+          .closest(".conv-main")
+        if (convMain) convMain.classList.remove("chat-selecting")
+        flaggedSelectedTurnIds.clear()
+        document
+          .querySelectorAll("#flaggedChatThread .chat-turn.selected")
+          .forEach((t) => t.classList.remove("selected"))
+        const selBtn = document.getElementById("flaggedSelectModeBtn")
+        if (selBtn) {
+          selBtn.textContent = "Select"
+          selBtn.classList.remove("active")
+        }
+        const copyBtn = document.getElementById("flaggedCopySelBtn")
+        if (copyBtn) copyBtn.style.display = "none"
+        const countEl = document.getElementById("flaggedSelCount")
+        if (countEl) countEl.textContent = ""
+        const selAllBtn = document.getElementById("flaggedSelAllBtn")
+        if (selAllBtn) selAllBtn.style.display = "none"
+      }
+
+      function toggleFlaggedSelectMode() {
+        if (flaggedSelectMode) exitFlaggedSelectMode()
+        else enterFlaggedSelectMode()
+      }
+
+      function selectAllFlaggedTurns() {
+        document
+          .querySelectorAll("#flaggedChatThread .chat-turn")
+          .forEach((el) => {
+            flaggedSelectedTurnIds.add(el.dataset.turnId)
+            el.classList.add("selected")
+          })
+        _updateFlaggedSelectHeader()
+      }
+
+      function deselectAllFlaggedTurns() {
+        document
+          .querySelectorAll("#flaggedChatThread .chat-turn")
+          .forEach((el) => el.classList.remove("selected"))
+        flaggedSelectedTurnIds.clear()
+        _updateFlaggedSelectHeader()
+      }
+
+      function copyFlaggedSelectedTurns(btn) {
+        const thread = document.getElementById("flaggedChatThread")
+        const byId = [...thread.querySelectorAll(".chat-turn")].filter((el) =>
+          flaggedSelectedTurnIds.has(el.dataset.turnId),
+        )
+        _doCopyTurns(byId.length ? byId : [], btn)
+      }
+
+      function removeFlaggedConversation(flagId) {
+        _showConfirm("Remove this flagged conversation?", async () => {
+          try {
+            await window.electronAPI.unflagSession(flagId)
+            activeFlagId = null
+            _flaggedViewContexts = []
+            document.getElementById("flaggedChatHeader").innerHTML =
+              '<div class="chat-empty" style="flex:none;padding:0;font-size:0.78rem">Select a flagged conversation</div>'
+            document.getElementById("flaggedChatThread").innerHTML =
+              '<div class="chat-empty">No flagged conversation selected.<br>Choose one from the list on the left.</div>'
+            exitFlaggedSelectMode()
+            await loadFlaggedSessions()
+          } catch (e) {
+            console.error("removeFlaggedConversation error:", e)
+          }
+        })
+      }
+
+      function openFlaggedContextsModal() {
+        const ctx = _flaggedViewContexts
+        document.getElementById("sessionCtxModalTitle").textContent =
+          "Session Contexts"
+        const body = document.getElementById("sessionCtxModalBody")
+        if (!ctx.length) {
+          body.innerHTML =
+            '<div style="color:var(--muted);font-size:0.8rem;text-align:center;padding:24px">No context data for this session.</div>'
+        } else {
+          const sorted = [...ctx].sort((a, b) =>
+            (a.name || "").localeCompare(b.name || ""),
+          )
+          const rows = sorted
+            .map((c) => {
+              const valClass =
+                c.value === "true"
+                  ? ' class="ctx-val-true"'
+                  : c.value === "false"
+                  ? ' class="ctx-val-false"'
+                  : ""
+              return `<tr><td>${esc(c.name)}</td><td${valClass}>${esc(
+                c.value,
+              )}</td></tr>`
+            })
+            .join("")
+          body.innerHTML = `<table class="ctx-detail-table"><thead><tr><th>Context name</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`
+        }
+        document.getElementById("sessionContextModal").classList.add("open")
+      }
+
+      async function unflagSession(flagId, event) {
+        event.stopPropagation()
+        try {
+          await window.electronAPI.unflagSession(flagId)
+          if (activeFlagId === flagId) {
+            activeFlagId = null
+            document.getElementById(
+              "flaggedChatHeader",
+            ).innerHTML = `<div class="chat-empty" style="flex:none;padding:0;font-size:0.78rem">Select a flagged conversation</div>`
+            document.getElementById(
+              "flaggedChatThread",
+            ).innerHTML = `<div class="chat-empty">No flagged conversation selected.<br>Choose one from the list on the left.</div>`
+          }
+          await loadFlaggedSessions()
+        } catch (e) {
+          console.error("unflagSession error:", e)
+        }
+      }
+
+      // ── Folder CRUD ────────────────────────────────────────────────
+
+      // Custom prompt modal (replaces window.prompt which is unreliable in Tauri)
+      let _folderPromptCallback = null
+      function _showFolderPrompt(title, defaultValue, callback) {
+        _folderPromptCallback = callback
+        document.getElementById("folderPromptTitle").textContent = title
+        const inp = document.getElementById("folderPromptInput")
+        inp.value = defaultValue || ""
+        document.getElementById("folderPromptOverlay").classList.add("open")
+        setTimeout(() => {
+          inp.focus()
+          inp.select()
+        }, 50)
+      }
+      function _folderPromptOk() {
+        const val = document.getElementById("folderPromptInput").value.trim()
+        document.getElementById("folderPromptOverlay").classList.remove("open")
+        if (val && _folderPromptCallback) _folderPromptCallback(val)
+        _folderPromptCallback = null
+      }
+      function _folderPromptCancel() {
+        document.getElementById("folderPromptOverlay").classList.remove("open")
+        _folderPromptCallback = null
+      }
+      // Allow Enter/Escape in the prompt input
+      document
+        .getElementById("folderPromptInput")
+        .addEventListener("keydown", (e) => {
+          if (e.key === "Enter") _folderPromptOk()
+          else if (e.key === "Escape") _folderPromptCancel()
+        })
+
+      // Confirm overlay (for destructive actions without text input)
+      let _confirmCallback = null
+      function _showConfirm(message, callback) {
+        _confirmCallback = callback
+        document.getElementById("confirmOverlayTitle").textContent = message
+        document.getElementById("confirmOverlay").classList.add("open")
+      }
+      function _confirmOk() {
+        document.getElementById("confirmOverlay").classList.remove("open")
+        const cb = _confirmCallback
+        _confirmCallback = null
+        if (cb) cb()
+      }
+      function _confirmCancel() {
+        document.getElementById("confirmOverlay").classList.remove("open")
+        _confirmCallback = null
+      }
+      document.addEventListener("keydown", (e) => {
+        if (
+          e.key === "Escape" &&
+          document.getElementById("confirmOverlay").classList.contains("open")
+        ) {
+          _confirmCancel()
+        }
+      })
+
+      // ── Long-press / triple-click: enter select mode ────────────────
+      let _longPressTimer = null
+      let _longPressTarget = null
+      let _longPressActivated = false // suppress the click that follows mouseup
+
+      function onTurnMousedown(turnEl, event, clickFn) {
+        if (event.button !== 0) return
+        _longPressTarget = turnEl
+        _longPressActivated = false
+        _longPressTimer = setTimeout(() => {
+          _longPressTimer = null
+          _longPressActivated = false // allow this direct invocation through
+          clickFn(turnEl, { detail: 3 }) // enter select mode + select turn
+          _longPressActivated = true // now suppress the DOM click that follows mouseup
+        }, 500)
+      }
+
+      function onTurnMouseup() {
+        if (_longPressTimer) {
+          clearTimeout(_longPressTimer)
+          _longPressTimer = null
+        }
+      }
+
+      // Prevent browser text-selection on triple-click (and during long-press drag)
+      // (capture phase fires before the browser selects text in child nodes)
+      document.addEventListener(
+        "mousedown",
+        (e) => {
+          if (e.detail >= 3 && e.target.closest(".chat-turn"))
+            e.preventDefault()
+        },
+        true,
+      )
+      document.addEventListener("mouseup", onTurnMouseup)
+      document.addEventListener("mouseleave", onTurnMouseup)
+
+      // ── Global Cmd+C / Ctrl+C copy shortcut ─────────────────────────
+      document.addEventListener("keydown", (e) => {
+        const active = document.activeElement
+        const inInput =
+          active &&
+          (active.tagName === "INPUT" ||
+            active.tagName === "TEXTAREA" ||
+            active.isContentEditable)
+        if (inInput) return
+
+        // Cmd/Ctrl+F — flag selected interactions (conversations select mode only)
+        if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+          if (chatSelectMode && selectedTurnIds.size > 0) {
+            e.preventDefault()
+            const btn = document.getElementById("chatFlagSelBtn")
+            if (btn) btn.click()
+          }
+          return
+        }
+
+        const isCopy = (e.metaKey || e.ctrlKey) && e.key === "c"
+        if (!isCopy) return
+        // Don't intercept if the user has a text selection or is in an input
+        const sel = window.getSelection()
+        if (sel && sel.toString().length > 0) return
+        if (chatSelectMode && selectedTurnIds.size > 0) {
+          e.preventDefault()
+          const btn = document.getElementById("chatCopySelBtn")
+          if (btn) copySelectedTurns(btn)
+        } else if (flaggedSelectMode && flaggedSelectedTurnIds.size > 0) {
+          e.preventDefault()
+          const btn = document.getElementById("flaggedCopySelBtn")
+          if (btn) copyFlaggedSelectedTurns(btn)
+        }
+      })
+
+      function createFlaggedFolderPrompt() {
+        _showFolderPrompt("New Folder", "", async (name) => {
+          try {
+            await window.electronAPI.createFlaggedFolder(name)
+            await loadFlaggedSessions()
+          } catch (e) {
+            console.error("createFlaggedFolder error:", e)
+          }
+        })
+      }
+
+      function renameFlaggedFolderPrompt(folderId, event) {
+        event.stopPropagation()
+        const folder = flaggedFolders.find((f) => f.folderId === folderId)
+        _showFolderPrompt("Rename Folder", folder?.name ?? "", async (name) => {
+          try {
+            await window.electronAPI.renameFlaggedFolder(folderId, name)
+            await loadFlaggedSessions()
+          } catch (e) {
+            console.error("renameFlaggedFolder error:", e)
+          }
+        })
+      }
+
+      async function deleteFlaggedFolderConfirm(folderId, event) {
+        event.stopPropagation()
+        try {
+          await window.electronAPI.deleteFlaggedFolder(folderId)
+          if (activeFolderFilter === folderId) activeFolderFilter = "all"
+          await loadFlaggedSessions()
+        } catch (e) {
+          console.error("deleteFlaggedFolder error:", e)
+        }
+      }
+
+      async function moveToFlaggedFolderById(flagId, folderId) {
+        try {
+          await window.electronAPI.moveToFlaggedFolder(flagId, folderId)
+          await loadFlaggedSessions()
+          // Re-select active session if it matches to keep the thread visible
+          if (activeFlagId === flagId) {
+            document.querySelectorAll(".flagged-session-card").forEach((c) => {
+              c.classList.toggle("active", Number(c.dataset.flagId) === flagId)
+            })
+          }
+        } catch (e) {
+          console.error("moveToFlaggedFolder error:", e)
+        }
+      }
+
+      function renderFlaggedThread(interactions) {
+        if (!interactions || interactions.length === 0) {
+          return `<div class="chat-empty">No interactions stored.</div>`
+        }
+
+        // Build flagged log ID set for highlighting
+        const flaggedIds = new Set(
+          interactions.filter((r) => r.isFlagged).map((r) => String(r.logId)),
+        )
+
+        // Simple turn grouper (mirrors buildChatTurns logic but self-contained)
+        const isGenAiRow = (r) =>
+          r.mainInteractionType === "GenerativeAI" ||
+          (r.allInteractionTypes || "").includes("GenerativeAI")
+        const hasBotOutput = (r) => Boolean(r.outputText)
+
+        const turns = []
+        let i = 0
+        while (i < interactions.length) {
+          const row = interactions[i]
+          const t = row.mainInteractionType
+          const isSystemOnly =
+            (t === "Event" || t === "LinkClick") &&
+            isInternalValue(row.interactionValue) &&
+            !row.outputText
+          if (isSystemOnly) {
+            turns.push({ system: row, userRow: null, botRows: [] })
+            i++
+            continue
+          }
+          const userRow =
+            t !== "Event" &&
+            t !== "LinkClick" &&
+            !isInternalValue(row.interactionValue) &&
+            row.interactionValue
+              ? row
+              : null
+          const linkClicked =
+            t === "LinkClick" && row.interactionValue
+              ? row.interactionValue
+              : null
+          const dialogNav =
+            t === "Dialog" && /^\d+:\d+$/.test(row.interactionValue || "")
+              ? row
+              : null
+          const botRows = []
+          let j = i
+          if (hasBotOutput(row)) {
+            botRows.push(row)
+            j++
+            while (j < interactions.length) {
+              const next = interactions[j]
+              if (
+                !isInternalValue(next.interactionValue) &&
+                next.interactionValue
+              )
+                break
+              if (!hasBotOutput(next)) {
+                j++
+                continue
+              }
+              botRows.push(next)
+              j++
+            }
+          } else {
+            j = i + 1
+          }
+          turns.push({ system: null, userRow, botRows, linkClicked, dialogNav })
+          i = j
+        }
+
+        const html = turns
+          .map((turn) => {
+            if (turn.system) {
+              const t = turn.system.mainInteractionType
+              const label =
+                t === "Event"
+                  ? "Event: " + esc(turn.system.interactionValue || "")
+                  : "Link clicked"
+              return `<div class="system-pill">${label}</div>`
+            }
+            const turnId = String(
+              (turn.userRow || turn.botRows[0])?.logId ?? Math.random(),
+            )
+            const isFlagged = flaggedIds.has(turnId)
+            const flaggedCls = isFlagged ? " flagged-mark" : ""
+
+            let inner = ""
+            if (turn.linkClicked) {
+              inner += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
+                turn.linkClicked,
+              )}</span></div></div>`
+            }
+            if (turn.dialogNav) {
+              inner += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#8627;</span><span class="link-click-pill-label">Dialog started</span><span class="link-click-url">${esc(
+                turn.dialogNav.interactionValue,
+              )}</span></div></div>`
+            }
+            if (turn.userRow) {
+              inner += `<div class="user-group"><span class="user-label">User</span><div class="bubble user">${
+                chatHl(turn.userRow.interactionValue, false).body
+              }</div><span class="bubble-ts">${esc(
+                turn.userRow.timestampStart
+                  ? turn.userRow.timestampStart.slice(11, 16)
+                  : "",
+              )}</span></div>`
+            }
+            if (turn.botRows.length) {
+              const hasAi = turn.botRows.some(isGenAiRow)
+              const avatarClass = hasAi ? "genai" : ""
+              const label = hasAi
+                ? `Bot <span class="bot-name-badge">AI</span>`
+                : "Bot"
+              inner += `<div class="bot-group"><div class="bot-group-header"><div class="bot-avatar ${avatarClass}">B</div><span class="bot-name">${label}</span></div>`
+              turn.botRows.forEach((br) => {
+                const bubbleClass = isGenAiRow(br) ? "genai" : "bot"
+                const { body, options, ctas, asks } = chatHl(br.outputText)
+                const optionsHtml = options.length
+                  ? `<div class="dialog-options">${options
+                      .map(
+                        (o) =>
+                          `<span class="dialog-option-chip">${esc(o)}</span>`,
+                      )
+                      .join("")}</div>`
+                  : ""
+                const ctasHtml = ctas.length
+                  ? `<div class="cta-buttons">${ctas
+                      .map(
+                        (c) =>
+                          `<button class="cta-btn" onclick="previewUrl('${esc(
+                            c.href,
+                          )}');return false">&#x2197; ${esc(c.text)}</button>`,
+                      )
+                      .join("")}</div>`
+                  : ""
+                const detail = renderBubbleDetail(br)
+                inner += `<div class="bubble ${bubbleClass}" onclick="toggleBubbleDetail(${br.logId})">
+                  ${body}
+                  <span class="bubble-expand-hint">&#x25BE; details</span>
+                  <div class="bubble-detail" data-logid="${br.logId}">${detail}</div>
+                </div>${optionsHtml}${ctasHtml}`
+              })
+              const tsRow = turn.botRows[turn.botRows.length - 1]
+              inner += `<span class="bubble-ts">${esc(
+                tsRow.timestampStart ? tsRow.timestampStart.slice(11, 16) : "",
+              )}</span></div>`
+            }
+            return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onFlaggedTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onFlaggedTurnClick(this,event)">${inner}</div>`
+          })
+          .join("")
+
+        return (
+          html ||
+          `<div class="chat-empty">No renderable interactions found.</div>`
+        )
+      }
+
+      // ═══════════════════════════════════════════════════════════════
       // CONVERSATIONS VIEW
       // ═══════════════════════════════════════════════════════════════
 
@@ -9136,21 +10490,29 @@
           .classList.toggle("hidden", name !== "content")
         const convEl = document.getElementById("view-conversations")
         convEl.classList.toggle("active", name === "conversations")
+        const flaggedEl = document.getElementById("view-flagged")
+        flaggedEl.classList.toggle("active", name === "flagged")
         document
           .getElementById("viewBtnContent")
           .classList.toggle("active", name === "content")
         document
           .getElementById("viewBtnConversations")
           .classList.toggle("active", name === "conversations")
+        document
+          .getElementById("viewBtnFlagged")
+          .classList.toggle("active", name === "flagged")
         if (name === "conversations") {
           onEnterConversationsView()
+        }
+        if (name === "flagged") {
+          loadFlaggedSessions()
         }
       }
 
       // Apply initial view on load
-      if (currentView === "conversations") {
+      if (currentView === "conversations" || currentView === "flagged") {
         // Defer until after all init runs
-        setTimeout(() => switchView("conversations"), 0)
+        setTimeout(() => switchView(currentView), 0)
       }
 
       // ── DB setup & status ───────────────────────────────────────────
@@ -10198,8 +11560,21 @@
       const selectedTurnIds = new Set()
       let chatCopyFormat = localStorage.getItem("chat-copy-format") || "table"
 
-      function onTurnClick(turnEl) {
-        if (!chatSelectMode) return
+      function onTurnClick(turnEl, event) {
+        if (_longPressActivated) {
+          _longPressActivated = false
+          return
+        }
+        if (!chatSelectMode) {
+          // Triple-click: enter select mode and immediately select this turn
+          if (event && event.detail >= 3) {
+            enterChatSelectMode()
+            selectedTurnIds.add(turnEl.dataset.turnId)
+            turnEl.classList.add("selected")
+            _updateChatSelectHeader()
+          }
+          return
+        }
         const id = turnEl.dataset.turnId
         if (selectedTurnIds.has(id)) {
           selectedTurnIds.delete(id)
@@ -10214,10 +11589,14 @@
       function _updateChatSelectHeader() {
         const count = selectedTurnIds.size
         const copyBtn = document.getElementById("chatCopySelBtn")
+        const flagBtn = document.getElementById("chatFlagSelBtn")
         const countEl = document.getElementById("chatSelCount")
         if (copyBtn) {
           copyBtn.style.display = count > 0 ? "" : "none"
           copyBtn.innerHTML = `&#x2398; Copy ${count}`
+        }
+        if (flagBtn) {
+          flagBtn.style.display = count > 0 ? "" : "none"
         }
         if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
       }
@@ -10236,6 +11615,8 @@
         }
         const copyBtn = document.getElementById("chatCopySelBtn")
         if (copyBtn) copyBtn.style.display = "none"
+        const flagBtn = document.getElementById("chatFlagSelBtn")
+        if (flagBtn) flagBtn.style.display = "none"
         const selAllBtn = document.getElementById("chatSelAllBtn")
         if (selAllBtn) selAllBtn.style.display = ""
       }
@@ -10304,6 +11685,42 @@
             )
           : selected
         _doCopyTurns(byId.length ? byId : selected, btn)
+      }
+
+      async function flagCurrentSession(btn) {
+        if (!activeSessionUuid || selectedTurnIds.size === 0) return
+        const flaggedLogIds = [...selectedTurnIds]
+          .map((id) => parseInt(id, 10))
+          .filter((n) => !isNaN(n))
+        if (flaggedLogIds.length === 0) return
+
+        const origText = btn.innerHTML
+        btn.disabled = true
+        btn.innerHTML = "Flagging…"
+        try {
+          const flagId = await window.electronAPI.flagSession(
+            activeSessionUuid,
+            flaggedLogIds,
+            convDbPath || "",
+          )
+          if (flagId != null) {
+            btn.innerHTML = "&#x2713; Flagged"
+            // Notify flagged view to refresh if it's the active view
+            if (typeof onFlaggedSessionAdded === "function")
+              onFlaggedSessionAdded()
+            setTimeout(() => {
+              btn.innerHTML = origText
+              btn.disabled = false
+            }, 1800)
+          } else {
+            btn.innerHTML = origText
+            btn.disabled = false
+          }
+        } catch (e) {
+          console.error("Flag error:", e)
+          btn.innerHTML = origText
+          btn.disabled = false
+        }
       }
 
       function _extractTurnContent(turn) {
@@ -10977,6 +12394,7 @@
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
               <button class="btn-chat-copy-sel" id="chatCopySelBtn" style="display:none" onclick="copySelectedTurns(this)">&#x2398; Copy 0</button>
+              <button class="btn-chat-flag-sel" id="chatFlagSelBtn" style="display:none" onclick="flagCurrentSession(this)" title="Save flagged conversation to Flagged view">&#x2691; Flag</button>
               <span class="chat-meta" id="chatSelCount" style="min-width:6ch;text-align:right"></span>
               <span class="btn-chat-sel-actions" id="chatSelAllBtn" style="display:none;font-size:0.72rem;color:var(--muted);display:none">
                 <button class="btn-chat-sel-action" onclick="selectAllTurns()">All</button>
@@ -11478,12 +12896,11 @@
           )
           const selectedCls = selectedTurnIds.has(turnId) ? " selected" : ""
           const turnInner = renderTurnInner(turn)
-          return `<div class="chat-turn${selectedCls}" data-turn-id="${turnId}" onclick="onTurnClick(this)">${turnInner}</div>`
+          return `<div class="chat-turn${selectedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onTurnClick(this,event)">${turnInner}</div>`
         }
 
         function renderTurnInner(turn) {
           let html = ""
-          // (closing brace for renderTurnInner is at end of turn content block)
           if (turn.linkClicked) {
             html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
               turn.linkClicked,
