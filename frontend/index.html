@@ -305,6 +305,32 @@
       .sopt[data-tooltip]:hover::after {
         opacity: 1;
       }
+      .search-wrap-global[data-tooltip]::after,
+      .conv-search-wrap[data-tooltip]::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.72rem;
+        font-weight: 400;
+        letter-spacing: 0;
+        white-space: nowrap;
+        padding: 5px 9px;
+        border-radius: 5px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+        z-index: 200;
+      }
+      .search-wrap-global[data-tooltip]:hover::after,
+      .conv-search-wrap[data-tooltip]:hover::after {
+        opacity: 1;
+      }
 
       /* === TABS === */
       .tab-bar {
@@ -2163,7 +2189,6 @@
         border-right: 1px solid var(--border);
         display: flex;
         flex-direction: column;
-        overflow: hidden;
         background: var(--surface);
         position: relative;
       }
@@ -2198,6 +2223,7 @@
         align-items: stretch;
         flex: 1;
         min-width: 0;
+        position: relative;
       }
       .conv-search-inner {
         position: relative;
@@ -2775,6 +2801,15 @@
       }
       .ctx-chip.val-false {
         color: var(--muted);
+      }
+      .ctx-chip.val-not-set {
+        border-style: dashed;
+        color: var(--muted);
+        font-style: italic;
+      }
+      .ctx-chip.val-not-set.active {
+        border-style: dashed;
+        color: var(--accent);
       }
 
       /* === SESSION CONTEXT INFO BUTTON === */
@@ -3652,7 +3687,7 @@
       <!-- GLOBAL SEARCH -->
       <div class="global-search-bar">
         <div class="search-row">
-          <div class="search-wrap-global">
+          <div class="search-wrap-global" data-tooltip="space = AND · | = OR">
             <svg
               width="14"
               height="14"
@@ -4056,13 +4091,13 @@
               >
                 #ID
               </button>
-              <div class="conv-search-wrap">
+              <div class="conv-search-wrap" data-tooltip="space = AND · | = OR">
                 <div class="conv-search-inner">
                   <input
                     type="text"
                     class="conv-search"
                     id="convSearch"
-                    placeholder="Search conversations…"
+                    placeholder="Search…"
                     autocomplete="off"
                     spellcheck="false"
                   />
@@ -5401,25 +5436,62 @@
           return null
         }
       }
-      // Cached highlight regex — avoids rebuilding per hl() call during render
+      // Parse a query string into OR groups of AND terms (mirrors the worker's parseOrGroups).
+      // Returns flat unique list of all terms for highlighting.
+      function parseQueryTermsForHl(q) {
+        if (!q) return []
+        if (searchRegex) return [q]
+        return [
+          ...new Set(
+            q.split("|").flatMap((g) => g.trim().split(/\s+/).filter(Boolean)),
+          ),
+        ]
+      }
+      // Build a global-flag regex for a single escaped term.
+      function _buildTermHlRegex(term) {
+        try {
+          let pat = searchRegex
+            ? term
+            : term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          if (searchWord)
+            pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
+          return new RegExp(pat, (searchCase ? "" : "i") + "g")
+        } catch (e) {
+          return null
+        }
+      }
+      // Cached highlight regexes keyed by full query + options.
       let _hlCacheQ = null
       let _hlCacheOpts = null
-      let _hlCacheRe = undefined // undefined = not yet computed
-      function _getHlRegex(q) {
+      let _hlCacheRes = undefined // undefined = not yet computed; array of RegExp on hit
+      function _getHlRegexes(q) {
         const opts = "" + searchCase + searchWord + searchRegex
-        if (q === _hlCacheQ && opts === _hlCacheOpts) return _hlCacheRe
+        if (q === _hlCacheQ && opts === _hlCacheOpts) return _hlCacheRes
         _hlCacheQ = q
         _hlCacheOpts = opts
-        const re = buildSearchRegex(q)
-        _hlCacheRe = re ? new RegExp(re.source, re.flags + "g") : null
-        return _hlCacheRe
+        const terms = parseQueryTermsForHl(q)
+        _hlCacheRes = terms.map((t) => _buildTermHlRegex(t)).filter(Boolean)
+        return _hlCacheRes
+      }
+      // For backwards-compat (used by updateRegexIndicator).
+      function _getHlRegex(q) {
+        const res = _getHlRegexes(q)
+        return res && res.length ? res[0] : null
       }
       function hl(text, q) {
         if (!q || text == null) return esc(text)
-        const reG = _getHlRegex(q)
-        if (!reG) return esc(text)
-        const e = esc(text)
-        return e.replace(reG, (m) => "<mark>" + m + "</mark>")
+        const reGs = _getHlRegexes(q)
+        if (!reGs || !reGs.length) return esc(text)
+        let e = esc(text)
+        // Apply each term's regex in sequence; avoid double-marking by working on
+        // placeholder tokens replaced back at the end.
+        for (const reG of reGs) {
+          reG.lastIndex = 0
+          e = e.replace(reG, (m) => "\x00MARK\x00" + m + "\x00/MARK\x00")
+        }
+        return e
+          .replace(/\x00MARK\x00/g, "<mark>")
+          .replace(/\x00\/MARK\x00/g, "</mark>")
       }
       function strip(t) {
         return (t || "")
@@ -5854,6 +5926,7 @@
           }
         }
         return contentContextFilters.every((f) => {
+          if (f.value === "__not_set__") return !ctxSet[f.name]
           const vals = ctxSet[f.name]
           return vals && vals.includes(f.value)
         })
@@ -5895,14 +5968,17 @@
         if (!answersData.length) return ""
         const listId = "ctx-list-" + toggleId
         const btnId = "ctx-btn-" + toggleId
-        // Highlight the toggle button when any contextual answer matches the query
-        const _matchRe = q ? buildSearchRegex(q) : null
+        // Highlight the toggle button when any contextual answer matches any search term
+        const _hlRegs = q ? _getHlRegexes(q) : null
         const hasTextMatch =
-          _matchRe &&
-          answersData.some((ans) => {
-            _matchRe.lastIndex = 0
-            return _matchRe.test(ans.displayText)
-          })
+          _hlRegs &&
+          _hlRegs.length > 0 &&
+          answersData.some((ans) =>
+            _hlRegs.some((re) => {
+              re.lastIndex = 0
+              return re.test(ans.displayText)
+            }),
+          )
         let html =
           '<button id="' +
           btnId +
@@ -9476,6 +9552,45 @@
             return { name, value, count }
           },
         )
+
+        // Add "not set" options: for each known variable name, count items that
+        // have at least one Answer output where that variable is not explicitly set.
+        const allNames = new Set(contentContextOptions.map((o) => o.name))
+        for (const name of allNames) {
+          let count = 0
+          for (const a of allArticles) {
+            if (
+              a.Outputs.some((o) => {
+                if (o.Type !== "Answer") return false
+                const cvs = o.ContextVariables || []
+                return !cvs.some((cv) => {
+                  const cvName = ctxVarMap.get(cv.Id)
+                  return (
+                    cvName === name && cv.Values && !cv.Values.includes("any")
+                  )
+                })
+              })
+            )
+              count++
+          }
+          for (const d of allDialogsCombined) {
+            if (
+              (d.nodes || []).some((node) =>
+                ((node.output && node.output.items) || []).some((item) => {
+                  if (item.type !== "Answer") return false
+                  const cvs = item.contextVariables || []
+                  return !cvs.some((cv) => {
+                    const cvName = ctxVarMap.get(cv.id)
+                    return cvName === name && cv.value
+                  })
+                }),
+              )
+            )
+              count++
+          }
+          if (count > 0)
+            contentContextOptions.push({ name, value: "__not_set__", count })
+        }
       }
 
       function _updateContentCtxBadge() {
@@ -9495,10 +9610,11 @@
         const q = (searchQ || "").toLowerCase().trim()
         const groups = {}
         for (const o of contentContextOptions) {
+          const displayValue = o.value === "__not_set__" ? "not set" : o.value
           if (
             q &&
             !o.name.toLowerCase().includes(q) &&
-            !o.value.toLowerCase().includes(q)
+            !displayValue.toLowerCase().includes(q)
           )
             continue
           if (!groups[o.name]) groups[o.name] = []
@@ -9515,19 +9631,22 @@
                 const active = contentContextFilters.some(
                   (f) => f.name === o.name && f.value === o.value,
                 )
-                const valClass =
-                  o.value === "true"
-                    ? " val-true"
-                    : o.value === "false"
-                    ? " val-false"
-                    : ""
+                const isNotSet = o.value === "__not_set__"
+                const valClass = isNotSet
+                  ? " val-not-set"
+                  : o.value === "true"
+                  ? " val-true"
+                  : o.value === "false"
+                  ? " val-false"
+                  : ""
+                const label = isNotSet ? "not set" : o.value
                 return `<button class="ctx-chip${
                   active ? " active" : ""
                 }${valClass}" data-ctx-name="${esc(
                   o.name,
                 )}" data-ctx-value="${esc(o.value)}" title="${esc(
                   o.count,
-                )} items">${esc(o.value)}</button>`
+                )} items">${esc(label)}</button>`
               })
               .join("")
             return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
@@ -9634,10 +9753,11 @@
         const q = (searchQ || "").toLowerCase().trim()
         const groups = {}
         for (const o of contextOptions) {
+          const displayValue = o.value === "__not_set__" ? "not set" : o.value
           if (
             q &&
             !o.name.toLowerCase().includes(q) &&
-            !o.value.toLowerCase().includes(q)
+            !displayValue.toLowerCase().includes(q)
           )
             continue
           if (!groups[o.name]) groups[o.name] = []
@@ -9654,19 +9774,22 @@
                 const active = convContextFilters.some(
                   (f) => f.name === o.name && f.value === o.value,
                 )
-                const valClass =
-                  o.value === "true"
-                    ? " val-true"
-                    : o.value === "false"
-                    ? " val-false"
-                    : ""
+                const isNotSet = o.value === "__not_set__"
+                const valClass = isNotSet
+                  ? " val-not-set"
+                  : o.value === "true"
+                  ? " val-true"
+                  : o.value === "false"
+                  ? " val-false"
+                  : ""
+                const label = isNotSet ? "not set" : o.value
                 return `<button class="ctx-chip${
                   active ? " active" : ""
                 }${valClass}" data-ctx-name="${esc(
                   o.name,
                 )}" data-ctx-value="${esc(o.value)}" title="${esc(
                   o.count,
-                )} sessions">${esc(o.value)}</button>`
+                )} sessions">${esc(label)}</button>`
               })
               .join("")
             return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
@@ -10319,6 +10442,7 @@
         if (!t) return true
         if (t.toLowerCase() === "continue") return true
         if (/^#[^#]+#$/.test(t)) return true // #VariableName#
+        if (/^\d+:\d+$/.test(t)) return true // dialogId:nodeId (dialog link navigation)
         return false
       }
 
@@ -10453,28 +10577,75 @@
         return { body: safe, options, ctas, asks }
       }
 
-      function buildChatSearchRegex(q) {
-        if (!q) return null
-        try {
-          const pat = chatSearchRegex
-            ? q
-            : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-          return new RegExp(pat, "ig")
-        } catch (e) {
-          return null
+      // Returns an array of global-flag RegExps for chat highlighting/matching.
+      // Supports AND/OR parsing when not in regex mode (same as content search).
+      function buildChatSearchRegexes(q) {
+        if (!q) return []
+        if (chatSearchRegex) {
+          try {
+            return [new RegExp(q, "ig")]
+          } catch (e) {
+            return []
+          }
         }
+        // Parse into OR groups of AND terms; collect all unique terms for highlighting
+        const terms = [
+          ...new Set(
+            q.split("|").flatMap((g) => g.trim().split(/\s+/).filter(Boolean)),
+          ),
+        ]
+        return terms
+          .map((t) => {
+            try {
+              return new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "ig")
+            } catch (e) {
+              return null
+            }
+          })
+          .filter(Boolean)
+      }
+      // For backwards compat (used by turnMatches for single-regex check path).
+      function buildChatSearchRegex(q) {
+        const res = buildChatSearchRegexes(q)
+        return res.length ? res[0] : null
+      }
+      // Check if a string matches ALL AND-terms of ANY OR-group using chat query.
+      function chatQueryMatchesText(text) {
+        if (!text || !chatQuery) return false
+        if (chatSearchRegex) {
+          const re = buildChatSearchRegex(chatQuery)
+          if (!re) return false
+          re.lastIndex = 0
+          return re.test(text)
+        }
+        const orGroups = chatQuery
+          .split("|")
+          .map((g) => g.trim().split(/\s+/).filter(Boolean))
+          .filter((g) => g.length)
+        return orGroups.some((andTerms) =>
+          andTerms.every((term) =>
+            text.toLowerCase().includes(term.toLowerCase()),
+          ),
+        )
       }
       function chatHl(text, botMode = true) {
         const { body, options, ctas, asks } = parseCmOutput(text, botMode)
         if (!chatQuery) return { body, options, ctas, asks }
-        const re = buildChatSearchRegex(chatQuery)
-        if (!re) return { body, options, ctas, asks }
-        const reG = new RegExp(
-          re.source,
-          re.flags.includes("g") ? re.flags : re.flags + "g",
-        )
+        const reGs = buildChatSearchRegexes(chatQuery)
+        if (!reGs.length) return { body, options, ctas, asks }
+        let highlighted = body
+        for (const reG of reGs) {
+          reG.lastIndex = 0
+          highlighted = highlighted.replace(
+            reG,
+            (m) => `\x00MARK\x00${m}\x00/MARK\x00`,
+          )
+        }
+        highlighted = highlighted
+          .replace(/\x00MARK\x00/g, "<mark>")
+          .replace(/\x00\/MARK\x00/g, "</mark>")
         return {
-          body: body.replace(reG, (m) => `<mark>${m}</mark>`),
+          body: highlighted,
           options,
           ctas,
           asks,
@@ -10681,6 +10852,10 @@
               t === "LinkClick" && row.interactionValue
                 ? row.interactionValue
                 : null
+            const dialogNav =
+              t === "Dialog" && /^\d+:\d+$/.test(row.interactionValue || "")
+                ? row
+                : null
             const botRows = []
             let j = i
             if (hasBotOutput(row)) {
@@ -10703,44 +10878,30 @@
             } else {
               j = i + 1
             }
-            turns.push({ system: null, userRow, botRows, linkClicked })
+            turns.push({
+              system: null,
+              userRow,
+              botRows,
+              linkClicked,
+              dialogNav,
+            })
             i = j
           }
           return turns
         }
 
-        // Check whether a turn contains a match for chatQuery.
+        // Check whether a turn contains a match for chatQuery (AND/OR aware).
         function turnMatches(turn) {
-          const re = buildChatSearchRegex(chatQuery)
           const rows = turn.system
             ? [turn.system]
             : [turn.userRow, ...turn.botRows].filter(Boolean)
-          if (re) {
-            return rows.some((r) => {
-              re.lastIndex = 0
-              if (re.test(r.interactionValue || "")) return true
-              re.lastIndex = 0
-              if (re.test(r.outputText || "")) return true
-              if (convSearchIds) {
-                re.lastIndex = 0
-                if (re.test(r.articleIds || "")) return true
-                re.lastIndex = 0
-                if (re.test(r.dialogPaths || "")) return true
-              }
-              return false
-            })
-          }
-          // Fallback: plain case-insensitive substring
-          const ql = chatQuery.toLowerCase()
           return rows.some((r) => {
-            if ((r.interactionValue || "").toLowerCase().includes(ql))
-              return true
-            if ((r.outputText || "").toLowerCase().includes(ql)) return true
+            const fields = [r.interactionValue || "", r.outputText || ""]
             if (convSearchIds) {
-              if ((r.articleIds || "").toLowerCase().includes(ql)) return true
-              if ((r.dialogPaths || "").toLowerCase().includes(ql)) return true
+              fields.push(r.articleIds || "", r.dialogPaths || "")
             }
-            return false
+            // Use AND/OR aware matching
+            return fields.some((f) => chatQueryMatchesText(f))
           })
         }
 
@@ -10759,6 +10920,17 @@
           if (turn.linkClicked) {
             html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
               turn.linkClicked,
+            )}</span></div></div>`
+          }
+          if (turn.dialogNav) {
+            const dnRow = turn.dialogNav
+            const dnInfo =
+              dnRow.articles &&
+              dnRow.articles.dialog &&
+              dnRow.articles.dialog[0]
+            const dnName = dnInfo ? dnInfo.dialogName : dnRow.interactionValue
+            html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#8627;</span><span class="link-click-pill-label">Dialog started</span><span class="link-click-url">${esc(
+              dnName,
             )}</span></div></div>`
           }
           const zeroRecogActive = convSessionFilter === "zero_recog"

@@ -44,6 +44,77 @@ function buildSearchRegex(q) {
   }
 }
 
+// Parse a query into OR groups of AND terms.
+// "hello world | goodbye" → [["hello","world"],["goodbye"]]
+// When in regex mode, return a single group with the raw query as one term.
+function parseOrGroups(q) {
+  if (!q) return []
+  if (searchRegex) return [[q]]
+  return q
+    .split("|")
+    .map((g) => g.trim().split(/\s+/).filter(Boolean))
+    .filter((g) => g.length > 0)
+}
+
+// Build a regex for a single escaped term (respects searchCase and searchWord).
+function buildTermRegex(term) {
+  try {
+    let pat = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    if (searchWord)
+      pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
+    return new RegExp(pat, searchCase ? "" : "i")
+  } catch (e) {
+    return null
+  }
+}
+
+// Pre-compiled OR groups: array of AND-groups, each being array of {re, needle} objects.
+// Built once per search message and shared across all match calls.
+let _orRegexGroups = [] // [{re, needle}[]][]
+
+function buildOrRegexGroups(orGroups) {
+  return orGroups.map((andTerms) =>
+    andTerms.map((term) => ({
+      re: !canUsePlainMatch() ? buildTermRegex(term) : null,
+      needle: canUsePlainMatch()
+        ? searchCase
+          ? term
+          : term.toLowerCase()
+        : null,
+    })),
+  )
+}
+
+// Test a single string against one compiled term {re, needle}.
+function testTerm(compiled, str) {
+  if (!str) return false
+  if (compiled.re) {
+    compiled.re.lastIndex = 0
+    return compiled.re.test(str)
+  }
+  if (compiled.needle !== null) {
+    return searchCase
+      ? str.indexOf(compiled.needle) !== -1
+      : str.toLowerCase().indexOf(compiled.needle) !== -1
+  }
+  return false
+}
+
+// Test a single term against multiple field strings (any match = term is found).
+function termFoundInFields(compiled, fields) {
+  return fields.some((f) => f != null && testTerm(compiled, f))
+}
+
+// Check if ALL terms in an AND-group are each found somewhere in the given fields.
+function andGroupMatchesFields(andGroup, fields) {
+  return andGroup.every((compiled) => termFoundInFields(compiled, fields))
+}
+
+// Check if ANY OR-group's AND terms all match the given fields.
+function orGroupsMatchFields(groups, fields) {
+  return groups.some((andGroup) => andGroupMatchesFields(andGroup, fields))
+}
+
 function testRe(re, str) {
   if (!re || !str) return false
   re.lastIndex = 0
@@ -173,10 +244,14 @@ function precomputeArticle(a) {
 
   // Build context sets for contextual Answer outputs
   a._ctxSets = []
+  a._hasDefaultAnswer = false
   for (const o of a.Outputs) {
     if (o.Type !== "Answer") continue
     const cvs = o.ContextVariables || []
-    if (!cvs.some((cv) => cv.Values && !cv.Values.includes("any"))) continue
+    if (!cvs.some((cv) => cv.Values && !cv.Values.includes("any"))) {
+      a._hasDefaultAnswer = true
+      continue
+    }
     const ctxSet = {}
     for (const cv of cvs) {
       const name = ctxVarMap.get(cv.Id)
@@ -331,11 +406,15 @@ function precomputeDialog(item) {
 
   // Build context sets for contextual Answer items in nodes
   item._ctxSets = []
+  item._hasDefaultAnswer = false
   for (const n of nodes) {
     for (const oi of (n.output && n.output.items) || []) {
       if (oi.type !== "Answer") continue
       const cvs = oi.contextVariables || []
-      if (!cvs.length) continue
+      if (!cvs.length) {
+        item._hasDefaultAnswer = true
+        continue
+      }
       const ctxSet = {}
       for (const cv of cvs) {
         const name = ctxVarMap.get(cv.id)
@@ -347,6 +426,7 @@ function precomputeDialog(item) {
         if (vals.length) ctxSet[name] = vals
       }
       if (Object.keys(ctxSet).length) item._ctxSets.push(ctxSet)
+      else item._hasDefaultAnswer = true
     }
   }
 }
@@ -398,10 +478,33 @@ function canUsePlainMatch() {
 
 // Returns true if item passes the active content context filter set.
 // An item passes if it has at least one ctxSet satisfying ALL active filters.
+// For "not set" filters the implicit default answer ({}) is also considered.
 function matchesContentContext(item) {
   if (!contentContextFilters.length) return true
-  return (item._ctxSets || []).some((ctxSet) =>
+  const hasNotSetFilter = contentContextFilters.some(
+    (f) => f.value === "__not_set__",
+  )
+  const ctxSets = item._ctxSets || []
+  // Include implicit "default" answer (empty ctxSet) when a not-set filter is active
+  // and the item actually has a default (context-free) answer.
+  if (hasNotSetFilter && item._hasDefaultAnswer) {
+    return (
+      ctxSets.some((ctxSet) =>
+        contentContextFilters.every((f) => {
+          if (f.value === "__not_set__") return !ctxSet[f.name]
+          const vals = ctxSet[f.name]
+          return vals && vals.includes(f.value)
+        }),
+      ) ||
+      contentContextFilters.every((f) => {
+        if (f.value === "__not_set__") return true // default answer has nothing set
+        return false // regular filter can't be satisfied by empty ctxSet
+      })
+    )
+  }
+  return ctxSets.some((ctxSet) =>
     contentContextFilters.every((f) => {
+      if (f.value === "__not_set__") return !ctxSet[f.name]
       const vals = ctxSet[f.name]
       return vals && vals.includes(f.value)
     }),
@@ -409,203 +512,120 @@ function matchesContentContext(item) {
 }
 
 // Check if a single answer's ctxSet satisfies all active content context filters.
-// An empty ctxSet (default/unconditional answer) never satisfies a non-empty filter.
+// Supports "__not_set__" sentinel: passes when the variable is absent from ctxSet.
 function ctxSetMatchesFilters(ctxSet) {
   if (!contentContextFilters.length) return true
-  if (!Object.keys(ctxSet).length) return false
   return contentContextFilters.every((f) => {
+    if (f.value === "__not_set__") return !ctxSet[f.name]
     const vals = ctxSet[f.name]
     return vals && vals.includes(f.value)
   })
 }
 
-// Check if a single answer item matches the text query.
-function answerMatchesText(ai, re, isPlain, needle) {
-  if (isPlain) {
-    return searchCase
-      ? testPlain(needle, ai.s) ||
-          testPlain(needle, ai.r) ||
-          testPlain(needle, ai.e)
-      : testPlainCI(needle, ai.s) ||
-          testPlainCI(needle, ai.r) ||
-          testPlainCI(needle, ai.e)
-  }
-  return testRe(re, ai.s) || testRe(re, ai.r) || testRe(re, ai.e)
+// Check if a single answer item matches ALL terms in a single AND-group.
+// The AND terms can be spread across the s/r/e fields of the same answer item.
+function answerMatchesAndGroup(ai, andGroup) {
+  const fields = [ai.s, ai.r, ai.e]
+  return andGroupMatchesFields(andGroup, fields)
 }
 
-// Combined match: the SAME answer must satisfy both context filter AND text query.
-function matchArticleCombined(a, re, isPlain, needle) {
-  return (a._answerItems || []).some(
-    (ai) =>
-      ctxSetMatchesFilters(ai.ctxSet) &&
-      answerMatchesText(ai, re, isPlain, needle),
-  )
-}
-
-function matchDialogCombined(item, re, isPlain, needle) {
-  return (item._searchNodes || []).some((sn) =>
-    (sn._answerItems || []).some(
+// Check if any answer item satisfies both context filter AND ALL terms of ANY OR-group.
+function answerItemsMatchOrGroups(answerItems, groups) {
+  // For each OR-group, check if any single answer item satisfies all AND terms
+  // AND the context filter.
+  return groups.some((andGroup) =>
+    (answerItems || []).some(
       (ai) =>
-        ctxSetMatchesFilters(ai.ctxSet) &&
-        answerMatchesText(ai, re, isPlain, needle),
+        ctxSetMatchesFilters(ai.ctxSet) && answerMatchesAndGroup(ai, andGroup),
     ),
   )
 }
 
-function matchArticle(a, re, isPlain, needle) {
+// Combined match (context + text): the SAME answer must satisfy both.
+function matchArticleCombined(a) {
+  return answerItemsMatchOrGroups(a._answerItems, _orRegexGroups)
+}
+
+function matchDialogCombined(item) {
+  return (item._searchNodes || []).some((sn) =>
+    answerItemsMatchOrGroups(sn._answerItems, _orRegexGroups),
+  )
+}
+
+// Returns all searchable field strings for an article (non-content and response fields).
+function articleFields(a) {
+  const fields = [
+    a._searchResponse,
+    a._searchResponseRaw,
+    a._searchResponseExpanded,
+  ]
   if (!searchContent) {
-    if (isPlain) {
-      if (searchCase) {
-        if (testPlain(needle, a._searchId)) return true
-        if (a.Questions.some((qs) => testPlain(needle, qs.Text))) return true
-      } else {
-        if (testPlainCI(needle, a._searchId)) return true
-        if (a.Questions.some((qs) => testPlainCI(needle, qs.Text))) return true
-      }
-    } else {
-      if (testRe(re, a._searchId)) return true
-      if (a.Questions.some((qs) => testRe(re, qs.Text))) return true
-    }
+    fields.push(a._searchId)
+    for (const qs of a.Questions) fields.push(qs.Text)
   }
-  // Search response text (always searched)
-  if (isPlain) {
-    if (
-      searchCase
-        ? testPlain(needle, a._searchResponse) ||
-          testPlain(needle, a._searchResponseRaw) ||
-          testPlain(needle, a._searchResponseExpanded)
-        : testPlainCI(needle, a._searchResponse) ||
-          testPlainCI(needle, a._searchResponseRaw) ||
-          testPlainCI(needle, a._searchResponseExpanded)
-    )
-      return true
-  } else {
-    if (
-      testRe(re, a._searchResponse) ||
-      testRe(re, a._searchResponseRaw) ||
-      testRe(re, a._searchResponseExpanded)
-    )
-      return true
-  }
-  // Search contextual / alternative Answer outputs
   for (const ca of a._searchCtxAnswers || []) {
-    if (isPlain) {
-      if (
-        searchCase
-          ? testPlain(needle, ca.s) ||
-            testPlain(needle, ca.r) ||
-            testPlain(needle, ca.e)
-          : testPlainCI(needle, ca.s) ||
-            testPlainCI(needle, ca.r) ||
-            testPlainCI(needle, ca.e)
-      )
-        return true
-    } else {
-      if (testRe(re, ca.s) || testRe(re, ca.r) || testRe(re, ca.e)) return true
-    }
+    fields.push(ca.s, ca.r, ca.e)
   }
-  // Entity-word enrichment
-  if (
+  return fields
+}
+
+function matchArticle(a) {
+  // For each OR-group, all AND terms must each be found in at least one field.
+  // Terms can be satisfied by DIFFERENT fields (e.g. one term in ID, another in response).
+  const hasEntityMatch =
     matchingEntityNames.size > 0 &&
     a._searchQuestionsUpper.some((t) => matchingEntityNames.has(t))
-  )
-    return true
-  return false
+
+  const fields = articleFields(a)
+
+  return _orRegexGroups.some((andGroup) => {
+    // Each term in the AND-group must appear in at least one field of this article.
+    return andGroup.every((compiled) => {
+      if (termFoundInFields(compiled, fields)) return true
+      // Entity-word enrichment: if the entity matched, count it as a field hit
+      if (hasEntityMatch) return true
+      return false
+    })
+  })
 }
 
-function matchDialog(item, re, isPlain, needle) {
+// Returns all searchable field strings for a dialog item.
+function dialogFields(item) {
+  const fields = []
   if (!searchContent) {
-    if (isPlain) {
-      if (searchCase) {
-        if (testPlain(needle, item._searchId)) return true
-        if (testPlain(needle, item._searchName)) return true
-        if (testPlain(needle, item._searchDesc)) return true
-      } else {
-        if (testPlainCI(needle, item._searchId)) return true
-        if (testPlainCI(needle, item._searchName)) return true
-        if (testPlainCI(needle, item._searchDesc)) return true
-      }
-    } else {
-      if (testRe(re, item._searchId)) return true
-      if (testRe(re, item._searchName)) return true
-      if (testRe(re, item._searchDesc)) return true
-    }
+    fields.push(item._searchId, item._searchName, item._searchDesc)
   }
-  // Check node content
-  for (const sn of item._searchNodes) {
-    if (!searchContent) {
-      if (isPlain) {
-        if (
-          searchCase ? testPlain(needle, sn.name) : testPlainCI(needle, sn.name)
-        )
-          return true
-      } else {
-        if (testRe(re, sn.name)) return true
-      }
-    }
+  for (const sn of item._searchNodes || []) {
+    if (!searchContent) fields.push(sn.name)
     if (sn.answerText || sn.answerTextRaw) {
-      if (isPlain) {
-        if (
-          searchCase
-            ? testPlain(needle, sn.answerText) ||
-              testPlain(needle, sn.answerTextRaw) ||
-              testPlain(needle, sn.answerTextExpanded)
-            : testPlainCI(needle, sn.answerText) ||
-              testPlainCI(needle, sn.answerTextRaw) ||
-              testPlainCI(needle, sn.answerTextExpanded)
-        )
-          return true
-      } else {
-        if (
-          testRe(re, sn.answerText) ||
-          testRe(re, sn.answerTextRaw) ||
-          testRe(re, sn.answerTextExpanded)
-        )
-          return true
-      }
+      fields.push(sn.answerText, sn.answerTextRaw, sn.answerTextExpanded)
     }
-    // Search contextual / alternative Answer items in this node
     for (const ca of sn.ctxAnswerTexts || []) {
-      if (isPlain) {
-        if (
-          searchCase
-            ? testPlain(needle, ca.s) ||
-              testPlain(needle, ca.r) ||
-              testPlain(needle, ca.e)
-            : testPlainCI(needle, ca.s) ||
-              testPlainCI(needle, ca.r) ||
-              testPlainCI(needle, ca.e)
-        )
-          return true
-      } else {
-        if (testRe(re, ca.s) || testRe(re, ca.r) || testRe(re, ca.e))
-          return true
-      }
+      fields.push(ca.s, ca.r, ca.e)
     }
   }
-  // Entity-word enrichment
-  if (
+  return fields
+}
+
+function matchDialog(item) {
+  const hasEntityMatch =
     matchingEntityNames.size > 0 &&
     item._entityQuestionTexts.some((t) => matchingEntityNames.has(t))
+
+  const fields = dialogFields(item)
+
+  return _orRegexGroups.some((andGroup) =>
+    andGroup.every((compiled) => {
+      if (termFoundInFields(compiled, fields)) return true
+      if (hasEntityMatch) return true
+      return false
+    }),
   )
-    return true
-  return false
 }
 
-function matchEntity(entity, re, isPlain, needle) {
-  if (isPlain) {
-    if (searchCase) {
-      if (testPlain(needle, entity._searchName)) return true
-      if (entity._searchWords.some((w) => testPlain(needle, w))) return true
-    } else {
-      if (testPlainCI(needle, entity._searchName)) return true
-      if (entity._searchWords.some((w) => testPlainCI(needle, w))) return true
-    }
-  } else {
-    if (testRe(re, entity._searchName)) return true
-    if (entity._searchWords.some((w) => testRe(re, w))) return true
-  }
-  return false
+function matchEntity(entity) {
+  const fields = [entity._searchName, ...entity._searchWords]
+  return orGroupsMatchFields(_orRegexGroups, fields)
 }
 
 // ── Message handler ───────────────────────────────────────────────────────────
@@ -669,32 +689,44 @@ self.onmessage = function (e) {
 
     const q = query
 
-    // ── Build regex ONCE for this search ───────────────────────────────
+    // ── Build OR-groups of AND-term regexes ONCE for this search ──────
+    const orGroups = q ? parseOrGroups(q) : []
+    _orRegexGroups = q ? buildOrRegexGroups(orGroups) : []
+    const hasValidQuery =
+      _orRegexGroups.length > 0 && _orRegexGroups.every((g) => g.length > 0)
+
+    // For entity-matching we still build a single regex from the full query
+    // (entity words are matched individually, not per-term).
     const re = q ? buildSearchRegex(q) : null
     const isPlain = q ? canUsePlainMatch() : false
-    // For plain-text mode, prepare the needle string
     const needle = isPlain ? (searchCase ? q : q.toLowerCase()) : null
 
     // Pre-compute entity names matched by the current query
     matchingEntityNames = new Set()
-    if (q && workerEntities.length && (re || isPlain)) {
+    if (q && workerEntities.length) {
+      // Match entities against each individual term in the union of all OR groups
+      const allTerms = orGroups.flat()
       for (const entity of workerEntities) {
-        if (isPlain) {
-          if (
-            entity._searchWords.some((w) =>
-              searchCase ? testPlain(needle, w) : testPlainCI(needle, w),
-            )
-          )
-            matchingEntityNames.add(entity._nameUpper)
-        } else if (re) {
-          if (entity._searchWords.some((w) => testRe(re, w)))
-            matchingEntityNames.add(entity._nameUpper)
-        }
+        const wordMatches = entity._searchWords.some((w) => {
+          if (isPlain) {
+            return allTerms.some((term) => {
+              const n = searchCase ? term : term.toLowerCase()
+              return searchCase
+                ? w.indexOf(n) !== -1
+                : w.toLowerCase().indexOf(n) !== -1
+            })
+          }
+          return allTerms.some((term) => {
+            const termRe = buildTermRegex(term)
+            return termRe && termRe.test(w)
+          })
+        })
+        if (wordMatches) matchingEntityNames.add(entity._nameUpper)
       }
     }
 
     // Short-circuit: no query and no filter → return everything
-    const noQuery = !q
+    const noQuery = !q || !hasValidQuery
     const hasCtxFilter = contentContextFilters.length > 0
 
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
@@ -709,17 +741,13 @@ self.onmessage = function (e) {
         if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
           return false
         if (hasCtxFilter && !noQuery) {
-          if (!re && !isPlain) return false
           return item._kind === "article"
-            ? matchArticleCombined(item, re, isPlain, needle)
-            : matchDialogCombined(item, re, isPlain, needle)
+            ? matchArticleCombined(item)
+            : matchDialogCombined(item)
         }
         if (!matchesContentContext(item)) return false
         if (noQuery) return true
-        if (!re && !isPlain) return false
-        return item._kind === "article"
-          ? matchArticle(item, re, isPlain, needle)
-          : matchDialog(item, re, isPlain, needle)
+        return item._kind === "article" ? matchArticle(item) : matchDialog(item)
       })
     }
     filteredAll = sortBy(
@@ -738,13 +766,11 @@ self.onmessage = function (e) {
         if (aFilter === "answer" && aKind(a) !== "answer") return false
         if (aFilter === "dialog" && aKind(a) === "answer") return false
         if (hasCtxFilter && !noQuery) {
-          if (!re && !isPlain) return false
-          return matchArticleCombined(a, re, isPlain, needle)
+          return matchArticleCombined(a)
         }
         if (!matchesContentContext(a)) return false
         if (noQuery) return true
-        if (!re && !isPlain) return false
-        return matchArticle(a, re, isPlain, needle)
+        return matchArticle(a)
       })
     }
     filteredArticles = sortBy(
@@ -765,13 +791,11 @@ self.onmessage = function (e) {
         if (dFilter === "recognition" && item._kind === "tdialog") return false
         if (dFilter === "recognition" && !item._hasAnswerOutput) return false
         if (hasCtxFilter && !noQuery) {
-          if (!re && !isPlain) return false
-          return matchDialogCombined(item, re, isPlain, needle)
+          return matchDialogCombined(item)
         }
         if (!matchesContentContext(item)) return false
         if (noQuery) return true
-        if (!re && !isPlain) return false
-        return matchDialog(item, re, isPlain, needle)
+        return matchDialog(item)
       })
     }
     filteredDialogs = sortBy(
@@ -798,8 +822,7 @@ self.onmessage = function (e) {
         )
           return false
         if (noQuery) return true
-        if (!re && !isPlain) return false
-        return matchEntity(entity, re, isPlain, needle)
+        return matchEntity(entity)
       })
     }
     if (eSort === "name-asc")

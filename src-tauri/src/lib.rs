@@ -1457,21 +1457,38 @@ async fn get_sessions(
                 .unwrap_or(false);
 
             if fts_available {
-                // Build a prefix-match FTS5 query: each whitespace-separated token becomes
-                // "token*" so partial words are found (similar to LIKE '%token%' for prefixes).
-                let fts_query: String = query
-                    .split_whitespace()
-                    .filter_map(|t| {
-                        // Strip FTS5 special characters to avoid parse errors.
-                        let clean: String = t
-                            .chars()
-                            .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
-                            .collect();
-                        if clean.is_empty() { None } else { Some(format!("{}*", clean)) }
+                // Parse OR groups: split by '|', each group's tokens become FTS5 AND terms.
+                // "hello world | goodbye" → "(hello* world*) OR (goodbye*)"
+                let or_groups: Vec<Vec<String>> = query
+                    .split('|')
+                    .map(|g| {
+                        g.split_whitespace()
+                            .filter_map(|t| {
+                                let clean: String = t
+                                    .chars()
+                                    .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
+                                    .collect();
+                                if clean.is_empty() { None } else { Some(format!("{}*", clean)) }
+                            })
+                            .collect::<Vec<_>>()
                     })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if !fts_query.is_empty() {
+                    .filter(|g| !g.is_empty())
+                    .collect();
+
+                if !or_groups.is_empty() {
+                    let fts_inner = or_groups
+                        .iter()
+                        .map(|terms| {
+                            if terms.len() == 1 {
+                                terms[0].clone()
+                            } else {
+                                format!("({})", terms.join(" "))
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" OR ");
+
+                    let fts_query = fts_inner;
                     let fts_match_expr = match (query_scope.as_str(), query_ids) {
                         ("user", false) => format!("interaction_value : {fts_query}"),
                         ("user", true)  => format!("{{interaction_value article_ids dialog_paths}} : {fts_query}"),
@@ -1489,36 +1506,67 @@ async fn get_sessions(
                     ));
                 }
             } else {
-                // FTS5 not available — fall back to LIKE (slower but always works).
-                let like_val = format!("%{}%", query.replace('%', "\\%").replace('_', "\\_"));
-                let p = next_param(&mut param_idx);
-                let text_cond = match query_scope.as_str() {
-                    "user" => {
-                        param_values.push(Box::new(like_val.clone()));
-                        format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\')")
-                    }
-                    "bot" => {
-                        param_values.push(Box::new(like_val.clone()));
-                        format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE output_text LIKE {p} ESCAPE '\\')")
-                    }
-                    _ => {
-                        param_values.push(Box::new(like_val.clone()));
-                        let p2 = next_param(&mut param_idx);
-                        param_values.push(Box::new(like_val.clone()));
-                        format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE interaction_value LIKE {p} ESCAPE '\\' OR output_text LIKE {p2} ESCAPE '\\')")
-                    }
-                };
-                let cond = if query_ids {
-                    let pi1 = next_param(&mut param_idx);
-                    param_values.push(Box::new(like_val.clone()));
-                    let pi2 = next_param(&mut param_idx);
-                    param_values.push(Box::new(like_val.clone()));
-                    let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')");
-                    format!("({text_cond} OR {ids_subq})")
-                } else {
-                    text_cond
-                };
-                conditions.push(cond);
+                // FTS5 not available — fall back to LIKE per AND-term, OR between groups.
+                // "hello world | goodbye" → sessions matching (hello AND world) OR (goodbye).
+                let or_groups: Vec<Vec<String>> = query
+                    .split('|')
+                    .map(|g| g.split_whitespace().map(|t| t.to_string()).filter(|t| !t.is_empty()).collect::<Vec<_>>())
+                    .filter(|g| !g.is_empty())
+                    .collect();
+
+                if !or_groups.is_empty() {
+                    // Build one subquery per AND-group; join with UNION (= SQL OR on session_uuid).
+                    let or_subqueries: Vec<String> = or_groups
+                        .iter()
+                        .map(|and_terms| {
+                            // Each AND term becomes a LIKE condition on the scope-selected columns.
+                            let and_clauses: Vec<String> = and_terms
+                                .iter()
+                                .map(|term| {
+                                    let like_val = format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
+                                    let text_filters = match query_scope.as_str() {
+                                        "user" => {
+                                            let p = next_param(&mut param_idx);
+                                            param_values.push(Box::new(like_val.clone()));
+                                            format!("interaction_value LIKE {p} ESCAPE '\\'")
+                                        }
+                                        "bot" => {
+                                            let p = next_param(&mut param_idx);
+                                            param_values.push(Box::new(like_val.clone()));
+                                            format!("output_text LIKE {p} ESCAPE '\\'")
+                                        }
+                                        _ => {
+                                            let p1 = next_param(&mut param_idx);
+                                            param_values.push(Box::new(like_val.clone()));
+                                            let p2 = next_param(&mut param_idx);
+                                            param_values.push(Box::new(like_val.clone()));
+                                            format!("(interaction_value LIKE {p1} ESCAPE '\\' OR output_text LIKE {p2} ESCAPE '\\')")
+                                        }
+                                    };
+                                    if query_ids {
+                                        let pi1 = next_param(&mut param_idx);
+                                        param_values.push(Box::new(like_val.clone()));
+                                        let pi2 = next_param(&mut param_idx);
+                                        param_values.push(Box::new(like_val.clone()));
+                                        format!("({text_filters} OR article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')")
+                                    } else {
+                                        text_filters
+                                    }
+                                })
+                                .collect();
+                            // All AND terms must match in this group — intersect via nested subquery.
+                            // Simplest: emit as a subquery with multiple WHERE AND conditions.
+                            let where_clause = and_clauses.join(" AND ");
+                            format!("SELECT DISTINCT session_uuid FROM interactions WHERE {where_clause}")
+                        })
+                        .collect();
+
+                    // UNION of all OR-group subqueries
+                    let union_sql = or_subqueries.join(" UNION ");
+                    conditions.push(format!(
+                        "session_uuid IN ({union_sql})"
+                    ));
+                }
             }
         }
     }
@@ -1534,23 +1582,47 @@ async fn get_sessions(
             let exists_clauses: Vec<String> = groups
                 .iter()
                 .map(|(name, values)| {
-                    let pn = next_param(&mut param_idx);
-                    param_values.push(Box::new(name.clone()));
-                    let value_placeholders: Vec<String> = values
-                        .iter()
-                        .map(|v| {
-                            let pv = next_param(&mut param_idx);
-                            param_values.push(Box::new(v.clone()));
-                            pv
-                        })
-                        .collect();
-                    let in_list = value_placeholders.join(", ");
-                    // Use context_index (pre-computed at import) instead of json_each for speed
-                    format!(
-                        "session_uuid IN (SELECT DISTINCT session_uuid FROM context_index \
-                         WHERE name = {pn} AND value IN ({in_list}))"
-                    )
+                    let has_not_set = values.iter().any(|v| v == "__not_set__");
+                    let regular_values: Vec<&String> = values.iter().filter(|v| v.as_str() != "__not_set__").collect();
+
+                    let mut subclauses: Vec<String> = Vec::new();
+
+                    // "not set" — sessions with NO entry for this name in context_index
+                    if has_not_set {
+                        let pn = next_param(&mut param_idx);
+                        param_values.push(Box::new(name.clone()));
+                        subclauses.push(format!(
+                            "session_uuid NOT IN (SELECT DISTINCT session_uuid FROM context_index WHERE name = {pn})"
+                        ));
+                    }
+
+                    // Regular value filter — sessions that have this name with specific values
+                    if !regular_values.is_empty() {
+                        let pn = next_param(&mut param_idx);
+                        param_values.push(Box::new(name.clone()));
+                        let value_placeholders: Vec<String> = regular_values
+                            .iter()
+                            .map(|v| {
+                                let pv = next_param(&mut param_idx);
+                                param_values.push(Box::new((*v).clone()));
+                                pv
+                            })
+                            .collect();
+                        let in_list = value_placeholders.join(", ");
+                        // Use context_index (pre-computed at import) instead of json_each for speed
+                        subclauses.push(format!(
+                            "session_uuid IN (SELECT DISTINCT session_uuid FROM context_index \
+                             WHERE name = {pn} AND value IN ({in_list}))"
+                        ));
+                    }
+
+                    if subclauses.len() == 1 {
+                        subclauses.into_iter().next().unwrap_or_default()
+                    } else {
+                        format!("({})", subclauses.join(" OR "))
+                    }
                 })
+                .filter(|s| !s.is_empty())
                 .collect();
             if !exists_clauses.is_empty() {
                 conditions.extend(exists_clauses);
@@ -1646,6 +1718,7 @@ async fn get_context_options(db_state: State<'_, SharedDbState>) -> Result<Vec<C
     let state = db.lock().map_err(|e| e.to_string())?;
     let conn = state.conn.as_ref().ok_or("No database open.")?;
 
+    // Regular options: name × value with per-value session counts
     let mut stmt = conn
         .prepare(
             "SELECT name, value, COUNT(DISTINCT session_uuid) as session_count \
@@ -1656,7 +1729,7 @@ async fn get_context_options(db_state: State<'_, SharedDbState>) -> Result<Vec<C
         )
         .map_err(|e| format!("Prepare error: {e}"))?;
 
-    let opts = stmt
+    let mut opts: Vec<ContextOption> = stmt
         .query_map([], |row| {
             Ok(ContextOption {
                 name:  row.get(0)?,
@@ -1669,6 +1742,33 @@ async fn get_context_options(db_state: State<'_, SharedDbState>) -> Result<Vec<C
         .filter(|o| !o.name.is_empty())
         .collect();
 
+    // "Not set" options: for each known name, count sessions that have NO entry for that name.
+    // not_set_count = total_sessions - sessions_with_that_name
+    let mut stmt2 = conn
+        .prepare(
+            "SELECT ci.name, \
+              (SELECT COUNT(DISTINCT session_uuid) FROM interactions) - COUNT(DISTINCT ci.session_uuid) \
+             FROM context_index ci \
+             GROUP BY ci.name \
+             HAVING (SELECT COUNT(DISTINCT session_uuid) FROM interactions) - COUNT(DISTINCT ci.session_uuid) > 0 \
+             ORDER BY ci.name ASC",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let not_set_opts: Vec<ContextOption> = stmt2
+        .query_map([], |row| {
+            Ok(ContextOption {
+                name:  row.get(0)?,
+                value: "__not_set__".to_string(),
+                count: row.get(1)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .filter(|o| !o.name.is_empty())
+        .collect();
+
+    opts.extend(not_set_opts);
     Ok(opts)
     })
     .await
