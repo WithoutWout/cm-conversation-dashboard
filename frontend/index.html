@@ -6186,42 +6186,57 @@
               multi: false,
             },
           })
-          ;(node.links || []).forEach((link) => {
-            const cond = link.condition || {}
-            const condData = cond.data || {}
-            let edgeLabel = ""
-            let edgeColor = "#3a3d55"
-            let dashes = undefined
-            if (cond.type === "GoTo") {
-              edgeLabel = "GoTo"
-              edgeColor = "#64738b"
-              dashes = [4, 3]
-            } else if (condData.isFallback) {
-              edgeLabel = "Fallback"
-              edgeColor = "#fb923c"
-            } else {
-              const qs = (condData.questions || []).map((q) => q.text)
-              const shown = qs.slice(0, 2).join(", ")
-              edgeLabel = shown + (qs.length > 2 ? " +" + (qs.length - 2) : "")
-            }
-            edges.push({
-              from: node.id,
-              to: link.childNodeId,
-              label: edgeLabel,
-              color: {
-                color: edgeColor,
-                highlight: "#7c6af7",
-                hover: "#a89ff5",
-              },
-              dashes,
-              font: {
-                size: 10,
-                color: "#8892a4",
-                align: "middle",
-                strokeWidth: 0,
-              },
+          ;[...(node.links || [])]
+            .sort((a, b) => {
+              const pa =
+                (a.condition &&
+                  a.condition.data &&
+                  a.condition.data.evaluationPriority) ??
+                Infinity
+              const pb =
+                (b.condition &&
+                  b.condition.data &&
+                  b.condition.data.evaluationPriority) ??
+                Infinity
+              return pa - pb
             })
-          })
+            .forEach((link) => {
+              const cond = link.condition || {}
+              const condData = cond.data || {}
+              let edgeLabel = ""
+              let edgeColor = "#3a3d55"
+              let dashes = undefined
+              if (cond.type === "GoTo") {
+                edgeLabel = "GoTo"
+                edgeColor = "#64738b"
+                dashes = [4, 3]
+              } else if (condData.isFallback) {
+                edgeLabel = "Fallback"
+                edgeColor = "#fb923c"
+              } else {
+                const qs = (condData.questions || []).map((q) => q.text)
+                const shown = qs.slice(0, 2).join(", ")
+                edgeLabel =
+                  shown + (qs.length > 2 ? " +" + (qs.length - 2) : "")
+              }
+              edges.push({
+                from: node.id,
+                to: link.childNodeId,
+                label: edgeLabel,
+                color: {
+                  color: edgeColor,
+                  highlight: "#7c6af7",
+                  hover: "#a89ff5",
+                },
+                dashes,
+                font: {
+                  size: 10,
+                  color: "#8892a4",
+                  align: "middle",
+                  strokeWidth: 0,
+                },
+              })
+            })
         })
 
         return { nodes, edges }
@@ -6719,7 +6734,20 @@
           "node-" + node.id,
         )
         const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
-        const optHtml = (node.links || [])
+        const optHtml = [...(node.links || [])]
+          .sort((a, b) => {
+            const pa =
+              (a.condition &&
+                a.condition.data &&
+                a.condition.data.evaluationPriority) ??
+              Infinity
+            const pb =
+              (b.condition &&
+                b.condition.data &&
+                b.condition.data.evaluationPriority) ??
+              Infinity
+            return pa - pb
+          })
           .flatMap((link) => {
             const isFB =
               link.condition &&
