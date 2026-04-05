@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "CAIDashboard"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "csv",
  "log",
