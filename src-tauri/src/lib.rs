@@ -685,6 +685,33 @@ fn get_data(
 }
 
 #[tauri::command]
+fn resize_to_available_height(
+    app: tauri::AppHandle,
+    height: f64,
+    y: f64,
+) -> Result<(), String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or("main window not found")?;
+    let scale = win.scale_factor().map_err(|e| e.to_string())?;
+    let outer = win.outer_size().map_err(|e| e.to_string())?;
+    let outer_pos = win.outer_position().map_err(|e| e.to_string())?;
+    let current_w = outer.width as f64 / scale;
+    let current_x = outer_pos.x as f64 / scale;
+    win.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: current_w,
+        height,
+    }))
+    .map_err(|e| e.to_string())?;
+    win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+        x: current_x,
+        y,
+    }))
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn open_url(app: tauri::AppHandle, url: String) {
     use tauri_plugin_opener::OpenerExt;
     if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("tel:") {
@@ -2661,6 +2688,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            resize_to_available_height,
             get_data,
             open_url,
             open_preview_window,

@@ -6133,6 +6133,19 @@
             invoke("move_to_flagged_folder", { flagId, folderId }),
         }
       })()
+
+      // Resize to full available screen height on startup, keeping current width.
+      ;(async function () {
+        const invoke = window.__TAURI__?.core?.invoke
+        if (!invoke) return
+        try {
+          await invoke("resize_to_available_height", {
+            height: screen.availHeight,
+            y: screen.availTop || 0,
+          })
+        } catch (_) {}
+      })()
+
       if (!window.electronAPI.selectDataFolder) {
         window.electronAPI.selectDataFolder = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
@@ -11645,8 +11658,10 @@
 
         // Add "not set" options: for each known variable name, count items that
         // have at least one Answer output where that variable is not explicitly set.
+        // Skip "escalationGroup" — it uses its own aggregate ctxSet logic.
         const allNames = new Set(contentContextOptions.map((o) => o.name))
         for (const name of allNames) {
+          if (name === "escalationGroup") continue
           let count = 0
           for (const a of allArticles) {
             if (
@@ -11680,6 +11695,38 @@
           }
           if (count > 0)
             contentContextOptions.push({ name, value: "__not_set__", count })
+        }
+
+        // Add escalation group filter options from OutputMetaData/metadata.
+        // Count distinct articles/dialogs that have at least one Answer output
+        // with that escalation group value.
+        const escGroupCounts = new Map() // group value → count of articles+dialogs
+        for (const a of allArticles) {
+          const groups = new Set()
+          for (const o of a.Outputs) {
+            if (o.Type !== "Answer") continue
+            const g = o.OutputMetaData && o.OutputMetaData.escalationGroup
+            if (g) groups.add(g)
+          }
+          for (const g of groups)
+            escGroupCounts.set(g, (escGroupCounts.get(g) || 0) + 1)
+        }
+        for (const d of allDialogsCombined) {
+          const groups = new Set()
+          for (const node of d.nodes || []) {
+            for (const item of (node.output && node.output.items) || []) {
+              if (item.type !== "Answer") continue
+              const g = item.metadata && item.metadata.escalationGroup
+              if (g) groups.add(g)
+            }
+          }
+          for (const g of groups)
+            escGroupCounts.set(g, (escGroupCounts.get(g) || 0) + 1)
+        }
+        for (const [value, count] of Array.from(escGroupCounts.entries()).sort(
+          ([a], [b]) => a.localeCompare(b),
+        )) {
+          contentContextOptions.push({ name: "escalationGroup", value, count })
         }
       }
 

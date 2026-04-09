@@ -291,6 +291,17 @@ function precomputeArticle(a) {
     if (Object.keys(ctxSet).length) a._ctxSets.push(ctxSet)
   }
 
+  // Add aggregate escalation group ctxSet so the escalationGroup filter works.
+  // All groups found across Answer outputs are merged into a single ctxSet so
+  // multi-select (AND logic) can match articles that cover multiple groups.
+  const _escGroups = []
+  for (const o of a.Outputs) {
+    if (o.Type !== "Answer") continue
+    const g = o.OutputMetaData && o.OutputMetaData.escalationGroup
+    if (g && !_escGroups.includes(g)) _escGroups.push(g)
+  }
+  if (_escGroups.length) a._ctxSets.push({ escalationGroup: _escGroups })
+
   // Build aligned per-answer data: {s, r, e, ctxSet} for every Answer output.
   // This links text and context conditions for the SAME answer so combined
   // text+context filtering can require both to be satisfied by one answer.
@@ -452,6 +463,17 @@ function precomputeDialog(item) {
       else item._hasDefaultAnswer = true
     }
   }
+
+  // Add aggregate escalation group ctxSet so the escalationGroup filter works.
+  const _dEscGroups = []
+  for (const n of nodes) {
+    for (const oi of (n.output && n.output.items) || []) {
+      if (oi.type !== "Answer") continue
+      const g = oi.metadata && oi.metadata.escalationGroup
+      if (g && !_dEscGroups.includes(g)) _dEscGroups.push(g)
+    }
+  }
+  if (_dEscGroups.length) item._ctxSets.push({ escalationGroup: _dEscGroups })
 }
 
 function precomputeEntity(entity) {
