@@ -52,6 +52,30 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "v__VERSION__"
           releaseBody: |
+            ## What's new in v0.7.0
+
+            ### Chat — Flag/Unflag toggle
+            - Pressing **F** (or **Cmd/Ctrl+F**) in chat select mode now toggles: if all selected interactions are already flagged, the shortcut **removes** the flag instead of creating a duplicate.
+            - The **Flag** button in the select header dynamically shows **"Unflag"** when all selected turns have already been flagged, giving clear visual feedback.
+
+            ### Flagged view — keyboard shortcut
+            - Pressing **F** / **Cmd+F** in the Flagged view (while select mode is on) now triggers **Remove flag** for the currently open flagged conversation.
+
+            ### Conversations view improvements
+            - Feedback highlighting and scrollable feedback indicators in the chat thread.
+            - Floating action buttons for quick interaction access within a chat.
+            - Links can now be opened in a **popup window** or the **default browser** (configurable in Settings).
+            - GenerativeAI sessions are now correctly included when filtering on all interaction types.
+
+            ### Context filters
+            - Enhanced context variable handling with escalation group aggregation for more precise session filtering.
+
+            ### Window & database
+            - Window auto-resizes to available screen height on startup.
+            - Configurable **data retention** setting for interaction logs with automatic purge.
+
+            ---
+
             ## Download
 
             ### Windows (geen admin nodig, geen installatie) — aanbevolen
