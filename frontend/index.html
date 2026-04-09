@@ -1834,16 +1834,31 @@
 
       /* === MODAL === */
       .modal-overlay {
-        display: none;
+        display: flex;
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.6);
         z-index: 100;
         align-items: center;
         justify-content: center;
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 0.15s ease, visibility 0.15s ease;
       }
       .modal-overlay.open {
-        display: flex;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+      .modal-overlay .modal-box,
+      .modal-overlay .ctx-detail-modal-box {
+        transform: scale(0.97) translateY(6px);
+        transition: transform 0.15s ease;
+      }
+      .modal-overlay.open .modal-box,
+      .modal-overlay.open .ctx-detail-modal-box {
+        transform: scale(1) translateY(0);
       }
       .modal-box {
         background: var(--surface);
@@ -3324,6 +3339,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        position: relative;
       }
       .chat-header {
         padding: 10px 20px;
@@ -3333,7 +3349,8 @@
         align-items: center;
         gap: 10px;
         flex-shrink: 0;
-        min-height: 46px;
+        height: 46px;
+        overflow: hidden;
       }
       .chat-session-info {
         font-family: monospace;
@@ -3438,34 +3455,47 @@
         border-color: var(--red);
       }
       .chat-match-banner {
-        font-size: 0.78rem;
-        color: var(--muted);
-        padding: 6px 10px;
-        background: var(--surface2);
-        border-radius: 6px;
-        margin-bottom: 4px;
+        display: none;
+      }
+      .chat-show-all-btn {
+        display: none;
+      }
+      .chat-float-btn {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
         display: flex;
         align-items: center;
         gap: 6px;
-        flex-shrink: 0;
-      }
-      .chat-show-all-btn {
-        background: none;
+        padding: 8px 16px;
+        background: var(--accent);
+        color: #fff;
         border: none;
-        color: var(--accent);
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
         cursor: pointer;
-        font-size: 0.78rem;
-        padding: 0;
-        text-decoration: underline;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        white-space: nowrap;
+        z-index: 10;
+        transition: opacity 0.15s, transform 0.15s;
       }
-      .chat-show-all-btn:hover {
-        opacity: 0.75;
+      .chat-float-btn:hover {
+        opacity: 0.88;
+        transform: translateX(-50%) translateY(-1px);
+      }
+      .chat-float-btn--secondary {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
       }
       .chat-thread {
         flex: 1;
         overflow-y: auto;
         scrollbar-gutter: stable;
-        padding: 20px;
+        padding: 20px 20px 20px 28px;
         display: flex;
         flex-direction: column;
         gap: 4px;
@@ -3505,7 +3535,7 @@
         flex-shrink: 0;
       }
       .chat-selecting .chat-thread {
-        padding-left: 28px;
+        /* padding-left already 28px — no change needed */
       }
       /* Select button in chat header */
       .btn-chat-select {
@@ -4905,6 +4935,45 @@
               left.
             </div>
           </div>
+          <button
+            class="chat-float-btn"
+            id="chatShowAllBtn"
+            onclick="showFullConversation()"
+            style="display: none"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+            >
+              <path
+                d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"
+              />
+            </svg>
+            Show full conversation
+          </button>
+          <button
+            class="chat-float-btn chat-float-btn--secondary"
+            id="chatShowMatchedBtn"
+            onclick="showMatchedOnly()"
+            style="display: none"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            Show matched only
+          </button>
         </div>
       </div>
     </div>
@@ -12864,6 +12933,13 @@
               uuid.slice(0, 8),
             )}…${esc(uuid.slice(-8))}</div>
               <span class="chat-meta">${esc(fmtTs(session.firstTs))}</span>
+              ${
+                session.contexts
+                  ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(
+                      uuid,
+                    )}')" title="View session contexts">&#8505;</button>`
+                  : ""
+              }
               <div class="chat-spacer"></div>
               ${haloLink}
               <span class="chat-meta">${
@@ -13265,6 +13341,8 @@
 
         if (!interactions.length) {
           thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
+          document.getElementById("chatShowAllBtn").style.display = "none"
+          document.getElementById("chatShowMatchedBtn").style.display = "none"
           return
         }
 
@@ -13525,32 +13603,23 @@
           const matched = allTurns.filter(turnMatches)
           if (!matched.length) {
             thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
+            document.getElementById("chatShowAllBtn").style.display = "none"
+            document.getElementById("chatShowMatchedBtn").style.display = "none"
             return
           }
-          const qaTurns = allTurns.filter((t) => !t.system)
-          const matchCount = matched.filter((t) => !t.system).length
-          thread.innerHTML =
-            `<div class="chat-match-banner">Showing ${matchCount} matched turn${
-              matchCount !== 1 ? "s" : ""
-            } of ${
-              qaTurns.length
-            } &nbsp;&middot;&nbsp; <button class="chat-show-all-btn" onclick="showFullConversation()">Show full conversation</button></div>` +
-            matched.map(renderTurn).join("")
+          thread.innerHTML = matched.map(renderTurn).join("")
+          document.getElementById("chatShowAllBtn").style.display = "flex"
+          document.getElementById("chatShowMatchedBtn").style.display = "none"
           return
         }
 
-        // Render full conversation (optionally with a banner when a search is active)
-        let html = ""
-        if (chatQuery) {
-          const qaTurns = allTurns.filter((t) => !t.system)
-          html += `<div class="chat-match-banner">Full conversation (${
-            qaTurns.length
-          } turn${
-            qaTurns.length !== 1 ? "s" : ""
-          }) &nbsp;&middot;&nbsp; <button class="chat-show-all-btn" onclick="showMatchedOnly()">Show matched only</button></div>`
-        }
-        html += allTurns.map(renderTurn).join("")
+        // Render full conversation
+        let html = allTurns.map(renderTurn).join("")
         thread.innerHTML = html
+        document.getElementById("chatShowAllBtn").style.display = "none"
+        document.getElementById("chatShowMatchedBtn").style.display = chatQuery
+          ? "flex"
+          : "none"
 
         // Scroll to the first highlighted interaction when a recog filter is active
         if (
