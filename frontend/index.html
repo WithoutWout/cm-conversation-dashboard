@@ -3534,9 +3534,6 @@
         background: var(--accent);
         flex-shrink: 0;
       }
-      .chat-selecting .chat-thread {
-        /* padding-left already 28px — no change needed */
-      }
       /* Select button in chat header */
       .btn-chat-select {
         background: none;
@@ -3844,6 +3841,11 @@
       .bubble.zero-recog-highlight.genai {
         border-color: rgba(239, 68, 68, 0.65) !important;
         background: rgba(239, 68, 68, 0.07) !important;
+      }
+      .bubble.feedback-highlight {
+        border-color: rgba(96, 165, 250, 0.6) !important;
+        background: rgba(96, 165, 250, 0.06) !important;
+        box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3);
       }
       /* Entity match chips */
       .entity-match-chip {
@@ -13473,6 +13475,21 @@
           }
           const zeroRecogActive = convSessionFilter === "zero_recog"
           const lowRecogActive = convSessionFilter === "low_recog"
+          const negFeedbackActive = convSessionFilter === "neg_feedback"
+          const posFeedbackActive = convSessionFilter === "pos_feedback"
+          const hasFeedbackScore = (rows, score) =>
+            rows.some((br) => {
+              if (!br.feedbackInfo) return false
+              try {
+                const f =
+                  typeof br.feedbackInfo === "object"
+                    ? br.feedbackInfo
+                    : JSON.parse(br.feedbackInfo)
+                return f.score === score
+              } catch {
+                return false
+              }
+            })
           const turnHasZeroRecog = turn.botRows.some(
             (br) =>
               br.recognitionQuality === 0 &&
@@ -13487,11 +13504,30 @@
               br.recognitionType !== "GenerativeAI" &&
               !isGenAiRow(br),
           )
+          const turnHasNegFeedback =
+            hasFeedbackScore(
+              [...(turn.userRow ? [turn.userRow] : []), ...turn.botRows],
+              -1,
+            ) ||
+            (negFeedbackActive &&
+              turn.userRow?.mainInteractionType === "Feedback" &&
+              turn.userRow?.interactionValue === "no")
+          const turnHasPosFeedback =
+            hasFeedbackScore(
+              [...(turn.userRow ? [turn.userRow] : []), ...turn.botRows],
+              1,
+            ) ||
+            (posFeedbackActive &&
+              turn.userRow?.mainInteractionType === "Feedback" &&
+              turn.userRow?.interactionValue === "yes")
           const userHighlightClass =
             zeroRecogActive && turnHasZeroRecog
               ? " zero-recog-highlight"
               : lowRecogActive && turnHasLowRecog
               ? " low-recog-highlight"
+              : (negFeedbackActive && turnHasNegFeedback) ||
+                (posFeedbackActive && turnHasPosFeedback)
+              ? " feedback-highlight"
               : ""
 
           if (turn.userRow) {
@@ -13576,7 +13612,17 @@
                   ? " zero-recog-highlight"
                   : lowRecogActive && isBrLowRecog
                   ? " low-recog-highlight"
-                  : ""
+                  : (() => {
+                      if (!br.feedbackInfo) return ""
+                      try {
+                        const f = JSON.parse(br.feedbackInfo)
+                        if (negFeedbackActive && f.score === -1)
+                          return " feedback-highlight"
+                        if (posFeedbackActive && f.score === 1)
+                          return " feedback-highlight"
+                      } catch {}
+                      return ""
+                    })()
               const detailOpenClass =
                 (zeroRecogActive && isBrZeroRecog) ||
                 (lowRecogActive && isBrLowRecog)
@@ -13621,17 +13667,91 @@
           ? "flex"
           : "none"
 
-        // Scroll to the first highlighted interaction when a recog filter is active
-        if (
+        // Scroll to the first highlighted turn (or the originating interaction for feedback filters) at the top
+        const isFilterScroll =
           convSessionFilter === "zero_recog" ||
-          convSessionFilter === "low_recog"
-        ) {
+          convSessionFilter === "low_recog" ||
+          convSessionFilter === "neg_feedback" ||
+          convSessionFilter === "pos_feedback"
+        if (isFilterScroll) {
+          const isFeedbackFilter =
+            convSessionFilter === "neg_feedback" ||
+            convSessionFilter === "pos_feedback"
           requestAnimationFrame(() => {
-            const first = thread.querySelector(
-              ".zero-recog-highlight, .low-recog-highlight",
-            )
-            if (first)
-              first.scrollIntoView({ behavior: "smooth", block: "center" })
+            if (isFeedbackFilter) {
+              // Find the first feedback turn and resolve its originatingInteractionId
+              const negActive = convSessionFilter === "neg_feedback"
+              const feedbackTurn =
+                allTurns.find((t) => {
+                  const ur = t.userRow
+                  if (!ur) return false
+                  try {
+                    const fi =
+                      typeof ur.feedbackInfo === "object"
+                        ? ur.feedbackInfo
+                        : JSON.parse(ur.feedbackInfo)
+                    return negActive ? fi?.score === -1 : fi?.score === 1
+                  } catch {
+                    return false
+                  }
+                }) ||
+                allTurns.find((t) =>
+                  negActive
+                    ? t.userRow?.mainInteractionType === "Feedback" &&
+                      t.userRow?.interactionValue === "no"
+                    : t.userRow?.mainInteractionType === "Feedback" &&
+                      t.userRow?.interactionValue === "yes",
+                )
+              if (!feedbackTurn) return
+              let targetEl = null
+              try {
+                const fi =
+                  typeof feedbackTurn.userRow.feedbackInfo === "object"
+                    ? feedbackTurn.userRow.feedbackInfo
+                    : JSON.parse(feedbackTurn.userRow.feedbackInfo)
+                const originatingId = fi?.originatingInteractionId
+                if (originatingId) {
+                  const originatingTurn = allTurns.find((t) =>
+                    [t.userRow, ...t.botRows]
+                      .filter(Boolean)
+                      .some((r) => r.interactionUuid === originatingId),
+                  )
+                  if (originatingTurn) {
+                    const logId = String(
+                      (originatingTurn.userRow || originatingTurn.botRows[0])
+                        ?.logId,
+                    )
+                    targetEl = thread.querySelector(
+                      `.chat-turn[data-turn-id="${logId}"]`,
+                    )
+                  }
+                }
+              } catch {
+                /* fall through to DOM fallback */
+              }
+              // Fallback: turn before the feedback-highlighted element in the DOM
+              if (!targetEl) {
+                const allTurnEls = [...thread.querySelectorAll(".chat-turn")]
+                const feedbackEl = allTurnEls.find((el) =>
+                  el.querySelector(".feedback-highlight"),
+                )
+                const idx = feedbackEl ? allTurnEls.indexOf(feedbackEl) : -1
+                targetEl = idx > 0 ? allTurnEls[idx - 1] : feedbackEl
+              }
+              if (targetEl)
+                targetEl.scrollIntoView({ behavior: "smooth", block: "start" })
+            } else {
+              const allTurnEls = [...thread.querySelectorAll(".chat-turn")]
+              const firstHighlightedTurn = allTurnEls.find((el) =>
+                el.querySelector(".zero-recog-highlight, .low-recog-highlight"),
+              )
+              if (firstHighlightedTurn) {
+                firstHighlightedTurn.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                })
+              }
+            }
           })
         }
       }
