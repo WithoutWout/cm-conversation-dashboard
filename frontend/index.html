@@ -271,6 +271,11 @@
         border-color: var(--red);
         color: var(--red);
       }
+      .sopt:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
       .sopt-sep {
         width: 1px;
         height: 18px;
@@ -525,7 +530,7 @@
         background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: var(--border);
+        background: #3d4462;
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
@@ -533,7 +538,7 @@
       }
       * {
         scrollbar-width: thin;
-        scrollbar-color: var(--border) transparent;
+        scrollbar-color: #3d4462 transparent;
       }
       .search-spinner-inline {
         width: 13px;
@@ -547,6 +552,27 @@
       }
       .search-spinner-inline.visible {
         display: block;
+      }
+      .search-cancel-btn {
+        display: none;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        font-size: 11px;
+        color: var(--muted);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .search-cancel-btn:hover {
+        color: var(--text);
+        border-color: var(--muted);
+      }
+      .search-cancel-btn.visible {
+        display: flex;
       }
       .card {
         background: var(--surface);
@@ -1459,6 +1485,17 @@
         to {
           transform: rotate(360deg);
         }
+      }
+      @keyframes chatReveal {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      .chat-turn.chat-turn-new {
+        animation: chatReveal 0.5s ease forwards;
       }
       .spinner {
         width: 18px;
@@ -3010,6 +3047,21 @@
         animation: spin 0.7s linear infinite;
         flex-shrink: 0;
       }
+      .conv-search-cancel-btn {
+        margin-left: 8px;
+        padding: 2px 8px;
+        font-size: 11px;
+        color: var(--muted);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .conv-search-cancel-btn:hover {
+        color: var(--text);
+        border-color: var(--muted);
+      }
 
       /* === CONTEXT FILTER BUTTON === */
       .conv-ctx-btn {
@@ -3412,6 +3464,7 @@
       .chat-thread {
         flex: 1;
         overflow-y: auto;
+        scrollbar-gutter: stable;
         padding: 20px;
         display: flex;
         flex-direction: column;
@@ -4226,6 +4279,13 @@
             <button class="clear-btn" id="clearSearch">&#x2715;</button>
           </div>
           <span class="search-spinner-inline" id="searchSpinner"></span>
+          <button
+            class="search-cancel-btn"
+            id="searchCancel"
+            title="Cancel search"
+          >
+            &#x2715; Cancel
+          </button>
           <div class="search-opts">
             <button
               class="sopt"
@@ -4780,6 +4840,9 @@
             <div class="conv-search-loading-box">
               <div class="mini-spinner"></div>
               Searching…
+              <button class="conv-search-cancel-btn" id="convSearchCancel">
+                &#x2715; Cancel
+              </button>
             </div>
           </div>
           <div class="sessions-pagination" id="sessionsPagination"></div>
@@ -5626,6 +5689,15 @@
               style="display: flex; gap: 6px"
             ></div>
             <button
+              class="sopt"
+              id="article-modal-filter-btn"
+              onclick="toggleModalMatchFilter()"
+              title="Show search-matching content only"
+              disabled
+            >
+              &#x22B5;q
+            </button>
+            <button
               class="close-btn"
               onclick="closeArticleInfoModal(); _navClear()"
             >
@@ -5665,6 +5737,15 @@
             "
           >
             <div id="dialog-info-actions" style="display: flex; gap: 6px"></div>
+            <button
+              class="sopt"
+              id="dialog-modal-filter-btn"
+              onclick="toggleModalMatchFilter()"
+              title="Show search-matching content only"
+              disabled
+            >
+              &#x22B5;q
+            </button>
             <button
               class="close-btn"
               onclick="closeDialogInfoModal(); _navClear()"
@@ -6039,6 +6120,7 @@
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
+      let modalMatchFilter = false
       let searchCase = false
       let searchWord = false
       let searchRegex = false
@@ -6146,6 +6228,7 @@
       let convIdType = "article" // "article" | "dialog" | "node" — active ID search type
       let chatSearchRegex = false // when true, treat chatQuery as a regex
       let convImporting = false
+      let convSearchSeq = 0 // incremented on each search; used to discard stale results
       let convContextFilters = [] // [{name, value}] — active context filters
       let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
@@ -7500,7 +7583,7 @@
       }
 
       // ── Dialog node ─────────────────────────────────────────────────
-      function renderNodeHtml(node, dialog, q) {
+      function renderNodeHtml(node, dialog, q, autoOpenCtx) {
         const isRec = node.type === "Recognition"
         const items = (node.output && node.output.items) || []
         // Use the isDefault answer as the primary; fall back to first Answer
@@ -7554,6 +7637,7 @@
           contextualAnsData,
           q,
           "node-" + node.id,
+          autoOpenCtx,
         )
         const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
         const optHtml = [...(node.links || [])]
@@ -7756,6 +7840,128 @@
         re.lastIndex = 0
         return re.test(str)
       }
+      // ── Modal match-filter helpers ───────────────────────────────────
+      // Returns array of individual term regexes for the current query.
+      // These are used for inclusive OR-per-element filtering: an element
+      // (node/entity) is shown if ANY term matches any of its fields.
+      // This mirrors how the search worker handles AND terms spread across
+      // multiple fields — a node that contains one of several AND terms is
+      // still relevant to why the item appeared in results.
+      function _buildModalTermRegexes() {
+        if (!gQuery) return []
+        const terms = parseQueryTermsForHl(gQuery) // already unique, respects searchRegex
+        return terms
+          .map((t) => {
+            try {
+              let pat = searchRegex
+                ? t
+                : t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+              if (searchWord)
+                pat =
+                  "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
+              return new RegExp(pat, searchCase ? "" : "i")
+            } catch (e) {
+              return null
+            }
+          })
+          .filter(Boolean)
+      }
+
+      // Test text against any of the term regexes (OR logic).
+      function _anyTermMatches(termRes, str) {
+        if (!str) return false
+        return termRes.some((re) => {
+          re.lastIndex = 0
+          return re.test(str)
+        })
+      }
+
+      function nodeMatchesQuery(n, termRes) {
+        if (!searchContent && _anyTermMatches(termRes, n.name || ""))
+          return true
+        // All answer items (default + contextual)
+        const ansItems = ((n.output && n.output.items) || []).filter(
+          (i) => i.type === "Answer",
+        )
+        if (
+          ansItems.some((i) => {
+            const t = stripDisplay(
+              (i.data && i.data.text) || "",
+              (i.data && i.data.hyperlinks) || [],
+            )
+            return (
+              _anyTermMatches(termRes, t) ||
+              _anyTermMatches(
+                termRes,
+                expandVarNames((i.data && i.data.text) || ""),
+              )
+            )
+          })
+        )
+          return true
+        // KBA article reference — check referenced article's response text
+        const kbaRef = n.output && n.output.kbaIdReference
+        if (kbaRef) {
+          const kbaArt = articleMap.get(kbaRef)
+          if (kbaArt) {
+            if (_anyTermMatches(termRes, kbaArt._displayResponse || ""))
+              return true
+            if (
+              _anyTermMatches(termRes, expandVarNames(kbaArt._response || ""))
+            )
+              return true
+          }
+        }
+        // Recognition links + entity enrichment
+        if (
+          (n.links || []).some((link) => {
+            const cd = (link.condition && link.condition.data) || {}
+            if (cd.isFallback) return false
+            return (cd.questions || []).some(
+              (qo) =>
+                qo.text &&
+                (_anyTermMatches(termRes, qo.text) ||
+                  (matchingEntityNames.size > 0 &&
+                    matchingEntityNames.has(qo.text.toUpperCase()))),
+            )
+          })
+        )
+          return true
+        return false
+      }
+
+      function _syncModalFilterBtn() {
+        const hasQuery = !!gQuery
+        ;["article-modal-filter-btn", "dialog-modal-filter-btn"].forEach(
+          (btnId) => {
+            const btn = document.getElementById(btnId)
+            if (!btn) return
+            btn.classList.toggle("on", modalMatchFilter && hasQuery)
+            btn.disabled = !hasQuery
+            btn.title = hasQuery
+              ? "Show search-matching content only"
+              : "No active search query"
+          },
+        )
+      }
+
+      function toggleModalMatchFilter() {
+        if (!gQuery) return
+        modalMatchFilter = !modalMatchFilter
+        _syncModalFilterBtn()
+        if (!_navCurrentModal) return
+        const { type, id, isTDialog } = _navCurrentModal
+        if (type === "article") {
+          const art = articleMap.get(id)
+          if (art) _renderArticleModalBody(art, aKind(art))
+        } else if (type === "dialog") {
+          const item = isTDialog
+            ? tDialogMap.get(id)
+            : allDialogsCombined.find((d) => d.id === id)
+          if (item) _renderDialogModalBody(item, id, !!isTDialog)
+        }
+      }
+
       function matchArticle(a, q) {
         if (!q) return true
         const re = buildSearchRegex(q)
@@ -8347,7 +8553,27 @@
           id +
           ' in conversations">&#128172; Conversations</button>'
 
+        _renderArticleModalBody(art, kind)
+        _syncModalFilterBtn()
+        document.getElementById("articleInfoModal").classList.add("open")
+        _navUpdateBackButtons()
+      }
+
+      function _renderArticleModalBody(art, kind) {
+        const termRes =
+          gQuery && modalMatchFilter ? _buildModalTermRegexes() : []
+        const filterActive = termRes.length > 0
+
         const makeChip = (qs) => {
+          if (
+            filterActive &&
+            !_anyTermMatches(termRes, qs.Text) &&
+            !(
+              matchingEntityNames.size > 0 &&
+              matchingEntityNames.has(qs.Text.toUpperCase())
+            )
+          )
+            return ""
           const linkedEntity = getEntityForChip(qs.Text)
           return (
             '<span class="chip' +
@@ -8367,22 +8593,37 @@
           )
         }
 
-        let html =
-          '<div class="detail-section"><h4>Entities (' +
-          qCnt +
-          ")</h4>" +
-          '<div class="chip-grid">' +
-          art.Questions.map(makeChip).join("") +
-          "</div></div>"
+        const chipItems = art.Questions.map(makeChip)
+        const chips = chipItems.join("")
+        const visibleChipCount = chipItems.filter(Boolean).length
+        let html = chips
+          ? '<div class="detail-section"><h4>Entities (' +
+            (filterActive
+              ? visibleChipCount + "/" + art.Questions.length
+              : art.Questions.length) +
+            ")</h4>" +
+            '<div class="chip-grid">' +
+            chips +
+            "</div></div>"
+          : filterActive
+          ? ""
+          : '<div class="detail-section"><h4>Entities (0)</h4></div>'
 
         if (kind === "answer") {
           const raw = art._displayResponse || ""
-          if (raw)
-            html +=
-              '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
-              hlVar(hl(raw, gQuery)) +
-              "</div></div>"
-          // Contextual responses (non-default Answer outputs)
+          const rawExpanded = expandVarNames(art._response || "")
+          if (
+            !filterActive ||
+            _anyTermMatches(termRes, raw) ||
+            _anyTermMatches(termRes, rawExpanded)
+          ) {
+            if (raw)
+              html +=
+                '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
+                hlVar(hl(raw, gQuery)) +
+                "</div></div>"
+          }
+          // Contextual responses
           const contextualOutputs = art.Outputs.filter(
             (o) => o.Type === "Answer" && !o.IsDefault,
           ).map((o) => ({
@@ -8392,13 +8633,21 @@
             isArticle: true,
             isContextMatch: ctxVarsMatchFilters(o.ContextVariables || [], true),
           }))
-          if (contextualOutputs.length)
+          const visibleContextual = filterActive
+            ? contextualOutputs.filter(
+                (o) =>
+                  _anyTermMatches(termRes, o.displayText) ||
+                  _anyTermMatches(termRes, expandVarNames(o.displayText)),
+              )
+            : contextualOutputs
+          if (visibleContextual.length)
             html +=
               '<div class="detail-section">' +
               renderContextualAnswersList(
-                contextualOutputs,
+                visibleContextual,
                 gQuery,
-                "art-" + id,
+                "art-" + art.Id,
+                filterActive,
               ) +
               "</div>"
         } else {
@@ -8441,9 +8690,12 @@
               "</div></div>"
         }
 
+        if (filterActive && !html) {
+          html =
+            '<p style="color:var(--muted);font-size:0.82rem">No content matching the current search query.</p>'
+        }
+
         document.getElementById("article-info-body").innerHTML = html
-        document.getElementById("articleInfoModal").classList.add("open")
-        _navUpdateBackButtons()
       }
 
       function closeArticleInfoModal() {
@@ -8551,7 +8803,6 @@
         const titleEl = document.getElementById("dialog-info-title")
         const subtitleEl = document.getElementById("dialog-info-subtitle")
         const actionsEl = document.getElementById("dialog-info-actions")
-        const bodyEl = document.getElementById("dialog-info-body")
 
         if (isTDialog) {
           titleEl.textContent = item.name || "Transactional Dialog"
@@ -8563,8 +8814,6 @@
             ",'dialog')\" title=\"Search Transactional Dialog ID " +
             id +
             ' in conversations">&#128172; Conversations</button>'
-          bodyEl.innerHTML =
-            '<p style="color:var(--muted);font-size:0.82rem">No additional details available for Transactional Dialogs.</p>'
         } else {
           const nodeCnt = (item.nodes || []).length
           const recCnt = (item.nodes || []).filter(
@@ -8591,35 +8840,63 @@
             ",'dialog')\" title=\"Search Dialog ID " +
             id +
             ' in conversations">&#128172; Conversations</button>'
+        }
 
-          let html = ""
+        _renderDialogModalBody(item, id, !!isTDialog)
+        _syncModalFilterBtn()
+        modal.classList.add("open")
+        _navUpdateBackButtons()
+      }
 
-          if (item.description) {
+      function _renderDialogModalBody(item, id, isTDialog) {
+        const bodyEl = document.getElementById("dialog-info-body")
+        if (isTDialog) {
+          bodyEl.innerHTML =
+            '<p style="color:var(--muted);font-size:0.82rem">No additional details available for Transactional Dialogs.</p>'
+          return
+        }
+
+        const termRes =
+          gQuery && modalMatchFilter ? _buildModalTermRegexes() : []
+        const filterActive = termRes.length > 0
+
+        let html = ""
+
+        if (item.description) {
+          if (!filterActive || _anyTermMatches(termRes, item.description)) {
             html +=
               '<div class="detail-section"><h4>Description</h4><p class="desc-text">' +
               hl(item.description, gQuery) +
               "</p></div>"
           }
+        }
 
-          if (nodeCnt > 0) {
+        const nodes = item.nodes || []
+        if (nodes.length > 0) {
+          const visibleNodes = filterActive
+            ? nodes.filter((n) => nodeMatchesQuery(n, termRes))
+            : nodes
+          if (visibleNodes.length) {
             html +=
-              '<div class="detail-section"><h4>Nodes</h4><div style="display:flex;flex-direction:column;gap:8px">'
-            ;(item.nodes || []).forEach((node) => {
-              html += renderNodeHtml(node, item, gQuery)
+              '<div class="detail-section"><h4>Nodes' +
+              (filterActive && visibleNodes.length < nodes.length
+                ? " (" + visibleNodes.length + "/" + nodes.length + ")"
+                : "") +
+              '</h4><div style="display:flex;flex-direction:column;gap:8px">'
+            visibleNodes.forEach((node) => {
+              html += renderNodeHtml(node, item, gQuery, filterActive)
             })
             html += "</div></div>"
           }
-
-          if (!html) {
-            html =
-              '<p style="color:var(--muted);font-size:0.82rem">No details available.</p>'
-          }
-
-          bodyEl.innerHTML = html
         }
 
-        modal.classList.add("open")
-        _navUpdateBackButtons()
+        if (!html) {
+          html = filterActive
+            ? '<p style="color:var(--muted);font-size:0.82rem">No content matching the current search query.</p>'
+            : '<p style="color:var(--muted);font-size:0.82rem">No details available.</p>'
+        }
+
+        bodyEl.innerHTML = html
       }
 
       function closeDialogInfoModal() {
@@ -8637,6 +8914,9 @@
       function showSearchLoading(visible) {
         document
           .getElementById("searchSpinner")
+          .classList.toggle("visible", visible)
+        document
+          .getElementById("searchCancel")
           .classList.toggle("visible", visible)
       }
       function triggerSearch() {
@@ -8756,6 +9036,21 @@
         }
 
         window.dispatchEvent(new CustomEvent("searchcomplete"))
+
+        // Sync modal filter button state and re-render if filter is active
+        _syncModalFilterBtn()
+        if (modalMatchFilter && _navCurrentModal) {
+          const { type, id, isTDialog } = _navCurrentModal
+          if (type === "article") {
+            const art = articleMap.get(id)
+            if (art) _renderArticleModalBody(art, aKind(art))
+          } else if (type === "dialog") {
+            const item = isTDialog
+              ? tDialogMap.get(id)
+              : allDialogsCombined.find((d) => d.id === id)
+            if (item) _renderDialogModalBody(item, id, !!isTDialog)
+          }
+        }
       }
       searchWorker = new Worker("search-worker.js")
       searchWorker.onmessage = function (e) {
@@ -8790,6 +9085,11 @@
         document.getElementById("clearSearch").classList.remove("visible")
         gQuery = ""
         triggerSearch()
+      })
+      document.getElementById("searchCancel").addEventListener("click", () => {
+        // Bump searchSeq so any in-flight worker result is discarded
+        searchSeq++
+        showSearchLoading(false)
       })
       document.getElementById("opt-case").addEventListener("click", () => {
         searchCase = !searchCase
@@ -10640,11 +10940,12 @@
               .getDateRange()
               .then(({ min, max }) => initDatePicker(min, max))
               .catch(() => {})
-            if (convHasSearched) {
-              await loadSessions()
-            } else {
+            // Only show the search prompt if no search has been run yet.
+            // Never auto-reload — the user must press Search or Enter to run a query.
+            if (!convHasSearched) {
               showConvSearchPrompt()
             }
+            // If convHasSearched, results already in DOM — leave them as-is.
           } catch (_) {
             // DB file may have moved; prompt
             convDbPath = ""
@@ -11085,8 +11386,11 @@
         await new Promise((r) =>
           requestAnimationFrame(() => requestAnimationFrame(r)),
         )
+        const mySeq = ++convSearchSeq
         try {
           const res = await window.electronAPI.getSessions(args)
+          // Discard if a newer search was started or the user cancelled
+          if (mySeq !== convSearchSeq) return
           convSessions = res.sessions || []
           convTotalSessions = res.total || 0
           _submitBtn.classList.remove("loading")
@@ -11096,6 +11400,7 @@
             .classList.remove("visible")
           renderSessionList()
         } catch (e) {
+          if (mySeq !== convSearchSeq) return
           _submitBtn.classList.remove("loading")
           setConvDbBusy(false)
           document
@@ -12020,6 +12325,8 @@
           convPage = 1
           convHasSearched = true
           loadSessions()
+        } else if (e.key === "Escape") {
+          document.getElementById("convSearchCancel").click()
         }
       })
 
@@ -12039,6 +12346,20 @@
           document.getElementById("convClearSearch").classList.remove("visible")
           convQuery = ""
           convPage = 1
+        })
+
+      document
+        .getElementById("convSearchCancel")
+        .addEventListener("click", () => {
+          // Bump seq so the in-flight getSessions result is discarded on arrival
+          convSearchSeq++
+          document
+            .getElementById("convSearchSubmit")
+            .classList.remove("loading")
+          setConvDbBusy(false)
+          document
+            .getElementById("convSearchLoadingOverlay")
+            .classList.remove("visible")
         })
 
       function setConvIdType(type) {
@@ -12416,14 +12737,72 @@
 
       // ── Chat thread ─────────────────────────────────────────────────
       function showFullConversation() {
+        const thread = document.getElementById("chatThread")
+
+        // Snapshot which turn IDs are currently rendered (these stay visible — no animation)
+        const existingIds = new Set(
+          [...thread.querySelectorAll(".chat-turn")].map(
+            (el) => el.dataset.turnId,
+          ),
+        )
+
+        // Snapshot the first turn whose top edge is at or below the container's visible top
+        const containerRect = thread.getBoundingClientRect()
+        let anchorId = null
+        let anchorOffset = 0
+        for (const turn of thread.querySelectorAll(".chat-turn")) {
+          const rect = turn.getBoundingClientRect()
+          if (rect.top >= containerRect.top) {
+            anchorId = turn.dataset.turnId
+            anchorOffset = rect.top - containerRect.top
+            break
+          }
+        }
+
+        // Hide instantly before re-rendering so the scroll-position change is invisible
+        thread.style.opacity = "0"
+
         chatShowAll = true
         renderChatThread()
-        // Defer scroll until after the browser has laid out the new content
+
+        // Restore scroll position, then reveal
         requestAnimationFrame(() => {
-          const thread = document.getElementById("chatThread")
-          const firstMark = thread.querySelector("mark")
-          if (firstMark)
-            firstMark.scrollIntoView({ behavior: "smooth", block: "center" })
+          if (anchorId) {
+            const anchor = thread.querySelector(
+              `.chat-turn[data-turn-id="${anchorId}"]`,
+            )
+            if (anchor) {
+              const anchorCurrentTop =
+                anchor.getBoundingClientRect().top -
+                thread.getBoundingClientRect().top
+              const target = anchorCurrentTop - anchorOffset
+              if (target > 0) {
+                const maxScroll = thread.scrollHeight - thread.clientHeight
+                if (target > maxScroll) {
+                  const spacer = document.createElement("div")
+                  spacer.style.cssText = `height:${
+                    target - maxScroll
+                  }px;flex-shrink:0`
+                  thread.appendChild(spacer)
+                  void thread.scrollHeight
+                }
+                thread.scrollTop = target
+              }
+            }
+          }
+
+          // Show the thread, then animate only the newly added turns
+          thread.style.opacity = ""
+          for (const turn of thread.querySelectorAll(".chat-turn")) {
+            if (!existingIds.has(turn.dataset.turnId)) {
+              turn.classList.add("chat-turn-new")
+              turn.addEventListener(
+                "animationend",
+                () => turn.classList.remove("chat-turn-new"),
+                { once: true },
+              )
+            }
+          }
         })
       }
 

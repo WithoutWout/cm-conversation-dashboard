@@ -1554,7 +1554,7 @@ async fn get_sessions(
     );
     if filter == "genai" {
         conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE main_interaction_type = 'GenerativeAI')".to_string(),
+            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE main_interaction_type = 'GenerativeAI' OR all_interaction_types LIKE '%GenerativeAI%')".to_string(),
         );
     } else if filter == "neg_feedback" {
         conditions.push(
