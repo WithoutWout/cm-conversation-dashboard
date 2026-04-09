@@ -1188,6 +1188,24 @@
         padding: 1px 6px;
         color: #a89ff5;
       }
+      @keyframes pill-match-glow {
+        0%,
+        100% {
+          border-color: rgba(124, 106, 247, 0.7);
+          box-shadow: 0 0 0 1px rgba(124, 106, 247, 0.2);
+        }
+        50% {
+          border-color: #a89ff5;
+          box-shadow: 0 0 7px 1px rgba(168, 159, 245, 0.35),
+            0 0 0 1px rgba(124, 106, 247, 0.45);
+        }
+      }
+      .ctx-var-pill.ctx-var-pill-match {
+        background: rgba(124, 106, 247, 0.18);
+        border-color: rgba(124, 106, 247, 0.7);
+        color: #c4bbff;
+        animation: pill-match-glow 2s ease-in-out infinite;
+      }
 
       .modal-box.dialog-info-modal-box {
         width: calc(100vw - 32px) !important;
@@ -6204,7 +6222,7 @@
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
-      let modalMatchFilter = false
+      let modalMatchFilter = true
       let searchCase = false
       let searchWord = false
       let searchRegex = false
@@ -6846,17 +6864,33 @@
       }
       // Build context-variable pills for display.
       // isArticle=true → {Id, Values[]}, false → {id, value}
-      function renderCtxVarPills(contextVars, isArticle) {
+      // escGroup: optional escalation group string to render as an extra pill
+      function renderCtxVarPills(contextVars, isArticle, escGroup) {
         const pills = []
         if (isArticle) {
           for (const cv of contextVars) {
             if (!cv.Values.includes("any")) {
               const name = ctxVarMap.get(cv.Id) || "Var #" + cv.Id
+              const vals = cv.Values.join(", ")
+              const isMatch =
+                contentContextFilters.length > 0 &&
+                contentContextFilters.some(
+                  (f) =>
+                    f.name === name &&
+                    cv.Values.some((v) =>
+                      v
+                        .split(",")
+                        .map((x) => x.trim())
+                        .includes(f.value),
+                    ),
+                )
               pills.push(
-                '<span class="ctx-var-pill">' +
+                '<span class="ctx-var-pill' +
+                  (isMatch ? " ctx-var-pill-match" : "") +
+                  '">' +
                   esc(name) +
                   ": " +
-                  esc(cv.Values.join(", ")) +
+                  esc(vals) +
                   "</span>",
               )
             }
@@ -6864,20 +6898,48 @@
         } else {
           for (const cv of contextVars) {
             const name = ctxVarMap.get(cv.id) || "Var #" + cv.id
+            const val = cv.value || ""
+            const isMatch =
+              contentContextFilters.length > 0 &&
+              contentContextFilters.some(
+                (f) =>
+                  f.name === name &&
+                  val
+                    .split(",")
+                    .map((x) => x.trim())
+                    .includes(f.value),
+              )
             pills.push(
-              '<span class="ctx-var-pill">' +
+              '<span class="ctx-var-pill' +
+                (isMatch ? " ctx-var-pill-match" : "") +
+                '">' +
                 esc(name) +
                 ": " +
-                esc(cv.value || "") +
+                esc(val) +
                 "</span>",
             )
           }
+        }
+        if (escGroup) {
+          const isMatch =
+            contentContextFilters.length > 0 &&
+            contentContextFilters.some(
+              (f) => f.name === "escalationGroup" && f.value === escGroup,
+            )
+          pills.push(
+            '<span class="ctx-var-pill' +
+              (isMatch ? " ctx-var-pill-match" : "") +
+              '">escalationGroup: ' +
+              esc(escGroup) +
+              "</span>",
+          )
         }
         return pills.join("")
       }
       // Render a collapsible section of contextual answers.
       // answersData: [{displayText, isUnreachable, contextVars, isArticle}]
-      function renderContextualAnswersList(answersData, q, toggleId) {
+      // autoOpen: when true, section starts expanded (e.g. when a filter is active)
+      function renderContextualAnswersList(answersData, q, toggleId, autoOpen) {
         if (!answersData.length) return ""
         const listId = "ctx-list-" + toggleId
         const btnId = "ctx-btn-" + toggleId
@@ -6897,6 +6959,7 @@
           btnId +
           '" class="contextual-answers-toggle' +
           (hasTextMatch ? " has-text-match" : "") +
+          (autoOpen ? " open" : "") +
           '" onclick="toggleCtxAnswers(\'' +
           listId +
           "','" +
@@ -6907,14 +6970,23 @@
           " contextual response" +
           (answersData.length !== 1 ? "s" : "") +
           "</button>"
-        html += '<div id="' + listId + '" class="contextual-answers-list">'
+        html +=
+          '<div id="' +
+          listId +
+          '" class="contextual-answers-list' +
+          (autoOpen ? " open" : "") +
+          '">'
         for (const ans of answersData) {
           html +=
             '<div class="contextual-answer-item' +
             (ans.isUnreachable ? " unreachable" : "") +
             (ans.isContextMatch ? " ctx-filter-match" : "") +
             '">'
-          const pills = renderCtxVarPills(ans.contextVars, ans.isArticle)
+          const pills = renderCtxVarPills(
+            ans.contextVars,
+            ans.isArticle,
+            ans.escGroup,
+          )
           if (ans.isUnreachable || pills) {
             html += '<div class="ctx-answer-meta">'
             if (ans.isUnreachable)
@@ -6926,6 +6998,57 @@
         }
         html += "</div>"
         return html
+      }
+
+      // Returns true if a single answer output satisfies all active content context filters.
+      // escGroup: string|null from OutputMetaData.escalationGroup or metadata.escalationGroup
+      // contextVars: ContextVariables[] (article) or contextVariables[] (dialog item)
+      // isArticle: true for article-style vars ({Id, Values[]}), false for dialog-style ({id, value})
+      function answerPassesContextFilters(contextVars, escGroup, isArticle) {
+        if (!contentContextFilters.length) return true
+        const escFilters = contentContextFilters.filter(
+          (f) => f.name === "escalationGroup",
+        )
+        const varFilters = contentContextFilters.filter(
+          (f) => f.name !== "escalationGroup",
+        )
+        // Escalation group: OR among selected values — answer passes if its
+        // single group is any of the selected group values.
+        if (escFilters.length) {
+          if (!escGroup || !escFilters.some((f) => f.value === escGroup))
+            return false
+        }
+        if (!varFilters.length) return true
+        const ctxSet = {}
+        if (isArticle) {
+          for (const cv of contextVars) {
+            const name = ctxVarMap.get(cv.Id)
+            if (!name) continue
+            const vals = []
+            for (const valStr of cv.Values || []) {
+              for (const v of valStr.split(",")) {
+                const t = v.trim()
+                if (t && t !== "any") vals.push(t)
+              }
+            }
+            if (vals.length) ctxSet[name] = vals
+          }
+        } else {
+          for (const cv of contextVars) {
+            const name = ctxVarMap.get(cv.id)
+            if (!name || !cv.value) continue
+            const vals = cv.value
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+            if (vals.length) ctxSet[name] = vals
+          }
+        }
+        return varFilters.every((f) => {
+          if (f.value === "__not_set__") return !ctxSet[f.name]
+          const vals = ctxSet[f.name]
+          return vals && vals.includes(f.value)
+        })
       }
 
       // ── Article helpers ─────────────────────────────────────────────
@@ -7704,24 +7827,48 @@
             "</a> "
           : ""
         // Build contextual answers section for this node
-        const contextualAnsData = contextualAnsItems.map((item) => ({
-          displayText: stripDisplay(
-            (item.data && item.data.text) || "",
-            (item.data && item.data.hyperlinks) || [],
-          ),
-          isUnreachable: !dialogItemHasContext(item),
-          contextVars: item.contextVariables || [],
-          isArticle: false,
-          isContextMatch: ctxVarsMatchFilters(
-            item.contextVariables || [],
-            false,
-          ),
-        }))
+        const _nodeHasCtxFilter = contentContextFilters.length > 0
+        const _nodeTermRes = autoOpenCtx ? _buildModalTermRegexes() : []
+        const contextualAnsData = contextualAnsItems.map((item) => {
+          const _rawText = (item.data && item.data.text) || ""
+          return {
+            displayText: stripDisplay(
+              _rawText,
+              (item.data && item.data.hyperlinks) || [],
+            ),
+            rawText: _rawText,
+            isUnreachable: !dialogItemHasContext(item),
+            contextVars: item.contextVariables || [],
+            escGroup: (item.metadata && item.metadata.escalationGroup) || null,
+            isArticle: false,
+            isContextMatch: ctxVarsMatchFilters(
+              item.contextVariables || [],
+              false,
+            ),
+          }
+        })
+        const visibleNodeCtxData =
+          autoOpenCtx || _nodeHasCtxFilter
+            ? contextualAnsData.filter(
+                (ans) =>
+                  (!autoOpenCtx ||
+                    _anyTermMatches(_nodeTermRes, ans.displayText) ||
+                    _anyTermMatches(
+                      _nodeTermRes,
+                      expandVarNames(ans.rawText),
+                    )) &&
+                  answerPassesContextFilters(
+                    ans.contextVars,
+                    ans.escGroup,
+                    false,
+                  ),
+              )
+            : contextualAnsData
         const contextualAnsHtml = renderContextualAnswersList(
-          contextualAnsData,
+          visibleNodeCtxData,
           q,
           "node-" + node.id,
-          autoOpenCtx,
+          autoOpenCtx || _nodeHasCtxFilter,
         )
         const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
         const optHtml = [...(node.links || [])]
@@ -8708,22 +8855,32 @@
                 "</div></div>"
           }
           // Contextual responses
+          const hasCtxFilter = contentContextFilters.length > 0
           const contextualOutputs = art.Outputs.filter(
             (o) => o.Type === "Answer" && !o.IsDefault,
           ).map((o) => ({
             displayText: stripDisplay(o.Text, o.Links),
             isUnreachable: !articleOutputHasContext(o),
             contextVars: o.ContextVariables || [],
+            escGroup:
+              (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
             isArticle: true,
             isContextMatch: ctxVarsMatchFilters(o.ContextVariables || [], true),
           }))
-          const visibleContextual = filterActive
-            ? contextualOutputs.filter(
-                (o) =>
-                  _anyTermMatches(termRes, o.displayText) ||
-                  _anyTermMatches(termRes, expandVarNames(o.displayText)),
-              )
-            : contextualOutputs
+          const visibleContextual =
+            filterActive || hasCtxFilter
+              ? contextualOutputs.filter(
+                  (o) =>
+                    (!filterActive ||
+                      _anyTermMatches(termRes, o.displayText) ||
+                      _anyTermMatches(
+                        termRes,
+                        expandVarNames(o.displayText),
+                      )) &&
+                    answerPassesContextFilters(o.contextVars, o.escGroup, true),
+                )
+              : contextualOutputs
+          const autoOpenCtxSection = filterActive || hasCtxFilter
           if (visibleContextual.length)
             html +=
               '<div class="detail-section">' +
@@ -8731,7 +8888,7 @@
                 visibleContextual,
                 gQuery,
                 "art-" + art.Id,
-                filterActive,
+                autoOpenCtxSection,
               ) +
               "</div>"
         } else {
@@ -10687,14 +10844,26 @@
             active.isContentEditable)
         if (inInput) return
 
-        // Cmd/Ctrl+F — flag selected interactions (conversations select mode only)
-        if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        // F / Cmd/Ctrl+F — flag or unflag selected interactions
+        const _isBareF =
+          (e.key === "f" || e.key === "F") &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey
+        const _isModF = (e.metaKey || e.ctrlKey) && e.key === "f"
+        if (_isBareF || _isModF) {
           if (chatSelectMode && selectedTurnIds.size > 0) {
             e.preventDefault()
             const btn = document.getElementById("chatFlagSelBtn")
             if (btn) btn.click()
+            return
           }
-          return
+          if (flaggedSelectMode && activeFlagId != null) {
+            e.preventDefault()
+            removeFlaggedConversation(activeFlagId)
+            return
+          }
+          if (_isModF) return
         }
 
         const isCopy = (e.metaKey || e.ctrlKey) && e.key === "c"
@@ -11620,7 +11789,8 @@
             for (const cv of o.ContextVariables || []) {
               if (!cv.Values || cv.Values.includes("any")) continue
               const name = ctxVarMap.get(cv.Id)
-              if (!name) continue
+              // escalationGroup is handled separately via OutputMetaData
+              if (!name || name === "escalationGroup") continue
               for (const valStr of cv.Values) {
                 for (const v of valStr.split(",")) {
                   const val = v.trim()
@@ -11638,7 +11808,8 @@
               if (item.type !== "Answer") continue
               for (const cv of item.contextVariables || []) {
                 const name = ctxVarMap.get(cv.id)
-                if (!name || !cv.value) continue
+                // escalationGroup is handled separately via metadata
+                if (!name || !cv.value || name === "escalationGroup") continue
                 for (const v of cv.value.split(",")) {
                   const val = v.trim()
                   if (!val) continue
@@ -12064,6 +12235,8 @@
 
       let chatSelectMode = false
       const selectedTurnIds = new Set()
+      // turnId → flagId for turns flagged in the current session (in-memory only)
+      const chatFlaggedTurnMap = new Map()
       let chatCopyFormat = localStorage.getItem("chat-copy-format") || "table"
 
       function onTurnClick(turnEl, event) {
@@ -12103,6 +12276,13 @@
         }
         if (flagBtn) {
           flagBtn.style.display = count > 0 ? "" : "none"
+          const allFlagged =
+            count > 0 &&
+            [...selectedTurnIds].every((id) => chatFlaggedTurnMap.has(id))
+          flagBtn.innerHTML = allFlagged ? "&#x2691; Unflag" : "&#x2691; Flag"
+          flagBtn.title = allFlagged
+            ? "Remove from Flagged view"
+            : "Save flagged conversation to Flagged view"
         }
         if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
       }
@@ -12195,7 +12375,39 @@
 
       async function flagCurrentSession(btn) {
         if (!activeSessionUuid || selectedTurnIds.size === 0) return
-        const flaggedLogIds = [...selectedTurnIds]
+
+        const selected = [...selectedTurnIds]
+        const allFlagged = selected.every((id) => chatFlaggedTurnMap.has(id))
+
+        if (allFlagged) {
+          // Unflag: remove each unique flagged session that covers these turns
+          const uniqueFlagIds = new Set(
+            selected.map((id) => chatFlaggedTurnMap.get(id)),
+          )
+          const origText = btn.innerHTML
+          btn.disabled = true
+          btn.innerHTML = "Unflagging…"
+          try {
+            for (const flagId of uniqueFlagIds) {
+              await window.electronAPI.unflagSession(flagId)
+            }
+            selected.forEach((id) => chatFlaggedTurnMap.delete(id))
+            btn.innerHTML = "&#x2713; Unflagged"
+            if (typeof onFlaggedSessionAdded === "function")
+              onFlaggedSessionAdded()
+            setTimeout(() => {
+              btn.disabled = false
+              _updateChatSelectHeader()
+            }, 1800)
+          } catch (e) {
+            console.error("Unflag error:", e)
+            btn.innerHTML = origText
+            btn.disabled = false
+          }
+          return
+        }
+
+        const flaggedLogIds = selected
           .map((id) => parseInt(id, 10))
           .filter((n) => !isNaN(n))
         if (flaggedLogIds.length === 0) return
@@ -12210,13 +12422,15 @@
             convDbPath || "",
           )
           if (flagId != null) {
+            // Track which turns belong to this flagged session
+            selected.forEach((id) => chatFlaggedTurnMap.set(id, flagId))
             btn.innerHTML = "&#x2713; Flagged"
             // Notify flagged view to refresh if it's the active view
             if (typeof onFlaggedSessionAdded === "function")
               onFlaggedSessionAdded()
             setTimeout(() => {
-              btn.innerHTML = origText
               btn.disabled = false
+              _updateChatSelectHeader()
             }, 1800)
           } else {
             btn.innerHTML = origText
@@ -12933,6 +13147,7 @@
         activeSessionUuid = uuid
         chatFilter = "all"
         chatShowAll = false
+        chatFlaggedTurnMap.clear()
         clearChatSelection()
         // Reset chat filter pills
         document.querySelectorAll("[data-chat-filter]").forEach((b) => {

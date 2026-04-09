@@ -278,7 +278,8 @@ function precomputeArticle(a) {
     const ctxSet = {}
     for (const cv of cvs) {
       const name = ctxVarMap.get(cv.Id)
-      if (!name) continue
+      // escalationGroup is handled by the OutputMetaData aggregate pass below
+      if (!name || name === "escalationGroup") continue
       const vals = []
       for (const valStr of cv.Values) {
         for (const v of valStr.split(",")) {
@@ -452,7 +453,8 @@ function precomputeDialog(item) {
       const ctxSet = {}
       for (const cv of cvs) {
         const name = ctxVarMap.get(cv.id)
-        if (!name || !cv.value) continue
+        // escalationGroup is handled by the metadata aggregate pass below
+        if (!name || !cv.value || name === "escalationGroup") continue
         const vals = cv.value
           .split(",")
           .map((v) => v.trim())
@@ -524,31 +526,56 @@ function canUsePlainMatch() {
 // Returns true if item passes the active content context filter set.
 // An item passes if it has at least one ctxSet satisfying ALL active filters.
 // For "not set" filters the implicit default answer ({}) is also considered.
+// NOTE: escalationGroup is stored in a dedicated aggregate ctxSet separate from
+// per-answer contextVariable ctxSets, so it is checked independently and the
+// results are AND'd with the regular context variable check.
 function matchesContentContext(item) {
   if (!contentContextFilters.length) return true
-  const hasNotSetFilter = contentContextFilters.some(
-    (f) => f.value === "__not_set__",
-  )
   const ctxSets = item._ctxSets || []
-  // Include implicit "default" answer (empty ctxSet) when a not-set filter is active
-  // and the item actually has a default (context-free) answer.
+
+  // Split filters: escalationGroup uses an item-level aggregate ctxSet;
+  // regular context vars use per-answer ctxSets. Must check independently
+  // or combining the two always yields 0 results.
+  const escFilters = contentContextFilters.filter(
+    (f) => f.name === "escalationGroup",
+  )
+  const varFilters = contentContextFilters.filter(
+    (f) => f.name !== "escalationGroup",
+  )
+
+  // ── Escalation group check ────────────────────────────────────────────────
+  if (escFilters.length) {
+    const aggCtx = ctxSets.find((cs) => cs.escalationGroup !== undefined)
+    if (
+      !aggCtx ||
+      !escFilters.every((f) => aggCtx.escalationGroup.includes(f.value))
+    )
+      return false
+  }
+
+  // ── Regular context variable check ───────────────────────────────────────
+  if (!varFilters.length) return true
+  // Exclude the escalation aggregate ctxSet — it holds no regular vars and
+  // would falsely satisfy any "__not_set__" check.
+  const varCtxSets = ctxSets.filter((cs) => cs.escalationGroup === undefined)
+  const hasNotSetFilter = varFilters.some((f) => f.value === "__not_set__")
   if (hasNotSetFilter && item._hasDefaultAnswer) {
     return (
-      ctxSets.some((ctxSet) =>
-        contentContextFilters.every((f) => {
+      varCtxSets.some((ctxSet) =>
+        varFilters.every((f) => {
           if (f.value === "__not_set__") return !ctxSet[f.name]
           const vals = ctxSet[f.name]
           return vals && vals.includes(f.value)
         }),
       ) ||
-      contentContextFilters.every((f) => {
+      varFilters.every((f) => {
         if (f.value === "__not_set__") return true // default answer has nothing set
         return false // regular filter can't be satisfied by empty ctxSet
       })
     )
   }
-  return ctxSets.some((ctxSet) =>
-    contentContextFilters.every((f) => {
+  return varCtxSets.some((ctxSet) =>
+    varFilters.every((f) => {
       if (f.value === "__not_set__") return !ctxSet[f.name]
       const vals = ctxSet[f.name]
       return vals && vals.includes(f.value)
@@ -790,11 +817,6 @@ self.onmessage = function (e) {
         if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
         if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
           return false
-        if (hasCtxFilter && !noQuery) {
-          return item._kind === "article"
-            ? matchArticleCombined(item)
-            : matchDialogCombined(item)
-        }
         if (!matchesContentContext(item)) return false
         if (noQuery) return true
         return item._kind === "article" ? matchArticle(item) : matchDialog(item)
@@ -815,9 +837,6 @@ self.onmessage = function (e) {
       filteredArticles = workerArticles.filter((a) => {
         if (aFilter === "answer" && aKind(a) !== "answer") return false
         if (aFilter === "dialog" && aKind(a) === "answer") return false
-        if (hasCtxFilter && !noQuery) {
-          return matchArticleCombined(a)
-        }
         if (!matchesContentContext(a)) return false
         if (noQuery) return true
         return matchArticle(a)
@@ -840,9 +859,6 @@ self.onmessage = function (e) {
         if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
         if (dFilter === "recognition" && item._kind === "tdialog") return false
         if (dFilter === "recognition" && !item._hasAnswerOutput) return false
-        if (hasCtxFilter && !noQuery) {
-          return matchDialogCombined(item)
-        }
         if (!matchesContentContext(item)) return false
         if (noQuery) return true
         return matchDialog(item)
