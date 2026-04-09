@@ -688,7 +688,12 @@ fn get_data(
 fn open_url(app: tauri::AppHandle, url: String) {
     use tauri_plugin_opener::OpenerExt;
     if url.starts_with("https://") || url.starts_with("http://") || url.starts_with("tel:") {
-        let _ = app.opener().open_url(url, None::<String>);
+        // Spawn in a detached thread so a blocking OS shell call (e.g. Windows
+        // ShellExecute waiting on a security policy or UAC prompt) never
+        // freezes the Tauri command executor or the UI.
+        std::thread::spawn(move || {
+            let _ = app.opener().open_url(url, None::<String>);
+        });
     }
 }
 

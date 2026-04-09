@@ -5056,6 +5056,22 @@
                 >
               </div>
             </div>
+            <div style="margin-top: 14px">
+              <label>Open other links</label>
+              <p class="hint" style="margin-bottom: 6px">
+                Applies to chat message URLs and CTA buttons.
+              </p>
+              <div class="radio-group">
+                <label class="radio-option"
+                  ><input type="radio" name="other-open-mode" value="popup" />
+                  In a popup window</label
+                >
+                <label class="radio-option"
+                  ><input type="radio" name="other-open-mode" value="browser" />
+                  In default browser</label
+                >
+              </div>
+            </div>
             <div
               style="
                 margin-top: 14px;
@@ -5744,7 +5760,11 @@
               style="font-size: 0.72rem; color: var(--muted)"
             ></span>
           </div>
-          <button class="close-btn" onclick="closeSessionContextModal()">
+          <button
+            class="close-btn"
+            style="margin-left: auto"
+            onclick="closeSessionContextModal()"
+          >
             &#x2715;
           </button>
         </div>
@@ -6075,6 +6095,7 @@
         10,
       )
       let openMode = localStorage.getItem("cm-open-mode") || "popup"
+      let otherOpenMode = localStorage.getItem("cm-other-open-mode") || "popup"
       let flowNetwork = null
       let flowDirection = localStorage.getItem("cm-flow-direction") || "LR"
       let flowCurrentDialogId = null
@@ -9000,7 +9021,7 @@
             const safeIdText = esc(JSON.stringify(idLabel))
             return `<div class="export-row">
             <span class="export-row-id" onclick="${
-              url ? `window.electronAPI.openUrl('${safeUrl}')` : ""
+              url ? `openLink('${safeUrl}')` : ""
             }" title="${
               url
                 ? safeUrl
@@ -9040,6 +9061,12 @@
           _navClear()
         }
       })
+      document
+        .getElementById("sessionContextModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("sessionContextModal"))
+            closeSessionContextModal()
+        })
       document
         .getElementById("dialogInfoModal")
         .addEventListener("click", (e) => {
@@ -9163,6 +9190,9 @@
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
+        document.querySelector(
+          `input[name="other-open-mode"][value="${otherOpenMode}"]`,
+        ).checked = true
         const _cfRadio = document.querySelector(
           `input[name="chat-copy-format"][value="${chatCopyFormat}"]`,
         )
@@ -9232,6 +9262,10 @@
           'input[name="open-mode"]:checked',
         ).value
         localStorage.setItem("cm-open-mode", openMode)
+        otherOpenMode = document.querySelector(
+          'input[name="other-open-mode"]:checked',
+        ).value
+        localStorage.setItem("cm-other-open-mode", otherOpenMode)
         const _cfChecked = document.querySelector(
           'input[name="chat-copy-format"]:checked',
         )
@@ -9276,9 +9310,11 @@
       document.addEventListener("click", (e) => {
         const a = e.target.closest("a.action-link, a.btn-open-url")
         if (!a || !a.href) return
-        if (openMode === "browser" || a.classList.contains("btn-open-url")) {
-          e.preventDefault()
+        e.preventDefault()
+        if (a.classList.contains("btn-open-url")) {
           window.electronAPI.openUrl(a.href)
+        } else {
+          openLink(a.href)
         }
       })
 
@@ -11900,7 +11936,21 @@
       // ── URL Preview Modal ────────────────────────────────────────────
       function previewUrl(url) {
         if (!/^https?:\/\//i.test(url)) return
-        window.electronAPI.openPreviewWindow(url)
+        if (otherOpenMode === "browser") {
+          window.electronAPI.openUrl(url)
+        } else {
+          window.electronAPI.openPreviewWindow(url)
+        }
+      }
+
+      // ── Open link respecting the open-mode setting ───────────────────
+      function openLink(url) {
+        if (!url || !/^https?:\/\//i.test(url)) return
+        if (openMode === "browser") {
+          window.electronAPI.openUrl(url)
+        } else {
+          window.electronAPI.openPreviewWindow(url)
+        }
       }
 
       // Conv filter pills — only update state; search fires on Enter / submit button
@@ -12766,7 +12816,7 @@
             if (base && entityId) {
               const url = `${base}/entities/${entityId}`
               const safeUrl = esc(url)
-              html += `<button class="entity-match-chip"${titleAttr} onclick="event.stopPropagation();window.electronAPI.openUrl('${safeUrl}');return false">&#x1F516; ${name}${matchedSpan}</button>`
+              html += `<button class="entity-match-chip"${titleAttr} onclick="event.stopPropagation();openLink('${safeUrl}');return false">&#x1F516; ${name}${matchedSpan}</button>`
             } else {
               html += `<span class="entity-match-chip-static"${titleAttr}>&#x1F516; ${name}${matchedSpan}</span>`
             }
