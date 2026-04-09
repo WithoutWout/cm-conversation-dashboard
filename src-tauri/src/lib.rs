@@ -1067,16 +1067,14 @@ fn parse_ts(s: &str) -> String {
     s.to_string()
 }
 
-fn purge_old(conn: &Connection) -> i64 {
-    // Keep 12 days of data
+fn purge_old(conn: &Connection, max_days: u64) -> i64 {
     let cutoff = {
         use std::time::{SystemTime, UNIX_EPOCH};
         let secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        // 12 days in seconds
-        secs.saturating_sub(12 * 24 * 3600)
+        secs.saturating_sub(max_days * 24 * 3600)
     };
     // timestamp_start stored as ISO text "YYYY-MM-DDTHH:MM:SS"
     // We compare against an ISO cutoff string
@@ -1225,6 +1223,7 @@ async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
 async fn import_interactions_csv(
     db_state: State<'_, SharedDbState>,
     file_path: String,
+    max_age_days: Option<i64>,
 ) -> Result<ImportResult, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -1434,7 +1433,7 @@ async fn import_interactions_csv(
             &mut inserted, &mut skipped, &mut errors);
     }
 
-    let purged = purge_old(conn);
+    let purged = purge_old(conn, max_age_days.unwrap_or(90).max(1) as u64);
 
     Ok(ImportResult { inserted, skipped, purged, errors })
     })

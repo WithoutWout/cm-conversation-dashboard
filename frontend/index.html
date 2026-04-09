@@ -4573,7 +4573,6 @@
         <button
           class="conv-manage-btn"
           id="convManageDbBtn"
-          disabled
           title="Manage database: view and delete data by day"
         >
           <svg
@@ -5167,32 +5166,6 @@
                 border-top: 1px solid var(--border);
               "
             >
-              <label>Conversations Database</label>
-              <p class="hint" style="margin-bottom: 8px">
-                The SQLite database file used to store imported conversation
-                data. Can be on a network share for shared team access.
-              </p>
-              <div style="display: flex; gap: 8px; margin-bottom: 6px">
-                <button class="btn-secondary" id="settingsDbCreateBtn">
-                  Create new…
-                </button>
-                <button class="btn-secondary" id="settingsDbOpenBtn">
-                  Open existing…
-                </button>
-              </div>
-              <p
-                class="hint"
-                id="settingsDbPath"
-                style="min-height: 1.2em; word-break: break-all"
-              ></p>
-            </div>
-            <div
-              style="
-                margin-top: 14px;
-                padding-top: 14px;
-                border-top: 1px solid var(--border);
-              "
-            >
               <label>Chat Copy Format</label>
               <p class="hint" style="margin-bottom: 6px">
                 How selected interactions are copied to the clipboard.
@@ -5208,22 +5181,6 @@
                   Prose &mdash; bold user message, italic bot response</label
                 >
               </div>
-            </div>
-            <div
-              style="
-                margin-top: 14px;
-                padding-top: 14px;
-                border-top: 1px solid var(--border);
-              "
-            >
-              <label>Interaction Log Import</label>
-              <p class="hint" style="margin-bottom: 8px">
-                Import daily interaction log exports (CSV) to populate the
-                Conversations view.
-              </p>
-              <button class="btn-link" id="openInteractionLogInstructionsBtn">
-                How to export the Interaction Log?
-              </button>
             </div>
           </div>
         </div>
@@ -5514,8 +5471,71 @@
             &#x2715;
           </button>
         </div>
-        <div class="modal-body" id="manageDbBody">
-          <div class="manage-db-empty">Loading…</div>
+        <div class="modal-body">
+          <div
+            style="
+              padding: 14px 18px 12px;
+              border-bottom: 1px solid var(--border);
+            "
+          >
+            <label>Database file</label>
+            <p class="hint" style="margin-bottom: 8px">
+              The SQLite database file storing imported conversation data. Can
+              be on a network share for shared team access.
+            </p>
+            <div style="display: flex; gap: 8px; margin-bottom: 6px">
+              <button class="btn-secondary" id="settingsDbCreateBtn">
+                Create new…
+              </button>
+              <button class="btn-secondary" id="settingsDbOpenBtn">
+                Open existing…
+              </button>
+            </div>
+            <p
+              class="hint"
+              id="settingsDbPath"
+              style="min-height: 1.2em; word-break: break-all"
+            ></p>
+          </div>
+          <div
+            style="
+              padding: 14px 18px 12px;
+              border-bottom: 1px solid var(--border);
+            "
+          >
+            <label for="setting-data-retention-days"
+              >Data retention (days)</label
+            >
+            <input
+              id="setting-data-retention-days"
+              type="number"
+              min="1"
+              max="365"
+              style="width: 80px"
+            />
+            <p class="hint" style="margin-top: 4px">
+              Interactions older than this many days are automatically removed
+              when importing new data (1&ndash;365).
+            </p>
+          </div>
+          <div
+            style="
+              padding: 14px 18px 12px;
+              border-bottom: 1px solid var(--border);
+            "
+          >
+            <label>Interaction Log Import</label>
+            <p class="hint" style="margin-bottom: 8px">
+              Import daily interaction log exports (CSV) to populate the
+              Conversations view.
+            </p>
+            <button class="btn-link" id="openInteractionLogInstructionsBtn">
+              How to export the Interaction Log?
+            </button>
+          </div>
+          <div id="manageDbBody">
+            <div class="manage-db-empty">Loading…</div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" onclick="closeManageDbModal()">
@@ -5908,8 +5928,8 @@
           selectCsvFiles: () => invoke("select_csv_files"),
           selectDbSavePath: () => invoke("select_db_save_path"),
           selectDbOpenPath: () => invoke("select_db_open_path"),
-          importInteractionsCsv: (filePath) =>
-            invoke("import_interactions_csv", { filePath }),
+          importInteractionsCsv: (filePath, maxAgeDays) =>
+            invoke("import_interactions_csv", { filePath, maxAgeDays }),
           getSessions: (args) => invoke("get_sessions", { args }),
           getSessionInteractions: (sessionUuid) =>
             invoke("get_session_interactions", { sessionUuid }),
@@ -6048,6 +6068,10 @@
       let haloBaseUrl = localStorage.getItem("halo-base-url") || ""
       let lowRecogThreshold = parseInt(
         localStorage.getItem("conv-low-recog-threshold") || "60",
+        10,
+      )
+      let dataRetentionDays = parseInt(
+        localStorage.getItem("conv-data-retention-days") || "90",
         10,
       )
       let openMode = localStorage.getItem("cm-open-mode") || "popup"
@@ -9135,6 +9159,7 @@
         document.getElementById("setting-halo-url").value = haloBaseUrl
         document.getElementById("setting-low-recog-threshold").value =
           lowRecogThreshold
+        // data-retention setting lives in the Manage DB modal
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
@@ -10528,7 +10553,7 @@
           btn.disabled = false
         } else {
           el.classList.remove("connected")
-          txt.textContent = "No database — configure in Settings ⚙"
+          txt.textContent = "No database — use Manage DB to configure"
           btn.disabled = true
         }
         // Update settings panel path display
@@ -10656,7 +10681,7 @@
         const importBtn = document.getElementById("convImportBtn")
         const manageBtn = document.getElementById("convManageDbBtn")
         if (importBtn) importBtn.disabled = busy || !convDbPath
-        if (manageBtn) manageBtn.disabled = busy || !convDbPath
+        if (manageBtn) manageBtn.disabled = busy
       }
 
       // ── CSV Import ──────────────────────────────────────────────────
@@ -10676,7 +10701,10 @@
         const allErrors = []
         try {
           for (const fp of filePaths) {
-            const res = await window.electronAPI.importInteractionsCsv(fp)
+            const res = await window.electronAPI.importInteractionsCsv(
+              fp,
+              dataRetentionDays,
+            )
             if (res) {
               totalInserted += res.inserted || 0
               totalSkipped += res.skipped || 0
@@ -10718,6 +10746,8 @@
       function openManageDbModal() {
         _manageDbSelectedDates = new Set()
         _manageDbConfirming = false
+        document.getElementById("setting-data-retention-days").value =
+          dataRetentionDays
         document.getElementById("manageDbModal").classList.add("open")
         refreshManageDbModal()
       }
@@ -10885,6 +10915,25 @@
       }
 
       document
+        .getElementById("setting-data-retention-days")
+        .addEventListener("change", () => {
+          dataRetentionDays = Math.min(
+            365,
+            Math.max(
+              1,
+              parseInt(
+                document.getElementById("setting-data-retention-days").value,
+                10,
+              ) || 90,
+            ),
+          )
+          localStorage.setItem(
+            "conv-data-retention-days",
+            String(dataRetentionDays),
+          )
+        })
+
+      document
         .getElementById("convManageDbBtn")
         .addEventListener("click", openManageDbModal)
 
@@ -10892,8 +10941,6 @@
       const _origUpdateConvDbStatus = updateConvDbStatus
       updateConvDbStatus = function () {
         _origUpdateConvDbStatus()
-        const manageBtn = document.getElementById("convManageDbBtn")
-        if (manageBtn) manageBtn.disabled = !convDbPath
       }
 
       // Drag-and-drop
