@@ -1849,6 +1849,114 @@
         border-color: var(--text);
         color: var(--text);
       }
+      /* Flagged notes */
+      .flagged-card-note {
+        font-size: 0.69rem;
+        color: var(--muted);
+        font-style: italic;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        cursor: text;
+      }
+      .flagged-card-note.has-note {
+        color: var(--text);
+        font-style: normal;
+      }
+      .flagged-note-area {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        padding: 6px 10px;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .flagged-note-textarea {
+        flex: 1;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.78rem;
+        padding: 5px 8px;
+        resize: none;
+        min-height: 48px;
+        max-height: 120px;
+        font-family: inherit;
+        line-height: 1.4;
+        transition: border-color 0.15s;
+      }
+      .flagged-note-textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .flagged-note-textarea::placeholder {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .flagged-note-save-btn {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.72rem;
+        padding: 4px 10px;
+        cursor: pointer;
+        white-space: nowrap;
+        align-self: flex-end;
+        transition: opacity 0.15s;
+      }
+      .flagged-note-save-btn:hover {
+        opacity: 0.85;
+      }
+      .flagged-note-save-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      /* Inline note prompt shown after flagging in chat view */
+      .flag-note-prompt {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+        border-bottom: 1px solid rgba(var(--accent-rgb, 59, 130, 246), 0.2);
+      }
+      .flag-note-prompt-input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: var(--text);
+        font-size: 0.75rem;
+        padding: 2px 4px;
+        font-family: inherit;
+      }
+      .flag-note-prompt-input:focus {
+        outline: none;
+      }
+      .flag-note-prompt-input::placeholder {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .flag-note-prompt-ok {
+        background: none;
+        border: none;
+        color: var(--accent);
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 2px 5px;
+        white-space: nowrap;
+      }
+      .flag-note-prompt-skip {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.72rem;
+        cursor: pointer;
+        padding: 2px 5px;
+      }
 
       /* === MODAL === */
       .modal-overlay {
@@ -2059,11 +2167,38 @@
       }
       /* === EXPORT MODAL === */
       .export-modal-box {
-        width: 660px;
-        max-height: 82vh;
+        width: min(900px, 92vw);
+        max-height: 88vh;
         display: flex;
         flex-direction: column;
         overflow: hidden;
+      }
+      .export-view-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        padding: 0 16px;
+      }
+      .export-view-tab {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.78rem;
+        padding: 7px 14px;
+        font-family: inherit;
+        transition: color 0.15s, border-color 0.15s;
+        margin-bottom: -1px;
+      }
+      .export-view-tab:hover {
+        color: var(--text);
+      }
+      .export-view-tab.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
       }
       .export-modal-box .modal-body {
         flex: 1;
@@ -2080,10 +2215,11 @@
         background: var(--bg);
       }
       .export-row {
-        display: flex;
-        align-items: center;
+        display: grid;
+        grid-template-columns: auto 1fr 1.5fr auto;
+        align-items: start;
         gap: 10px;
-        padding: 7px 12px;
+        padding: 8px 12px;
         border-bottom: 1px solid var(--border);
         font-size: 0.78rem;
       }
@@ -2102,13 +2238,38 @@
         font-family: monospace;
         font-size: 0.74rem;
         flex-shrink: 0;
+        padding-top: 2px;
+      }
+      .export-row-no-url {
+        color: var(--muted);
+        white-space: nowrap;
+        font-family: monospace;
+        font-size: 0.74rem;
+        flex-shrink: 0;
+        cursor: default;
+        padding-top: 2px;
       }
       .export-row-title {
         color: var(--text);
-        flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        min-width: 0;
+        padding-top: 2px;
+      }
+      .export-row-responses {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+      }
+      .export-row-response {
+        color: var(--muted);
+        font-size: 0.73rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-style: italic;
       }
       .export-row-copy {
         background: none;
@@ -2116,10 +2277,11 @@
         border-radius: 5px;
         color: var(--muted);
         font-size: 0.68rem;
-        padding: 2px 7px;
+        padding: 3px 8px;
         cursor: pointer;
-        flex-shrink: 0;
-        transition: border-color 0.15s, color 0.15s;
+        white-space: nowrap;
+        transition: border-color 0.15s, color 0.15s, background 0.15s;
+        align-self: center;
       }
       .export-row-copy:hover {
         border-color: var(--accent);
@@ -2128,6 +2290,77 @@
       .export-row-copy.copied {
         border-color: var(--green);
         color: var(--green);
+      }
+      /* Table view */
+      .export-table-wrap {
+        flex: 1;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--bg);
+      }
+      .export-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.77rem;
+      }
+      .export-table th {
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+        padding: 7px 11px;
+        text-align: left;
+        font-weight: 600;
+        color: var(--muted);
+        font-size: 0.69rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+        z-index: 1;
+      }
+      .export-table td {
+        padding: 7px 11px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+        color: var(--text);
+        line-height: 1.4;
+      }
+      .export-table tr:last-child td {
+        border-bottom: none;
+      }
+      .export-table tr:hover td {
+        background: var(--surface2);
+      }
+      .export-table td.td-id {
+        font-family: monospace;
+        font-size: 0.73rem;
+        white-space: nowrap;
+        color: var(--blue);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        cursor: pointer;
+      }
+      .export-table td.td-id-plain {
+        font-family: monospace;
+        font-size: 0.73rem;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+      .export-table td.td-response {
+        font-style: italic;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+      .export-footer-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .export-footer-actions .btn-primary,
+      .export-footer-actions .btn-secondary {
+        min-width: 160px;
+        text-align: center;
       }
       .copy-feedback {
         font-size: 0.73rem;
@@ -2363,6 +2596,50 @@
         flex: 1;
         overflow: hidden;
         flex-direction: column;
+        position: relative;
+      }
+      .conv-import-overlay {
+        display: none;
+        position: absolute;
+        inset: 0;
+        z-index: 200;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 16px;
+        color: #fff;
+        font-size: 0.9rem;
+      }
+      .conv-import-overlay.visible {
+        display: flex;
+      }
+      .conv-import-overlay-spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid rgba(255, 255, 255, 0.25);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: convImportSpin 0.75s linear infinite;
+      }
+      @keyframes convImportSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .conv-import-overlay-label {
+        font-weight: 600;
+        font-size: 1rem;
+      }
+      .conv-import-overlay-file {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.8rem;
+        max-width: 320px;
+        text-align: center;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       #view-conversations.active {
         display: flex;
@@ -4296,7 +4573,7 @@
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
-        Export IDs
+        Share Content
       </button>
     </header>
 
@@ -4365,7 +4642,7 @@
             </button>
             <div class="sopt-sep"></div>
             <button
-              class="sopt on"
+              class="sopt"
               id="opt-content"
               title="Responses only"
               data-tooltip="Responses only — ignore IDs, titles &amp; entities"
@@ -4652,6 +4929,19 @@
 
     <!-- CONVERSATIONS VIEW -->
     <div id="view-conversations">
+      <!-- Import busy overlay -->
+      <div
+        class="conv-import-overlay"
+        id="convImportOverlay"
+        aria-live="polite"
+      >
+        <div class="conv-import-overlay-spinner"></div>
+        <span class="conv-import-overlay-label">Importing CSV…</span>
+        <span
+          class="conv-import-overlay-file"
+          id="convImportOverlayFile"
+        ></span>
+      </div>
       <!-- Toolbar -->
       <div class="conv-toolbar" id="convToolbar">
         <div class="conv-db-status" id="convDbStatus">
@@ -5069,6 +5359,26 @@
             >
               Select a flagged conversation
             </div>
+          </div>
+          <div
+            class="flagged-note-area"
+            id="flaggedNoteArea"
+            style="display: none"
+          >
+            <textarea
+              class="flagged-note-textarea"
+              id="flaggedNoteTextarea"
+              rows="2"
+              placeholder="Add a note about this flagged conversation…"
+            ></textarea>
+            <button
+              class="flagged-note-save-btn"
+              id="flaggedNoteSaveBtn"
+              onclick="_commitFlaggedNote()"
+              disabled
+            >
+              Save
+            </button>
           </div>
           <div class="chat-thread" id="flaggedChatThread">
             <div class="chat-empty">
@@ -5721,27 +6031,37 @@
       </div>
     </div>
 
-    <!-- EXPORT IDs MODAL -->
+    <!-- SHARE CONTENT MODAL -->
     <div class="modal-overlay" id="exportModal">
       <div class="modal-box export-modal-box">
         <div class="modal-header">
           <div style="display: flex; flex-direction: column; gap: 3px">
-            <h3>Export IDs</h3>
+            <h3>Share Content</h3>
             <span class="export-meta" id="export-meta"></span>
           </div>
+          <div class="chat-spacer"></div>
           <button class="close-btn" id="closeExport">&#x2715;</button>
+        </div>
+        <div class="export-view-tabs" id="exportViewTabs">
+          <button class="export-view-tab active" data-export-view="list">
+            List
+          </button>
+          <button class="export-view-tab" data-export-view="table">
+            Table
+          </button>
         </div>
         <div class="modal-body">
           <div class="export-list" id="exportList"></div>
-          <p class="hint">
-            Click an ID to open it in CM.com &mdash; Copy row copies a
-            Jira-ready hyperlink. Copy all copies the full list.
-          </p>
         </div>
-        <div class="modal-footer">
-          <span class="copy-feedback" id="copy-feedback"></span>
+        <div
+          class="modal-footer"
+          style="justify-content: space-between; align-items: center"
+        >
+          <div style="display: flex; align-items: center; gap: 10px">
+            <div class="export-footer-actions" id="exportFooterActions"></div>
+            <span class="copy-feedback" id="copy-feedback"></span>
+          </div>
           <button class="btn-secondary" id="closeExport2">Close</button>
-          <button class="btn-primary" id="copyExport">Copy to clipboard</button>
         </div>
       </div>
     </div>
@@ -6139,6 +6459,8 @@
           getFlaggedSessionInteractions: (flagId) =>
             invoke("get_flagged_session_interactions", { flagId }),
           unflagSession: (flagId) => invoke("unflag_session", { flagId }),
+          saveFlaggedNote: (flagId, notes) =>
+            invoke("save_flagged_note", { flagId, notes }),
           // Flagged folder commands
           getFlaggedFolders: () => invoke("get_flagged_folders"),
           createFlaggedFolder: (name) =>
@@ -6209,6 +6531,8 @@
           Promise.resolve([])
       if (!window.electronAPI.unflagSession)
         window.electronAPI.unflagSession = _convStub
+      if (!window.electronAPI.saveFlaggedNote)
+        window.electronAPI.saveFlaggedNote = _convStub
       if (!window.electronAPI.getFlaggedFolders)
         window.electronAPI.getFlaggedFolders = () => Promise.resolve([])
       if (!window.electronAPI.createFlaggedFolder)
@@ -6226,7 +6550,7 @@
       let searchCase = false
       let searchWord = false
       let searchRegex = false
-      let searchContent = true
+      let searchContent = false
       let allFilterPill = "all"
       let aFilter = "all"
       let dFilter = "all"
@@ -6545,6 +6869,8 @@
             ? cmBaseUrl + "/articles/" + id
             : type === "entity"
             ? cmBaseUrl + "/entities/"
+            : type === "tdialog"
+            ? cmBaseUrl + "/dialogs/transactional/" + id
             : cmBaseUrl + "/dialogs/" + id
         return (
           '<a class="action-link" href="' +
@@ -6573,6 +6899,8 @@
               ? cmBaseUrl + "/articles/" + id
               : type === "entity"
               ? cmBaseUrl + "/entities/"
+              : type === "tdialog"
+              ? cmBaseUrl + "/dialogs/transactional/" + id
               : cmBaseUrl + "/dialogs/" + id
           return (
             '<a class="btn-open-url" href="' +
@@ -7697,7 +8025,7 @@
                   '<button class="flow-dir-btn" onclick="closeFlowModal();openDialogInfoModal(' +
                   tid +
                   ',true)" style="padding:2px 6px;color:var(--teal)" title="Open details">&#8594; View</button>'
-                html += cmLink("dialog", tid)
+                html += cmLink("tdialog", tid)
                 html += "</span>"
               }
             })
@@ -8001,7 +8329,7 @@
             '<div class="card-meta"><span class="badge b-tdialog">Transactional Dialog</span></div>' +
             "</div>" +
             '<div class="card-actions">' +
-            cmLink("dialog", item.id) +
+            cmLink("tdialog", item.id) +
             '<button class="btn-show-dialog" onclick="searchConvsForId(' +
             item.id +
             ",'dialog');event.stopPropagation()\" title=\"Search Transactional Dialog ID " +
@@ -9049,7 +9377,7 @@
           titleEl.textContent = item.name || "Transactional Dialog"
           subtitleEl.textContent = "Transactional Dialog #" + id
           actionsEl.innerHTML =
-            cmOpenButton("dialog", id) +
+            cmOpenButton("tdialog", id) +
             '<button class="btn-show-dialog" onclick="closeDialogInfoModal();_navClear();searchConvsForId(' +
             id +
             ",'dialog')\" title=\"Search Transactional Dialog ID " +
@@ -9450,37 +9778,132 @@
         applyEntityFilters()
       })
 
-      // ── Export IDs modal ─────────────────────────────────────────────
+      // ── Share Content modal ─────────────────────────────────────────
+      let _exportView = "list" // "list" | "table"
+
+      // Extract the answer/response texts that actually match the current search
+      // query for a given item. Falls back to the default response if no query.
+      function _getMatchReason(item, re) {
+        // Returns a short "(matched on: …)" label for when no response text matched
+        if (item.Id != null) {
+          // Article
+          if (testRe(re, String(item.Id))) return `(matched on: ID ${item.Id})`
+          const q = (item.Questions || []).find((qs) => testRe(re, qs.Text))
+          if (q) return `(matched on: entity — "${q.Text}")`
+          return "(matched on: entity)"
+        } else {
+          // Dialog / tDialog
+          if (testRe(re, String(item.id))) return `(matched on: ID ${item.id})`
+          if (testRe(re, item.name || ""))
+            return `(matched on: name — "${item.name}")`
+          if (testRe(re, item.description || ""))
+            return `(matched on: description)`
+          for (const sn of item._searchNodes || []) {
+            if (testRe(re, sn.name || ""))
+              return `(matched on: node — "${sn.name}")`
+          }
+          return "(matched on: entity)"
+        }
+      }
+
+      function _getMatchedResponses(item /* raw article or dialog */) {
+        if (!gQuery) {
+          // No search — return the default response/description
+          if (item.Id != null) return item._response ? [item._response] : []
+          return item.description ? [item.description] : []
+        }
+        const re = buildSearchRegex(gQuery)
+        if (!re) return []
+        const matched = []
+        if (item.Id != null) {
+          // Article: check each _answerItem's text
+          for (const ai of item._answerItems || []) {
+            const text = ai.s || ai.r || ""
+            if (re.test(text)) {
+              const display = (ai.r || ai.s || "").trim()
+              if (display && !matched.includes(display)) matched.push(display)
+            }
+          }
+          // Also include context labels
+          for (const ai of item._answerItems || []) {
+            for (const [k, vals] of Object.entries(ai.ctxSet || {})) {
+              const label = `[${k}: ${vals.join(", ")}]`
+              if (re.test(label) && !matched.includes(label))
+                matched.push(label)
+            }
+          }
+          // Fallback: show default response + reason
+          if (!matched.length) {
+            if (item._response) matched.push(item._response)
+            matched.push(_getMatchReason(item, re))
+          }
+        } else {
+          // Dialog: check each search node's _answerItems
+          for (const sn of item._searchNodes || []) {
+            for (const ai of sn._answerItems || []) {
+              const text = ai.s || ai.r || ""
+              if (re.test(text)) {
+                const display = (ai.r || ai.s || "").trim()
+                if (display && !matched.includes(display)) matched.push(display)
+              }
+            }
+          }
+          // Fallback: show description + reason
+          if (!matched.length) {
+            if (item.description) matched.push(item.description)
+            matched.push(_getMatchReason(item, re))
+          }
+        }
+        return matched
+      }
+
       function getActiveExportItems() {
         const activeTab = document.querySelector(".tab.active").dataset.tab
+        const toItem = (item) => {
+          if (item.Id != null) {
+            return {
+              kind:
+                item._aKind === "tdialog"
+                  ? "tdialog"
+                  : item._aKind === "dialog"
+                  ? "dialog"
+                  : "article",
+              id: item.Id,
+              title: aFaqQ(item) || "(no question)",
+              responses: _getMatchedResponses(item),
+              _raw: item,
+            }
+          }
+          return {
+            kind: item._kind, // "dialog" | "tdialog"
+            id: item.id,
+            title: item.name || "",
+            responses: _getMatchedResponses(item),
+            _raw: item,
+          }
+        }
         if (activeTab === "articles")
-          return Array.from(filteredArticles, (i) => allArticles[i]).map(
-            (a) => ({
-              kind: "article",
-              id: a.Id,
-              title: aFaqQ(a) || "(no question)",
-            }),
-          )
+          return Array.from(filteredArticles, (i) => allArticles[i]).map(toItem)
         if (activeTab === "dialogs")
           return Array.from(filteredDialogs, (i) => allDialogsCombined[i]).map(
-            (d) => ({ kind: d._kind, id: d.id, title: d.name || "" }),
+            toItem,
           )
-        return Array.from(filteredAll, (i) => allCombinedItems[i]).map((item) =>
-          item._kind === "article"
-            ? {
-                kind: "article",
-                id: item.Id,
-                title: aFaqQ(item) || "(no question)",
-              }
-            : { kind: item._kind, id: item.id, title: item.name || "" },
-        )
+        return Array.from(filteredAll, (i) => allCombinedItems[i]).map(toItem)
       }
+
       function buildItemUrl(kind, id) {
         if (!cmBaseUrl) return ""
         return kind === "article"
           ? cmBaseUrl + "/articles/" + id
+          : kind === "tdialog"
+          ? cmBaseUrl + "/dialogs/transactional/" + id
           : cmBaseUrl + "/dialogs/" + id
       }
+
+      function _itemIdToken(item) {
+        return item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
+      }
+
       function execCommandCopy(htmlStr) {
         const div = document.createElement("div")
         div.contentEditable = "true"
@@ -9498,9 +9921,6 @@
       }
 
       function copyRichHtml(htmlStr) {
-        // Wrap in a full HTML document with CF_HTML-style fragment markers.
-        // This is identical to what Word puts on the clipboard, which TinyMCE's
-        // paste plugin handles on all platforms including macOS.
         const wrapped = `<html><body><!--StartFragment-->${htmlStr}<!--EndFragment--></body></html>`
         const plain = htmlStr.replace(/<[^>]+>/g, "")
         if (typeof ClipboardItem !== "undefined") {
@@ -9523,13 +9943,207 @@
           : `${esc(idLabel)} → ${esc(title)}`
         copyRichHtml(htmlStr)
         if (btn) {
-          btn.textContent = "Copied!"
+          const orig = btn.textContent
+          btn.textContent = "✓ Copied"
           btn.classList.add("copied")
           setTimeout(() => {
-            btn.textContent = "Copy link"
+            btn.textContent = orig
             btn.classList.remove("copied")
           }, 2000)
         }
+      }
+
+      function _showCopyFeedback(msg) {
+        const el = document.getElementById("copy-feedback")
+        if (!el) return
+        el.textContent = msg
+        setTimeout(() => {
+          if (el.textContent === msg) el.textContent = ""
+        }, 2500)
+      }
+
+      function _renderExportList(items) {
+        const list = document.getElementById("exportList")
+        list.className = "export-list"
+        list.innerHTML = items
+          .map((item) => {
+            const idToken = _itemIdToken(item)
+            const url = buildItemUrl(item.kind, item.id)
+            const safeUrl = esc(url)
+            const safeTitle = esc(JSON.stringify(item.title))
+            const safeIdText = esc(JSON.stringify(idToken))
+            const idSpan = url
+              ? `<span class="export-row-id" onclick="openLink('${safeUrl}')" title="Open in CM.com">${esc(
+                  idToken,
+                )}</span>`
+              : `<span class="export-row-no-url" title="Set CM.com Context URL in Settings to enable links">${esc(
+                  idToken,
+                )}</span>`
+            const responseHtml = item.responses.length
+              ? item.responses
+                  .map(
+                    (r) =>
+                      `<span class="export-row-response" title="${esc(
+                        r,
+                      )}">${esc(
+                        r.length > 120 ? r.slice(0, 120) + "…" : r,
+                      )}</span>`,
+                  )
+                  .join("")
+              : ""
+            return `<div class="export-row">
+              ${idSpan}
+              <span class="export-row-title" title="${esc(item.title)}">${esc(
+              item.title,
+            )}</span>
+              <span class="export-row-responses">${responseHtml}</span>
+              <button class="export-row-copy" title="Copy as link"
+                onclick="copyJiraLink('${safeUrl}', ${safeIdText}, ${safeTitle}, this)">&#x1F517; Copy link</button>
+            </div>`
+          })
+          .join("")
+      }
+
+      function _renderExportTable(items) {
+        const list = document.getElementById("exportList")
+        list.className = "export-table-wrap"
+        const rows = items
+          .map((item) => {
+            const idToken = _itemIdToken(item)
+            const url = buildItemUrl(item.kind, item.id)
+            const idCell = url
+              ? `<td class="td-id" onclick="openLink('${esc(
+                  url,
+                )}')" title="Open in CM.com">${esc(idToken)}</td>`
+              : `<td class="td-id-plain">${esc(idToken)}</td>`
+            const responseText = item.responses.join(" · ")
+            const responseCell = responseText
+              ? `<td class="td-response">${esc(responseText)}</td>`
+              : `<td class="td-response" style="opacity:0.3">—</td>`
+            return `<tr>${idCell}<td>${esc(
+              item.title,
+            )}</td>${responseCell}</tr>`
+          })
+          .join("")
+        list.innerHTML = `<table class="export-table">
+          <thead><tr>
+            <th>ID</th><th>Title / Question</th><th>Matched Response(s)</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      }
+
+      function _renderExportFooter() {
+        const actions = document.getElementById("exportFooterActions")
+        if (_exportView === "list") {
+          actions.innerHTML = `
+            <button class="btn-primary" onclick="_copyExportLinks(this)">&#x1F517; Copy all as links</button>
+            <button class="btn-secondary" onclick="_copyExportPlain(this)">&#x1F4CB; Copy as plain text</button>`
+        } else {
+          actions.innerHTML = `
+            <button class="btn-primary" onclick="_copyExportTable(this)">&#x1F5C3; Copy table</button>
+            <button class="btn-secondary" onclick="_copyExportPlain(this)">&#x1F4CB; Copy as plain text</button>`
+        }
+      }
+
+      function _setBtnCopied(btn, label) {
+        if (!btn) return
+        const orig = btn.innerHTML
+        btn.innerHTML = "✓ " + label
+        btn.disabled = true
+        setTimeout(() => {
+          btn.innerHTML = orig
+          btn.disabled = false
+        }, 2200)
+      }
+
+      function _copyExportLinks(btn) {
+        const items = getActiveExportItems()
+        const htmlStr = items
+          .map((item) => {
+            const url = buildItemUrl(item.kind, item.id)
+            const idToken = _itemIdToken(item)
+            return url
+              ? `<a href="${esc(url)}">${esc(idToken)}</a> → ${esc(item.title)}`
+              : `${esc(idToken)} → ${esc(item.title)}`
+          })
+          .join("<br>")
+        copyRichHtml(htmlStr)
+        _setBtnCopied(btn, "Copied!")
+        _showCopyFeedback("✓ " + items.length + " links copied")
+      }
+
+      function _copyExportPlain(btn) {
+        const items = getActiveExportItems()
+        const text = items
+          .map((item) => {
+            const idToken = _itemIdToken(item)
+            const url = buildItemUrl(item.kind, item.id)
+            const parts = [idToken, item.title]
+            if (item.responses.length) parts.push(item.responses.join(" | "))
+            if (url) parts.push(url)
+            return parts.join("\t")
+          })
+          .join("\n")
+        navigator.clipboard.writeText(text).catch(() => {
+          const ta = document.createElement("textarea")
+          ta.value = text
+          ta.style.cssText = "position:fixed;top:-9999px"
+          document.body.appendChild(ta)
+          ta.select()
+          document.execCommand("copy")
+          document.body.removeChild(ta)
+        })
+        _setBtnCopied(btn, "Copied!")
+        _showCopyFeedback("✓ " + items.length + " rows copied")
+      }
+
+      function _copyExportTable(btn) {
+        const items = getActiveExportItems()
+        const header = ["ID", "Title / Question", "Matched Response(s)"]
+        const rows = items.map((item) => {
+          const idToken = _itemIdToken(item)
+          const url = buildItemUrl(item.kind, item.id)
+          return {
+            idToken,
+            title: item.title,
+            responses: item.responses.join(" | "),
+            url,
+          }
+        })
+        const htmlRows = rows
+          .map((r) => {
+            const idCell = r.url
+              ? `<td><a href="${esc(r.url)}">${esc(r.idToken)}</a></td>`
+              : `<td>${esc(r.idToken)}</td>`
+            return `<tr>${idCell}<td>${esc(r.title)}</td><td>${esc(
+              r.responses,
+            )}</td></tr>`
+          })
+          .join("")
+        const htmlTable = `<table><thead><tr>${header
+          .map((h) => `<th>${esc(h)}</th>`)
+          .join("")}</tr></thead><tbody>${htmlRows}</tbody></table>`
+        const tsvData = [
+          header,
+          ...rows.map((r) => [r.idToken, r.title, r.responses]),
+        ]
+        const tsv = tsvData.map((r) => r.join("\t")).join("\n")
+        if (typeof ClipboardItem !== "undefined") {
+          const wrapped = `<html><body><!--StartFragment-->${htmlTable}<!--EndFragment--></body></html>`
+          navigator.clipboard
+            .write([
+              new ClipboardItem({
+                "text/html": new Blob([wrapped], { type: "text/html" }),
+                "text/plain": new Blob([tsv], { type: "text/plain" }),
+              }),
+            ])
+            .catch(() => execCommandCopy(htmlTable))
+        } else {
+          execCommandCopy(htmlTable)
+        }
+        _setBtnCopied(btn, "Copied!")
+        _showCopyFeedback("✓ Table copied")
       }
 
       function openExportModal() {
@@ -9547,42 +10161,35 @@
           (items.length !== 1 ? "s" : "") +
           " — " +
           tabLabel +
-          (gQuery ? ' · search: "' + gQuery + '"' : "")
+          (gQuery ? ' · "' + gQuery + '"' : "")
 
-        const list = document.getElementById("exportList")
-        list.innerHTML = items
-          .map((item) => {
-            const idToken =
-              item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
-            const url = buildItemUrl(item.kind, item.id)
-            const idText = idToken
-            const idLabel = idToken
-            const safeUrl = esc(url)
-            const safeTitle = esc(JSON.stringify(item.title))
-            const safeIdText = esc(JSON.stringify(idLabel))
-            return `<div class="export-row">
-            <span class="export-row-id" onclick="${
-              url ? `openLink('${safeUrl}')` : ""
-            }" title="${
-              url
-                ? safeUrl
-                : "Set CM.com Context URL in Settings to enable links"
-            }">${esc(idText)}</span>
-            <span class="export-row-title" title="${esc(item.title)}">${esc(
-              item.title,
-            )}</span>
-            <button class="export-row-copy" title="Copy Jira-ready link"
-              onclick="copyJiraLink('${safeUrl}', ${safeIdText}, ${safeTitle}, this)">Copy link</button>
-          </div>`
-          })
-          .join("")
+        if (_exportView === "list") _renderExportList(items)
+        else _renderExportTable(items)
+        _renderExportFooter()
 
         document.getElementById("copy-feedback").textContent = ""
         document.getElementById("exportModal").classList.add("open")
       }
+
       function closeExportModal() {
         document.getElementById("exportModal").classList.remove("open")
       }
+
+      // View tabs
+      document.querySelectorAll(".export-view-tab").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll(".export-view-tab")
+            .forEach((b) => b.classList.remove("active"))
+          btn.classList.add("active")
+          _exportView = btn.dataset.exportView
+          const items = getActiveExportItems()
+          if (_exportView === "list") _renderExportList(items)
+          else _renderExportTable(items)
+          _renderExportFooter()
+        })
+      })
+
       document
         .getElementById("exportBtn")
         .addEventListener("click", openExportModal)
@@ -9645,27 +10252,6 @@
             _navClear()
           }
         }
-      })
-      document.getElementById("copyExport").addEventListener("click", () => {
-        const items = getActiveExportItems()
-        const htmlStr = items
-          .map((item) => {
-            const idLabel =
-              item.kind === "article" ? `qa-${item.id}` : `dn-${item.id}`
-            const url = buildItemUrl(item.kind, item.id)
-            return url
-              ? `<a href="${url}">${esc(idLabel)}</a> → ${esc(item.title)}`
-              : `${esc(idLabel)} → ${esc(item.title)}`
-          })
-          .join("<br>\n")
-        copyRichHtml(htmlStr)
-        const fb = document.getElementById("copy-feedback")
-        fb.textContent = `\u2713 Copied ${items.length} Jira-ready link${
-          items.length !== 1 ? "s" : ""
-        }!`
-        setTimeout(() => {
-          fb.textContent = ""
-        }, 2500)
       })
 
       // ── Instructions modal ────────────────────────────────────────────
@@ -10213,8 +10799,13 @@
       // ═══════════════════════════════════════════════════════════════
       // FLAGGED VIEW
       // ═══════════════════════════════════════════════════════════════
+      // Declare currentView early so it is accessible throughout this file
+      // (the view-switcher section below also assigns it, but let-TDZ would
+      // otherwise cause ReferenceErrors in callbacks like onFlaggedSessionAdded).
+      let currentView = localStorage.getItem("cm-view") || "content"
 
       let activeFlagId = null
+      let _noteSaveTimer = null
       let flaggedSessions = []
       let flaggedFolders = []
       let activeFolderFilter = "all" // "all" | "unfiled" | <number folder_id>
@@ -10223,6 +10814,56 @@
       function onFlaggedSessionAdded() {
         // Called from flagCurrentSession() after a successful flag
         if (currentView === "flagged") loadFlaggedSessions()
+      }
+
+      async function _commitFlaggedNote() {
+        if (activeFlagId == null) return
+        const ta = document.getElementById("flaggedNoteTextarea")
+        const btn = document.getElementById("flaggedNoteSaveBtn")
+        if (!ta) return
+        const notes = ta.value.trim()
+        btn.disabled = true
+        try {
+          await window.electronAPI.saveFlaggedNote(activeFlagId, notes)
+          // Update in-memory record
+          const s = flaggedSessions.find((x) => x.flagId === activeFlagId)
+          if (s) s.notes = notes
+          // Refresh sidebar card note preview
+          const card = document.querySelector(
+            `.flagged-session-card[data-flag-id="${activeFlagId}"] .flagged-card-note`,
+          )
+          if (card) {
+            card.textContent = notes || "Add a note…"
+            card.classList.toggle("has-note", !!notes)
+          }
+          btn.textContent = "Saved ✓"
+          setTimeout(() => {
+            btn.textContent = "Save"
+          }, 1500)
+        } catch (e) {
+          console.error("saveFlaggedNote error:", e)
+          btn.disabled = false
+        }
+      }
+
+      function _initFlaggedNoteArea(session) {
+        const area = document.getElementById("flaggedNoteArea")
+        const ta = document.getElementById("flaggedNoteTextarea")
+        const btn = document.getElementById("flaggedNoteSaveBtn")
+        if (!area || !ta || !btn) return
+        area.style.display = "flex"
+        ta.value = session?.notes ?? ""
+        btn.disabled = true
+        ta.oninput = () => {
+          btn.disabled = false
+          btn.textContent = "Save"
+        }
+        ta.onkeydown = (e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault()
+            _commitFlaggedNote()
+          }
+        }
       }
 
       async function loadFlaggedSessions() {
@@ -10473,6 +11114,11 @@
               }
             </div>
             ${folderRow}
+            <div class="flagged-card-note${
+              s.notes ? " has-note" : ""
+            }" onclick="event.stopPropagation()" title="${
+              s.notes ? esc(s.notes) : "Add a note…"
+            }">${s.notes ? esc(s.notes) : "Add a note…"}</div>
             <button class="flagged-session-unflag" onclick="unflagSession(${
               s.flagId
             },event)" onmousedown="event.stopPropagation()" title="Remove from Flagged">Remove</button>
@@ -10553,10 +11199,20 @@
           }
 
           thread.innerHTML = renderFlaggedThread(interactions)
+          // Scroll to first flagged interaction
+          requestAnimationFrame(() => {
+            const first = thread.querySelector(".flagged-mark")
+            if (first)
+              first.scrollIntoView({ behavior: "smooth", block: "center" })
+          })
+          // Init note editing area
+          _initFlaggedNoteArea(session)
         } catch (e) {
           console.error("getFlaggedSessionInteractions error:", e)
           header.innerHTML = `<span style="font-size:0.72rem;color:var(--red)">Error loading flagged conversation</span>`
           thread.innerHTML = `<div class="chat-empty">Failed to load interactions.</div>`
+          const area = document.getElementById("flaggedNoteArea")
+          if (area) area.style.display = "none"
         }
       }
 
@@ -10721,21 +11377,23 @@
 
       async function unflagSession(flagId, event) {
         event.stopPropagation()
-        try {
-          await window.electronAPI.unflagSession(flagId)
-          if (activeFlagId === flagId) {
-            activeFlagId = null
-            document.getElementById(
-              "flaggedChatHeader",
-            ).innerHTML = `<div class="chat-empty" style="flex:none;padding:0;font-size:0.78rem">Select a flagged conversation</div>`
-            document.getElementById(
-              "flaggedChatThread",
-            ).innerHTML = `<div class="chat-empty">No flagged conversation selected.<br>Choose one from the list on the left.</div>`
+        _showConfirm("Remove this flagged conversation?", async () => {
+          try {
+            await window.electronAPI.unflagSession(flagId)
+            if (activeFlagId === flagId) {
+              activeFlagId = null
+              document.getElementById(
+                "flaggedChatHeader",
+              ).innerHTML = `<div class="chat-empty" style="flex:none;padding:0;font-size:0.78rem">Select a flagged conversation</div>`
+              document.getElementById(
+                "flaggedChatThread",
+              ).innerHTML = `<div class="chat-empty">No flagged conversation selected.<br>Choose one from the list on the left.</div>`
+            }
+            await loadFlaggedSessions()
+          } catch (e) {
+            console.error("unflagSession error:", e)
           }
-          await loadFlaggedSessions()
-        } catch (e) {
-          console.error("unflagSession error:", e)
-        }
+        })
       }
 
       // ── Folder CRUD ────────────────────────────────────────────────
@@ -11034,9 +11692,7 @@
               inner += `<div class="user-group"><span class="user-label">User</span><div class="bubble user">${
                 chatHl(turn.userRow.interactionValue, false).body
               }</div><span class="bubble-ts">${esc(
-                turn.userRow.timestampStart
-                  ? turn.userRow.timestampStart.slice(11, 16)
-                  : "",
+                fmtChatTime(turn.userRow.timestampStart),
               )}</span></div>`
             }
             if (turn.botRows.length) {
@@ -11076,7 +11732,7 @@
               })
               const tsRow = turn.botRows[turn.botRows.length - 1]
               inner += `<span class="bubble-ts">${esc(
-                tsRow.timestampStart ? tsRow.timestampStart.slice(11, 16) : "",
+                fmtChatTime(tsRow.timestampStart),
               )}</span></div>`
             }
             return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onFlaggedTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onFlaggedTurnClick(this,event)">${inner}</div>`
@@ -11094,7 +11750,6 @@
       // ═══════════════════════════════════════════════════════════════
 
       // ── View switcher ───────────────────────────────────────────────
-      let currentView = localStorage.getItem("cm-view") || "content"
 
       function switchView(name) {
         currentView = name
@@ -11275,6 +11930,14 @@
       }
 
       // ── CSV Import ──────────────────────────────────────────────────
+      function setImportOverlay(visible, filename) {
+        const overlay = document.getElementById("convImportOverlay")
+        const fileEl = document.getElementById("convImportOverlayFile")
+        if (!overlay) return
+        overlay.classList.toggle("visible", visible)
+        if (fileEl) fileEl.textContent = filename || ""
+      }
+
       async function doImport(filePaths) {
         if (!convDbPath) {
           openDbSetupModal()
@@ -11291,6 +11954,8 @@
         const allErrors = []
         try {
           for (const fp of filePaths) {
+            const fileName = fp.replace(/\\/g, "/").split("/").pop()
+            setImportOverlay(true, fileName)
             const res = await window.electronAPI.importInteractionsCsv(
               fp,
               dataRetentionDays,
@@ -11308,12 +11973,18 @@
           if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
           showImportToast("success", msg)
           contextOptionsLoaded = false // refresh context options on next panel open
+          // Refresh date picker bounds without resetting user's selection
+          window.electronAPI
+            .getDateRange()
+            .then(({ min, max }) => initDatePicker(min, max))
+            .catch(() => {})
           convHasSearched = true
           await loadSessions()
         } catch (e) {
           showImportToast("error", "Import failed: " + e)
         } finally {
           convImporting = false
+          setImportOverlay(false)
           btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import CSV…`
           setConvDbBusy(false)
         }
@@ -11671,13 +12342,25 @@
 
       function fmtTs(iso) {
         if (!iso) return ""
-        // "2026-03-25T09:30:22" → "25 Mar 2026, 09:30"
+        // "2026-03-25T09:30:22" stored as UTC → display in CET/Amsterdam time
         const d = new Date(iso.replace("T", " ") + "Z")
         if (isNaN(d)) return iso.replace("T", " ").slice(0, 16)
         return d.toLocaleString("nl-NL", {
+          timeZone: "Europe/Amsterdam",
           day: "2-digit",
           month: "short",
           year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      }
+
+      function fmtChatTime(iso) {
+        if (!iso) return ""
+        const d = new Date(iso.replace("T", " ") + "Z")
+        if (isNaN(d)) return iso.slice(11, 16)
+        return d.toLocaleTimeString("nl-NL", {
+          timeZone: "Europe/Amsterdam",
           hour: "2-digit",
           minute: "2-digit",
         })
@@ -12373,6 +13056,66 @@
         _doCopyTurns(byId.length ? byId : selected, btn)
       }
 
+      function _showFlagNotePrompt(flagBtn, flagId) {
+        flagBtn.disabled = false
+        const filterRow = document.getElementById("chatFilterRow")
+        if (!filterRow) {
+          _updateChatSelectHeader()
+          return
+        }
+
+        // Remove any existing prompt
+        const existing = document.getElementById("flagNotePromptRow")
+        if (existing) existing.remove()
+
+        const prompt = document.createElement("div")
+        prompt.id = "flagNotePromptRow"
+        prompt.className = "chat-filter-row flag-note-prompt"
+        prompt.style.cssText = "gap:8px"
+        prompt.innerHTML = `
+          <span style="font-size:0.72rem;color:var(--muted);white-space:nowrap;flex-shrink:0">&#x2691; Note</span>
+          <input class="flag-note-prompt-input" placeholder="Add a note about this flagged conversation… (optional)" maxlength="500" autocomplete="off" style="flex:1">
+          <button class="flag-note-prompt-ok">Save</button>
+          <button class="flag-note-prompt-skip" title="Skip">✕</button>`
+
+        // Hide filter row, insert prompt in its place
+        filterRow.style.display = "none"
+        filterRow.insertAdjacentElement("afterend", prompt)
+
+        const input = prompt.querySelector(".flag-note-prompt-input")
+        const okBtn = prompt.querySelector(".flag-note-prompt-ok")
+        const skipBtn = prompt.querySelector(".flag-note-prompt-skip")
+
+        const dismiss = async (save) => {
+          prompt.remove()
+          filterRow.style.display = ""
+          _updateChatSelectHeader()
+          if (save) {
+            const notes = input.value.trim()
+            if (notes) {
+              try {
+                await window.electronAPI.saveFlaggedNote(flagId, notes)
+                const s = flaggedSessions.find((x) => x.flagId === flagId)
+                if (s) s.notes = notes
+              } catch (e) {
+                console.error("saveFlaggedNote error (inline):", e)
+              }
+            }
+          }
+        }
+
+        input.focus()
+        okBtn.onclick = () => dismiss(true)
+        skipBtn.onclick = () => dismiss(false)
+        input.onkeydown = (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            dismiss(true)
+          }
+          if (e.key === "Escape") dismiss(false)
+        }
+      }
+
       async function flagCurrentSession(btn) {
         if (!activeSessionUuid || selectedTurnIds.size === 0) return
 
@@ -12428,10 +13171,8 @@
             // Notify flagged view to refresh if it's the active view
             if (typeof onFlaggedSessionAdded === "function")
               onFlaggedSessionAdded()
-            setTimeout(() => {
-              btn.disabled = false
-              _updateChatSelectHeader()
-            }, 1800)
+            // Show inline note prompt
+            _showFlagNotePrompt(btn, flagId)
           } else {
             btn.innerHTML = origText
             btn.disabled = false
@@ -13174,7 +13915,9 @@
         document.querySelectorAll(".session-card").forEach((c) => {
           c.classList.toggle("active", c.dataset.uuid === uuid)
         })
-        // Show filter row
+        // Show filter row (and remove any pending flag-note prompt)
+        const _existingPrompt = document.getElementById("flagNotePromptRow")
+        if (_existingPrompt) _existingPrompt.remove()
         document.getElementById("chatFilterRow").style.display = ""
         // Load interactions
         try {
@@ -13799,9 +14542,7 @@
               chatHl(turn.userRow.interactionValue, false).body
             }</div>
               <span class="bubble-ts">${esc(
-                turn.userRow.timestampStart
-                  ? turn.userRow.timestampStart.slice(11, 16)
-                  : "",
+                fmtChatTime(turn.userRow.timestampStart),
               )}</span>
             </div>`
           }
@@ -13898,7 +14639,7 @@
             })
             const tsRow = turn.botRows[turn.botRows.length - 1]
             html += `<span class="bubble-ts">${esc(
-              tsRow.timestampStart ? tsRow.timestampStart.slice(11, 16) : "",
+              fmtChatTime(tsRow.timestampStart),
             )}</span></div>`
           }
           return html

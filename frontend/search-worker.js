@@ -642,24 +642,41 @@ function articleFields(a) {
 }
 
 function matchArticle(a) {
-  // For each OR-group, all AND terms must each be found in at least one field.
-  // Terms can be satisfied by DIFFERENT fields (e.g. one term in ID, another in response).
-  const fields = articleFields(a)
-  // Entity enrichment: only the entity names actually referenced by this article.
   const articleEntityNames =
     matchingEntityNames.size > 0
       ? a._searchQuestionsUpper.filter((t) => matchingEntityNames.has(t))
       : []
 
+  // Non-content fields (id, question texts) form a single per-item bucket.
+  // Evaluated only when !searchContent; all AND terms must be in this bucket alone.
+  if (!searchContent) {
+    const nonContentFields = [a._searchId]
+    for (const qs of a.Questions) nonContentFields.push(qs.Text)
+    if (
+      _orRegexGroups.some((andGroup) =>
+        andGroup.every(
+          (compiled) =>
+            termFoundInFields(compiled, nonContentFields) ||
+            (articleEntityNames.length > 0 &&
+              termMatchesEntityByNames(compiled, articleEntityNames)),
+        ),
+      )
+    )
+      return true
+  }
+
+  // Content matching: ALL AND terms of an OR-group must be found within the
+  // SAME answer item (default or contextual). Terms may not straddle different answers.
   return _orRegexGroups.some((andGroup) =>
-    // Each term in the AND-group must appear in at least one field of this article,
-    // OR that specific term must match a word in one of the article's entities.
-    andGroup.every(
-      (compiled) =>
-        termFoundInFields(compiled, fields) ||
-        (articleEntityNames.length > 0 &&
-          termMatchesEntityByNames(compiled, articleEntityNames)),
-    ),
+    (a._answerItems || []).some((ai) => {
+      const fields = [ai.s, ai.r, ai.e]
+      return andGroup.every(
+        (compiled) =>
+          termFoundInFields(compiled, fields) ||
+          (articleEntityNames.length > 0 &&
+            termMatchesEntityByNames(compiled, articleEntityNames)),
+      )
+    }),
   )
 }
 
@@ -682,18 +699,46 @@ function dialogFields(item) {
 }
 
 function matchDialog(item) {
-  const fields = dialogFields(item)
   const dialogEntityNames =
     matchingEntityNames.size > 0
       ? item._entityQuestionTexts.filter((t) => matchingEntityNames.has(t))
       : []
 
+  // Non-content fields (id, name, description, node names) form a single per-item bucket.
+  // Evaluated only when !searchContent; all AND terms must be in this bucket alone.
+  if (!searchContent) {
+    const nonContentFields = [
+      item._searchId,
+      item._searchName,
+      item._searchDesc,
+    ]
+    for (const sn of item._searchNodes || []) nonContentFields.push(sn.name)
+    if (
+      _orRegexGroups.some((andGroup) =>
+        andGroup.every(
+          (compiled) =>
+            termFoundInFields(compiled, nonContentFields) ||
+            (dialogEntityNames.length > 0 &&
+              termMatchesEntityByNames(compiled, dialogEntityNames)),
+        ),
+      )
+    )
+      return true
+  }
+
+  // Content matching: ALL AND terms of an OR-group must be found within the
+  // SAME answer item in the SAME node. Terms may not straddle different nodes or answers.
   return _orRegexGroups.some((andGroup) =>
-    andGroup.every(
-      (compiled) =>
-        termFoundInFields(compiled, fields) ||
-        (dialogEntityNames.length > 0 &&
-          termMatchesEntityByNames(compiled, dialogEntityNames)),
+    (item._searchNodes || []).some((sn) =>
+      (sn._answerItems || []).some((ai) => {
+        const fields = [ai.s, ai.r, ai.e]
+        return andGroup.every(
+          (compiled) =>
+            termFoundInFields(compiled, fields) ||
+            (dialogEntityNames.length > 0 &&
+              termMatchesEntityByNames(compiled, dialogEntityNames)),
+        )
+      }),
     ),
   )
 }

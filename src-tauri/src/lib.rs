@@ -146,6 +146,7 @@ struct FlaggedSessionSummary {
     interaction_count: i64,
     flagged_count: i64,
     folder_id: Option<i64>,
+    notes: String,
 }
 
 #[derive(Serialize)]
@@ -695,12 +696,18 @@ fn resize_to_available_height(
         .ok_or("main window not found")?;
     let scale = win.scale_factor().map_err(|e| e.to_string())?;
     let outer = win.outer_size().map_err(|e| e.to_string())?;
+    let inner = win.inner_size().map_err(|e| e.to_string())?;
     let outer_pos = win.outer_position().map_err(|e| e.to_string())?;
     let current_w = outer.width as f64 / scale;
     let current_x = outer_pos.x as f64 / scale;
+    // set_size sets the inner (client area) size, not the outer size.
+    // Subtract the non-client chrome height (title bar + borders) so the
+    // outer frame stays within the available area and does not overlap the taskbar.
+    let chrome_h = (outer.height as f64 - inner.height as f64) / scale;
+    let inner_h = (height - chrome_h).max(100.0);
     win.set_size(tauri::Size::Logical(tauri::LogicalSize {
         width: current_w,
-        height,
+        height: inner_h,
     }))
     .map_err(|e| e.to_string())?;
     win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -931,7 +938,8 @@ CREATE TABLE IF NOT EXISTS flagged_sessions (
     culture           TEXT NOT NULL DEFAULT '',
     first_ts          TEXT NOT NULL DEFAULT '',
     interaction_count INTEGER NOT NULL DEFAULT 0,
-    folder_id         INTEGER REFERENCES flagged_folders(folder_id) ON DELETE SET NULL
+    folder_id         INTEGER REFERENCES flagged_folders(folder_id) ON DELETE SET NULL,
+    notes             TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS flagged_interactions (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -978,6 +986,7 @@ fn open_flagged_db(path: &str) -> Result<Connection, String> {
         .map_err(|e| format!("Schema error: {e}"))?;
     // Migrations for existing DBs (ignore errors if column already exists)
     let _ = conn.execute_batch("ALTER TABLE flagged_sessions ADD COLUMN folder_id INTEGER REFERENCES flagged_folders(folder_id) ON DELETE SET NULL");
+    let _ = conn.execute_batch("ALTER TABLE flagged_sessions ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
     Ok(conn)
 }
 
@@ -2546,7 +2555,7 @@ async fn get_flagged_sessions(flagged_db: State<'_, SharedFlaggedDb>) -> Result<
                         fs.culture, fs.first_ts, fs.interaction_count, \
                         COALESCE((SELECT COUNT(*) FROM flagged_interactions fi \
                                   WHERE fi.flag_id = fs.flag_id AND fi.is_flagged = 1), 0) AS flagged_count, \
-                        fs.folder_id \
+                        fs.folder_id, COALESCE(fs.notes, '') \
                  FROM flagged_sessions fs \
                  ORDER BY fs.flagged_at DESC",
             )
@@ -2563,6 +2572,7 @@ async fn get_flagged_sessions(flagged_db: State<'_, SharedFlaggedDb>) -> Result<
                     interaction_count: row.get::<_, i64>(6).unwrap_or(0),
                     flagged_count:     row.get::<_, i64>(7).unwrap_or(0),
                     folder_id:         row.get::<_, Option<i64>>(8).unwrap_or(None),
+                    notes:             row.get::<_, String>(9).unwrap_or_default(),
                 })
             })
             .map_err(|e| format!("Query error: {e}"))?
@@ -2640,6 +2650,27 @@ async fn get_flagged_session_interactions(
 }
 
 #[tauri::command]
+async fn save_flagged_note(
+    flagged_db: State<'_, SharedFlaggedDb>,
+    flag_id: i64,
+    notes: String,
+) -> Result<(), String> {
+    let fdb = flagged_db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = fdb.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        conn.execute(
+            "UPDATE flagged_sessions SET notes = ?1 WHERE flag_id = ?2",
+            params![notes, flag_id],
+        )
+        .map_err(|e| format!("Update error: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn unflag_session(
     flagged_db: State<'_, SharedFlaggedDb>,
     flag_id: i64,
@@ -2711,6 +2742,7 @@ pub fn run() {
             get_flagged_sessions,
             get_flagged_session_interactions,
             unflag_session,
+            save_flagged_note,
             get_flagged_folders,
             create_flagged_folder,
             rename_flagged_folder,
