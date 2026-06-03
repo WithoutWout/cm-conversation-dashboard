@@ -12,8 +12,8 @@ let allItems = [] // pre-built articles + dialogs combined
 
 // ── Pre-computed search indexes (built on "init") ────────────────────────────
 // Maps item → pre-stripped searchable text so strip() isn't called per search.
-// Article: _searchId (string), _searchQuestions (uppercased texts), _searchResponse (stripped)
-// Dialog: _searchId (string), _searchName, _searchDesc, _searchNodes [{name, answerText}]
+// Article: _searchId (string), _searchQuestionsUpper, _answerItems
+// Dialog: _searchId (string), _searchName, _searchDesc, _searchNodes [{name, _answerItems}]
 // Entity: _searchName, _searchWords [lowercased texts]
 
 // Pre-computed entity cross-reference sets (built on init)
@@ -34,18 +34,6 @@ let searchExcludeNonDefault = false
 let contentContextFilters = [] // [{name, value}] — active content context filters
 
 // ── Utilities ────────────────────────────────────────────────────────────────
-function buildSearchRegex(q) {
-  if (!q) return null
-  try {
-    let pat = searchRegex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    if (searchWord)
-      pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
-    return new RegExp(pat, searchCase ? "" : "i")
-  } catch (e) {
-    return null
-  }
-}
-
 // Parse a query into OR groups of AND terms.
 // "hello world | goodbye" → [["hello","world"],["goodbye"]]
 // When in regex mode, return a single group with the raw query as one term.
@@ -82,6 +70,12 @@ function buildTermRegex(term) {
   } catch (e) {
     return null
   }
+}
+
+function compiledGroupsHaveInvalidRegex(groups) {
+  return groups.some((andGroup) =>
+    andGroup.some((compiled) => compiled.re === null && compiled.needle === null),
+  )
 }
 
 // Pre-compiled OR groups: array of AND-groups, each being array of {re, needle} objects.
@@ -141,23 +135,6 @@ function orGroupsMatchFields(groups, fields) {
   return groups.some((andGroup) => andGroupMatchesFields(andGroup, fields))
 }
 
-function testRe(re, str) {
-  if (!re || !str) return false
-  re.lastIndex = 0
-  return re.test(str)
-}
-
-// Fast plain-text test: uses indexOf (much faster than regex for literal strings)
-function testPlain(needle, haystack) {
-  if (!needle || !haystack) return false
-  return haystack.indexOf(needle) !== -1
-}
-
-function testPlainCI(needleLower, haystack) {
-  if (!needleLower || !haystack) return false
-  return haystack.toLowerCase().indexOf(needleLower) !== -1
-}
-
 // Expand %{ConversationVariable(N)} and %{ContextVariable(N)} to their names
 // so users can search by variable name instead of numeric ID.
 function expandVarNames(text) {
@@ -209,10 +186,6 @@ function aFaqQ(a) {
   return a._faqQ // pre-computed on init
 }
 
-function aResponse(a) {
-  return a._response // pre-computed on init
-}
-
 // ── Pre-computation on init ───────────────────────────────────────────────────
 
 function precomputeArticle(a) {
@@ -232,43 +205,8 @@ function precomputeArticle(a) {
     a.Outputs.find((o) => o.Type === "Answer")
   a._response = o ? o.Text : null
 
-  // Build per-article link label map (TagId → Label) for expanding %{Link(N)}
-  const linkMap = new Map()
-  ;((o && o.Links) || []).forEach((l) => {
-    if (l.TagId && l.Label) linkMap.set(l.TagId, l.Label)
-  })
-  const expandedWithLinks = (a._response || "").replace(
-    /%\{Link\((\d+)\)\}/g,
-    (_, n) => linkMap.get(Number(n)) || "Link " + n,
-  )
-
-  // Pre-compute search fields
   a._searchId = String(a.Id)
-  a._searchResponse = strip(a._response || "")
-  a._searchResponseRaw = a._response || ""
-  a._searchResponseExpanded = expandVarNames(expandedWithLinks)
   a._searchQuestionsUpper = a.Questions.map((qs) => qs.Text.toUpperCase())
-
-  // Index ALL Answer outputs (contextual alternatives not covered above)
-  const _primaryAnsIdx = a.Outputs.findIndex((o) => o.Type === "Answer")
-  a._searchCtxAnswers = []
-  for (let _oi = 0; _oi < a.Outputs.length; _oi++) {
-    const _co = a.Outputs[_oi]
-    if (_co.Type !== "Answer" || _oi === _primaryAnsIdx) continue
-    const _lm = new Map()
-    ;(_co.Links || []).forEach((l) => {
-      if (l.TagId && l.Label) _lm.set(l.TagId, l.Label)
-    })
-    const _exp = (_co.Text || "").replace(
-      /%\{Link\((\d+)\)\}/g,
-      (_, n) => _lm.get(Number(n)) || "Link " + n,
-    )
-    a._searchCtxAnswers.push({
-      s: strip(_exp),
-      r: _co.Text || "",
-      e: expandVarNames(_exp),
-    })
-  }
 
   // Build context sets for contextual Answer outputs
   a._ctxSets = []
@@ -339,6 +277,8 @@ function precomputeArticle(a) {
         if (vals.length) _aCtx[name] = vals
       }
     }
+    const _aEscGroup = _ao.OutputMetaData && _ao.OutputMetaData.escalationGroup
+    if (_aEscGroup) _aCtx.escalationGroup = [_aEscGroup]
     a._answerItems.push({
       s: strip(_aExp),
       r: _arT,
@@ -361,32 +301,6 @@ function precomputeDialog(item) {
       (i) => i.type === "Answer",
     )
     const ans = nodeAnsItems.find((i) => i.isDefault) || nodeAnsItems[0] || null
-    const rawText = (ans && ans.data && ans.data.text) || ""
-    // Expand %{Link(N)} tokens for the primary answer using its hyperlinks
-    const _primaryLm = new Map()
-    ;((ans && ans.data && ans.data.hyperlinks) || []).forEach((h) => {
-      if (h.id !== undefined && h.label) _primaryLm.set(h.id, h.label)
-    })
-    const _primaryExp = rawText.replace(
-      /%\{Link\((\d+)\)\}/g,
-      (_, n) => _primaryLm.get(Number(n)) || "Link " + n,
-    )
-    // Build search entries for all non-primary Answer items (contextual alternatives)
-    const ctxAnswerTexts = []
-    for (let _i = 0; _i < nodeAnsItems.length; _i++) {
-      const _ci = nodeAnsItems[_i]
-      if (_ci === ans) continue
-      const _rawT = (_ci.data && _ci.data.text) || ""
-      const _lm = new Map()
-      ;((_ci.data && _ci.data.hyperlinks) || []).forEach((h) => {
-        if (h.id !== undefined && h.label) _lm.set(h.id, h.label)
-      })
-      const _exp = _rawT.replace(
-        /%\{Link\((\d+)\)\}/g,
-        (_, n) => _lm.get(Number(n)) || "Link " + n,
-      )
-      ctxAnswerTexts.push({ s: strip(_exp), r: _rawT, e: expandVarNames(_exp) })
-    }
     // Build aligned per-answer items for this node: {s, r, e, ctxSet}
     // so combined text+context matching can require both on the same answer.
     const _nodeAnsItems = []
@@ -411,6 +325,8 @@ function precomputeDialog(item) {
           .filter(Boolean)
         if (vals.length) _nCtx[name] = vals
       }
+      const _nEscGroup = _nai.metadata && _nai.metadata.escalationGroup
+      if (_nEscGroup) _nCtx.escalationGroup = [_nEscGroup]
       _nodeAnsItems.push({
         s: strip(_nExp),
         r: _nrT,
@@ -421,10 +337,6 @@ function precomputeDialog(item) {
     }
     return {
       name: n.name || "",
-      answerText: ans ? strip(_primaryExp) : "",
-      answerTextRaw: rawText,
-      answerTextExpanded: expandVarNames(_primaryExp),
-      ctxAnswerTexts,
       _answerItems: _nodeAnsItems,
     }
   })
@@ -633,26 +545,9 @@ function matchDialogCombined(item) {
   )
 }
 
-// Returns all searchable field strings for an article (non-content and response fields).
-function articleFields(a) {
-  const fields = [
-    a._searchResponse,
-    a._searchResponseRaw,
-    a._searchResponseExpanded,
-  ]
-  if (!searchContent) {
-    fields.push(a._searchId)
-    for (const qs of a.Questions) fields.push(qs.Text)
-  }
-  for (const ca of a._searchCtxAnswers || []) {
-    fields.push(ca.s, ca.r, ca.e)
-  }
-  return fields
-}
-
 function matchArticle(a) {
   const articleEntityNames =
-    matchingEntityNames.size > 0
+    !searchContent && matchingEntityNames.size > 0
       ? a._searchQuestionsUpper.filter((t) => matchingEntityNames.has(t))
       : []
 
@@ -681,36 +576,15 @@ function matchArticle(a) {
       if (searchExcludeNonDefault && ai.isNonDefault) return false
       const fields = [ai.s, ai.r, ai.e]
       return andGroup.every(
-        (compiled) =>
-          termFoundInFields(compiled, fields) ||
-          (articleEntityNames.length > 0 &&
-            termMatchesEntityByNames(compiled, articleEntityNames)),
+        (compiled) => termFoundInFields(compiled, fields),
       )
     }),
   )
 }
 
-// Returns all searchable field strings for a dialog item.
-function dialogFields(item) {
-  const fields = []
-  if (!searchContent) {
-    fields.push(item._searchId, item._searchName, item._searchDesc)
-  }
-  for (const sn of item._searchNodes || []) {
-    if (!searchContent) fields.push(sn.name)
-    if (sn.answerText || sn.answerTextRaw) {
-      fields.push(sn.answerText, sn.answerTextRaw, sn.answerTextExpanded)
-    }
-    for (const ca of sn.ctxAnswerTexts || []) {
-      fields.push(ca.s, ca.r, ca.e)
-    }
-  }
-  return fields
-}
-
 function matchDialog(item) {
   const dialogEntityNames =
-    matchingEntityNames.size > 0
+    !searchContent && matchingEntityNames.size > 0
       ? item._entityQuestionTexts.filter((t) => matchingEntityNames.has(t))
       : []
 
@@ -744,10 +618,7 @@ function matchDialog(item) {
         if (searchExcludeNonDefault && ai.isNonDefault) return false
         const fields = [ai.s, ai.r, ai.e]
         return andGroup.every(
-          (compiled) =>
-            termFoundInFields(compiled, fields) ||
-            (dialogEntityNames.length > 0 &&
-              termMatchesEntityByNames(compiled, dialogEntityNames)),
+          (compiled) => termFoundInFields(compiled, fields),
         )
       }),
     ),
@@ -826,18 +697,40 @@ self.onmessage = function (e) {
     // ── Build OR-groups of AND-term regexes ONCE for this search ──────
     const orGroups = q ? parseOrGroups(q) : []
     _orRegexGroups = q ? buildOrRegexGroups(orGroups) : []
+    const invalidRegex = q && searchRegex && compiledGroupsHaveInvalidRegex(_orRegexGroups)
+    if (invalidRegex) {
+      const filteredAllIdx = new Int32Array(0)
+      const filteredArticlesIdx = new Int32Array(0)
+      const filteredDialogsIdx = new Int32Array(0)
+      const filteredEntitiesIdx = new Int32Array(0)
+      self.postMessage(
+        {
+          type: "results",
+          id,
+          error: "invalid_regex",
+          filteredAllIdx,
+          filteredArticlesIdx,
+          filteredDialogsIdx,
+          filteredEntitiesIdx,
+          matchingEntityNames: [],
+        },
+        [
+          filteredAllIdx.buffer,
+          filteredArticlesIdx.buffer,
+          filteredDialogsIdx.buffer,
+          filteredEntitiesIdx.buffer,
+        ],
+      )
+      return
+    }
     const hasValidQuery =
       _orRegexGroups.length > 0 && _orRegexGroups.every((g) => g.length > 0)
 
-    // For entity-matching we still build a single regex from the full query
-    // (entity words are matched individually, not per-term).
-    const re = q ? buildSearchRegex(q) : null
     const isPlain = q ? canUsePlainMatch() : false
-    const needle = isPlain ? (searchCase ? q : q.toLowerCase()) : null
 
     // Pre-compute entity names matched by the current query
     matchingEntityNames = new Set()
-    if (q && workerEntities.length) {
+    if (q && !searchContent && workerEntities.length) {
       // Match entities against each individual term in the union of all OR groups
       const allTerms = orGroups.flat()
       for (const entity of workerEntities) {
@@ -873,8 +766,12 @@ self.onmessage = function (e) {
         if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
         if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
           return false
+        if (noQuery) return matchesContentContext(item)
+        if (hasCtxFilter)
+          return item._kind === "article"
+            ? matchArticleCombined(item)
+            : matchDialogCombined(item)
         if (!matchesContentContext(item)) return false
-        if (noQuery) return true
         return item._kind === "article" ? matchArticle(item) : matchDialog(item)
       })
     }
@@ -893,8 +790,9 @@ self.onmessage = function (e) {
       filteredArticles = workerArticles.filter((a) => {
         if (aFilter === "answer" && aKind(a) !== "answer") return false
         if (aFilter === "dialog" && aKind(a) === "answer") return false
+        if (noQuery) return matchesContentContext(a)
+        if (hasCtxFilter) return matchArticleCombined(a)
         if (!matchesContentContext(a)) return false
-        if (noQuery) return true
         return matchArticle(a)
       })
     }
@@ -915,8 +813,9 @@ self.onmessage = function (e) {
         if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
         if (dFilter === "recognition" && item._kind === "tdialog") return false
         if (dFilter === "recognition" && !item._hasAnswerOutput) return false
+        if (noQuery) return matchesContentContext(item)
+        if (hasCtxFilter) return matchDialogCombined(item)
         if (!matchesContentContext(item)) return false
-        if (noQuery) return true
         return matchDialog(item)
       })
     }

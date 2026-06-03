@@ -680,6 +680,65 @@
         flex-wrap: wrap;
         align-items: center;
       }
+      .card-snippet {
+        margin-top: 5px;
+        color: #8fa4c3;
+        font-size: 0.72rem;
+        line-height: 1.35;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .card-snippet-label {
+        color: var(--orange);
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 0.58rem;
+        letter-spacing: 0.04em;
+        margin-right: 5px;
+      }
+      .content-rel-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 5px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      .content-rel-label {
+        color: var(--muted);
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .content-rel-chip {
+        background: rgba(124, 106, 247, 0.1);
+        border: 1px solid rgba(124, 106, 247, 0.24);
+        border-radius: 5px;
+        color: #a89ff5;
+        cursor: pointer;
+        font-size: 0.68rem;
+        max-width: 190px;
+        overflow: hidden;
+        padding: 2px 6px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .content-rel-chip:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .content-rel-chip.article {
+        background: rgba(96, 165, 250, 0.09);
+        border-color: rgba(96, 165, 250, 0.22);
+        color: var(--blue);
+      }
+      .content-rel-chip.tdialog {
+        background: rgba(45, 212, 191, 0.09);
+        border-color: rgba(45, 212, 191, 0.22);
+        color: var(--teal);
+      }
       .badge {
         font-size: 0.6rem;
         padding: 2px 6px;
@@ -688,6 +747,16 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
         white-space: nowrap;
+      }
+      .badge.rel-badge {
+        cursor: pointer;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .badge.rel-badge:hover {
+        border-color: var(--accent);
+        color: var(--text);
       }
       .b-article {
         background: rgba(96, 165, 250, 0.12);
@@ -2229,6 +2298,9 @@
       .export-row:hover {
         background: var(--surface2);
       }
+      .export-row.has-relations {
+        grid-template-columns: auto minmax(160px, 1fr) minmax(220px, 1.3fr) auto;
+      }
       .export-row-id {
         color: var(--blue);
         text-decoration: underline;
@@ -2270,6 +2342,33 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         font-style: italic;
+      }
+      .export-row-relations {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      .export-relation-arrow {
+        color: var(--muted);
+        font-size: 0.72rem;
+        white-space: nowrap;
+      }
+      .export-relation-chip {
+        background: rgba(96, 165, 250, 0.09);
+        border: 1px solid rgba(96, 165, 250, 0.22);
+        border-radius: 5px;
+        color: var(--blue);
+        cursor: pointer;
+        font-family: monospace;
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        white-space: nowrap;
+      }
+      .export-relation-chip:hover {
+        border-color: var(--blue);
+        color: var(--text);
       }
       .export-row-copy {
         background: none;
@@ -2351,6 +2450,32 @@
         font-style: italic;
         color: var(--muted);
         font-size: 0.74rem;
+      }
+      .export-grouped {
+        flex: 1;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--bg);
+      }
+      .export-group {
+        border-bottom: 1px solid var(--border);
+      }
+      .export-group:last-child {
+        border-bottom: none;
+      }
+      .export-group-title {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        padding: 7px 12px;
+        text-transform: uppercase;
       }
       .export-footer-actions {
         display: flex;
@@ -6057,6 +6182,9 @@
           <button class="export-view-tab" data-export-view="table">
             Table
           </button>
+          <button class="export-view-tab" data-export-view="grouped">
+            Grouped
+          </button>
         </div>
         <div class="modal-body">
           <div class="export-list" id="exportList"></div>
@@ -7157,16 +7285,25 @@
       }
 
       // ── Contextual answer helpers ────────────────────────────────────
-      // An article output has specific context if at least one ContextVariable
-      // has a value other than "any".
-      function articleOutputHasContext(o) {
+      function articleAnswerHasContext(o) {
         const cvs = o.ContextVariables || []
-        return cvs.some((cv) => cv.Values && !cv.Values.includes("any"))
+        const hasContextVar = cvs.some(
+          (cv) => cv.Values && !cv.Values.includes("any"),
+        )
+        const hasEscGroup = !!(
+          o.OutputMetaData && o.OutputMetaData.escalationGroup
+        )
+        return hasContextVar || hasEscGroup
       }
-      // A dialog output item has context if contextVariables is non-empty.
-      function dialogItemHasContext(item) {
-        return !!(item.contextVariables && item.contextVariables.length > 0)
+
+      function dialogAnswerHasContext(item) {
+        const hasContextVar = !!(
+          item.contextVariables && item.contextVariables.length > 0
+        )
+        const hasEscGroup = !!(item.metadata && item.metadata.escalationGroup)
+        return hasContextVar || hasEscGroup
       }
+
       // Returns true if the contextVars satisfy ALL active content context filters.
       // Used to highlight contextual answers that match the active filter in modals.
       function ctxVarsMatchFilters(contextVars, isArticle) {
@@ -7330,7 +7467,7 @@
           if (ans.isUnreachable || pills) {
             html += '<div class="ctx-answer-meta">'
             if (ans.isUnreachable)
-              html += '<span class="ctx-unreachable-badge">Non-default</span>'
+              html += '<span class="ctx-unreachable-badge">Unreachable</span>'
             html += pills + "</div>"
           }
           html += hlVar(hl(ans.displayText, q))
@@ -7402,8 +7539,123 @@
       function aFaqQ(a) {
         return a._faqQ
       }
-      function aResponse(a) {
-        return a._response
+
+      function articleLinkedDialogs(art) {
+        const seen = new Set()
+        const links = []
+        for (const o of art.Outputs || []) {
+          let kind = null
+          let id = null
+          if (o.Type === "DialogStart") {
+            kind = "dialog"
+            id = o.DialogId
+          } else if (o.Type === "TDialogStart") {
+            kind = "tdialog"
+            id = o.TDialogId || o.DialogId
+          }
+          if (!kind || id == null) continue
+          const key = kind + ":" + id
+          if (seen.has(key)) continue
+          seen.add(key)
+          const ref =
+            kind === "tdialog" ? tDialogMap.get(id) : dialogMap.get(id)
+          links.push({
+            kind,
+            id,
+            title: ref ? ref.name : "#" + id,
+          })
+        }
+        return links.sort((a, b) => a.id - b.id)
+      }
+
+      function dialogLinkedArticles(item) {
+        if (!item || item._kind === "tdialog") return []
+        const seen = new Set()
+        const refs = []
+        for (const node of item.nodes || []) {
+          const id = node.output && node.output.kbaIdReference
+          if (id == null || seen.has(id)) continue
+          seen.add(id)
+          const art = articleMap.get(id)
+          refs.push({
+            kind: "article",
+            id,
+            title: art ? aFaqQ(art) || "Article #" + id : "Article #" + id,
+          })
+        }
+        return refs.sort((a, b) => a.id - b.id)
+      }
+
+      function relationRowHtml(label, links) {
+        if (!links.length) return ""
+        return (
+          '<div class="content-rel-row"><span class="content-rel-label">' +
+          esc(label) +
+          "</span>" +
+          links
+            .map((link) => {
+              const cls =
+                link.kind === "article"
+                  ? " article"
+                  : link.kind === "tdialog"
+                  ? " tdialog"
+                  : ""
+              const click =
+                link.kind === "article"
+                  ? "goToArticle(" + link.id + ")"
+                  : "jumpToDialog(" +
+                    link.id +
+                    "," +
+                    (link.kind === "tdialog" ? "true" : "false") +
+                    ")"
+              const prefix =
+                link.kind === "article"
+                  ? "qa-"
+                  : link.kind === "tdialog"
+                  ? "td-"
+                  : "dn-"
+              return (
+                '<button class="content-rel-chip' +
+                cls +
+                '" onclick="event.stopPropagation();' +
+                click +
+                '" title="' +
+                esc(link.title) +
+                '">' +
+                esc(prefix + link.id) +
+                "</button>"
+              )
+            })
+            .join("") +
+          "</div>"
+        )
+      }
+
+      function articleDialogLinkBadges(links) {
+        if (!links.length) return ""
+        return links
+          .map((link) => {
+            const isTDialog = link.kind === "tdialog"
+            const cls = isTDialog ? "b-tdialog" : "b-dialog"
+            const label = isTDialog ? "Transactional Dialog" : "Dialog Link"
+            const prefix = isTDialog ? "td-" : "dn-"
+            return (
+              '<span class="badge rel-badge ' +
+              cls +
+              '" onclick="event.stopPropagation();jumpToDialog(' +
+              link.id +
+              "," +
+              (isTDialog ? "true" : "false") +
+              ')" title="' +
+              esc(link.title) +
+              '">' +
+              label +
+              " " +
+              esc(prefix + link.id) +
+              "</span>"
+            )
+          })
+          .join("")
       }
 
       // ── Article card ────────────────────────────────────────────────
@@ -7412,12 +7664,11 @@
           faq = aHasFaq(art),
           pq = aFaqQ(art),
           qCnt = art.Questions.length
+        const linkedDialogs = articleLinkedDialogs(art)
         const kindBadge =
           kind === "answer"
             ? '<span class="badge b-response">Response</span>'
-            : kind === "tdialog"
-            ? '<span class="badge b-tdialog">Transactional Dialog</span>'
-            : '<span class="badge b-dialog">Dialog Link</span>'
+            : articleDialogLinkBadges(linkedDialogs)
         let outputSection = ""
         if (kind === "answer") {
           const raw = art._displayResponse || ""
@@ -7506,6 +7757,10 @@
             : visibleChips
         const hoverTitle =
           kind === "answer" ? (art._displayResponse || "").slice(0, 250) : ""
+        const snippetHtml = cardSnippetHtml(
+          nonDefaultArticleMatchSnippet(art, q),
+          q,
+        )
         return (
           '<div class="card type-article">' +
           '<div class="card-header" onclick="goToArticle(' +
@@ -7532,6 +7787,7 @@
           (qCnt !== 1 ? "ies" : "y") +
           "</span>" +
           "</div>" +
+          snippetHtml +
           "</div>" +
           '<div class="card-actions">' +
           cmLink("article", art.Id) +
@@ -8134,11 +8390,9 @@
         const isRec = node.type === "Recognition"
         const items = (node.output && node.output.items) || []
         // Use the isDefault answer as the primary; fall back to first Answer
-        const defaultAnsItem =
-          items.find((i) => i.type === "Answer" && i.isDefault) ||
-          items.find((i) => i.type === "Answer")
+        const defaultAnsItem = defaultDialogAnswerItem(items)
         const contextualAnsItems = items.filter(
-          (i) => i.type === "Answer" && !i.isDefault,
+          (i) => i.type === "Answer" && i !== defaultAnsItem,
         )
         const kbaRef = node.output && node.output.kbaIdReference
         const kbaArt = !defaultAnsItem && kbaRef ? articleMap.get(kbaRef) : null
@@ -8177,7 +8431,7 @@
               (item.data && item.data.hyperlinks) || [],
             ),
             rawText: _rawText,
-            isUnreachable: !dialogItemHasContext(item),
+            isUnreachable: !dialogAnswerHasContext(item),
             contextVars: item.contextVariables || [],
             escGroup: (item.metadata && item.metadata.escalationGroup) || null,
             isArticle: false,
@@ -8191,7 +8445,7 @@
           autoOpenCtx || _nodeHasCtxFilter
             ? contextualAnsData.filter(
                 (ans) =>
-                  !searchExcludeNonDefault &&
+                  !(searchExcludeNonDefault && autoOpenCtx) &&
                   (!autoOpenCtx ||
                     _anyTermMatches(_nodeTermRes, ans.displayText) ||
                     _anyTermMatches(
@@ -8359,6 +8613,14 @@
         ).length
         const desc = item.description || ""
         const hasDetail = !!desc
+        const snippetHtml = cardSnippetHtml(
+          nonDefaultDialogMatchSnippet(item, q),
+          q,
+        )
+        const relationHtml = relationRowHtml(
+          "Uses articles",
+          dialogLinkedArticles(item),
+        )
         return (
           '<div class="card type-dialog">' +
           '<div class="card-header" onclick="openDialogInfoModal(' +
@@ -8389,6 +8651,8 @@
           (nodeCnt !== 1 ? "s" : "") +
           "</span>" +
           "</div>" +
+          relationHtml +
+          snippetHtml +
           "</div>" +
           '<div class="card-actions">' +
           cmLink("dialog", item.id) +
@@ -8448,15 +8712,106 @@
         })
       }
 
+      function defaultArticleAnswer(art) {
+        const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
+        return answers.find((o) => o.IsDefault) || answers[0] || null
+      }
+
+      function defaultDialogAnswerItem(items) {
+        const answers = (items || []).filter((i) => i.type === "Answer")
+        return answers.find((i) => i.isDefault) || answers[0] || null
+      }
+
+      function answerTextMatchesTermRes(termRes, displayText, rawText) {
+        return (
+          _anyTermMatches(termRes, displayText) ||
+          _anyTermMatches(termRes, expandVarNames(rawText || displayText || ""))
+        )
+      }
+
+      function cardSnippetHtml(match, q) {
+        if (!match) return ""
+        return (
+          '<div class="card-snippet"><span class="card-snippet-label">' +
+          esc(match.label) +
+          "</span>" +
+          hlVar(hl(match.text, q)) +
+          "</div>"
+        )
+      }
+
+      function nonDefaultArticleMatchSnippet(art, q) {
+        if (!q || searchExcludeNonDefault) return null
+        const termRes = _buildModalTermRegexes()
+        if (!termRes.length) return null
+        const def = defaultArticleAnswer(art)
+        for (const o of art.Outputs || []) {
+          if (o.Type !== "Answer" || o === def) continue
+          const displayText = stripDisplay(o.Text || "", o.Links || [])
+          if (!answerTextMatchesTermRes(termRes, displayText, o.Text || ""))
+            continue
+          if (
+            contentContextFilters.length &&
+            !answerPassesContextFilters(
+              o.ContextVariables || [],
+              (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
+              true,
+            )
+          )
+            continue
+          return { label: "Contextual response", text: displayText }
+        }
+        return null
+      }
+
+      function nonDefaultDialogMatchSnippet(item, q) {
+        if (!q || searchExcludeNonDefault || item._kind === "tdialog")
+          return null
+        const termRes = _buildModalTermRegexes()
+        if (!termRes.length) return null
+        for (const node of item.nodes || []) {
+          const items = (node.output && node.output.items) || []
+          const def = defaultDialogAnswerItem(items)
+          for (const ans of items) {
+            if (ans.type !== "Answer" || ans === def) continue
+            const rawText = (ans.data && ans.data.text) || ""
+            const displayText = stripDisplay(
+              rawText,
+              (ans.data && ans.data.hyperlinks) || [],
+            )
+            if (!answerTextMatchesTermRes(termRes, displayText, rawText))
+              continue
+            if (
+              contentContextFilters.length &&
+              !answerPassesContextFilters(
+                ans.contextVariables || [],
+                (ans.metadata && ans.metadata.escalationGroup) || null,
+                false,
+              )
+            )
+              continue
+            return {
+              label: "Contextual response",
+              text: (node.name ? node.name + ": " : "") + displayText,
+            }
+          }
+        }
+        return null
+      }
+
       function nodeMatchesQuery(n, termRes) {
-        if (!searchContent && _anyTermMatches(termRes, n.name || ""))
+        const hasCtxFilter = contentContextFilters.length > 0
+        if (
+          !searchContent &&
+          !hasCtxFilter &&
+          _anyTermMatches(termRes, n.name || "")
+        )
           return true
         // All answer items (default + contextual)
         const ansItems = ((n.output && n.output.items) || []).filter(
           (i) => i.type === "Answer",
         )
-        const defaultAnsItem =
-          ansItems.find((i) => i.isDefault) || ansItems[0] || null
+        const defaultAnsItem = defaultDialogAnswerItem(ansItems)
         if (
           ansItems.some((i) => {
             if (searchExcludeNonDefault && i !== defaultAnsItem) return false
@@ -8465,30 +8820,24 @@
               (i.data && i.data.hyperlinks) || [],
             )
             return (
-              _anyTermMatches(termRes, t) ||
-              _anyTermMatches(
+              answerTextMatchesTermRes(
                 termRes,
-                expandVarNames((i.data && i.data.text) || ""),
+                t,
+                (i.data && i.data.text) || "",
+              ) &&
+              answerPassesContextFilters(
+                i.contextVariables || [],
+                (i.metadata && i.metadata.escalationGroup) || null,
+                false,
               )
             )
           })
         )
           return true
-        // KBA article reference — check referenced article's response text
-        const kbaRef = n.output && n.output.kbaIdReference
-        if (kbaRef) {
-          const kbaArt = articleMap.get(kbaRef)
-          if (kbaArt) {
-            if (_anyTermMatches(termRes, kbaArt._displayResponse || ""))
-              return true
-            if (
-              _anyTermMatches(termRes, expandVarNames(kbaArt._response || ""))
-            )
-              return true
-          }
-        }
         // Recognition links + entity enrichment
         if (
+          !searchContent &&
+          !hasCtxFilter &&
           (n.links || []).some((link) => {
             const cd = (link.condition && link.condition.data) || {}
             if (cd.isFallback) return false
@@ -8535,82 +8884,6 @@
             : allDialogsCombined.find((d) => d.id === id)
           if (item) _renderDialogModalBody(item, id, !!isTDialog)
         }
-      }
-
-      function matchArticle(a, q) {
-        if (!q) return true
-        const re = buildSearchRegex(q)
-        if (!re) return false
-        if (!searchContent && testRe(re, String(a.Id))) return true
-        if (!searchContent && a.Questions.some((qs) => testRe(re, qs.Text)))
-          return true
-        // Search all Answer outputs (default + contextual), including link labels and URLs
-        if (
-          a.Outputs.filter((o) => o.Type === "Answer").some((o) =>
-            testRe(re, stripDisplay(o.Text || "", o.Links || [])),
-          )
-        )
-          return true
-        // Entity-word enrichment: match if any Question.Text maps to an entity
-        // whose word list contains the query
-        if (
-          matchingEntityNames.size > 0 &&
-          a.Questions.some((qs) =>
-            matchingEntityNames.has(qs.Text.toUpperCase()),
-          )
-        )
-          return true
-        return false
-      }
-      function matchDialog(item, q) {
-        if (!q) return true
-        const re = buildSearchRegex(q)
-        if (!re) return false
-        if (!searchContent && testRe(re, String(item.id))) return true
-        if (!searchContent && testRe(re, item.name || "")) return true
-        if (!searchContent && testRe(re, item.description || "")) return true
-        if (
-          (item.nodes || []).some((n) => {
-            if (!searchContent && testRe(re, n.name || "")) return true
-            // Search all Answer items (default + contextual), including link labels and URLs
-            if (
-              ((n.output && n.output.items) || [])
-                .filter((i) => i.type === "Answer")
-                .some((i) =>
-                  testRe(
-                    re,
-                    stripDisplay(
-                      (i.data && i.data.text) || "",
-                      (i.data && i.data.hyperlinks) || [],
-                    ),
-                  ),
-                )
-            )
-              return true
-            return false
-          })
-        )
-          return true
-        // Entity-word enrichment: match if any recognition node entity name maps
-        // to an entity whose word list contains the query
-        if (
-          matchingEntityNames.size > 0 &&
-          (item.nodes || []).some((n) =>
-            (n.links || []).some((link) => {
-              const condData = (link.condition && link.condition.data) || {}
-              return (
-                !condData.isFallback &&
-                (condData.questions || []).some((qo) =>
-                  qo.text
-                    ? matchingEntityNames.has(qo.text.toUpperCase())
-                    : false,
-                )
-              )
-            }),
-          )
-        )
-          return true
-        return false
       }
 
       // ── Apply & render: All ─────────────────────────────────────────
@@ -9142,11 +9415,13 @@
         const makeChip = (qs) => {
           if (
             filterActive &&
-            !_anyTermMatches(termRes, qs.Text) &&
-            !(
-              matchingEntityNames.size > 0 &&
-              matchingEntityNames.has(qs.Text.toUpperCase())
-            )
+            (searchContent ||
+              contentContextFilters.length > 0 ||
+              (!_anyTermMatches(termRes, qs.Text) &&
+                !(
+                  matchingEntityNames.size > 0 &&
+                  matchingEntityNames.has(qs.Text.toUpperCase())
+                )))
           )
             return ""
           const linkedEntity = getEntityForChip(qs.Text)
@@ -9200,11 +9475,12 @@
           }
           // Contextual responses
           const hasCtxFilter = contentContextFilters.length > 0
+          const defaultOutput = defaultArticleAnswer(art)
           const contextualOutputs = art.Outputs.filter(
-            (o) => o.Type === "Answer" && !o.IsDefault,
+            (o) => o.Type === "Answer" && o !== defaultOutput,
           ).map((o) => ({
             displayText: stripDisplay(o.Text, o.Links),
-            isUnreachable: !articleOutputHasContext(o),
+            isUnreachable: !articleAnswerHasContext(o),
             contextVars: o.ContextVariables || [],
             escGroup:
               (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
@@ -9215,7 +9491,7 @@
             filterActive || hasCtxFilter
               ? contextualOutputs.filter(
                   (o) =>
-                    !searchExcludeNonDefault &&
+                    !(searchExcludeNonDefault && filterActive) &&
                     (!filterActive ||
                       _anyTermMatches(termRes, o.displayText) ||
                       _anyTermMatches(
@@ -9449,7 +9725,12 @@
         let html = ""
 
         if (item.description) {
-          if (!filterActive || _anyTermMatches(termRes, item.description)) {
+          if (
+            !filterActive ||
+            (!searchContent &&
+              !contentContextFilters.length &&
+              _anyTermMatches(termRes, item.description))
+          ) {
             html +=
               '<div class="detail-section"><h4>Description</h4><p class="desc-text">' +
               hl(item.description, gQuery) +
@@ -9528,8 +9809,51 @@
           contentContextFilters,
         })
       }
+      function showInvalidRegexResults() {
+        filteredAll = new Int32Array(0)
+        filteredArticles = new Int32Array(0)
+        filteredDialogs = new Int32Array(0)
+        filteredEntities = new Int32Array(0)
+        matchingEntityNames = new Set()
+        showSearchLoading(false)
+
+        document.getElementById("all-result-count").textContent =
+          "Invalid regex"
+        document.getElementById("a-result-count").textContent = "Invalid regex"
+        document.getElementById("d-result-count").textContent = "Invalid regex"
+        document.getElementById("e-result-count").textContent = "Invalid regex"
+        ;["tab-all-count", "tab-a-count", "tab-d-count", "tab-e-count"].forEach(
+          (id) => {
+            document.getElementById(id).textContent = "!"
+          },
+        )
+        ;[
+          "all-pagination",
+          "a-pagination",
+          "d-pagination",
+          "e-pagination",
+        ].forEach((id) => {
+          document.getElementById(id).innerHTML = ""
+        })
+
+        const msg =
+          '<div class="empty-state"><p>Invalid regular expression.</p></div>'
+        document.getElementById("allList").innerHTML = msg
+        document.getElementById("articleList").innerHTML = msg
+        document.getElementById("dialogList").innerHTML = msg
+        document.getElementById("entityList").innerHTML = msg
+        allListDirty = false
+        articleListDirty = false
+        dialogListDirty = false
+        entityListDirty = false
+        _syncModalFilterBtn()
+      }
       async function handleSearchResults(msg) {
         if (msg.id !== searchSeq) return
+        if (msg.error === "invalid_regex") {
+          showInvalidRegexResults()
+          return
+        }
         const myId = msg.id
 
         // Store typed index arrays directly — O(1), no object expansion.
@@ -9806,7 +10130,7 @@
       })
 
       // ── Share Content modal ─────────────────────────────────────────
-      let _exportView = "list" // "list" | "table"
+      let _exportView = "list" // "list" | "table" | "grouped"
 
       // Extract the answer/response texts that actually match the current search
       // query for a given item. Falls back to the default response if no query.
@@ -9889,12 +10213,7 @@
         const toItem = (item) => {
           if (item.Id != null) {
             return {
-              kind:
-                item._aKind === "tdialog"
-                  ? "tdialog"
-                  : item._aKind === "dialog"
-                  ? "dialog"
-                  : "article",
+              kind: "article",
               id: item.Id,
               title: aFaqQ(item) || "(no question)",
               responses: _getMatchedResponses(item),
@@ -9916,6 +10235,33 @@
             toItem,
           )
         return Array.from(filteredAll, (i) => allCombinedItems[i]).map(toItem)
+      }
+
+      function exportGroupLabel(kind) {
+        return kind === "article"
+          ? "Articles"
+          : kind === "tdialog"
+          ? "Transactional Dialogs"
+          : "Dialogs"
+      }
+
+      function exportGroupOrder(kind) {
+        return kind === "article" ? 0 : kind === "dialog" ? 1 : 2
+      }
+
+      function groupedExportItems(items) {
+        return items
+          .slice()
+          .sort(
+            (a, b) =>
+              exportGroupOrder(a.kind) - exportGroupOrder(b.kind) ||
+              a.id - b.id,
+          )
+      }
+
+      function getExportItemsForCurrentView() {
+        const items = getActiveExportItems()
+        return _exportView === "grouped" ? groupedExportItems(items) : items
       }
 
       function buildItemUrl(kind, id) {
@@ -10060,15 +10406,122 @@
         </table>`
       }
 
+      function _exportDialogArticleRelations(item) {
+        if (item.kind !== "dialog" || !item._raw) return []
+        return dialogLinkedArticles(item._raw)
+      }
+
+      function _exportRelationText(item) {
+        const refs = _exportDialogArticleRelations(item)
+        if (!refs.length) return ""
+        return (
+          _itemIdToken(item) +
+          " -> " +
+          refs.map((ref) => "qa-" + ref.id).join(", ")
+        )
+      }
+
+      function _exportRelationHtml(item) {
+        const refs = _exportDialogArticleRelations(item)
+        if (!refs.length) return ""
+        return (
+          '<span class="export-relation-arrow">&#8594; Articles</span>' +
+          refs
+            .map((ref) => {
+              const url = buildItemUrl("article", ref.id)
+              const open = url
+                ? "openLink('" + esc(url) + "')"
+                : "goToArticle(" + ref.id + ")"
+              return (
+                '<button class="export-relation-chip" onclick="' +
+                open +
+                '" title="' +
+                esc(ref.title) +
+                '">qa-' +
+                ref.id +
+                "</button>"
+              )
+            })
+            .join("")
+        )
+      }
+
+      function _renderExportGrouped(items) {
+        const list = document.getElementById("exportList")
+        list.className = "export-grouped"
+        const grouped = groupedExportItems(items)
+        const sections = []
+        for (const kind of ["article", "dialog", "tdialog"]) {
+          const groupItems = grouped.filter((item) => item.kind === kind)
+          if (!groupItems.length) continue
+          const rows = groupItems
+            .map((item) => {
+              const idToken = _itemIdToken(item)
+              const url = buildItemUrl(item.kind, item.id)
+              const safeUrl = esc(url)
+              const safeTitle = esc(JSON.stringify(item.title))
+              const safeIdText = esc(JSON.stringify(idToken))
+              const idSpan = url
+                ? `<span class="export-row-id" onclick="openLink('${safeUrl}')" title="Open in CM.com">${esc(
+                    idToken,
+                  )}</span>`
+                : `<span class="export-row-no-url" title="Set CM.com Context URL in Settings to enable links">${esc(
+                    idToken,
+                  )}</span>`
+              const relationHtml = _exportRelationHtml(item)
+              const responseHtml = relationHtml
+                ? relationHtml
+                : item.responses.length
+                ? item.responses
+                    .map(
+                      (r) =>
+                        `<span class="export-row-response" title="${esc(
+                          r,
+                        )}">${esc(
+                          r.length > 120 ? r.slice(0, 120) + "…" : r,
+                        )}</span>`,
+                    )
+                    .join("")
+                : ""
+              return `<div class="export-row${
+                relationHtml ? " has-relations" : ""
+              }">
+                ${idSpan}
+                <span class="export-row-title" title="${esc(
+                  item.title,
+                )}">${esc(item.title)}</span>
+                <span class="${
+                  relationHtml
+                    ? "export-row-relations"
+                    : "export-row-responses"
+                }">${responseHtml}</span>
+                <button class="export-row-copy" title="Copy as link"
+                  onclick="copyJiraLink('${safeUrl}', ${safeIdText}, ${safeTitle}, this)">&#x1F517; Copy link</button>
+              </div>`
+            })
+            .join("")
+          sections.push(
+            '<div class="export-group"><div class="export-group-title">' +
+              esc(exportGroupLabel(kind)) +
+              " (" +
+              groupItems.length +
+              ")</div>" +
+              rows +
+              "</div>",
+          )
+        }
+        list.innerHTML = sections.join("")
+      }
+
       function _renderExportFooter() {
         const actions = document.getElementById("exportFooterActions")
-        if (_exportView === "list") {
+        if (_exportView === "table") {
           actions.innerHTML = `
-            <button class="btn-primary" onclick="_copyExportLinks(this)">&#x1F517; Copy all as links</button>
+            <button class="btn-primary" onclick="_copyExportTable(this)">&#x1F5C3; Copy table</button>
             <button class="btn-secondary" onclick="_copyExportPlain(this)">&#x1F4CB; Copy as plain text</button>`
         } else {
           actions.innerHTML = `
-            <button class="btn-primary" onclick="_copyExportTable(this)">&#x1F5C3; Copy table</button>
+            <button class="btn-primary" onclick="_copyExportLinks(this)">&#x1F517; Copy all as links</button>
             <button class="btn-secondary" onclick="_copyExportPlain(this)">&#x1F4CB; Copy as plain text</button>`
         }
       }
@@ -10085,33 +10538,66 @@
       }
 
       function _copyExportLinks(btn) {
-        const items = getActiveExportItems()
-        const htmlStr = items
-          .map((item) => {
-            const url = buildItemUrl(item.kind, item.id)
-            const idToken = _itemIdToken(item)
-            return url
-              ? `<a href="${esc(url)}">${esc(idToken)}</a> → ${esc(item.title)}`
-              : `${esc(idToken)} → ${esc(item.title)}`
-          })
-          .join("<br>")
+        const items = getExportItemsForCurrentView()
+        const rowHtml = (item) => {
+          const url = buildItemUrl(item.kind, item.id)
+          const idToken = _itemIdToken(item)
+          const label = url
+            ? `<a href="${esc(url)}">${esc(idToken)}</a> → ${esc(item.title)}`
+            : `${esc(idToken)} → ${esc(item.title)}`
+          const relation = _exportView === "grouped" ? _exportRelationText(item) : ""
+          return relation ? label + " <span style=\"color:#64738b\">(" + esc(relation) + ")</span>" : label
+        }
+        let htmlStr
+        if (_exportView === "grouped") {
+          htmlStr = ["article", "dialog", "tdialog"]
+            .map((kind) => {
+              const groupItems = items.filter((item) => item.kind === kind)
+              if (!groupItems.length) return ""
+              return (
+                "<strong>" +
+                esc(exportGroupLabel(kind)) +
+                "</strong><br>" +
+                groupItems.map(rowHtml).join("<br>")
+              )
+            })
+            .filter(Boolean)
+            .join("<br><br>")
+        } else {
+          htmlStr = items.map(rowHtml).join("<br>")
+        }
         copyRichHtml(htmlStr)
         _setBtnCopied(btn, "Copied!")
         _showCopyFeedback("✓ " + items.length + " links copied")
       }
 
       function _copyExportPlain(btn) {
-        const items = getActiveExportItems()
-        const text = items
-          .map((item) => {
-            const idToken = _itemIdToken(item)
-            const url = buildItemUrl(item.kind, item.id)
-            const parts = [idToken, item.title]
-            if (item.responses.length) parts.push(item.responses.join(" | "))
-            if (url) parts.push(url)
-            return parts.join("\t")
-          })
-          .join("\n")
+        const items = getExportItemsForCurrentView()
+        const rowText = (item) => {
+          const idToken = _itemIdToken(item)
+          const url = buildItemUrl(item.kind, item.id)
+          const parts = [idToken, item.title]
+          const relation = _exportView === "grouped" ? _exportRelationText(item) : ""
+          if (relation) parts.push(relation)
+          if (item.responses.length) parts.push(item.responses.join(" | "))
+          if (url) parts.push(url)
+          return parts.join("\t")
+        }
+        let text
+        if (_exportView === "grouped") {
+          text = ["article", "dialog", "tdialog"]
+            .map((kind) => {
+              const groupItems = items.filter((item) => item.kind === kind)
+              if (!groupItems.length) return ""
+              return (
+                exportGroupLabel(kind) + "\n" + groupItems.map(rowText).join("\n")
+              )
+            })
+            .filter(Boolean)
+            .join("\n\n")
+        } else {
+          text = items.map(rowText).join("\n")
+        }
         navigator.clipboard.writeText(text).catch(() => {
           const ta = document.createElement("textarea")
           ta.value = text
@@ -10126,7 +10612,7 @@
       }
 
       function _copyExportTable(btn) {
-        const items = getActiveExportItems()
+        const items = getExportItemsForCurrentView()
         const header = ["ID", "Title / Question", "Matched Response(s)"]
         const rows = items.map((item) => {
           const idToken = _itemIdToken(item)
@@ -10191,7 +10677,8 @@
           (gQuery ? ' · "' + gQuery + '"' : "")
 
         if (_exportView === "list") _renderExportList(items)
-        else _renderExportTable(items)
+        else if (_exportView === "table") _renderExportTable(items)
+        else _renderExportGrouped(items)
         _renderExportFooter()
 
         document.getElementById("copy-feedback").textContent = ""
@@ -10212,7 +10699,8 @@
           _exportView = btn.dataset.exportView
           const items = getActiveExportItems()
           if (_exportView === "list") _renderExportList(items)
-          else _renderExportTable(items)
+          else if (_exportView === "table") _renderExportTable(items)
+          else _renderExportGrouped(items)
           _renderExportFooter()
         })
       })
