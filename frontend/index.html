@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; frame-src https:;"
+      content="default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; frame-src https:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CM.com — Conversational AI Cloud Dashboard</title>
@@ -4645,9 +4645,17 @@
               class="sopt"
               id="opt-content"
               title="Responses only"
-              data-tooltip="Responses only — ignore IDs, titles &amp; entities"
+              data-tooltip="Responses only - ignore IDs, titles &amp; entities"
             >
               &#xAC;T
+            </button>
+            <button
+              class="sopt"
+              id="opt-nondefault"
+              title="Exclude non-default content"
+              data-tooltip="Exclude non-default responses from search"
+            >
+              ND
             </button>
             <div class="sopt-sep"></div>
             <button
@@ -6441,6 +6449,7 @@
           importInteractionsCsv: (filePath, maxAgeDays) =>
             invoke("import_interactions_csv", { filePath, maxAgeDays }),
           getSessions: (args) => invoke("get_sessions", { args }),
+          cancelSessionSearch: () => invoke("cancel_session_search"),
           getSessionInteractions: (sessionUuid) =>
             invoke("get_session_interactions", { sessionUuid }),
           getDateRange: () => invoke("get_date_range"),
@@ -6513,6 +6522,8 @@
       if (!window.electronAPI.getSessions)
         window.electronAPI.getSessions = () =>
           Promise.resolve({ sessions: [], total: 0, page: 1 })
+      if (!window.electronAPI.cancelSessionSearch)
+        window.electronAPI.cancelSessionSearch = _convStub
       if (!window.electronAPI.getSessionInteractions)
         window.electronAPI.getSessionInteractions = () => Promise.resolve([])
       if (!window.electronAPI.getContextOptions)
@@ -6551,6 +6562,7 @@
       let searchWord = false
       let searchRegex = false
       let searchContent = false
+      let searchExcludeNonDefault = false
       let allFilterPill = "all"
       let aFilter = "all"
       let dFilter = "all"
@@ -7318,7 +7330,7 @@
           if (ans.isUnreachable || pills) {
             html += '<div class="ctx-answer-meta">'
             if (ans.isUnreachable)
-              html += '<span class="ctx-unreachable-badge">Unreachable</span>'
+              html += '<span class="ctx-unreachable-badge">Non-default</span>'
             html += pills + "</div>"
           }
           html += hlVar(hl(ans.displayText, q))
@@ -8179,6 +8191,7 @@
           autoOpenCtx || _nodeHasCtxFilter
             ? contextualAnsData.filter(
                 (ans) =>
+                  !searchExcludeNonDefault &&
                   (!autoOpenCtx ||
                     _anyTermMatches(_nodeTermRes, ans.displayText) ||
                     _anyTermMatches(
@@ -8442,8 +8455,11 @@
         const ansItems = ((n.output && n.output.items) || []).filter(
           (i) => i.type === "Answer",
         )
+        const defaultAnsItem =
+          ansItems.find((i) => i.isDefault) || ansItems[0] || null
         if (
           ansItems.some((i) => {
+            if (searchExcludeNonDefault && i !== defaultAnsItem) return false
             const t = stripDisplay(
               (i.data && i.data.text) || "",
               (i.data && i.data.hyperlinks) || [],
@@ -9199,6 +9215,7 @@
             filterActive || hasCtxFilter
               ? contextualOutputs.filter(
                   (o) =>
+                    !searchExcludeNonDefault &&
                     (!filterActive ||
                       _anyTermMatches(termRes, o.displayText) ||
                       _anyTermMatches(
@@ -9499,6 +9516,7 @@
           searchWord,
           searchRegex,
           searchContent,
+          searchExcludeNonDefault,
           allFilterPill,
           aFilter,
           dFilter,
@@ -9682,6 +9700,15 @@
           .classList.toggle("on", searchContent)
         triggerSearch()
       })
+      document
+        .getElementById("opt-nondefault")
+        .addEventListener("click", () => {
+          searchExcludeNonDefault = !searchExcludeNonDefault
+          document
+            .getElementById("opt-nondefault")
+            .classList.toggle("on", searchExcludeNonDefault)
+          triggerSearch()
+        })
 
       // ── Tabs ────────────────────────────────────────────────────────
       document.querySelectorAll(".tab").forEach((btn) => {
@@ -13426,6 +13453,7 @@
         .addEventListener("click", () => {
           // Bump seq so the in-flight getSessions result is discarded on arrival
           convSearchSeq++
+          window.electronAPI.cancelSessionSearch().catch(() => {})
           document
             .getElementById("convSearchSubmit")
             .classList.remove("loading")

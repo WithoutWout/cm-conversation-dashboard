@@ -108,6 +108,7 @@ impl Default for DbState {
 }
 
 type SharedDbState = Arc<Mutex<DbState>>;
+type SharedSearchInterrupt = Arc<Mutex<Option<Arc<rusqlite::InterruptHandle>>>>;
 
 // ── Flagged DB state ─────────────────────────────────────────────────────────
 
@@ -224,6 +225,8 @@ struct SessionsPage {
     sessions: Vec<SessionSummary>,
     total: i64,
     page: i64,
+    timing_ms: i64,
+    search_mode: String,
 }
 
 #[derive(Serialize)]
@@ -910,6 +913,7 @@ CREATE INDEX IF NOT EXISTS idx_session_uuid  ON interactions(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_timestamp     ON interactions(timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_type          ON interactions(main_interaction_type);
 CREATE INDEX IF NOT EXISTS idx_session_ts    ON interactions(session_uuid, timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_session_log   ON interactions(session_uuid, log_id);
 CREATE INDEX IF NOT EXISTS idx_feedback      ON interactions(feedback_info) WHERE feedback_info IS NOT NULL AND feedback_info != '';
 CREATE INDEX IF NOT EXISTS idx_recog_quality ON interactions(recognition_quality) WHERE recognition_quality > 0;
 CREATE TABLE IF NOT EXISTS context_index (
@@ -919,6 +923,31 @@ CREATE TABLE IF NOT EXISTS context_index (
     PRIMARY KEY (name, value, session_uuid)
 );
 CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_index(session_uuid);
+CREATE INDEX IF NOT EXISTS idx_ctx_name_session ON context_index(name, session_uuid);
+CREATE TABLE IF NOT EXISTS session_summary (
+    session_uuid                     TEXT PRIMARY KEY,
+    first_ts                         TEXT NOT NULL,
+    last_ts                          TEXT NOT NULL,
+    interaction_count                INTEGER NOT NULL DEFAULT 0,
+    culture                          TEXT NOT NULL DEFAULT '',
+    first_user_message               TEXT NOT NULL DEFAULT '',
+    contexts_snapshot                TEXT NOT NULL DEFAULT '',
+    has_real_user_input              INTEGER NOT NULL DEFAULT 0,
+    has_gen_ai                       INTEGER NOT NULL DEFAULT 0,
+    has_neg_feedback                 INTEGER NOT NULL DEFAULT 0,
+    has_pos_feedback                 INTEGER NOT NULL DEFAULT 0,
+    min_positive_recognition_quality REAL NOT NULL DEFAULT 0,
+    has_zero_recog                   INTEGER NOT NULL DEFAULT 0,
+    updated_at                       INTEGER NOT NULL DEFAULT 0,
+    last_log_id                      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_summary_first_ts ON session_summary(first_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_real_first ON session_summary(has_real_user_input, first_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_genai_first ON session_summary(has_gen_ai, first_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_neg_first ON session_summary(has_neg_feedback, first_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_pos_first ON session_summary(has_pos_feedback, first_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_zero_first ON session_summary(has_zero_recog, first_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_summary_recog_first ON session_summary(min_positive_recognition_quality, first_ts DESC);
 "#;
 
 // ── Flagged DB schema ────────────────────────────────────────────────────────
@@ -1030,6 +1059,149 @@ CREATE VIRTUAL TABLE IF NOT EXISTS interactions_fts USING fts5(
 );
 "#;
 
+fn rebuild_session_summary(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+DELETE FROM session_summary;
+INSERT INTO session_summary (
+    session_uuid,
+    first_ts,
+    last_ts,
+    interaction_count,
+    culture,
+    first_user_message,
+    contexts_snapshot,
+    has_real_user_input,
+    has_gen_ai,
+    has_neg_feedback,
+    has_pos_feedback,
+    min_positive_recognition_quality,
+    has_zero_recog,
+    updated_at,
+    last_log_id
+)
+SELECT
+    s.session_uuid,
+    MIN(s.timestamp_start) AS first_ts,
+    MAX(COALESCE(NULLIF(s.timestamp_end, ''), s.timestamp_start)) AS last_ts,
+    COUNT(*) AS interaction_count,
+    COALESCE(MIN(NULLIF(s.culture, '')), '') AS culture,
+    COALESCE((
+        SELECT i2.interaction_value
+        FROM interactions i2
+        WHERE i2.session_uuid = s.session_uuid
+          AND i2.interaction_value != ''
+          AND i2.interaction_value NOT LIKE '#%#'
+          AND LOWER(i2.interaction_value) != 'continue'
+          AND COALESCE(i2.main_interaction_type, '') NOT IN ('Event', 'LinkClick')
+        ORDER BY i2.log_id ASC
+        LIMIT 1
+    ), '') AS first_user_message,
+    COALESCE((
+        SELECT i3.contexts
+        FROM interactions i3
+        WHERE i3.session_uuid = s.session_uuid
+          AND i3.contexts IS NOT NULL
+          AND i3.contexts != ''
+          AND i3.contexts != '[]'
+          AND i3.contexts != 'null'
+        ORDER BY i3.log_id DESC
+        LIMIT 1
+    ), '') AS contexts_snapshot,
+    MAX(CASE
+        WHEN s.interaction_value != ''
+         AND s.interaction_value NOT LIKE '#%#'
+         AND LOWER(s.interaction_value) != 'continue'
+         AND COALESCE(s.main_interaction_type, '') NOT IN ('Event', 'LinkClick')
+        THEN 1 ELSE 0 END) AS has_real_user_input,
+    MAX(CASE
+        WHEN s.main_interaction_type = 'GenerativeAI'
+          OR s.all_interaction_types LIKE '%GenerativeAI%'
+        THEN 1 ELSE 0 END) AS has_gen_ai,
+    MAX(CASE
+        WHEN s.feedback_info LIKE '%"score": -1%'
+          OR s.feedback_info LIKE '%"score":-1%'
+        THEN 1 ELSE 0 END) AS has_neg_feedback,
+    MAX(CASE
+        WHEN (s.feedback_info LIKE '%"score": 1%'
+           OR s.feedback_info LIKE '%"score":1%')
+          AND s.feedback_info NOT LIKE '%"score": -1%'
+          AND s.feedback_info NOT LIKE '%"score":-1%'
+        THEN 1 ELSE 0 END) AS has_pos_feedback,
+    COALESCE(MIN(CASE
+        WHEN s.recognition_quality > 0
+         AND COALESCE(s.main_interaction_type, '') != 'GenerativeAI'
+         AND COALESCE(s.recognition_type, '') != 'GenerativeAI'
+        THEN s.recognition_quality END), 0) AS min_positive_recognition_quality,
+    MAX(CASE
+        WHEN s.recognition_quality = 0
+         AND s.recognition_type IS NOT NULL
+         AND s.recognition_type != ''
+         AND s.recognition_type != 'GenerativeAI'
+         AND COALESCE(s.main_interaction_type, '') != 'GenerativeAI'
+        THEN 1 ELSE 0 END) AS has_zero_recog,
+    CAST(strftime('%s', 'now') AS INTEGER) AS updated_at,
+    MAX(s.log_id) AS last_log_id
+FROM interactions s
+WHERE s.session_uuid IS NOT NULL AND s.session_uuid != ''
+GROUP BY s.session_uuid;
+"#,
+    )
+    .map_err(|e| format!("Session summary rebuild error: {e}"))
+}
+
+fn ensure_session_summary(conn: &Connection) -> Result<(), String> {
+    let interaction_sessions: i64 = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT session_uuid) FROM interactions WHERE session_uuid IS NOT NULL AND session_uuid != ''",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let summary_sessions: i64 = conn
+        .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+        .unwrap_or(0);
+    let max_interaction_log: i64 = conn
+        .query_row("SELECT COALESCE(MAX(log_id), 0) FROM interactions", [], |r| r.get(0))
+        .unwrap_or(0);
+    let max_summary_log: i64 = conn
+        .query_row("SELECT COALESCE(MAX(last_log_id), 0) FROM session_summary", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    if interaction_sessions != summary_sessions || max_interaction_log != max_summary_log {
+        rebuild_session_summary(conn)?;
+    }
+    Ok(())
+}
+
+fn cleanup_orphan_contexts(conn: &Connection) {
+    let _ = conn.execute_batch(
+        "DELETE FROM context_index \
+         WHERE session_uuid NOT IN (SELECT DISTINCT session_uuid FROM interactions)",
+    );
+}
+
+fn repair_fts_index(conn: &Connection) {
+    if conn.execute_batch(FTS_SCHEMA).is_err() {
+        return;
+    }
+    let interaction_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
+        .unwrap_or(0);
+    let fts_row_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM interactions_fts", [], |r| r.get(0))
+        .unwrap_or(-1);
+    if interaction_count != fts_row_count {
+        let _ = conn.execute_batch(
+            "DELETE FROM interactions_fts; \
+             INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
+             SELECT log_id, COALESCE(interaction_value,''), COALESCE(output_text,''), \
+                    COALESCE(article_ids,''), COALESCE(dialog_paths,'') \
+             FROM interactions",
+        );
+    }
+}
+
 fn open_db(path: &str) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Cannot open DB: {e}"))?;
     // PRAGMA journal_mode returns a result row, so it must be run via query_row.
@@ -1063,29 +1235,9 @@ fn open_db(path: &str) -> Result<Connection, String> {
         ).ok();
     }
 
-    // Optional: FTS5 virtual table — failure here must never prevent the DB from opening.
-    if conn.execute_batch(FTS_SCHEMA).is_ok() {
-        // Populate FTS5 index if it has no rows yet (first open after upgrade, or fresh DB).
-        // We count rows in the FTS table itself, not in sqlite_master, because the shadow
-        // tables are always created together with the virtual table — checking sqlite_master
-        // would always return 1 and the bulk-insert would never run.
-        let fts_row_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM interactions_fts",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-        if fts_row_count == 0 {
-            conn.execute_batch(
-                "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
-                 SELECT log_id, COALESCE(interaction_value,''), COALESCE(output_text,''), \
-                        COALESCE(article_ids,''), COALESCE(dialog_paths,'') \
-                 FROM interactions",
-            )
-            .ok();
-        }
-    }
+    // Optional FTS5 and materialized summaries are repairable caches.
+    repair_fts_index(&conn);
+    ensure_session_summary(&conn)?;
     Ok(conn)
 }
 
@@ -1152,11 +1304,16 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
          (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
         params![cutoff_dt],
     );
-    conn.execute(
+    let deleted = conn.execute(
         "DELETE FROM interactions WHERE timestamp_start < ?1",
         params![cutoff_dt],
     )
-    .unwrap_or(0) as i64
+    .unwrap_or(0) as i64;
+    if deleted > 0 {
+        cleanup_orphan_contexts(conn);
+        let _ = rebuild_session_summary(conn);
+    }
+    deleted
 }
 
 // ── Conversation Tauri commands ───────────────────────────────────────────────
@@ -1164,14 +1321,19 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
 #[tauri::command]
 async fn set_db_path(
     db_state: State<'_, SharedDbState>,
+    search_interrupt: State<'_, SharedSearchInterrupt>,
     path: String,
 ) -> Result<(), String> {
     let db = db_state.inner().clone();
+    let interrupt_state = search_interrupt.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = open_db(&path)?;
+        let interrupt_handle = Arc::new(conn.get_interrupt_handle());
         let mut state = db.lock().map_err(|e| e.to_string())?;
         state.conn = Some(conn);
         state.path = Some(path);
+        let mut ih = interrupt_state.lock().map_err(|e| e.to_string())?;
+        *ih = Some(interrupt_handle);
         Ok(())
     })
     .await
@@ -1181,6 +1343,14 @@ async fn set_db_path(
 #[tauri::command]
 fn get_db_path(db_state: State<SharedDbState>) -> Option<String> {
     db_state.lock().ok().and_then(|s| s.path.clone())
+}
+
+#[tauri::command]
+fn cancel_session_search(search_interrupt: State<SharedSearchInterrupt>) -> Result<(), String> {
+    if let Some(handle) = search_interrupt.lock().map_err(|e| e.to_string())?.as_ref() {
+        handle.interrupt();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1475,6 +1645,10 @@ async fn import_interactions_csv(
     }
 
     let purged = purge_old(conn, max_age_days.unwrap_or(90).max(1) as u64);
+    if inserted > 0 || purged > 0 {
+        cleanup_orphan_contexts(conn);
+        rebuild_session_summary(conn)?;
+    }
 
     Ok(ImportResult { inserted, skipped, purged, errors })
     })
@@ -1535,452 +1709,440 @@ async fn get_sessions(
 ) -> Result<SessionsPage, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-    let state = db.lock().map_err(|e| e.to_string())?;
-    let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let started = Instant::now();
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
 
-    let page = args.page.unwrap_or(1).max(1);
-    let limit = 50i64;
-    let offset = (page - 1) * limit;
+        let page = args.page.unwrap_or(1).max(1);
+        let limit = 50i64;
+        let offset = (page - 1) * limit;
 
-    let filter = args.filter.as_deref().unwrap_or("all");
-    let query = args.query.as_deref().unwrap_or("").trim().to_string();
-    let query_regex = args.query_regex.unwrap_or(false);
-    let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
-    let query_ids = args.query_ids.unwrap_or(false);
-    let query_ids_only = args.query_ids_only.unwrap_or(false);
-    let query_id_type = args.query_id_type.as_deref().unwrap_or("article").to_string();
-    let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
+        let filter = args.filter.as_deref().unwrap_or("all");
+        let query = args.query.as_deref().unwrap_or("").trim().to_string();
+        let query_regex = args.query_regex.unwrap_or(false);
+        let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
+        let query_ids = args.query_ids.unwrap_or(false);
+        let query_ids_only = args.query_ids_only.unwrap_or(false);
+        let query_id_type = args.query_id_type.as_deref().unwrap_or("article").to_string();
+        let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
 
-    // Register a custom REGEXP function for this connection when regex mode is on
-    if query_regex && !query.is_empty() {
-        use regex::Regex;
-        use std::sync::Arc;
-        let compiled = Arc::new(
-            Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?
-        );
-        conn.create_scalar_function(
-            "regexp",
-            2,
-            rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-            move |ctx: &rusqlite::functions::Context<'_>| {
-                let text: String = ctx.get(1).unwrap_or_default();
-                Ok(compiled.is_match(&text) as i32)
-            },
-        ).ok();
-    }
-
-    // Collect parameterized values alongside conditions
-    let mut conditions: Vec<String> = Vec::new();
-    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut param_idx = 0usize;
-
-    // Helper to get next parameter placeholder
-    let next_param = |idx: &mut usize| -> String {
-        *idx += 1;
-        format!("?{}", *idx)
-    };
-
-    // Always exclude sessions that have no real user input
-    conditions.push(
-        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
-         WHERE interaction_value != '' \
-           AND interaction_value NOT LIKE '#%#' \
-           AND LOWER(interaction_value) != 'continue' \
-           AND main_interaction_type NOT IN ('Event', 'LinkClick'))".to_string(),
-    );
-    if filter == "genai" {
-        conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE main_interaction_type = 'GenerativeAI' OR all_interaction_types LIKE '%GenerativeAI%')".to_string(),
-        );
-    } else if filter == "neg_feedback" {
-        conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE feedback_info LIKE '%\"score\": -1%' OR feedback_info LIKE '%\"score\":-1%')".to_string(),
-        );
-    } else if filter == "pos_feedback" {
-        conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE (feedback_info LIKE '%\"score\": 1%' OR feedback_info LIKE '%\"score\":1%') AND feedback_info NOT LIKE '%\"score\": -1%' AND feedback_info NOT LIKE '%\"score\":-1%')".to_string(),
-        );
-    } else if filter == "low_recog" {
-        conditions.push(
-            format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality > 0 AND recognition_quality < {low_recog_threshold} AND main_interaction_type != 'GenerativeAI' AND (recognition_type IS NULL OR recognition_type != 'GenerativeAI'))")
-        );
-    } else if filter == "zero_recog" {
-        conditions.push(
-            "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE recognition_quality = 0 AND recognition_type IS NOT NULL AND recognition_type != '' AND recognition_type != 'GenerativeAI' AND main_interaction_type != 'GenerativeAI')".to_string(),
-        );
-    }
-    if let Some(ref df) = args.date_from {
-        if !df.is_empty() {
-            let p = next_param(&mut param_idx);
-            conditions.push(format!("timestamp_start >= {p}"));
-            param_values.push(Box::new(df.clone()));
-        }
-    }
-    if let Some(ref dt) = args.date_to {
-        if !dt.is_empty() {
-            let p = next_param(&mut param_idx);
-            conditions.push(format!("timestamp_start <= {p}"));
-            param_values.push(Box::new(dt.clone()));
-        }
-    }
-    if !query.is_empty() {
-        if query_ids_only {
-            // ID-type mode: search using the type-specific pattern
-            let cond = match query_id_type.as_str() {
-                "dialog" => {
-                    // Dialog ID appears as `"<id>:` in the dialog_paths JSON value.
-                    // Pattern: dialog_paths LIKE '%"<id>:%'
-                    let like_val = format!("%\"{}:%", query.replace('%', "\\%").replace('_', "\\_"));
-                    let p = next_param(&mut param_idx);
-                    param_values.push(Box::new(like_val));
-                    format!(
-                        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
-                         WHERE dialog_paths LIKE {p} ESCAPE '\\')"
-                    )
-                }
-                "node" => {
-                    // Node IDs are NOT globally unique — the same node.id can appear in
-                    // multiple dialogs. The interaction log uses the composite format
-                    // `dn-{dialogId}-{nodeId}` in article_ids (e.g. `dn-6391-6`).
-                    // The query is expected to be the composite "{dialogId}-{nodeId}" string
-                    // so we can search for the exact dn-{dialogId}-{nodeId} token.
-                    let escaped = query.replace('%', "\\%").replace('_', "\\_");
-                    let like_val = format!("%dn-{}%", escaped);
-                    let p = next_param(&mut param_idx);
-                    param_values.push(Box::new(like_val));
-                    format!(
-                        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
-                         WHERE article_ids LIKE {p} ESCAPE '\\')"
-                    )
-                }
-                _ => {
-                    // "article" (default): article ID stored as `qa-<id>` in article_ids.
-                    let like_val = format!("%qa-{}%", query.replace('%', "\\%").replace('_', "\\_"));
-                    let p = next_param(&mut param_idx);
-                    param_values.push(Box::new(like_val));
-                    format!(
-                        "session_uuid IN (SELECT DISTINCT session_uuid FROM interactions \
-                         WHERE article_ids LIKE {p} ESCAPE '\\')"
-                    )
-                }
-            };
-            conditions.push(cond);
-        } else if query_regex {
-            // Regex mode: use the registered REGEXP function
-            let p = next_param(&mut param_idx);
-            let text_cond = match query_scope.as_str() {
-                "user" => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p}, interaction_value))"),
-                "bot"  => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p}, output_text))"),
-                _      => format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p}, interaction_value) OR regexp({p}, output_text))"),
-            };
-            param_values.push(Box::new(query.clone()));
-            let cond = if query_ids {
-                let p2 = next_param(&mut param_idx);
-                param_values.push(Box::new(query.clone()));
-                let ids_subq = format!("session_uuid IN (SELECT DISTINCT session_uuid FROM interactions WHERE regexp({p2}, article_ids) OR regexp({p2}, dialog_paths))");
-                format!("({text_cond} OR {ids_subq})")
-            } else {
-                text_cond
-            };
-            conditions.push(cond);
-        } else {
-            // Tokenize a query segment into terms, respecting "quoted phrases" as single tokens.
-            // `"de Efteling" attractie` → ["de Efteling", "attractie"]
-            fn tokenize_segment(s: &str) -> Vec<String> {
-                let mut tokens = Vec::new();
-                let mut chars = s.chars().peekable();
-                while let Some(&c) = chars.peek() {
-                    if c.is_whitespace() {
-                        chars.next();
-                    } else if c == '"' {
-                        chars.next(); // consume opening quote
-                        let phrase: String = chars.by_ref().take_while(|&ch| ch != '"').collect();
-                        if !phrase.is_empty() {
-                            tokens.push(phrase);
-                        }
-                    } else {
-                        let word: String = chars.by_ref().take_while(|&ch| !ch.is_whitespace() && ch != '"').collect();
-                        if !word.is_empty() {
-                            tokens.push(word);
-                        }
+        fn tokenize_segment(s: &str) -> Vec<String> {
+            let mut tokens = Vec::new();
+            let mut chars = s.chars().peekable();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() {
+                    chars.next();
+                } else if c == '"' {
+                    chars.next();
+                    let phrase: String = chars.by_ref().take_while(|&ch| ch != '"').collect();
+                    if !phrase.is_empty() {
+                        tokens.push(phrase);
+                    }
+                } else {
+                    let word: String = chars
+                        .by_ref()
+                        .take_while(|&ch| !ch.is_whitespace() && ch != '"')
+                        .collect();
+                    if !word.is_empty() {
+                        tokens.push(word);
                     }
                 }
-                tokens
             }
+            tokens
+        }
 
-            // Plain text mode: try FTS5 full-text search; fall back to LIKE if unavailable.
-            let fts_available: bool = conn
-                .query_row(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
-                    [],
-                    |_| Ok(true),
+        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut param_idx = 0usize;
+        let next_param = |idx: &mut usize| -> String {
+            *idx += 1;
+            format!("?{}", *idx)
+        };
+
+        let mut base_conditions = vec!["s.has_real_user_input = 1".to_string()];
+        match filter {
+            "genai" => base_conditions.push("s.has_gen_ai = 1".to_string()),
+            "neg_feedback" => base_conditions.push("s.has_neg_feedback = 1".to_string()),
+            "pos_feedback" => base_conditions.push("s.has_pos_feedback = 1".to_string()),
+            "low_recog" => {
+                base_conditions.push(format!(
+                    "s.min_positive_recognition_quality > 0 AND s.min_positive_recognition_quality < {low_recog_threshold}"
+                ));
+            }
+            "zero_recog" => base_conditions.push("s.has_zero_recog = 1".to_string()),
+            _ => {}
+        }
+
+        if let Some(ref df) = args.date_from {
+            if !df.is_empty() {
+                let p = next_param(&mut param_idx);
+                base_conditions.push(format!("s.last_ts >= {p}"));
+                param_values.push(Box::new(df.clone()));
+            }
+        }
+        if let Some(ref dt) = args.date_to {
+            if !dt.is_empty() {
+                let p = next_param(&mut param_idx);
+                base_conditions.push(format!("s.first_ts <= {p}"));
+                param_values.push(Box::new(dt.clone()));
+            }
+        }
+
+        if let Some(ref ctx_filters) = args.context_filters {
+            if !ctx_filters.is_empty() {
+                let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+                for f in ctx_filters {
+                    groups.entry(f.name.clone()).or_default().push(f.value.clone());
+                }
+                for (name, values) in groups {
+                    let has_not_set = values.iter().any(|v| v == "__not_set__");
+                    let regular_values: Vec<String> = values
+                        .into_iter()
+                        .filter(|v| v != "__not_set__")
+                        .collect();
+                    let mut subclauses = Vec::new();
+                    if has_not_set {
+                        let pn = next_param(&mut param_idx);
+                        param_values.push(Box::new(name.clone()));
+                        subclauses.push(format!(
+                            "NOT EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn})"
+                        ));
+                    }
+                    if !regular_values.is_empty() {
+                        let pn = next_param(&mut param_idx);
+                        param_values.push(Box::new(name.clone()));
+                        let value_placeholders = regular_values
+                            .iter()
+                            .map(|v| {
+                                let pv = next_param(&mut param_idx);
+                                param_values.push(Box::new(v.clone()));
+                                pv
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        subclauses.push(format!(
+                            "EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn} AND ci.value IN ({value_placeholders}))"
+                        ));
+                    }
+                    if subclauses.len() == 1 {
+                        base_conditions.push(subclauses.remove(0));
+                    } else if !subclauses.is_empty() {
+                        base_conditions.push(format!("({})", subclauses.join(" OR ")));
+                    }
+                }
+            }
+        }
+
+        let base_where = format!("WHERE {}", base_conditions.join(" AND "));
+        let mut search_mode = "none".to_string();
+        let mut search_cte = String::new();
+        let mut filtered_from = "SELECT b.* FROM base_sessions b".to_string();
+
+        if !query.is_empty() {
+            if query_ids_only {
+                search_mode = "id".to_string();
+                let (column, like_val) = match query_id_type.as_str() {
+                    "dialog" => (
+                        "i.dialog_paths",
+                        format!("%\"{}:%", query.replace('%', "\\%").replace('_', "\\_")),
+                    ),
+                    "node" => (
+                        "i.article_ids",
+                        format!("%dn-{}%", query.replace('%', "\\%").replace('_', "\\_")),
+                    ),
+                    _ => (
+                        "i.article_ids",
+                        format!("%qa-{}%", query.replace('%', "\\%").replace('_', "\\_")),
+                    ),
+                };
+                let p = next_param(&mut param_idx);
+                param_values.push(Box::new(like_val));
+                search_cte = format!(
+                    ", search_sessions AS (\
+                        SELECT DISTINCT i.session_uuid \
+                        FROM interactions i \
+                        JOIN base_sessions b ON b.session_uuid = i.session_uuid \
+                        WHERE {column} LIKE {p} ESCAPE '\\'\
+                    )"
+                );
+                filtered_from =
+                    "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+            } else if query_regex {
+                search_mode = "regex".to_string();
+                use regex::Regex;
+                let compiled = Arc::new(
+                    Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?,
+                );
+                conn.create_scalar_function(
+                    "regexp",
+                    2,
+                    rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                        | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+                    move |ctx: &rusqlite::functions::Context<'_>| {
+                        let text: String = ctx.get(1).unwrap_or_default();
+                        Ok(compiled.is_match(&text) as i32)
+                    },
                 )
-                .unwrap_or(false);
+                .ok();
 
-            if fts_available {
-                // Parse OR groups: split by '|', each group's tokens become FTS5 AND terms.
-                // Quoted phrases ("de Efteling") are kept as single FTS5 PHRASE tokens.
+                let p = next_param(&mut param_idx);
+                param_values.push(Box::new(query.clone()));
+                let text_cond = match query_scope.as_str() {
+                    "user" => format!("regexp({p}, i.interaction_value)"),
+                    "bot" => format!("regexp({p}, i.output_text)"),
+                    _ => format!("(regexp({p}, i.interaction_value) OR regexp({p}, i.output_text))"),
+                };
+                let final_cond = if query_ids {
+                    let p2 = next_param(&mut param_idx);
+                    param_values.push(Box::new(query.clone()));
+                    format!(
+                        "({text_cond} OR regexp({p2}, i.article_ids) OR regexp({p2}, i.dialog_paths))"
+                    )
+                } else {
+                    text_cond
+                };
+                search_cte = format!(
+                    ", search_sessions AS (\
+                        SELECT DISTINCT i.session_uuid \
+                        FROM interactions i \
+                        JOIN base_sessions b ON b.session_uuid = i.session_uuid \
+                        WHERE {final_cond}\
+                    )"
+                );
+                filtered_from =
+                    "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+            } else {
+                let fts_available = conn
+                    .query_row(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
+                        [],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
                 let or_groups: Vec<Vec<String>> = query
                     .split('|')
-                    .map(|g| {
-                        tokenize_segment(g.trim())
-                            .into_iter()
-                            .filter_map(|t| {
-                                // If the token contains spaces it's a quoted phrase → use FTS5 phrase syntax: "word1 word2"
-                                if t.contains(' ') {
-                                    let phrase_terms: Vec<String> = t.split_whitespace()
-                                        .map(|w| {
-                                            w.chars()
-                                                .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
-                                                .collect::<String>()
-                                        })
-                                        .filter(|w| !w.is_empty())
-                                        .collect();
-                                    if phrase_terms.is_empty() { None } else { Some(format!("\"{}\"", phrase_terms.join(" "))) }
+                    .map(|g| tokenize_segment(g.trim()))
+                    .filter(|g| !g.is_empty())
+                    .collect();
+
+                if fts_available {
+                    let fts_groups = or_groups
+                        .iter()
+                        .map(|group| {
+                            group
+                                .iter()
+                                .filter_map(|t| {
+                                    if t.contains(' ') {
+                                        let phrase_terms = t
+                                            .split_whitespace()
+                                            .map(|w| {
+                                                w.chars()
+                                                    .filter(|c| {
+                                                        c.is_alphanumeric()
+                                                            || matches!(*c, '-' | '_' | '.')
+                                                    })
+                                                    .collect::<String>()
+                                            })
+                                            .filter(|w| !w.is_empty())
+                                            .collect::<Vec<_>>();
+                                        if phrase_terms.is_empty() {
+                                            None
+                                        } else {
+                                            Some(format!("\"{}\"", phrase_terms.join(" ")))
+                                        }
+                                    } else {
+                                        let clean = t
+                                            .chars()
+                                            .filter(|c| {
+                                                c.is_alphanumeric()
+                                                    || matches!(*c, '-' | '_' | '.')
+                                            })
+                                            .collect::<String>();
+                                        if clean.is_empty() {
+                                            None
+                                        } else {
+                                            Some(format!("{clean}*"))
+                                        }
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .filter(|g| !g.is_empty())
+                        .collect::<Vec<_>>();
+
+                    if !fts_groups.is_empty() {
+                        search_mode = "fts".to_string();
+                        let fts_query = fts_groups
+                            .iter()
+                            .map(|terms| {
+                                if terms.len() == 1 {
+                                    terms[0].clone()
                                 } else {
-                                    let clean: String = t
-                                        .chars()
-                                        .filter(|c| c.is_alphanumeric() || matches!(*c, '-' | '_' | '.'))
-                                        .collect();
-                                    if clean.is_empty() { None } else { Some(format!("{}*", clean)) }
+                                    format!("({})", terms.join(" "))
                                 }
                             })
                             .collect::<Vec<_>>()
-                    })
-                    .filter(|g| !g.is_empty())
-                    .collect();
-
-                if !or_groups.is_empty() {
-                    let fts_inner = or_groups
-                        .iter()
-                        .map(|terms| {
-                            if terms.len() == 1 {
-                                terms[0].clone()
-                            } else {
-                                format!("({})", terms.join(" "))
+                            .join(" OR ");
+                        let fts_match_expr = match (query_scope.as_str(), query_ids) {
+                            ("user", false) => format!("interaction_value : {fts_query}"),
+                            ("user", true) => {
+                                format!("{{interaction_value article_ids dialog_paths}} : {fts_query}")
                             }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" OR ");
-
-                    let fts_query = fts_inner;
-                    let fts_match_expr = match (query_scope.as_str(), query_ids) {
-                        ("user", false) => format!("interaction_value : {fts_query}"),
-                        ("user", true)  => format!("{{interaction_value article_ids dialog_paths}} : {fts_query}"),
-                        ("bot",  false) => format!("output_text : {fts_query}"),
-                        ("bot",  true)  => format!("{{output_text article_ids dialog_paths}} : {fts_query}"),
-                        (_,      _)     => fts_query,
-                    };
-                    let p = next_param(&mut param_idx);
-                    param_values.push(Box::new(fts_match_expr));
-                    conditions.push(format!(
-                        "session_uuid IN (\
-                            SELECT DISTINCT i.session_uuid FROM interactions i \
-                            WHERE i.log_id IN (SELECT rowid FROM interactions_fts WHERE interactions_fts MATCH {p})\
-                        )"
-                    ));
-                }
-            } else {
-                // FTS5 not available — fall back to LIKE per AND-term, OR between groups.
-                // Quoted phrases are kept as single literal terms for LIKE matching.
-                let or_groups: Vec<Vec<String>> = query
-                    .split('|')
-                    .map(|g| tokenize_segment(g.trim()).into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>())
-                    .filter(|g| !g.is_empty())
-                    .collect();
-
-                if !or_groups.is_empty() {
-                    // Build one subquery per AND-group; join with UNION (= SQL OR on session_uuid).
-                    let or_subqueries: Vec<String> = or_groups
+                            ("bot", false) => format!("output_text : {fts_query}"),
+                            ("bot", true) => {
+                                format!("{{output_text article_ids dialog_paths}} : {fts_query}")
+                            }
+                            (_, _) => fts_query,
+                        };
+                        let p = next_param(&mut param_idx);
+                        param_values.push(Box::new(fts_match_expr));
+                        search_cte = format!(
+                            ", search_sessions AS (\
+                                SELECT DISTINCT i.session_uuid \
+                                FROM interactions_fts \
+                                JOIN interactions i ON i.log_id = interactions_fts.rowid \
+                                JOIN base_sessions b ON b.session_uuid = i.session_uuid \
+                                WHERE interactions_fts MATCH {p}\
+                            )"
+                        );
+                        filtered_from =
+                            "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                    }
+                } else if !or_groups.is_empty() {
+                    search_mode = "like".to_string();
+                    let or_clauses = or_groups
                         .iter()
                         .map(|and_terms| {
-                            // Each AND term becomes a LIKE condition on the scope-selected columns.
-                            let and_clauses: Vec<String> = and_terms
+                            and_terms
                                 .iter()
                                 .map(|term| {
-                                    let like_val = format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
-                                    let text_filters = match query_scope.as_str() {
+                                    let like_val =
+                                        format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
+                                    let text_cond = match query_scope.as_str() {
                                         "user" => {
                                             let p = next_param(&mut param_idx);
                                             param_values.push(Box::new(like_val.clone()));
-                                            format!("interaction_value LIKE {p} ESCAPE '\\'")
+                                            format!("i.interaction_value LIKE {p} ESCAPE '\\'")
                                         }
                                         "bot" => {
                                             let p = next_param(&mut param_idx);
                                             param_values.push(Box::new(like_val.clone()));
-                                            format!("output_text LIKE {p} ESCAPE '\\'")
+                                            format!("i.output_text LIKE {p} ESCAPE '\\'")
                                         }
                                         _ => {
                                             let p1 = next_param(&mut param_idx);
                                             param_values.push(Box::new(like_val.clone()));
                                             let p2 = next_param(&mut param_idx);
                                             param_values.push(Box::new(like_val.clone()));
-                                            format!("(interaction_value LIKE {p1} ESCAPE '\\' OR output_text LIKE {p2} ESCAPE '\\')")
+                                            format!("(i.interaction_value LIKE {p1} ESCAPE '\\' OR i.output_text LIKE {p2} ESCAPE '\\')")
                                         }
                                     };
                                     if query_ids {
                                         let pi1 = next_param(&mut param_idx);
                                         param_values.push(Box::new(like_val.clone()));
                                         let pi2 = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val.clone()));
-                                        format!("({text_filters} OR article_ids LIKE {pi1} ESCAPE '\\' OR dialog_paths LIKE {pi2} ESCAPE '\\')")
+                                        param_values.push(Box::new(like_val));
+                                        format!("({text_cond} OR i.article_ids LIKE {pi1} ESCAPE '\\' OR i.dialog_paths LIKE {pi2} ESCAPE '\\')")
                                     } else {
-                                        text_filters
+                                        text_cond
                                     }
                                 })
-                                .collect();
-                            // All AND terms must match in this group — intersect via nested subquery.
-                            // Simplest: emit as a subquery with multiple WHERE AND conditions.
-                            let where_clause = and_clauses.join(" AND ");
-                            format!("SELECT DISTINCT session_uuid FROM interactions WHERE {where_clause}")
+                                .collect::<Vec<_>>()
+                                .join(" AND ")
                         })
-                        .collect();
-
-                    // UNION of all OR-group subqueries
-                    let union_sql = or_subqueries.join(" UNION ");
-                    conditions.push(format!(
-                        "session_uuid IN ({union_sql})"
-                    ));
+                        .map(|g| format!("({g})"))
+                        .collect::<Vec<_>>()
+                        .join(" OR ");
+                    search_cte = format!(
+                        ", search_sessions AS (\
+                            SELECT DISTINCT i.session_uuid \
+                            FROM interactions i \
+                            JOIN base_sessions b ON b.session_uuid = i.session_uuid \
+                            WHERE {or_clauses}\
+                        )"
+                    );
+                    filtered_from =
+                        "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
                 }
             }
         }
-    }
 
-    // Context filters — group by name, OR values within a group, AND between groups
-    if let Some(ref ctx_filters) = args.context_filters {
-        if !ctx_filters.is_empty() {
-            use std::collections::HashMap;
-            let mut groups: HashMap<String, Vec<String>> = HashMap::new();
-            for f in ctx_filters {
-                groups.entry(f.name.clone()).or_default().push(f.value.clone());
+        let p_limit = next_param(&mut param_idx);
+        param_values.push(Box::new(limit));
+        let p_offset = next_param(&mut param_idx);
+        param_values.push(Box::new(offset));
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            param_values.iter().map(|b| b.as_ref()).collect();
+
+        let sql = format!(
+            r#"WITH
+base_sessions AS (
+    SELECT s.*
+    FROM session_summary s
+    {base_where}
+)
+{search_cte},
+filtered_sessions AS (
+    {filtered_from}
+),
+total AS (
+    SELECT COUNT(*) AS total_count FROM filtered_sessions
+),
+page_rows AS (
+    SELECT *
+    FROM filtered_sessions
+    ORDER BY first_ts DESC
+    LIMIT {p_limit} OFFSET {p_offset}
+)
+SELECT
+    p.session_uuid,
+    p.first_ts,
+    p.last_ts,
+    p.interaction_count,
+    p.has_gen_ai,
+    p.culture,
+    p.first_user_message,
+    p.has_neg_feedback,
+    p.has_pos_feedback,
+    p.contexts_snapshot,
+    t.total_count
+FROM total t
+LEFT JOIN page_rows p ON 1 = 1
+ORDER BY p.first_ts DESC"#
+        );
+
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query error: {e}"))?;
+        let mut rows = stmt
+            .query(params_ref.as_slice())
+            .map_err(|e| format!("Query error: {e}"))?;
+        let mut sessions = Vec::new();
+        let mut total = 0i64;
+        while let Some(row) = rows.next().map_err(|e| format!("Query error: {e}"))? {
+            total = row.get::<_, i64>(10).unwrap_or(0);
+            let session_uuid = row.get::<_, Option<String>>(0).unwrap_or(None).unwrap_or_default();
+            if session_uuid.is_empty() {
+                continue;
             }
-            let exists_clauses: Vec<String> = groups
-                .iter()
-                .map(|(name, values)| {
-                    let has_not_set = values.iter().any(|v| v == "__not_set__");
-                    let regular_values: Vec<&String> = values.iter().filter(|v| v.as_str() != "__not_set__").collect();
-
-                    let mut subclauses: Vec<String> = Vec::new();
-
-                    // "not set" — sessions with NO entry for this name in context_index
-                    if has_not_set {
-                        let pn = next_param(&mut param_idx);
-                        param_values.push(Box::new(name.clone()));
-                        subclauses.push(format!(
-                            "session_uuid NOT IN (SELECT DISTINCT session_uuid FROM context_index WHERE name = {pn})"
-                        ));
-                    }
-
-                    // Regular value filter — sessions that have this name with specific values
-                    if !regular_values.is_empty() {
-                        let pn = next_param(&mut param_idx);
-                        param_values.push(Box::new(name.clone()));
-                        let value_placeholders: Vec<String> = regular_values
-                            .iter()
-                            .map(|v| {
-                                let pv = next_param(&mut param_idx);
-                                param_values.push(Box::new((*v).clone()));
-                                pv
-                            })
-                            .collect();
-                        let in_list = value_placeholders.join(", ");
-                        // Use context_index (pre-computed at import) instead of json_each for speed
-                        subclauses.push(format!(
-                            "session_uuid IN (SELECT DISTINCT session_uuid FROM context_index \
-                             WHERE name = {pn} AND value IN ({in_list}))"
-                        ));
-                    }
-
-                    if subclauses.len() == 1 {
-                        subclauses.into_iter().next().unwrap_or_default()
-                    } else {
-                        format!("({})", subclauses.join(" OR "))
-                    }
-                })
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !exists_clauses.is_empty() {
-                conditions.extend(exists_clauses);
-            }
+            sessions.push(SessionSummary {
+                session_uuid,
+                first_ts: row.get::<_, Option<String>>(1).unwrap_or(None).unwrap_or_default(),
+                last_ts: row.get::<_, Option<String>>(2).unwrap_or(None).unwrap_or_default(),
+                interaction_count: row.get::<_, Option<i64>>(3).unwrap_or(None).unwrap_or(0),
+                has_gen_ai: row.get::<_, Option<i64>>(4).unwrap_or(None).unwrap_or(0) == 1,
+                culture: row.get::<_, Option<String>>(5).unwrap_or(None).unwrap_or_default(),
+                user_message_preview: row.get::<_, Option<String>>(6).unwrap_or(None).unwrap_or_default(),
+                has_neg_feedback: row.get::<_, Option<i64>>(7).unwrap_or(None).unwrap_or(0) == 1,
+                has_pos_feedback: row.get::<_, Option<i64>>(8).unwrap_or(None).unwrap_or(0) == 1,
+                contexts: row.get::<_, Option<String>>(9).unwrap_or(None).unwrap_or_default(),
+            });
         }
-    }
 
-    let where_clause = if conditions.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", conditions.join(" AND "))
-    };
-
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
-
-    // Count total sessions
-    let count_sql = format!(
-        "SELECT COUNT(DISTINCT session_uuid) FROM interactions {where_clause}"
-    );
-    let total: i64 = conn
-        .query_row(&count_sql, params_ref.as_slice(), |row| row.get(0))
-        .unwrap_or(0);
-
-    // Get session summaries
-    let p_limit = next_param(&mut param_idx);
-    let p_offset = next_param(&mut param_idx);
-    param_values.push(Box::new(limit));
-    param_values.push(Box::new(offset));
-    let params_ref2: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|b| b.as_ref()).collect();
-
-    let sql = format!(
-        r#"SELECT
-            s.session_uuid,
-            MIN(s.timestamp_start) as first_ts,
-            MAX(s.timestamp_end) as last_ts,
-            COUNT(*) as cnt,
-            MAX(CASE WHEN s.main_interaction_type = 'GenerativeAI'
-                          OR s.all_interaction_types LIKE '%GenerativeAI%' THEN 1 ELSE 0 END) as has_gen_ai,
-            MIN(s.culture) as culture,
-            (SELECT interaction_value FROM interactions i2
-             WHERE i2.session_uuid = s.session_uuid
-               AND i2.interaction_value != ''
-               AND i2.interaction_value NOT LIKE '#%#'
-               AND LOWER(i2.interaction_value) != 'continue'
-               AND i2.main_interaction_type NOT IN ('Event', 'LinkClick')
-             ORDER BY i2.log_id ASC LIMIT 1) as preview,
-            MAX(CASE WHEN s.feedback_info LIKE '%"score": -1%'
-                      OR s.feedback_info LIKE '%"score":-1%' THEN 1 ELSE 0 END) as has_neg_feedback,
-            MAX(CASE WHEN s.feedback_info LIKE '%"score": 1%'
-                      OR s.feedback_info LIKE '%"score":1%' THEN 1 ELSE 0 END) as has_pos_feedback,
-            (SELECT i2.contexts FROM interactions i2
-             WHERE i2.session_uuid = s.session_uuid
-               AND i2.contexts IS NOT NULL AND i2.contexts != ''
-               AND i2.contexts != '[]' AND i2.contexts != 'null'
-             ORDER BY i2.log_id DESC LIMIT 1) as contexts_snapshot
-        FROM interactions s
-        {where_clause}
-        GROUP BY s.session_uuid
-        ORDER BY first_ts DESC
-        LIMIT {p_limit} OFFSET {p_offset}"#
-    );
-
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query error: {e}"))?;
-    let sessions = stmt
-        .query_map(params_ref2.as_slice(), |row| {
-            Ok(SessionSummary {
-                session_uuid: row.get::<_, String>(0)?,
-                first_ts: row.get::<_, String>(1).unwrap_or_default(),
-                last_ts: row.get::<_, String>(2).unwrap_or_default(),
-                interaction_count: row.get::<_, i64>(3)?,
-                has_gen_ai: row.get::<_, i64>(4)? == 1,
-                culture: row.get::<_, String>(5).unwrap_or_default(),
-                user_message_preview: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                has_neg_feedback: row.get::<_, i64>(7).unwrap_or(0) == 1,
-                has_pos_feedback: row.get::<_, i64>(8).unwrap_or(0) == 1,
-                contexts: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
-            })
+        Ok(SessionsPage {
+            sessions,
+            total,
+            page,
+            timing_ms: started.elapsed().as_millis() as i64,
+            search_mode,
         })
-        .map_err(|e| format!("Query error: {e}"))?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>();
-
-    Ok(SessionsPage { sessions, total, page })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2230,18 +2392,6 @@ async fn delete_interactions_by_dates(
         let params_refs2: Vec<&dyn rusqlite::types::ToSql> =
             args.dates.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
 
-        // Delete sessions from context_index that belong exclusively to the deleted date range
-        tx.execute_batch(&format!(
-            "DELETE FROM context_index WHERE session_uuid IN (\
-               SELECT DISTINCT session_uuid FROM interactions \
-               WHERE DATE(timestamp_start) IN ({placeholders}) \
-               AND session_uuid NOT IN (\
-                 SELECT DISTINCT session_uuid FROM interactions \
-                 WHERE DATE(timestamp_start) NOT IN ({placeholders})\
-               )\
-             )",
-        )).ok();
-
         // Delete from interactions
         let deleted = tx
             .execute(
@@ -2259,6 +2409,10 @@ async fn delete_interactions_by_dates(
         }
 
         tx.commit().map_err(|e| format!("Commit error: {e}"))?;
+        if deleted > 0 {
+            cleanup_orphan_contexts(conn);
+            rebuild_session_summary(conn)?;
+        }
 
         Ok(DeleteResult { deleted })
     })
@@ -2696,6 +2850,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Mutex::new(WatchState::default())))
         .manage(Arc::new(Mutex::new(DbState::default())) as SharedDbState)
+        .manage(Arc::new(Mutex::new(None)) as SharedSearchInterrupt)
         .manage(Arc::new(Mutex::new(FlaggedDbState::default())) as SharedFlaggedDb)
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -2733,6 +2888,7 @@ pub fn run() {
             select_db_open_path,
             import_interactions_csv,
             get_sessions,
+            cancel_session_search,
             get_session_interactions,
             get_date_range,
             get_context_options,
@@ -2751,4 +2907,112 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn
+    }
+
+    #[test]
+    fn session_summary_rebuild_materializes_search_flags() {
+        let conn = test_conn();
+        conn.execute(
+            "INSERT INTO interactions (
+                log_id, interaction_uuid, session_uuid, timestamp_start, timestamp_end,
+                culture, main_interaction_type, all_interaction_types, interaction_value,
+                output_text, article_ids, dialog_paths, feedback_info, recognition_type,
+                recognition_quality, contexts, imported_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            params![
+                1i64,
+                "iu-1",
+                "session-a",
+                "2026-01-01T10:00:00",
+                "2026-01-01T10:00:01",
+                "nl-NL",
+                "Question",
+                "",
+                "waar is de Python?",
+                "",
+                "",
+                "",
+                "",
+                "",
+                0.0f64,
+                "",
+                1i64
+            ],
+        )
+        .expect("insert user");
+        conn.execute(
+            "INSERT INTO interactions (
+                log_id, interaction_uuid, session_uuid, timestamp_start, timestamp_end,
+                culture, main_interaction_type, all_interaction_types, interaction_value,
+                output_text, article_ids, dialog_paths, feedback_info, recognition_type,
+                recognition_quality, contexts, imported_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            params![
+                2i64,
+                "iu-2",
+                "session-a",
+                "2026-01-01T10:00:02",
+                "2026-01-01T10:00:03",
+                "nl-NL",
+                "GenerativeAI",
+                "Dialog,GenerativeAI",
+                "",
+                "antwoord",
+                "",
+                "",
+                "{\"score\": -1}",
+                "Faq",
+                42.0f64,
+                "[{\"name\":\"channel\",\"value\":\"app\"}]",
+                1i64
+            ],
+        )
+        .expect("insert bot");
+
+        rebuild_session_summary(&conn).expect("summary rebuild");
+
+        let row: (i64, i64, i64, String, String, i64) = conn
+            .query_row(
+                "SELECT has_real_user_input, has_gen_ai, has_neg_feedback, first_user_message, contexts_snapshot, interaction_count FROM session_summary WHERE session_uuid = 'session-a'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .expect("summary row");
+        assert_eq!(row.0, 1);
+        assert_eq!(row.1, 1);
+        assert_eq!(row.2, 1);
+        assert_eq!(row.3, "waar is de Python?");
+        assert!(row.4.contains("channel"));
+        assert_eq!(row.5, 2);
+    }
+
+    #[test]
+    fn ensure_session_summary_repairs_stale_cache() {
+        let conn = test_conn();
+        conn.execute(
+            "INSERT INTO interactions (
+                log_id, interaction_uuid, session_uuid, timestamp_start,
+                interaction_value, output_text, imported_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![1i64, "iu-1", "session-b", "2026-01-01T11:00:00", "hoi", "", 1i64],
+        )
+        .expect("insert");
+
+        ensure_session_summary(&conn).expect("ensure summary");
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+            .expect("summary count");
+        assert_eq!(count, 1);
+    }
 }

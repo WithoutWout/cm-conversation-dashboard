@@ -30,6 +30,7 @@ let searchCase = false
 let searchWord = false
 let searchRegex = false
 let searchContent = true
+let searchExcludeNonDefault = false
 let contentContextFilters = [] // [{name, value}] — active content context filters
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -72,7 +73,9 @@ function parseOrGroups(q) {
 // Build a regex for a single escaped term (respects searchCase and searchWord).
 function buildTermRegex(term) {
   try {
-    let pat = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    let pat = searchRegex
+      ? term
+      : term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     if (searchWord)
       pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
     return new RegExp(pat, searchCase ? "" : "i")
@@ -224,7 +227,9 @@ function precomputeArticle(a) {
   a._faqQ = f ? f.Text : a.Questions[0] ? a.Questions[0].Text : null
 
   // Cache response text
-  const o = a.Outputs.find((o) => o.Type === "Answer")
+  const o =
+    a.Outputs.find((o) => o.Type === "Answer" && o.IsDefault) ||
+    a.Outputs.find((o) => o.Type === "Answer")
   a._response = o ? o.Text : null
 
   // Build per-article link label map (TagId → Label) for expanding %{Link(N)}
@@ -339,6 +344,7 @@ function precomputeArticle(a) {
       r: _arT,
       e: expandVarNames(_aExp),
       ctxSet: _aCtx,
+      isNonDefault: _ao !== o && !_ao.IsDefault,
     })
   }
 }
@@ -354,7 +360,7 @@ function precomputeDialog(item) {
     const nodeAnsItems = ((n.output && n.output.items) || []).filter(
       (i) => i.type === "Answer",
     )
-    const ans = nodeAnsItems[0] || null
+    const ans = nodeAnsItems.find((i) => i.isDefault) || nodeAnsItems[0] || null
     const rawText = (ans && ans.data && ans.data.text) || ""
     // Expand %{Link(N)} tokens for the primary answer using its hyperlinks
     const _primaryLm = new Map()
@@ -367,8 +373,9 @@ function precomputeDialog(item) {
     )
     // Build search entries for all non-primary Answer items (contextual alternatives)
     const ctxAnswerTexts = []
-    for (let _i = 1; _i < nodeAnsItems.length; _i++) {
+    for (let _i = 0; _i < nodeAnsItems.length; _i++) {
       const _ci = nodeAnsItems[_i]
+      if (_ci === ans) continue
       const _rawT = (_ci.data && _ci.data.text) || ""
       const _lm = new Map()
       ;((_ci.data && _ci.data.hyperlinks) || []).forEach((h) => {
@@ -409,6 +416,7 @@ function precomputeDialog(item) {
         r: _nrT,
         e: expandVarNames(_nExp),
         ctxSet: _nCtx,
+        isNonDefault: _nai !== ans && !_nai.isDefault,
       })
     }
     return {
@@ -608,6 +616,7 @@ function answerItemsMatchOrGroups(answerItems, groups) {
   return groups.some((andGroup) =>
     (answerItems || []).some(
       (ai) =>
+        (!searchExcludeNonDefault || !ai.isNonDefault) &&
         ctxSetMatchesFilters(ai.ctxSet) && answerMatchesAndGroup(ai, andGroup),
     ),
   )
@@ -669,6 +678,7 @@ function matchArticle(a) {
   // SAME answer item (default or contextual). Terms may not straddle different answers.
   return _orRegexGroups.some((andGroup) =>
     (a._answerItems || []).some((ai) => {
+      if (searchExcludeNonDefault && ai.isNonDefault) return false
       const fields = [ai.s, ai.r, ai.e]
       return andGroup.every(
         (compiled) =>
@@ -731,6 +741,7 @@ function matchDialog(item) {
   return _orRegexGroups.some((andGroup) =>
     (item._searchNodes || []).some((sn) =>
       (sn._answerItems || []).some((ai) => {
+        if (searchExcludeNonDefault && ai.isNonDefault) return false
         const fields = [ai.s, ai.r, ai.e]
         return andGroup.every(
           (compiled) =>
@@ -807,6 +818,7 @@ self.onmessage = function (e) {
     searchWord = msg.searchWord
     searchRegex = msg.searchRegex
     searchContent = msg.searchContent
+    searchExcludeNonDefault = msg.searchExcludeNonDefault
     contentContextFilters = msg.contentContextFilters || []
 
     const q = query
@@ -850,7 +862,6 @@ self.onmessage = function (e) {
     // Short-circuit: no query and no filter → return everything
     const noQuery = !q || !hasValidQuery
     const hasCtxFilter = contentContextFilters.length > 0
-
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
     let filteredAll
     if (noQuery && !hasCtxFilter && allFilterPill === "all") {
