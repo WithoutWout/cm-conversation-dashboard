@@ -20,14 +20,16 @@ Built with **Tauri v2** (Rust backend + vanilla JS frontend). Works fully offlin
   - [Detail Modals](#detail-modals)
   - [Flow Graph](#flow-graph)
   - [Context Filter](#context-filter)
-  - [Export IDs](#export-ids)
+  - [Share Content](#share-content)
 - [Conversations View](#conversations-view)
   - [Importing Interaction Logs](#importing-interaction-logs)
   - [Session List](#session-list)
   - [Chat Thread](#chat-thread)
   - [Chat Search](#chat-search)
   - [Managing the Database](#managing-the-database)
+- [Flagged View](#flagged-view)
 - [Settings](#settings)
+- [Development](#development)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Updates](#updates)
 
@@ -41,9 +43,10 @@ Built with **Tauri v2** (Rust backend + vanilla JS frontend). Works fully offlin
 | **Search**          | AND / OR / exact phrase syntax; case, word-boundary, and regex modes; responses-only toggle         |
 | **Conversations**   | Import CSV interaction logs into a local SQLite database; browse and search sessions                |
 | **Chat**            | Read individual conversation threads with rich bot output rendering (cards, CTAs, dialogs)          |
+| **Flagged**         | Save important conversation turns, add notes, and organize flagged sessions into folders            |
 | **Flow Graph**      | Interactive visual map of dialog node connections (powered by vis-network)                          |
 | **Context Filters** | Filter by contextual answer context variables in both Content and Conversations views               |
-| **Export IDs**      | Copy article/dialog IDs in Jira-ready rich hyperlink format                                         |
+| **Share Content**   | Copy article/dialog IDs as rich links, tables, grouped lists, or plain text                         |
 | **Deep Links**      | Open any article, dialog, or dialog node directly in CM.com (when a context URL is configured)      |
 | **Auto-updates**    | Checks GitHub releases on startup and notifies when a new version is available                      |
 
@@ -66,7 +69,7 @@ Download the latest release for your platform from the [Releases page](https://g
 
 ### 1 — Export your data from CM.com
 
-You need up to three export files. Place them all in the same folder on your machine.
+You need up to three export files. Place them all in the same folder on your machine. When multiple matching files exist, the app uses the newest file for each supported source.
 
 **Articles** (required):
 
@@ -100,7 +103,7 @@ The app will immediately load and display your content.
 
 ## Content View
 
-The Content view is the default view. Switch between Content and Conversations using the two icons in the top-right of the header.
+The Content view is the default view. Switch between Content, Conversations, and Flagged using the view buttons in the header.
 
 ### Search
 
@@ -119,12 +122,13 @@ The global search bar sits below the header and applies to whichever tab is curr
 
 #### Search modifiers (buttons to the right of the input)
 
-| Button | Default | Effect                                                    |
-| ------ | ------- | --------------------------------------------------------- |
-| `Aa`   | Off     | Case-sensitive matching                                   |
-| `\b`   | Off     | Whole-word matching only                                  |
-| `.*`   | Off     | Full regex mode (input border turns red on invalid regex) |
-| `¬T`   | **On**  | Responses only — ignores IDs, titles, and entity names    |
+| Button | Default | Effect                                                           |
+| ------ | ------- | ---------------------------------------------------------------- |
+| `Aa`   | Off     | Case-sensitive matching                                          |
+| `\b`   | Off     | Whole-word matching only                                         |
+| `.*`   | Off     | Full regex mode (input border turns red on invalid regex)        |
+| `¬T`   | Off     | Responses only — ignores IDs, titles, and entity names           |
+| `ND`   | Off     | Exclude non-default responses from search when a query is active |
 
 > **Entity enrichment:** when your query matches a word inside an entity, articles and dialogs that use that entity also appear in results — even if the query text isn't literally in the response.
 
@@ -162,7 +166,7 @@ Each article card shows:
 - **Entities** — all question/entity chips; FAQ chips highlighted in green; click a chip to open the Entity Info Modal
 - **Response** — full response text with variable tokens styled as `[VarName]` and search terms highlighted
 - **Linked dialog** — if the article routes to a dialog, a jump link appears
-- **Contextual Responses** — collapsible section; each contextual variant shows its context-variable conditions as pills and its response text; items matching the active context filter glow green; items with no context conditions are flagged `Unreachable` in red
+- **Contextual Responses** — collapsible section; each contextual variant shows its context-variable conditions as pills and its response text; items matching the active context filter glow green; non-default responses with no context conditions are flagged `Unreachable` in red
 
 **Action buttons** (top-right of expanded card):
 
@@ -212,6 +216,8 @@ Clicking the info button on a card opens a **full-screen detail modal**. All mod
 
 > Press **ESC** to close the top-most modal.
 
+When a search is active, Article and Dialog detail modals can also show only the content sections that matched the search.
+
 ---
 
 ### Flow Graph
@@ -239,13 +245,15 @@ The Content Context Filter panel lets you narrow results to articles and dialogs
 
 ---
 
-### Export IDs
+### Share Content
 
-Click **Export IDs** in the header to copy article and dialog IDs from the current tab and active search.
+Click **Share Content** in the header to copy article and dialog IDs from the current tab and active search.
 
 - Each row shows the ID token (`qa-{id}` for articles, `dn-{id}` for dialogs) and the item title
-- **Copy row** copies a single Jira-ready `<a>` hyperlink for that item
-- **Copy to clipboard** copies all items as a rich HTML list (plain-text fallback for non-rich editors)
+- **List** copies rich links or plain text
+- **Table** copies a table with ID, title/question, and matched response snippets
+- **Grouped** groups Articles, Dialogs, and Transactional Dialogs, sorted by ID
+- Dialog rows can show `dn-{id} -> qa-{id}` relationships when articles link to that dialog
 
 ---
 
@@ -310,6 +318,10 @@ Click the date button to open a calendar. Click once to set the start date, agai
 | `Low %`       | Sessions with a low recognition score (below the threshold in Settings) |
 | `Zero %`      | Sessions with zero recognition score                                    |
 
+#### Context filter
+
+Use the funnel button next to the date picker to filter sessions by one or more context variable values. Context values are loaded from the connected Conversations database.
+
 #### Session cards
 
 Each card shows:
@@ -349,6 +361,8 @@ Interactions are grouped into logical Q&A turns and rendered as a chat timeline:
 
 > Bubbles with zero or low recognition are highlighted in red/orange and scrolled into view automatically when those filters are active.
 
+Use **Select** to choose one or more turns. Selected turns can be copied using the configured chat copy format, or saved to the Flagged view for follow-up.
+
 ---
 
 ### Chat Search
@@ -368,10 +382,28 @@ The `.*` regex toggle turns red when the pattern is invalid.
 
 Click **Manage DB** to open the database management modal:
 
+- Create a new SQLite database or open an existing `conversations.db`
+- Configure retention: interactions older than the selected number of days are removed when importing new data
 - Overview: total interactions + number of days stored
 - Select days to delete (checkbox per day + session count)
 - **Delete Selected Days** — requires confirmation; shows exact interaction count before deleting
 - **This action cannot be undone.**
+
+---
+
+## Flagged View
+
+The Flagged view collects conversation turns that were saved from the Conversations view.
+
+- Flag one or more selected turns from an open conversation
+- Add an optional note while flagging, or edit the note later
+- Review flagged sessions in a dedicated list
+- Highlighted turns are shown in context inside the full conversation
+- Copy selected turns using the same chat copy format as Conversations
+- Organize flagged sessions into folders, including drag-and-drop between folders
+- Remove a flagged conversation when it is no longer needed
+
+Flagged conversations are stored in the local Conversations database, so they stay with the database file you opened or created.
 
 ---
 
@@ -381,12 +413,13 @@ Open **⚙ Settings** from the header.
 
 ### Content tab
 
-| Setting                | Description                                                                                                                                            |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **CM.com Context URL** | Base URL for your AI Cloud environment (e.g. `https://www.cm.com/en-gb/app/aicloud/{tenantId}/{projectName}/nl/`). Required to show deep-link buttons. |
-| **Open CM.com links**  | Open links in a popup window within the app, or in the default system browser                                                                          |
-| **Data Folder**        | Select or refresh the folder containing your export files                                                                                              |
-| **App Updates**        | Manually check for a new GitHub release                                                                                                                |
+| Setting                | Description                                                                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CM.com Context URL** | Context URL for your AI Cloud environment (e.g. `https://www.cm.com/en-gb/app/aicloud/{tenantId}/{projectName}/nl/`). Required to show deep-link buttons. |
+| **Open CM.com links**  | Open links in a popup window within the app, or in the default system browser                                                                             |
+| **Open other links**   | Open chat URLs and CTA buttons in a popup window within the app, or in the default system browser                                                         |
+| **Data Folder**        | Select or refresh the folder containing your export files                                                                                                 |
+| **App Updates**        | Manually check for a new GitHub release                                                                                                                   |
 
 ### Conversations tab
 
@@ -394,7 +427,28 @@ Open **⚙ Settings** from the header.
 | --------------------------------- | ------------------------------------------------------------------------------ |
 | **Halo Studio URL**               | Enables "Open in Halo Studio" buttons on sessions that have GenAI interactions |
 | **Low recognition threshold (%)** | Sessions below this value are flagged as `Low %` (default: 60)                 |
-| **Conversations Database**        | Create a new SQLite database or open an existing one                           |
+| **Chat Copy Format**              | Copy selected turns as a two-column table or prose                             |
+
+The Conversations database file and data-retention setting live in **Manage DB** inside the Conversations view.
+
+---
+
+## Development
+
+This is a Tauri v2 app with a Rust backend and a vanilla JS frontend. The frontend is served directly from `frontend/`; there is no bundler.
+
+```bash
+npm install
+npm run tauri:dev
+```
+
+Build a distributable app with:
+
+```bash
+npm run tauri:build
+```
+
+The app must work offline. If a frontend dependency is needed, vendor it locally under `frontend/vendor/` instead of loading it from a CDN.
 
 ---
 
