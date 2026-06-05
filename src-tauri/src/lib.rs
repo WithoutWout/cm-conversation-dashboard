@@ -103,7 +103,10 @@ struct DbState {
 
 impl Default for DbState {
     fn default() -> Self {
-        Self { conn: None, path: None }
+        Self {
+            conn: None,
+            path: None,
+        }
     }
 }
 
@@ -119,7 +122,10 @@ struct FlaggedDbState {
 
 impl Default for FlaggedDbState {
     fn default() -> Self {
-        Self { conn: None, path: None }
+        Self {
+            conn: None,
+            path: None,
+        }
     }
 }
 
@@ -447,7 +453,14 @@ fn extract_entities(content: &str) -> serde_json::Value {
     serde_json::Value::Array(result)
 }
 
-fn extract_dialogs(content: &str) -> (serde_json::Value, serde_json::Value, serde_json::Value, serde_json::Value) {
+fn extract_dialogs(
+    content: &str,
+) -> (
+    serde_json::Value,
+    serde_json::Value,
+    serde_json::Value,
+    serde_json::Value,
+) {
     let json = serde_json::from_str::<serde_json::Value>(content)
         .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
     let dialogs = json
@@ -562,7 +575,10 @@ fn configure_folder_watch(
         return;
     };
 
-    if watcher.watch(&watch_folder, RecursiveMode::NonRecursive).is_ok() {
+    if watcher
+        .watch(&watch_folder, RecursiveMode::NonRecursive)
+        .is_ok()
+    {
         state.watched_folder = Some(watch_folder);
         state.watcher = Some(watcher);
     }
@@ -609,7 +625,8 @@ fn get_data(
 
     if let Some(path) = source_paths.get("dialogs") {
         if let Ok(content) = fs::read_to_string(path) {
-            let (loaded_dialogs, loaded_t_dialogs, loaded_conv_vars, loaded_ctx_vars) = extract_dialogs(&content);
+            let (loaded_dialogs, loaded_t_dialogs, loaded_conv_vars, loaded_ctx_vars) =
+                extract_dialogs(&content);
             dialogs = loaded_dialogs;
             t_dialogs = loaded_t_dialogs;
             conv_vars = loaded_conv_vars;
@@ -650,9 +667,10 @@ fn get_data(
     let statuses = source_definitions()
         .iter()
         .map(|definition| {
-            let filename = source_paths
-                .get(definition.key)
-                .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()));
+            let filename = source_paths.get(definition.key).and_then(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            });
             SourceStatus {
                 key: definition.key.to_string(),
                 label: definition.label.to_string(),
@@ -689,11 +707,7 @@ fn get_data(
 }
 
 #[tauri::command]
-fn resize_to_available_height(
-    app: tauri::AppHandle,
-    height: f64,
-    y: f64,
-) -> Result<(), String> {
+fn resize_to_available_height(app: tauri::AppHandle, height: f64, y: f64) -> Result<(), String> {
     let win = app
         .get_webview_window("main")
         .ok_or("main window not found")?;
@@ -739,7 +753,9 @@ fn open_preview_window(app: tauri::AppHandle, url: String) -> Result<(), String>
     if !url.starts_with("https://") && !url.starts_with("http://") {
         return Err("Invalid URL: only http/https allowed".to_string());
     }
-    let parsed: tauri::Url = url.parse().map_err(|e: <tauri::Url as std::str::FromStr>::Err| e.to_string())?;
+    let parsed: tauri::Url = url
+        .parse()
+        .map_err(|e: <tauri::Url as std::str::FromStr>::Err| e.to_string())?;
     let label = "url-preview";
     // If a preview window is already open, close it first so we re-open fresh
     if let Some(win) = app.get_webview_window(label) {
@@ -1015,7 +1031,8 @@ fn open_flagged_db(path: &str) -> Result<Connection, String> {
         .map_err(|e| format!("Schema error: {e}"))?;
     // Migrations for existing DBs (ignore errors if column already exists)
     let _ = conn.execute_batch("ALTER TABLE flagged_sessions ADD COLUMN folder_id INTEGER REFERENCES flagged_folders(folder_id) ON DELETE SET NULL");
-    let _ = conn.execute_batch("ALTER TABLE flagged_sessions ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
+    let _ = conn
+        .execute_batch("ALTER TABLE flagged_sessions ADD COLUMN notes TEXT NOT NULL DEFAULT ''");
     Ok(conn)
 }
 
@@ -1031,21 +1048,45 @@ fn now_iso() -> String {
     let mut rem = secs / 86400;
     let mut year = 1970u64;
     loop {
-        let in_year: u64 = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
-        if rem < in_year { break; }
+        let in_year: u64 = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if rem < in_year {
+            break;
+        }
         rem -= in_year;
         year += 1;
     }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &d in &month_days {
-        if rem < d { break; }
+        if rem < d {
+            break;
+        }
         rem -= d;
         month += 1;
     }
     let day = rem + 1;
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, h, m, s)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, h, m, s
+    )
 }
 
 // FTS5 schema is kept separate so a missing fts5 module never prevents the DB from opening.
@@ -1162,10 +1203,18 @@ fn ensure_session_summary(conn: &Connection) -> Result<(), String> {
         .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
         .unwrap_or(0);
     let max_interaction_log: i64 = conn
-        .query_row("SELECT COALESCE(MAX(log_id), 0) FROM interactions", [], |r| r.get(0))
+        .query_row(
+            "SELECT COALESCE(MAX(log_id), 0) FROM interactions",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
     let max_summary_log: i64 = conn
-        .query_row("SELECT COALESCE(MAX(last_log_id), 0) FROM session_summary", [], |r| r.get(0))
+        .query_row(
+            "SELECT COALESCE(MAX(last_log_id), 0) FROM session_summary",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
 
     if interaction_sessions != summary_sessions || max_interaction_log != max_summary_log {
@@ -1232,7 +1281,8 @@ fn open_db(path: &str) -> Result<Connection, String> {
                AND i.contexts != 'null' \
                AND json_extract(c.value, '$.name') IS NOT NULL \
                AND json_extract(c.value, '$.name') != ''",
-        ).ok();
+        )
+        .ok();
     }
 
     // Optional FTS5 and materialized summaries are repairable caches.
@@ -1282,21 +1332,49 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
         let mut year = 1970u32;
         let mut rem_days = days_since_epoch as u32;
         loop {
-            let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366 } else { 365 };
-            if rem_days < days_in_year { break; }
+            let days_in_year = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+                366
+            } else {
+                365
+            };
+            if rem_days < days_in_year {
+                break;
+            }
             rem_days -= days_in_year;
             year += 1;
         }
-        let month_days: [u32; 12] = [31, if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        let month_days: [u32; 12] = [
+            31,
+            if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+                29
+            } else {
+                28
+            },
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ];
         let mut month = 1u32;
         for &d in &month_days {
-            if rem_days < d { break; }
+            if rem_days < d {
+                break;
+            }
             rem_days -= d;
             month += 1;
         }
         let day = rem_days + 1;
         let _ = t; // suppress unused
-        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", year, month, day, hrs, mins, s_secs)
+        format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+            year, month, day, hrs, mins, s_secs
+        )
     };
     // Remove stale FTS5 entries before deleting from interactions
     let _ = conn.execute(
@@ -1304,11 +1382,12 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
          (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
         params![cutoff_dt],
     );
-    let deleted = conn.execute(
-        "DELETE FROM interactions WHERE timestamp_start < ?1",
-        params![cutoff_dt],
-    )
-    .unwrap_or(0) as i64;
+    let deleted = conn
+        .execute(
+            "DELETE FROM interactions WHERE timestamp_start < ?1",
+            params![cutoff_dt],
+        )
+        .unwrap_or(0) as i64;
     if deleted > 0 {
         cleanup_orphan_contexts(conn);
         let _ = rebuild_session_summary(conn);
@@ -1374,8 +1453,16 @@ async fn select_csv_files(app: AppHandle) -> FileDialogResult {
         });
 
     match rx.await {
-        Ok(paths) if !paths.is_empty() => FileDialogResult { ok: true, canceled: false, paths },
-        _ => FileDialogResult { ok: false, canceled: true, paths: vec![] },
+        Ok(paths) if !paths.is_empty() => FileDialogResult {
+            ok: true,
+            canceled: false,
+            paths,
+        },
+        _ => FileDialogResult {
+            ok: false,
+            canceled: true,
+            paths: vec![],
+        },
     }
 }
 
@@ -1401,7 +1488,11 @@ async fn select_db_save_path(app: AppHandle) -> FileSaveResult {
             canceled: false,
             path: Some(path.to_string_lossy().into_owned()),
         },
-        None => FileSaveResult { ok: false, canceled: true, path: None },
+        None => FileSaveResult {
+            ok: false,
+            canceled: true,
+            path: None,
+        },
     }
 }
 
@@ -1426,7 +1517,11 @@ async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
             canceled: false,
             path: Some(path.to_string_lossy().into_owned()),
         },
-        None => FileSaveResult { ok: false, canceled: true, path: None },
+        None => FileSaveResult {
+            ok: false,
+            canceled: true,
+            path: None,
+        },
     }
 }
 
@@ -1667,19 +1762,19 @@ struct DateRange {
 async fn get_date_range(db_state: State<'_, SharedDbState>) -> Result<DateRange, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-    let state = db.lock().map_err(|e| e.to_string())?;
-    let conn = state.conn.as_ref().ok_or("No database open.")?;
-    let result: (Option<String>, Option<String>) = conn
-        .query_row(
-            "SELECT MIN(DATE(timestamp_start)), MAX(DATE(timestamp_start)) FROM interactions",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(DateRange {
-        min: result.0.unwrap_or_default(),
-        max: result.1.unwrap_or_default(),
-    })
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let result: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT MIN(DATE(timestamp_start)), MAX(DATE(timestamp_start)) FROM interactions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(DateRange {
+            min: result.0.unwrap_or_default(),
+            max: result.1.unwrap_or_default(),
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1693,9 +1788,9 @@ struct GetSessionsArgs {
     date_to: Option<String>,
     filter: Option<String>, // "all" | "genai" | "neg_feedback" | "low_recog" | "zero_recog"
     query: Option<String>,
-    query_regex: Option<bool>,   // treat query as a regex
-    query_scope: Option<String>, // "both" | "user" | "bot"
-    query_ids: Option<bool>,     // also search article_ids and dialog_paths columns
+    query_regex: Option<bool>,                   // treat query as a regex
+    query_scope: Option<String>,                 // "both" | "user" | "bot"
+    query_ids: Option<bool>,                     // also search article_ids and dialog_paths columns
     query_ids_only: Option<bool>, // search ONLY article_ids and dialog_paths, not message text
     query_id_type: Option<String>, // "article" | "dialog" | "node" — which ID column/pattern to use
     low_recog_threshold: Option<i64>, // threshold for "low recognition" filter (default 60, range 1–99)
@@ -1757,6 +1852,28 @@ async fn get_sessions(
             *idx += 1;
             format!("?{}", *idx)
         };
+        let is_feedback_filter = matches!(filter, "neg_feedback" | "pos_feedback");
+        if is_feedback_filter {
+            conn.create_scalar_function(
+                "feedback_origin",
+                1,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+                |ctx: &rusqlite::functions::Context<'_>| {
+                    let text: String = ctx.get(0).unwrap_or_default();
+                    let origin = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("originatingInteractionId")
+                                .and_then(|id| id.as_str())
+                                .map(|id| id.to_string())
+                        })
+                        .unwrap_or_default();
+                    Ok(origin)
+                },
+            )
+            .ok();
+        }
 
         let mut base_conditions = vec!["s.has_real_user_input = 1".to_string()];
         match filter {
@@ -1835,7 +1952,76 @@ async fn get_sessions(
         let base_where = format!("WHERE {}", base_conditions.join(" AND "));
         let mut search_mode = "none".to_string();
         let mut search_cte = String::new();
-        let mut filtered_from = "SELECT b.* FROM base_sessions b".to_string();
+        let mut filtered_from = "SELECT b.*, NULL AS match_log_id FROM base_sessions b".to_string();
+        let is_recognition_filter = matches!(filter, "low_recog" | "zero_recog");
+        let search_row_filter = match filter {
+            "genai" => {
+                " AND (i.main_interaction_type = 'GenerativeAI' OR i.all_interaction_types LIKE '%GenerativeAI%')".to_string()
+            }
+            "low_recog" => format!(
+                " AND i.recognition_quality > 0 \
+                  AND i.recognition_quality < {low_recog_threshold} \
+                  AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+                  AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI'"
+            ),
+            "zero_recog" => {
+                " AND i.recognition_quality = 0 \
+                  AND COALESCE(i.recognition_type, '') != '' \
+                  AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+                  AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI'".to_string()
+            }
+            _ => String::new(),
+        };
+        let search_row_filter = search_row_filter.as_str();
+        let feedback_score_filter = match filter {
+            "neg_feedback" => {
+                "AND (fb.feedback_info LIKE '%\"score\": -1%' OR fb.feedback_info LIKE '%\"score\":-1%')"
+            }
+            "pos_feedback" => {
+                "AND (fb.feedback_info LIKE '%\"score\": 1%' OR fb.feedback_info LIKE '%\"score\":1%') \
+                 AND fb.feedback_info NOT LIKE '%\"score\": -1%' \
+                 AND fb.feedback_info NOT LIKE '%\"score\":-1%'"
+            }
+            _ => "",
+        };
+        let feedback_origins_cte = if is_feedback_filter {
+            format!(
+                ", feedback_origins AS (\
+                    SELECT \
+                        fb.session_uuid, \
+                        COALESCE(origin.log_id, (\
+                            SELECT prev.log_id \
+                            FROM interactions prev \
+                            WHERE prev.session_uuid = fb.session_uuid \
+                              AND prev.log_id < fb.log_id \
+                              AND COALESCE(prev.output_text, '') != '' \
+                              AND COALESCE(prev.main_interaction_type, '') != 'Feedback' \
+                            ORDER BY prev.log_id DESC \
+                            LIMIT 1\
+                        ), fb.log_id) AS match_log_id \
+                    FROM interactions fb \
+                    JOIN base_sessions b ON b.session_uuid = fb.session_uuid \
+                    LEFT JOIN interactions origin \
+                      ON origin.session_uuid = fb.session_uuid \
+                     AND origin.interaction_uuid = feedback_origin(fb.feedback_info) \
+                    WHERE COALESCE(fb.feedback_info, '') != '' {feedback_score_filter}\
+                )"
+            )
+        } else {
+            String::new()
+        };
+        let recognition_matches_cte = if is_recognition_filter {
+            format!(
+                ", recognition_matches AS (\
+                    SELECT i.session_uuid, i.log_id AS match_log_id \
+                    FROM interactions i \
+                    JOIN base_sessions b ON b.session_uuid = i.session_uuid \
+                    WHERE 1 = 1{search_row_filter}\
+                )"
+            )
+        } else {
+            String::new()
+        };
 
         if !query.is_empty() {
             if query_ids_only {
@@ -1856,16 +2042,25 @@ async fn get_sessions(
                 };
                 let p = next_param(&mut param_idx);
                 param_values.push(Box::new(like_val));
+                let search_from = if is_feedback_filter {
+                    "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+                } else {
+                    "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+                };
+                let row_filter = if is_feedback_filter { "" } else { search_row_filter };
                 search_cte = format!(
-                    ", search_sessions AS (\
-                        SELECT DISTINCT i.session_uuid \
-                        FROM interactions i \
-                        JOIN base_sessions b ON b.session_uuid = i.session_uuid \
-                        WHERE {column} LIKE {p} ESCAPE '\\'\
+                    "{feedback_origins_cte}, search_matches AS (\
+                        SELECT i.session_uuid, i.log_id AS match_log_id \
+                        FROM {search_from} \
+                        WHERE {column} LIKE {p} ESCAPE '\\'{row_filter}\
+                    ), search_sessions AS (\
+                        SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                        FROM search_matches \
+                        GROUP BY session_uuid\
                     )"
                 );
                 filtered_from =
-                    "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                    "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
             } else if query_regex {
                 search_mode = "regex".to_string();
                 use regex::Regex;
@@ -1900,16 +2095,25 @@ async fn get_sessions(
                 } else {
                     text_cond
                 };
+                let search_from = if is_feedback_filter {
+                    "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+                } else {
+                    "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+                };
+                let row_filter = if is_feedback_filter { "" } else { search_row_filter };
                 search_cte = format!(
-                    ", search_sessions AS (\
-                        SELECT DISTINCT i.session_uuid \
-                        FROM interactions i \
-                        JOIN base_sessions b ON b.session_uuid = i.session_uuid \
-                        WHERE {final_cond}\
+                    "{feedback_origins_cte}, search_matches AS (\
+                        SELECT i.session_uuid, i.log_id AS match_log_id \
+                        FROM {search_from} \
+                        WHERE {final_cond}{row_filter}\
+                    ), search_sessions AS (\
+                        SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                        FROM search_matches \
+                        GROUP BY session_uuid\
                     )"
                 );
                 filtered_from =
-                    "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                    "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
             } else {
                 let fts_available = conn
                     .query_row(
@@ -1969,7 +2173,7 @@ async fn get_sessions(
                         .filter(|g| !g.is_empty())
                         .collect::<Vec<_>>();
 
-                    if !fts_groups.is_empty() {
+                if !fts_groups.is_empty() {
                         search_mode = "fts".to_string();
                         let fts_query = fts_groups
                             .iter()
@@ -1995,17 +2199,25 @@ async fn get_sessions(
                         };
                         let p = next_param(&mut param_idx);
                         param_values.push(Box::new(fts_match_expr));
+                        let search_from = if is_feedback_filter {
+                            "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id JOIN interactions_fts ON interactions_fts.rowid = i.log_id"
+                        } else {
+                            "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+                        };
+                        let row_filter = if is_feedback_filter { "" } else { search_row_filter };
                         search_cte = format!(
-                            ", search_sessions AS (\
-                                SELECT DISTINCT i.session_uuid \
-                                FROM interactions_fts \
-                                JOIN interactions i ON i.log_id = interactions_fts.rowid \
-                                JOIN base_sessions b ON b.session_uuid = i.session_uuid \
-                                WHERE interactions_fts MATCH {p}\
+                            "{feedback_origins_cte}, search_matches AS (\
+                                SELECT i.session_uuid, i.log_id AS match_log_id \
+                                FROM {search_from} \
+                                WHERE interactions_fts MATCH {p}{row_filter}\
+                            ), search_sessions AS (\
+                                SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                                FROM search_matches \
+                                GROUP BY session_uuid\
                             )"
                         );
                         filtered_from =
-                            "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                            "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
                     }
                 } else if !or_groups.is_empty() {
                     search_mode = "like".to_string();
@@ -2052,18 +2264,47 @@ async fn get_sessions(
                         .map(|g| format!("({g})"))
                         .collect::<Vec<_>>()
                         .join(" OR ");
+                    let search_from = if is_feedback_filter {
+                        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+                    } else {
+                        "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+                    };
+                    let row_filter = if is_feedback_filter { "" } else { search_row_filter };
                     search_cte = format!(
-                        ", search_sessions AS (\
-                            SELECT DISTINCT i.session_uuid \
-                            FROM interactions i \
-                            JOIN base_sessions b ON b.session_uuid = i.session_uuid \
-                            WHERE {or_clauses}\
+                        "{feedback_origins_cte}, search_matches AS (\
+                            SELECT i.session_uuid, i.log_id AS match_log_id \
+                            FROM {search_from} \
+                            WHERE {or_clauses}{row_filter}\
+                        ), search_sessions AS (\
+                            SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                            FROM search_matches \
+                            GROUP BY session_uuid\
                         )"
                     );
                     filtered_from =
-                        "SELECT b.* FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                        "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
                 }
             }
+        } else if is_feedback_filter {
+            search_cte = format!(
+                "{feedback_origins_cte}, feedback_sessions AS (\
+                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                    FROM feedback_origins \
+                    GROUP BY session_uuid\
+                )"
+            );
+            filtered_from =
+                "SELECT b.*, fs.match_log_id FROM base_sessions b JOIN feedback_sessions fs ON fs.session_uuid = b.session_uuid".to_string();
+        } else if is_recognition_filter {
+            search_cte = format!(
+                "{recognition_matches_cte}, recognition_sessions AS (\
+                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                    FROM recognition_matches \
+                    GROUP BY session_uuid\
+                )"
+            );
+            filtered_from =
+                "SELECT b.*, rs.match_log_id FROM base_sessions b JOIN recognition_sessions rs ON rs.session_uuid = b.session_uuid".to_string();
         }
 
         let p_limit = next_param(&mut param_idx);
@@ -2100,7 +2341,18 @@ SELECT
     p.interaction_count,
     p.has_gen_ai,
     p.culture,
-    p.first_user_message,
+    COALESCE(NULLIF((
+        SELECT i_match.interaction_value
+        FROM interactions i_match
+        WHERE i_match.session_uuid = p.session_uuid
+          AND i_match.log_id <= p.match_log_id
+          AND i_match.interaction_value != ''
+          AND i_match.interaction_value NOT LIKE '#%#'
+          AND LOWER(i_match.interaction_value) != 'continue'
+          AND COALESCE(i_match.main_interaction_type, '') NOT IN ('Event', 'LinkClick')
+        ORDER BY i_match.log_id DESC
+        LIMIT 1
+    ), ''), p.first_user_message) AS user_message_preview,
     p.has_neg_feedback,
     p.has_pos_feedback,
     p.contexts_snapshot,
@@ -2149,7 +2401,9 @@ ORDER BY p.first_ts DESC"#
 }
 
 #[tauri::command]
-async fn get_context_options(db_state: State<'_, SharedDbState>) -> Result<Vec<ContextOption>, String> {
+async fn get_context_options(
+    db_state: State<'_, SharedDbState>,
+) -> Result<Vec<ContextOption>, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
     let state = db.lock().map_err(|e| e.to_string())?;
@@ -2219,12 +2473,12 @@ async fn get_session_interactions(
 ) -> Result<Vec<InteractionRow>, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-    let state = db.lock().map_err(|e| e.to_string())?;
-    let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
 
-    let mut stmt = conn
-        .prepare(
-            r#"SELECT
+        let mut stmt = conn
+            .prepare(
+                r#"SELECT
                 log_id, interaction_uuid, session_uuid,
                 timestamp_start, timestamp_end, culture,
                 main_interaction_type, all_interaction_types,
@@ -2237,43 +2491,43 @@ async fn get_session_interactions(
             FROM interactions
             WHERE session_uuid = ?1
             ORDER BY log_id ASC"#,
-        )
-        .map_err(|e| format!("Prepare error: {e}"))?;
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
 
-    let rows = stmt
-        .query_map(params![session_uuid], |row| {
-            Ok(InteractionRow {
-                log_id:                  row.get(0)?,
-                interaction_uuid:        row.get::<_, String>(1).unwrap_or_default(),
-                session_uuid:            row.get::<_, String>(2).unwrap_or_default(),
-                timestamp_start:         row.get::<_, String>(3).unwrap_or_default(),
-                timestamp_end:           row.get::<_, String>(4).unwrap_or_default(),
-                culture:                 row.get::<_, String>(5).unwrap_or_default(),
-                main_interaction_type:   row.get::<_, String>(6).unwrap_or_default(),
-                all_interaction_types:   row.get::<_, String>(7).unwrap_or_default(),
-                interaction_value:       row.get::<_, String>(8).unwrap_or_default(),
-                output_text:             row.get::<_, String>(9).unwrap_or_default(),
-                article_ids:             row.get::<_, String>(10).unwrap_or_default(),
-                dialog_paths:            row.get::<_, String>(11).unwrap_or_default(),
-                tdialog_status:          row.get::<_, String>(12).unwrap_or_default(),
-                recognition_type:        row.get::<_, String>(13).unwrap_or_default(),
-                recognition_quality:     row.get::<_, f64>(14).unwrap_or(0.0),
-                generative_ai_sources:   row.get::<_, String>(15).unwrap_or_default(),
-                articles:                row.get::<_, String>(16).unwrap_or_default(),
-                faqs_found:              row.get::<_, String>(17).unwrap_or_default(),
-                contexts:                row.get::<_, String>(18).unwrap_or_default(),
-                pages:                   row.get::<_, String>(19).unwrap_or_default(),
-                link_click_info:         row.get::<_, String>(20).unwrap_or_default(),
-                feedback_info:           row.get::<_, String>(21).unwrap_or_default(),
-                output_metadata:         row.get::<_, String>(22).unwrap_or_default(),
-                recognition_details:     row.get::<_, String>(23).unwrap_or_default(),
+        let rows = stmt
+            .query_map(params![session_uuid], |row| {
+                Ok(InteractionRow {
+                    log_id: row.get(0)?,
+                    interaction_uuid: row.get::<_, String>(1).unwrap_or_default(),
+                    session_uuid: row.get::<_, String>(2).unwrap_or_default(),
+                    timestamp_start: row.get::<_, String>(3).unwrap_or_default(),
+                    timestamp_end: row.get::<_, String>(4).unwrap_or_default(),
+                    culture: row.get::<_, String>(5).unwrap_or_default(),
+                    main_interaction_type: row.get::<_, String>(6).unwrap_or_default(),
+                    all_interaction_types: row.get::<_, String>(7).unwrap_or_default(),
+                    interaction_value: row.get::<_, String>(8).unwrap_or_default(),
+                    output_text: row.get::<_, String>(9).unwrap_or_default(),
+                    article_ids: row.get::<_, String>(10).unwrap_or_default(),
+                    dialog_paths: row.get::<_, String>(11).unwrap_or_default(),
+                    tdialog_status: row.get::<_, String>(12).unwrap_or_default(),
+                    recognition_type: row.get::<_, String>(13).unwrap_or_default(),
+                    recognition_quality: row.get::<_, f64>(14).unwrap_or(0.0),
+                    generative_ai_sources: row.get::<_, String>(15).unwrap_or_default(),
+                    articles: row.get::<_, String>(16).unwrap_or_default(),
+                    faqs_found: row.get::<_, String>(17).unwrap_or_default(),
+                    contexts: row.get::<_, String>(18).unwrap_or_default(),
+                    pages: row.get::<_, String>(19).unwrap_or_default(),
+                    link_click_info: row.get::<_, String>(20).unwrap_or_default(),
+                    feedback_info: row.get::<_, String>(21).unwrap_or_default(),
+                    output_metadata: row.get::<_, String>(22).unwrap_or_default(),
+                    recognition_details: row.get::<_, String>(23).unwrap_or_default(),
+                })
             })
-        })
-        .map_err(|e| format!("Query error: {e}"))?
-        .filter_map(|r| r.ok())
-        .collect();
+            .map_err(|e| format!("Query error: {e}"))?
+            .filter_map(|r| r.ok())
+            .collect();
 
-    Ok(rows)
+        Ok(rows)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2565,11 +2819,16 @@ async fn flag_session(
 // ── Flagged folder commands ──────────────────────────────────────────────────
 
 #[tauri::command]
-async fn get_flagged_folders(flagged_db: State<'_, SharedFlaggedDb>) -> Result<Vec<FlaggedFolder>, String> {
+async fn get_flagged_folders(
+    flagged_db: State<'_, SharedFlaggedDb>,
+) -> Result<Vec<FlaggedFolder>, String> {
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
         let mut stmt = conn
             .prepare(
                 "SELECT ff.folder_id, ff.name, ff.created_at, ff.sort_order, \
@@ -2583,10 +2842,10 @@ async fn get_flagged_folders(flagged_db: State<'_, SharedFlaggedDb>) -> Result<V
         let rows = stmt
             .query_map([], |row| {
                 Ok(FlaggedFolder {
-                    folder_id:     row.get(0)?,
-                    name:          row.get::<_, String>(1).unwrap_or_default(),
-                    created_at:    row.get::<_, String>(2).unwrap_or_default(),
-                    sort_order:    row.get::<_, i64>(3).unwrap_or(0),
+                    folder_id: row.get(0)?,
+                    name: row.get::<_, String>(1).unwrap_or_default(),
+                    created_at: row.get::<_, String>(2).unwrap_or_default(),
+                    sort_order: row.get::<_, i64>(3).unwrap_or(0),
                     session_count: row.get::<_, i64>(4).unwrap_or(0),
                 })
             })
@@ -2643,7 +2902,10 @@ async fn rename_flagged_folder(
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
         conn.execute(
             "UPDATE flagged_folders SET name = ?1 WHERE folder_id = ?2",
             params![name, folder_id],
@@ -2663,7 +2925,10 @@ async fn delete_flagged_folder(
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
         // Sessions are moved to "unfiled" (folder_id = NULL) via ON DELETE SET NULL
         conn.execute(
             "DELETE FROM flagged_folders WHERE folder_id = ?1",
@@ -2685,7 +2950,10 @@ async fn move_to_flagged_folder(
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
         conn.execute(
             "UPDATE flagged_sessions SET folder_id = ?1 WHERE flag_id = ?2",
             params![folder_id, flag_id],
@@ -2698,7 +2966,9 @@ async fn move_to_flagged_folder(
 }
 
 #[tauri::command]
-async fn get_flagged_sessions(flagged_db: State<'_, SharedFlaggedDb>) -> Result<Vec<FlaggedSessionSummary>, String> {
+async fn get_flagged_sessions(
+    flagged_db: State<'_, SharedFlaggedDb>,
+) -> Result<Vec<FlaggedSessionSummary>, String> {
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
@@ -2746,7 +3016,10 @@ async fn get_flagged_session_interactions(
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
         let mut stmt = conn
             .prepare(
                 r#"SELECT
@@ -2767,31 +3040,31 @@ async fn get_flagged_session_interactions(
         let rows = stmt
             .query_map(params![flag_id], |row| {
                 Ok(FlaggedInteractionRow {
-                    log_id:                  row.get::<_, i64>(0).unwrap_or(0),
-                    interaction_uuid:        row.get::<_, String>(1).unwrap_or_default(),
-                    session_uuid:            row.get::<_, String>(2).unwrap_or_default(),
-                    timestamp_start:         row.get::<_, String>(3).unwrap_or_default(),
-                    timestamp_end:           row.get::<_, String>(4).unwrap_or_default(),
-                    culture:                 row.get::<_, String>(5).unwrap_or_default(),
-                    main_interaction_type:   row.get::<_, String>(6).unwrap_or_default(),
-                    all_interaction_types:   row.get::<_, String>(7).unwrap_or_default(),
-                    interaction_value:       row.get::<_, String>(8).unwrap_or_default(),
-                    output_text:             row.get::<_, String>(9).unwrap_or_default(),
-                    article_ids:             row.get::<_, String>(10).unwrap_or_default(),
-                    dialog_paths:            row.get::<_, String>(11).unwrap_or_default(),
-                    tdialog_status:          row.get::<_, String>(12).unwrap_or_default(),
-                    recognition_type:        row.get::<_, String>(13).unwrap_or_default(),
-                    recognition_quality:     row.get::<_, f64>(14).unwrap_or(0.0),
-                    generative_ai_sources:   row.get::<_, String>(15).unwrap_or_default(),
-                    articles:                row.get::<_, String>(16).unwrap_or_default(),
-                    faqs_found:              row.get::<_, String>(17).unwrap_or_default(),
-                    contexts:                row.get::<_, String>(18).unwrap_or_default(),
-                    pages:                   row.get::<_, String>(19).unwrap_or_default(),
-                    link_click_info:         row.get::<_, String>(20).unwrap_or_default(),
-                    feedback_info:           row.get::<_, String>(21).unwrap_or_default(),
-                    output_metadata:         row.get::<_, String>(22).unwrap_or_default(),
-                    recognition_details:     row.get::<_, String>(23).unwrap_or_default(),
-                    is_flagged:              row.get::<_, i64>(24).unwrap_or(0) != 0,
+                    log_id: row.get::<_, i64>(0).unwrap_or(0),
+                    interaction_uuid: row.get::<_, String>(1).unwrap_or_default(),
+                    session_uuid: row.get::<_, String>(2).unwrap_or_default(),
+                    timestamp_start: row.get::<_, String>(3).unwrap_or_default(),
+                    timestamp_end: row.get::<_, String>(4).unwrap_or_default(),
+                    culture: row.get::<_, String>(5).unwrap_or_default(),
+                    main_interaction_type: row.get::<_, String>(6).unwrap_or_default(),
+                    all_interaction_types: row.get::<_, String>(7).unwrap_or_default(),
+                    interaction_value: row.get::<_, String>(8).unwrap_or_default(),
+                    output_text: row.get::<_, String>(9).unwrap_or_default(),
+                    article_ids: row.get::<_, String>(10).unwrap_or_default(),
+                    dialog_paths: row.get::<_, String>(11).unwrap_or_default(),
+                    tdialog_status: row.get::<_, String>(12).unwrap_or_default(),
+                    recognition_type: row.get::<_, String>(13).unwrap_or_default(),
+                    recognition_quality: row.get::<_, f64>(14).unwrap_or(0.0),
+                    generative_ai_sources: row.get::<_, String>(15).unwrap_or_default(),
+                    articles: row.get::<_, String>(16).unwrap_or_default(),
+                    faqs_found: row.get::<_, String>(17).unwrap_or_default(),
+                    contexts: row.get::<_, String>(18).unwrap_or_default(),
+                    pages: row.get::<_, String>(19).unwrap_or_default(),
+                    link_click_info: row.get::<_, String>(20).unwrap_or_default(),
+                    feedback_info: row.get::<_, String>(21).unwrap_or_default(),
+                    output_metadata: row.get::<_, String>(22).unwrap_or_default(),
+                    recognition_details: row.get::<_, String>(23).unwrap_or_default(),
+                    is_flagged: row.get::<_, i64>(24).unwrap_or(0) != 0,
                 })
             })
             .map_err(|e| format!("Query error: {e}"))?
@@ -2812,7 +3085,10 @@ async fn save_flagged_note(
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
         conn.execute(
             "UPDATE flagged_sessions SET notes = ?1 WHERE flag_id = ?2",
             params![notes, flag_id],
@@ -2832,9 +3108,15 @@ async fn unflag_session(
     let fdb = flagged_db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = fdb.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("Flagged database not initialized.")?;
-        conn.execute("DELETE FROM flagged_sessions WHERE flag_id = ?1", params![flag_id])
-            .map_err(|e| format!("Delete error: {e}"))?;
+        let conn = state
+            .conn
+            .as_ref()
+            .ok_or("Flagged database not initialized.")?;
+        conn.execute(
+            "DELETE FROM flagged_sessions WHERE flag_id = ?1",
+            params![flag_id],
+        )
+        .map_err(|e| format!("Delete error: {e}"))?;
         Ok(())
     })
     .await
@@ -3004,7 +3286,15 @@ mod tests {
                 log_id, interaction_uuid, session_uuid, timestamp_start,
                 interaction_value, output_text, imported_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![1i64, "iu-1", "session-b", "2026-01-01T11:00:00", "hoi", "", 1i64],
+            params![
+                1i64,
+                "iu-1",
+                "session-b",
+                "2026-01-01T11:00:00",
+                "hoi",
+                "",
+                1i64
+            ],
         )
         .expect("insert");
 

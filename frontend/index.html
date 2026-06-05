@@ -17,6 +17,7 @@
         padding: 0;
       }
       :root {
+        color-scheme: dark;
         --bg: #0f1117;
         --surface: #1a1d27;
         --surface2: #21253a;
@@ -29,6 +30,10 @@
         --orange: #fb923c;
         --red: #f87171;
         --teal: #2dd4bf;
+      }
+      html {
+        background: var(--bg);
+        color-scheme: dark;
       }
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -536,6 +541,8 @@
       ::-webkit-scrollbar-thumb:hover {
         background: var(--muted);
       }
+      html,
+      body,
       * {
         scrollbar-width: thin;
         scrollbar-color: #3d4462 transparent;
@@ -4266,6 +4273,43 @@
         border-color: rgba(96, 165, 250, 0.6) !important;
         background: rgba(96, 165, 250, 0.06) !important;
         box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.3);
+      }
+      .bubble.feedback-origin-neg {
+        border-color: rgba(239, 68, 68, 0.42) !important;
+        box-shadow: inset 3px 0 0 rgba(239, 68, 68, 0.62);
+      }
+      .bubble.feedback-origin-neg.user {
+        box-shadow: inset -3px 0 0 rgba(239, 68, 68, 0.62);
+      }
+      .bubble.feedback-origin-neg::after,
+      .bubble.feedback-origin-pos::after {
+        content: "";
+        position: absolute;
+        top: 8px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        opacity: 0.85;
+      }
+      .bubble.feedback-origin-neg::after {
+        left: 8px;
+        background: var(--red);
+      }
+      .bubble.feedback-origin-neg.user::after,
+      .bubble.feedback-origin-pos.user::after {
+        left: auto;
+        right: 8px;
+      }
+      .bubble.feedback-origin-pos {
+        border-color: rgba(34, 197, 94, 0.42) !important;
+        box-shadow: inset 3px 0 0 rgba(34, 197, 94, 0.62);
+      }
+      .bubble.feedback-origin-pos.user {
+        box-shadow: inset -3px 0 0 rgba(34, 197, 94, 0.62);
+      }
+      .bubble.feedback-origin-pos::after {
+        left: 8px;
+        background: var(--green);
       }
       /* Entity match chips */
       .entity-match-chip {
@@ -14976,6 +15020,18 @@
           return `<div class="chat-turn${selectedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onTurnClick(this,event)">${turnInner}</div>`
         }
 
+        let feedbackOriginTurnScores = new Map()
+        function parseFeedbackInfo(row) {
+          if (!row || !row.feedbackInfo) return null
+          try {
+            return typeof row.feedbackInfo === "object"
+              ? row.feedbackInfo
+              : JSON.parse(row.feedbackInfo)
+          } catch {
+            return null
+          }
+        }
+
         function renderTurnInner(turn) {
           let html = ""
           if (turn.linkClicked) {
@@ -14998,18 +15054,23 @@
           const lowRecogActive = convSessionFilter === "low_recog"
           const negFeedbackActive = convSessionFilter === "neg_feedback"
           const posFeedbackActive = convSessionFilter === "pos_feedback"
+          const turnId = String(
+            (turn.userRow || turn.botRows[0])?.logId ?? "",
+          )
+          const feedbackOriginScore = feedbackOriginTurnScores.get(turnId)
+          const feedbackOriginClass =
+            feedbackOriginScore === -1
+              ? " feedback-origin-neg"
+              : feedbackOriginScore === 1
+              ? " feedback-origin-pos"
+              : ""
+          const turnMatchesActiveFeedback =
+            (negFeedbackActive && feedbackOriginScore === -1) ||
+            (posFeedbackActive && feedbackOriginScore === 1)
           const hasFeedbackScore = (rows, score) =>
             rows.some((br) => {
-              if (!br.feedbackInfo) return false
-              try {
-                const f =
-                  typeof br.feedbackInfo === "object"
-                    ? br.feedbackInfo
-                    : JSON.parse(br.feedbackInfo)
-                return f.score === score
-              } catch {
-                return false
-              }
+              const f = parseFeedbackInfo(br)
+              return f?.score === score
             })
           const turnHasZeroRecog = turn.botRows.some(
             (br) =>
@@ -15047,14 +15108,15 @@
               : lowRecogActive && turnHasLowRecog
               ? " low-recog-highlight"
               : (negFeedbackActive && turnHasNegFeedback) ||
-                (posFeedbackActive && turnHasPosFeedback)
+                (posFeedbackActive && turnHasPosFeedback) ||
+                turnMatchesActiveFeedback
               ? " feedback-highlight"
               : ""
 
           if (turn.userRow) {
             html += `<div class="user-group">
               <span class="user-label">User</span>
-              <div class="bubble user${userHighlightClass}">${
+              <div class="bubble user${userHighlightClass}${feedbackOriginClass}">${
               chatHl(turn.userRow.interactionValue, false).body
             }</div>
               <span class="bubble-ts">${esc(
@@ -15131,15 +15193,14 @@
                   ? " zero-recog-highlight"
                   : lowRecogActive && isBrLowRecog
                   ? " low-recog-highlight"
+                  : turnMatchesActiveFeedback
+                  ? " feedback-highlight"
                   : (() => {
-                      if (!br.feedbackInfo) return ""
-                      try {
-                        const f = JSON.parse(br.feedbackInfo)
-                        if (negFeedbackActive && f.score === -1)
-                          return " feedback-highlight"
-                        if (posFeedbackActive && f.score === 1)
-                          return " feedback-highlight"
-                      } catch {}
+                      const f = parseFeedbackInfo(br)
+                      if (negFeedbackActive && f?.score === -1)
+                        return " feedback-highlight"
+                      if (posFeedbackActive && f?.score === 1)
+                        return " feedback-highlight"
                       return ""
                     })()
               const detailOpenClass =
@@ -15147,7 +15208,7 @@
                 (lowRecogActive && isBrLowRecog)
                   ? " open"
                   : ""
-              html += `<div class="bubble ${bubbleClass}${highlightClass}" onclick="toggleBubbleDetail(${br.logId})">
+              html += `<div class="bubble ${bubbleClass}${highlightClass}${feedbackOriginClass}" onclick="toggleBubbleDetail(${br.logId})">
                 ${body}
                 <span class="bubble-expand-hint">▾ details</span>
                 <div class="bubble-detail${detailOpenClass}" data-logid="${br.logId}">${detail}</div>
@@ -15162,6 +15223,66 @@
         } // end renderTurnInner
 
         const allTurns = buildChatTurns(interactions)
+        feedbackOriginTurnScores = new Map()
+        const feedbackOrigins = new Map()
+        allTurns.forEach((t) => {
+          const rows = [t.userRow, ...t.botRows].filter(Boolean)
+          rows.forEach((row) => {
+            const info = parseFeedbackInfo(row)
+            if (
+              (info?.score === -1 || info?.score === 1) &&
+              info.originatingInteractionId
+            ) {
+              feedbackOrigins.set(info.originatingInteractionId, info.score)
+            }
+          })
+        })
+        if (feedbackOrigins.size) {
+          allTurns.forEach((t) => {
+            const rows = [t.userRow, ...t.botRows].filter(Boolean)
+            const matchedRow = rows.find((row) =>
+              feedbackOrigins.has(row.interactionUuid),
+            )
+            if (matchedRow) {
+              const id = String((t.userRow || t.botRows[0])?.logId ?? "")
+              if (id) {
+                feedbackOriginTurnScores.set(
+                  id,
+                  feedbackOrigins.get(matchedRow.interactionUuid),
+                )
+              }
+            }
+          })
+        }
+        allTurns.forEach((t, idx) => {
+          const rows = [t.userRow, ...t.botRows].filter(Boolean)
+          const fallbackScore = rows.reduce((score, row) => {
+            if (score) return score
+            const info = parseFeedbackInfo(row)
+            if (
+              (info?.score === -1 || info?.score === 1) &&
+              !info.originatingInteractionId
+            ) {
+              return info.score
+            }
+            if (row.mainInteractionType === "Feedback") {
+              if (row.interactionValue === "no") return -1
+              if (row.interactionValue === "yes") return 1
+            }
+            return 0
+          }, 0)
+          if (!fallbackScore) return
+          const targetTurn =
+            rows.some((row) => row.outputText) || idx === 0
+              ? t
+              : allTurns[idx - 1]
+          const id = String(
+            (targetTurn.userRow || targetTurn.botRows[0])?.logId ?? "",
+          )
+          if (id && !feedbackOriginTurnScores.has(id)) {
+            feedbackOriginTurnScores.set(id, fallbackScore)
+          }
+        })
 
         if (chatQuery && !chatShowAll) {
           // Show only the Q&A turns that contain a match
@@ -15202,17 +15323,11 @@
               const negActive = convSessionFilter === "neg_feedback"
               const feedbackTurn =
                 allTurns.find((t) => {
-                  const ur = t.userRow
-                  if (!ur) return false
-                  try {
-                    const fi =
-                      typeof ur.feedbackInfo === "object"
-                        ? ur.feedbackInfo
-                        : JSON.parse(ur.feedbackInfo)
+                  const rows = [t.userRow, ...t.botRows].filter(Boolean)
+                  return rows.some((row) => {
+                    const fi = parseFeedbackInfo(row)
                     return negActive ? fi?.score === -1 : fi?.score === 1
-                  } catch {
-                    return false
-                  }
+                  })
                 }) ||
                 allTurns.find((t) =>
                   negActive
@@ -15223,11 +15338,17 @@
                 )
               if (!feedbackTurn) return
               let targetEl = null
-              try {
-                const fi =
-                  typeof feedbackTurn.userRow.feedbackInfo === "object"
-                    ? feedbackTurn.userRow.feedbackInfo
-                    : JSON.parse(feedbackTurn.userRow.feedbackInfo)
+              {
+                const feedbackRow = [
+                  feedbackTurn.userRow,
+                  ...feedbackTurn.botRows,
+                ]
+                  .filter(Boolean)
+                  .find((row) => {
+                    const fi = parseFeedbackInfo(row)
+                    return negActive ? fi?.score === -1 : fi?.score === 1
+                  })
+                const fi = parseFeedbackInfo(feedbackRow)
                 const originatingId = fi?.originatingInteractionId
                 if (originatingId) {
                   const originatingTurn = allTurns.find((t) =>
@@ -15245,8 +15366,6 @@
                     )
                   }
                 }
-              } catch {
-                /* fall through to DOM fallback */
               }
               // Fallback: turn before the feedback-highlighted element in the DOM
               if (!targetEl) {
