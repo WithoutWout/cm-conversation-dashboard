@@ -50,30 +50,27 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "v0.8.0"
+          releaseName: "v0.8.1"
           releaseBody: |
-            ## What's new in v0.8.0
+            ## What's new in v0.8.1
 
-            ### Content search accuracy
-            - Content search now evaluates context filters and text queries against the same response output, so results are much more predictable.
-            - **Responses only** (`¬T`) now truly searches response text only, excluding IDs, titles, descriptions, node names, and entity enrichment.
-            - **ND** now means **Exclude non-default responses from search** and only affects active text searches.
-            - Invalid regex searches now show a clear error state instead of looking like a valid zero-result search.
+            ### Conversation search accuracy
+            - Conversation result previews now show the first matched user input instead of always showing the first user message in the session.
+            - Bot-output searches now preview the user question that led to the matched bot answer.
+            - GenAI searches now only match GenAI answers when the GenAI filter is active.
+            - Negative and positive feedback filters now resolve to the interaction that caused the feedback, instead of the generic feedback response.
+            - Low and zero recognition filters now use the first matching low/zero recognition interaction as the result.
 
-            ### Reachability and context clarity
-            - Content detail views now only mark a response as **Unreachable** when it is not the default response and has no context condition.
-            - Contextual responses that are reachable through user context are no longer presented as non-default/unreachable in result cards.
-            - Matching contextual responses can show compact snippets on result cards, making it easier to understand why an item appeared.
+            ### Chat review clarity
+            - Chat turns that led to negative feedback now show a subtle red indicator.
+            - Chat turns that led to positive feedback now show a subtle green indicator.
+            - Feedback indicators apply to both the user input and bot output in the rated Q&A turn.
 
-            ### Article and dialog relationships
-            - Article result cards now show clickable **Dialog Link** and **Transactional Dialog** chips inline.
-            - Dialog result cards can show which articles reference them, giving a clearer article -> dialog -> article overview.
-            - The **Share Content** modal now includes a **Grouped** view that groups Articles, Dialogs, and Transactional Dialogs, always sorted by ID.
-            - Grouped sharing makes dialog-to-article references easier to scan, for example `dn-123 -> qa-456`.
+            ### macOS polish
+            - Added explicit dark color-scheme styling so release builds use dark scrollbars that match the interface.
 
-            ### Documentation and release readiness
-            - Updated project instructions for Codex and GitHub Copilot with the latest content search, Entities, relationship, and sharing behavior.
-            - Bumped the application version to **0.8.0** across the Tauri and package metadata.
+            ### Release readiness
+            - Bumped the application version to **0.8.1** across the Tauri and package metadata.
 
             ---
 
