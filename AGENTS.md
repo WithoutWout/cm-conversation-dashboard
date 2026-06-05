@@ -17,7 +17,7 @@ Libraries may be used, but must be vendored locally (for example, `frontend/vend
 ```text
 src-tauri/
   src/
-    lib.rs     -- Tauri commands (get_data, open_url, select_data_folder, check_for_updates, get_version)
+    lib.rs     -- Tauri commands for content data, links, updates, and Conversations DB features
     main.rs    -- Entry point, calls lib::run()
   tauri.conf.json -- App config, window setup, frontendDist: ../frontend
   Cargo.toml  -- Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog)
@@ -25,6 +25,7 @@ src-tauri/
     default.json -- Capability grants: core:default, opener:default, dialog:default
 frontend/
   index.html  -- Entire renderer: HTML + embedded <style> + embedded <script>
+  search-worker.js -- Worker-side content/entity filtering, sorting, and search matching
 package.json  -- scripts: tauri dev / tauri build
 ```
 
@@ -32,6 +33,7 @@ Data files are read-only, never committed, and placed in a user-selected folder:
 
 - `*ArticlesExport*.json` -- matched by pattern `"ArticlesExport"`
 - `*DialogsExport*.json` -- matched by pattern `"DialogsExport"`
+- `*EntitiesExport*.csv` -- matched when present for Entities enrichment/search
 
 ---
 
@@ -49,11 +51,14 @@ Data files are read-only, never committed, and placed in a user-selected folder:
 
 | Command              | JS call via `window.electronAPI` | Description                                                                     |
 | -------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
-| `get_data`           | `getData(selectedFolder)`        | Returns `{ articles[], dialogs[], tDialogs[], files, sourceFiles, dataSource }` |
+| `get_data`           | `getData(selectedFolder)`        | Returns content data: articles, dialogs, tDialogs, entities, conversation/context vars, files, sourceFiles, dataSource |
 | `open_url`           | `openUrl(url)`                   | Opens a URL with `opener::open_url` (https/http only)                           |
+| `open_preview_window`| `openPreviewWindow(url)`         | Opens a validated URL in an in-app preview window                               |
 | `select_data_folder` | `selectDataFolder()`             | Opens a native folder picker, returns `{ ok, canceled, path }`                  |
 | `check_for_updates`  | `checkForUpdates()`              | Fetches GitHub releases API, returns `{ status, version, message }`             |
 | `get_version`        | `getVersion()`                   | Returns the app version string from `package_info()`                            |
+
+There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context options, daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
 ## Events (Rust to renderer)
 
@@ -73,12 +78,16 @@ const invoke = window.__TAURI__?.core?.invoke
 const listen = window.__TAURI__?.event?.listen
 window.electronAPI = {
   getData: (selectedFolder) =>
-    invoke("get_data", { args: { selected_folder: selectedFolder } }),
+    invoke("get_data", { args: { selected_folder: selectedFolder || null } }),
   openUrl: (url) => invoke("open_url", { url }),
+  openPreviewWindow: (url) => invoke("open_preview_window", { url }),
   selectDataFolder: () => invoke("select_data_folder"),
-  onDataFolderUpdated: (cb) => listen("data-folder-updated", cb),
+  onDataFolderUpdated: (handler) =>
+    listen ? listen("data-folder-updated", handler) : Promise.resolve(() => {}),
   checkForUpdates: () => invoke("check_for_updates"),
   getVersion: () => invoke("get_version"),
+  // Conversations DB commands are also mapped here; keep them behind
+  // window.electronAPI rather than adding direct renderer filesystem access.
 }
 ```
 
@@ -155,7 +164,7 @@ Deep-link patterns:
 
 ## Renderer architecture (`index.html`)
 
-There is a single `<script>` block at the bottom. There are no modules. All state is module-level `let`.
+There is a single `<script>` block at the bottom. There are no modules. Most renderer state is module-level `let`. Content/entity filtering and sorting run in `frontend/search-worker.js`; the renderer receives Int32Array index buffers and resolves only the visible page of items.
 
 ### State variables
 
@@ -164,53 +173,63 @@ let gQuery = "" // current search query string
 let searchCase = false // Aa toggle
 let searchWord = false // \b toggle
 let searchRegex = false // .* toggle
-let searchContent = true // not-text toggle; skip IDs, names, entities; match response/answer text only (on by default)
+let searchContent = false // ¬T toggle; when true, search responses only
+let searchExcludeNonDefault = false // ND toggle; excludes non-default response matches only when a query is active
 let allFilterPill = "all" // filter in All Results tab
 let aFilter = "all" // filter in Articles tab
 let dFilter = "all" // filter in Dialogs tab
+let allSort, aSort, dSort // persisted content sort choices
 let allPage, aPage, dPage // current pagination pages
 let allArticles = [] // raw article data
 let allDialogsCombined = [] // dialogs only (no tDialogs)
 let allCombinedItems = [] // articles + dialogs + tDialogs merged (each with _kind)
-let filteredAll,
-  filteredArticles,
-  filteredDialogs = []
+let filteredAll, filteredArticles, filteredDialogs // Int32Array result indexes
+let allEntities = []
+let filteredEntities // Int32Array entity result indexes
+let matchingEntityNames = new Set() // entity names matched by current search query
 let dialogMap = new Map() // id -> dialog object
 let tDialogMap = new Map() // id -> tDialog object
+let articleMap = new Map() // id -> article object
 let cmBaseUrl // CM.com context URL
+let haloBaseUrl // HALO/other context URL for conversation links
 let openMode // "popup" | "browser"
+let otherOpenMode // "popup" | "browser"
 ```
 
 ### Key functions
 
 | Function                          | Purpose                                                                                                    |
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `buildSearchRegex(q)`             | Central regex builder; respects `searchCase`, `searchWord`, `searchRegex`; returns `null` on invalid regex |
-| `hl(text, q)`                     | HTML-escapes text and wraps matches in `<mark>`; uses `g` flag only here                                   |
+| `buildSearchRegex(q)`             | Renderer highlight regex builder; worker has the authoritative search compiler                             |
+| `hl(text, q)`                     | HTML-escapes text and wraps matches in `<mark>`                                                            |
 | `esc(s)`                          | HTML-escapes a string; use for all dynamic content inserted into `innerHTML`                               |
 | `strip(t)`                        | Strips HTML tags from text                                                                                 |
 | `aKind(a)`                        | Returns `"dialog"`, `"tdialog"`, or `"plain"` for an article based on Outputs                              |
-| `matchArticle(a, q)`              | Tests article against current search regex across Id, Questions, Outputs                                   |
-| `matchDialog(item, q)`            | Tests dialog/tDialog against regex across id, name, description, node content                              |
+| `triggerSearch()`                 | Sends the current query, filters, toggles, context filters, and sort choices to `search-worker.js`          |
+| `handleSearchResults(msg)`        | Receives worker result index arrays, updates counts/pagination, and lazily renders the active tab          |
 | `cmLink(type, id)`                | Returns an `<a class="action-link">` HTML string; `type` is `"article"` or `"dialog"`                      |
+| `articleDialogLinkBadges(links)`  | Renders clickable Dialog Link/Transactional Dialog chips for article cards                                 |
+| `dialogLinkedArticles(item)`      | Finds Articles that link to a Dialog for card/export relationship displays                                 |
 | `renderArticleCard(art, q)`       | Full article card HTML with badges, expandable questions, output section                                   |
 | `renderDialogCard(item, q)`       | Full dialog/tDialog card HTML with expandable node list                                                    |
 | `renderNodeHtml(node, dialog, q)` | Individual node HTML: Recognition/Output badge, answer, user options, routing                              |
-| `applyAllFilters()`               | Filters `allCombinedItems` to `filteredAll`, then re-renders All Results panel                             |
-| `applyArticleFilters()`           | Filters `allArticles` to `filteredArticles`, then re-renders Articles panel                                |
-| `applyDialogFilters()`            | Filters `allDialogsCombined + tDialogs` to `filteredDialogs`, then re-renders Dialogs panel                |
+| `applyAllFilters()`               | Lightweight wrapper that triggers worker search for All Results                                            |
+| `applyArticleFilters()`           | Lightweight wrapper that triggers worker search for Articles                                               |
+| `applyDialogFilters()`            | Lightweight wrapper that triggers worker search for Dialogs                                                |
+| `applyEntityFilters()`            | Lightweight wrapper that triggers worker search for Entities                                               |
 | `jumpToDialog(id, isTDialog)`     | Switches to Dialogs tab, sets search to the ID, scrolls to and opens the matching card                     |
-| `openExportModal()`               | Context-aware: reads current active tab's filtered items, builds Jira-ready text                           |
+| `openExportModal()`               | Opens Share Content using the current active tab's filtered items                                          |
+| `_renderExportGrouped(items)`     | Groups Share Content by Articles, Dialogs, Transactional Dialogs, sorted by id, with dialog -> article refs |
 | `buildItemUrl(kind, id)`          | Returns full CM.com URL for an item                                                                        |
-| `triggerSearch()`                 | Called on every search input change; updates `gQuery`, calls all three `apply*` functions                  |
 
 ### Rendering pipeline
 
 1. Data loads via `window.electronAPI.getData(dataFolderPath)`.
 2. Maps (`dialogMap`, `tDialogMap`) are populated.
 3. Combined item arrays are assembled, and each item gets `._kind = "article" | "dialog" | "tdialog"`.
-4. `applyAllFilters()`, `applyArticleFilters()`, and `applyDialogFilters()` are called.
-5. Each panel renders its paginated slice using `renderArticleCard` or `renderDialogCard`.
+4. Data is posted to `search-worker.js`, which precomputes indexed answer/node/entity search fields.
+5. `triggerSearch()` asks the worker for filtered/sorted Int32Array indexes.
+6. The active panel renders its paginated slice using `renderArticleCard`, `renderDialogCard`, or `renderEntityCard`; inactive tabs are marked dirty and render lazily.
 
 ### Pagination
 
@@ -228,6 +247,18 @@ There are three distinct search types in the app:
 2. **Conversations search** searches conversations and their context, for example filtering by context. This search can be very resource-intensive, so use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter.
 3. **Chat search** searches within a single chat. A chat is first found and opened via Conversations search; Chat search then operates within that opened conversation.
 
+### Content search semantics
+
+- `search-worker.js` is the source of truth for result inclusion. Renderer helpers may mirror parts of search only for snippets, highlights, and modal display.
+- Plain search supports space-separated AND terms, `|` OR groups, quoted exact phrases, case sensitivity (`Aa`), whole word (`\b`), and regex (`.*`).
+- Invalid regex mode returns an explicit `invalid_regex` result from the worker; the renderer must show that as an error state, not as a valid zero-result search.
+- When content context filters and a text query are both active, the same answer output must satisfy both the context filter and the text query.
+- `¬T` means **Responses only**. When enabled, search excludes IDs, titles/names, descriptions, node names, and entity enrichment.
+- `ND` means **Exclude non-default responses from search**. It only affects matching when a text query is active and must not hide items for an empty query.
+- A response is user-facing unreachable only when it is not the default response and it has no context condition. Non-default responses with context are reachable for users in that context and should not be labeled "non-default" or "unreachable" in result cards.
+- Contextual/non-default query hits should show a compact snippet or reason on result cards so users can see why an item matched without opening the modal.
+- Modal "Show search-matching content only" should use the same answer/node sections that caused worker result inclusion.
+
 ---
 
 ## UI structure
@@ -237,12 +268,13 @@ There are three distinct search types in the app:
   brand | file tags | Export IDs button | Settings button (gear)
 
 <div.global-search-bar>
-  search input | [Aa] [\b] [.*] toggle buttons
+  search input | [Aa] [\b] [.*] [¬T] [ND] | context filter button
 
 <div.tab-bar>
   All Results (with sub-stats: art . dlg . t.dlg)
   | Articles (with sub-stats: resp . dlg-lnk)
   | Dialogs (with sub-stats: dlg . t.dlg . nodes . recog)
+  | Entities (with sub-stats: entities . words)
 
 <div#panel-all>
   filter pills (All / Articles / Dialogs / Transactional Dialogs)
@@ -256,13 +288,24 @@ There are three distinct search types in the app:
   filter pills (All / Dialogs / Transactional Dialogs / Has responses)
   item list | pagination
 
+<div#panel-entities>
+  filter pills (All / Used in Articles / Used in Dialogs)
+  entity list | pagination
+
 <div#settingsModal>
   CM.com Context URL input
+  Other/HALO URL input
   Open CM.com links: radio (popup / browser)
 
 <div#exportModal>
-  read-only textarea | Copy to clipboard
+  List / Table / Grouped tabs | copy as links / table / plain text
 ```
+
+Content result relationship displays:
+
+- Article cards show clickable Dialog Link / Transactional Dialog chips inline; avoid separate "Directs to ..." text when the target can be part of the chip.
+- Dialog cards can show "Uses articles" relationship rows with clickable `qa-...` chips.
+- Share Content `Grouped` view always groups by Articles, Dialogs, Transactional Dialogs, then sorts by id. Dialog rows that reference articles should visibly read as dialog -> article relationships, for example `dn-123 -> qa-456`, with clickable chips in the UI.
 
 ---
 
@@ -289,8 +332,20 @@ Always use these terms in the UI:
 | Key                    | Value                                  |
 | ---------------------- | -------------------------------------- |
 | `cm-base-url`          | CM.com context URL override (string)   |
+| `halo-base-url`        | HALO/other context URL override (string) |
 | `cm-open-mode`         | `"popup"` or `"browser"`               |
+| `cm-other-open-mode`   | `"popup"` or `"browser"`               |
 | `cm-dismissed-version` | Last update version the user dismissed |
+| `cm-data-folder`       | Last selected content export folder    |
+| `cm-sort-all`          | All Results sort choice                |
+| `cm-sort-articles`     | Articles sort choice                   |
+| `cm-sort-dialogs`      | Dialogs sort choice                    |
+| `cm-flow-direction`    | Dialog graph layout direction          |
+| `cm-view`              | Last selected main view                |
+| `conv-db-path`         | Last selected conversations database   |
+| `conv-low-recog-threshold` | Low recognition threshold          |
+| `conv-data-retention-days` | CSV import retention window        |
+| `chat-copy-format`     | Chat copy format preference            |
 
 Example `cm-base-url` value: `https://www.cm.com/en-gb/app/aicloud/dbd80c7c-e9b1-44d2-9762-fb5ad1664b7f/Efteling/EFTELING/nl/`
 
