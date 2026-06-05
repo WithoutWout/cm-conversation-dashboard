@@ -50,29 +50,30 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "v__VERSION__"
+          releaseName: "v0.8.0"
           releaseBody: |
-            ## What's new in v0.7.0
+            ## What's new in v0.8.0
 
-            ### Chat — Flag/Unflag toggle
-            - Pressing **F** (or **Cmd/Ctrl+F**) in chat select mode now toggles: if all selected interactions are already flagged, the shortcut **removes** the flag instead of creating a duplicate.
-            - The **Flag** button in the select header dynamically shows **"Unflag"** when all selected turns have already been flagged, giving clear visual feedback.
+            ### Content search accuracy
+            - Content search now evaluates context filters and text queries against the same response output, so results are much more predictable.
+            - **Responses only** (`¬T`) now truly searches response text only, excluding IDs, titles, descriptions, node names, and entity enrichment.
+            - **ND** now means **Exclude non-default responses from search** and only affects active text searches.
+            - Invalid regex searches now show a clear error state instead of looking like a valid zero-result search.
 
-            ### Flagged view — keyboard shortcut
-            - Pressing **F** / **Cmd+F** in the Flagged view (while select mode is on) now triggers **Remove flag** for the currently open flagged conversation.
+            ### Reachability and context clarity
+            - Content detail views now only mark a response as **Unreachable** when it is not the default response and has no context condition.
+            - Contextual responses that are reachable through user context are no longer presented as non-default/unreachable in result cards.
+            - Matching contextual responses can show compact snippets on result cards, making it easier to understand why an item appeared.
 
-            ### Conversations view improvements
-            - Feedback highlighting and scrollable feedback indicators in the chat thread.
-            - Floating action buttons for quick interaction access within a chat.
-            - Links can now be opened in a **popup window** or the **default browser** (configurable in Settings).
-            - GenerativeAI sessions are now correctly included when filtering on all interaction types.
+            ### Article and dialog relationships
+            - Article result cards now show clickable **Dialog Link** and **Transactional Dialog** chips inline.
+            - Dialog result cards can show which articles reference them, giving a clearer article -> dialog -> article overview.
+            - The **Share Content** modal now includes a **Grouped** view that groups Articles, Dialogs, and Transactional Dialogs, always sorted by ID.
+            - Grouped sharing makes dialog-to-article references easier to scan, for example `dn-123 -> qa-456`.
 
-            ### Context filters
-            - Enhanced context variable handling with escalation group aggregation for more precise session filtering.
-
-            ### Window & database
-            - Window auto-resizes to available screen height on startup.
-            - Configurable **data retention** setting for interaction logs with automatic purge.
+            ### Documentation and release readiness
+            - Updated project instructions for Codex and GitHub Copilot with the latest content search, Entities, relationship, and sharing behavior.
+            - Bumped the application version to **0.8.0** across the Tauri and package metadata.
 
             ---
 
