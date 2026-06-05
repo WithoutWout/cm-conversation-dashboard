@@ -59,7 +59,7 @@ Download the latest release for your platform from the [Releases page](https://g
 | Platform              | File                    |
 | --------------------- | ----------------------- |
 | macOS (Apple Silicon) | `.dmg`                  |
-| Windows               | `.exe` installer (NSIS) |
+| Windows               | Portable `.exe`         |
 
 > **macOS note:** The app is not yet notarised. On first launch, right-click the app → **Open** to bypass the Gatekeeper warning.
 
