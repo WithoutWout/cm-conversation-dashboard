@@ -4041,6 +4041,14 @@
         padding: 40px;
         line-height: 1.7;
       }
+      .chat-empty.compact {
+        flex: none;
+        padding: 0;
+        font-size: 0.78rem;
+      }
+      .chat-empty.error {
+        color: var(--red);
+      }
       /* Bot group */
       .bot-group {
         display: flex;
@@ -4599,6 +4607,128 @@
         background: rgba(124, 106, 247, 0.35);
         color: inherit;
         border-radius: 2px;
+      }
+
+      @media (max-width: 1100px) {
+        .app-header {
+          flex-wrap: wrap;
+          gap: 8px;
+          padding: 8px 12px;
+        }
+        .brand {
+          min-width: 180px;
+        }
+        .view-switcher {
+          order: 2;
+          flex: 1 1 100%;
+          margin: 2px 0 0;
+          border-left: none;
+          border-right: none;
+          padding: 0;
+          overflow-x: auto;
+        }
+        .header-files {
+          max-width: none;
+          flex: 1 1 260px;
+          justify-content: flex-start;
+          overflow: hidden;
+        }
+        .file-tag:not(.is-folder) {
+          max-width: 170px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .global-search-bar {
+          padding: 10px 12px;
+        }
+        .search-row,
+        .conv-search-row,
+        .chat-filter-row {
+          flex-wrap: wrap;
+        }
+        .search-wrap-global,
+        .conv-search-wrap,
+        .chat-search-wrap {
+          min-width: 220px;
+          max-width: none;
+        }
+        .chat-header {
+          height: auto;
+          min-height: 46px;
+          flex-wrap: wrap;
+          align-content: center;
+          padding: 8px 12px;
+        }
+        .chat-session-info {
+          max-width: 180px;
+        }
+        .halo-studio-link,
+        .chat-meta {
+          min-width: 0;
+        }
+      }
+
+      @media (max-width: 760px) {
+        body {
+          min-width: 0;
+        }
+        .brand-text {
+          display: none;
+        }
+        .icon-btn,
+        .view-btn {
+          padding-inline: 8px;
+        }
+        .tab-bar {
+          overflow-x: auto;
+        }
+        .tab {
+          min-width: 150px;
+        }
+        .toolbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+        .filter-pills,
+        .search-opts,
+        .conv-filter-pills,
+        .chat-filter-pills {
+          overflow-x: auto;
+          flex-wrap: nowrap;
+        }
+        .conv-layout,
+        .flagged-layout {
+          flex-direction: column;
+        }
+        .conv-sidebar,
+        .flagged-sidebar {
+          width: 100%;
+          min-width: 0;
+          max-height: 42vh;
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .conv-main,
+        .flagged-main {
+          min-width: 0;
+          min-height: 42vh;
+        }
+        .conv-toolbar {
+          flex-wrap: wrap;
+          padding: 8px 12px;
+        }
+        .bubble {
+          max-width: 88%;
+        }
+        .link-click-pill-inner {
+          max-width: 82%;
+        }
+        .modal-box,
+        .export-modal-box,
+        .manage-db-modal-box {
+          width: calc(100vw - 20px) !important;
+          max-width: calc(100vw - 20px) !important;
+        }
       }
     </style>
     <script src="vendor/vis-network.min.js"></script>
@@ -6846,8 +6976,34 @@
       let contentContextFilters = [] // [{name, value}] — active content context filters
       let contentContextOptions = [] // [{name, value, count}] — built from export data
       let _contentCtxSearchQuery = ""
+      let chatTurnsCache = {
+        interactions: null,
+        filter: "",
+        turns: [],
+        feedbackOriginTurnScores: new Map(),
+      }
+      let chatDetailCache = new Map() // logId -> rendered detail HTML
+      let chatRenderSeq = 0
 
       // ── Helpers ─────────────────────────────────────────────────────
+      function perfDebugEnabled() {
+        return localStorage.getItem("cm-perf-debug") === "1"
+      }
+      function perfStart(label) {
+        return perfDebugEnabled() ? { label, start: performance.now() } : null
+      }
+      function perfEnd(mark, detail) {
+        if (!mark) return
+        const suffix = detail ? " " + detail : ""
+        console.debug(
+          "[perf] " +
+            mark.label +
+            ": " +
+            (performance.now() - mark.start).toFixed(1) +
+            "ms" +
+            suffix,
+        )
+      }
       function esc(s) {
         return String(s == null ? "" : s)
           .replace(/&/g, "&amp;")
@@ -9893,9 +10049,11 @@
         _syncModalFilterBtn()
       }
       async function handleSearchResults(msg) {
+        const perf = perfStart("content search render")
         if (msg.id !== searchSeq) return
         if (msg.error === "invalid_regex") {
           showInvalidRegexResults()
+          perfEnd(perf, "invalid regex")
           return
         }
         const myId = msg.id
@@ -10006,6 +10164,7 @@
             if (item) _renderDialogModalBody(item, id, !!isTDialog)
           }
         }
+        perfEnd(perf, "tab=" + activeTab)
       }
       searchWorker = new Worker("search-worker.js")
       searchWorker.onmessage = function (e) {
@@ -12160,7 +12319,7 @@
         )
 
         // Simple turn grouper (mirrors buildChatTurns logic but self-contained)
-        const isGenAiRow = (r) =>
+        const chatRowIsGenAi = (r) =>
           r.mainInteractionType === "GenerativeAI" ||
           (r.allInteractionTypes || "").includes("GenerativeAI")
         const hasBotOutput = (r) => Boolean(r.outputText)
@@ -12255,14 +12414,14 @@
               )}</span></div>`
             }
             if (turn.botRows.length) {
-              const hasAi = turn.botRows.some(isGenAiRow)
+              const hasAi = turn.botRows.some(chatRowIsGenAi)
               const avatarClass = hasAi ? "genai" : ""
               const label = hasAi
                 ? `Bot <span class="bot-name-badge">AI</span>`
                 : "Bot"
               inner += `<div class="bot-group"><div class="bot-group-header"><div class="bot-avatar ${avatarClass}">B</div><span class="bot-name">${label}</span></div>`
               turn.botRows.forEach((br) => {
-                const bubbleClass = isGenAiRow(br) ? "genai" : "bot"
+                const bubbleClass = chatRowIsGenAi(br) ? "genai" : "bot"
                 const { body, options, ctas, asks } = chatHl(br.outputText)
                 const optionsHtml = options.length
                   ? `<div class="dialog-options">${options
@@ -12926,6 +13085,7 @@
       }
 
       function renderSessionList() {
+        const perf = perfStart("session list render")
         const list = document.getElementById("sessionsList")
         const countEl = document.getElementById("convResultCount")
         if (!convSessions.length) {
@@ -12936,6 +13096,7 @@
           }</div>`
           document.getElementById("sessionsPagination").innerHTML = ""
           if (countEl) countEl.textContent = ""
+          perfEnd(perf, "empty")
           return
         }
         const q = convQuery
@@ -13015,6 +13176,7 @@
         const totalPages = Math.ceil(convTotalSessions / 50)
         const pag = document.getElementById("sessionsPagination")
         pag.innerHTML = pagHtml(convPage, totalPages, "goConvPage")
+        perfEnd(perf, convSessions.length + " sessions")
       }
 
       function goConvPage(n) {
@@ -13209,22 +13371,8 @@
       function _renderContentCtxModal() {
         document.getElementById("contentCtxModalBody").innerHTML =
           _buildContentCtxModalHtml(_contentCtxSearchQuery)
-        _attachContentCtxChipListeners()
         document.getElementById("contentCtxClearBtn").style.display =
           contentContextFilters.length > 0 ? "" : "none"
-      }
-
-      function _attachContentCtxChipListeners() {
-        document
-          .querySelectorAll("#contentCtxModalBody .ctx-chip")
-          .forEach((btn) => {
-            btn.addEventListener("click", () => {
-              toggleContentContextOption(
-                btn.dataset.ctxName,
-                btn.dataset.ctxValue,
-              )
-            })
-          })
       }
 
       function toggleContentContextPanel() {
@@ -13282,6 +13430,13 @@
         _renderContentCtxModal()
         triggerSearch()
       }
+      document
+        .getElementById("contentCtxModalBody")
+        .addEventListener("click", (e) => {
+          const btn = e.target.closest(".ctx-chip")
+          if (!btn) return
+          toggleContentContextOption(btn.dataset.ctxName, btn.dataset.ctxValue)
+        })
 
       // ── Context filter modal ────────────────────────────────────────
       let _ctxSearchQuery = ""
@@ -13352,17 +13507,8 @@
       function _renderCtxModal() {
         document.getElementById("ctxModalBody").innerHTML =
           _buildCtxModalHtml(_ctxSearchQuery)
-        _attachCtxChipListeners()
         document.getElementById("ctxClearBtn").style.display =
           convContextFilters.length > 0 ? "" : "none"
-      }
-
-      function _attachCtxChipListeners() {
-        document.querySelectorAll("#ctxModalBody .ctx-chip").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            toggleContextOption(btn.dataset.ctxName, btn.dataset.ctxValue)
-          })
-        })
       }
 
       async function toggleContextPanel() {
@@ -13432,6 +13578,11 @@
         _renderCtxModal()
         convPage = 1
       }
+      document.getElementById("ctxModalBody").addEventListener("click", (e) => {
+        const btn = e.target.closest(".ctx-chip")
+        if (!btn) return
+        toggleContextOption(btn.dataset.ctxName, btn.dataset.ctxValue)
+      })
 
       // ── Session context detail modal ────────────────────────────────
       function openSessionContextModal(uuid) {
@@ -14484,6 +14635,7 @@
           activeInteractions = await window.electronAPI.getSessionInteractions(
             uuid,
           )
+          resetChatRenderCaches()
           renderChatThread()
           // Update header
           const session = convSessions.find((s) => s.sessionUuid === uuid)
@@ -14526,7 +14678,7 @@
         } catch (e) {
           document.getElementById(
             "chatThread",
-          ).innerHTML = `<div class="chat-empty">Error loading conversation:<br>${esc(
+          ).innerHTML = `<div class="chat-empty error">Error loading conversation:<br>${esc(
             String(e),
           )}</div>`
         }
@@ -14698,34 +14850,94 @@
           })
           .filter(Boolean)
       }
-      // For backwards compat (used by turnMatches for single-regex check path).
-      function buildChatSearchRegex(q) {
-        const res = buildChatSearchRegexes(q)
-        return res.length ? res[0] : null
-      }
-      // Check if a string matches ALL AND-terms of ANY OR-group using chat query.
-      function chatQueryMatchesText(text) {
-        if (!text || !chatQuery) return false
-        if (chatSearchRegex) {
-          const re = buildChatSearchRegex(chatQuery)
-          if (!re) return false
-          re.lastIndex = 0
-          return re.test(text)
+      function createChatSearchPlan(q, regexMode = chatSearchRegex) {
+        q = (q || "").trim()
+        if (!q) {
+          return {
+            query: "",
+            regexMode,
+            valid: true,
+            highlightRegexes: [],
+            orGroups: [],
+            regex: null,
+          }
         }
-        const orGroups = chatQuery
+        if (regexMode) {
+          try {
+            const regex = new RegExp(q, "i")
+            return {
+              query: q,
+              regexMode,
+              valid: true,
+              highlightRegexes: [new RegExp(q, "ig")],
+              orGroups: [],
+              regex,
+            }
+          } catch (e) {
+            return {
+              query: q,
+              regexMode,
+              valid: false,
+              highlightRegexes: [],
+              orGroups: [],
+              regex: null,
+            }
+          }
+        }
+        const orGroups = q
           .split("|")
           .map((g) => _tokenizeSegment(g.trim()))
           .filter((g) => g.length)
-        return orGroups.some((andTerms) =>
+        const terms = [...new Set(orGroups.flat())]
+        const highlightRegexes = terms
+          .map((t) => {
+            try {
+              return new RegExp(
+                t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                "ig",
+              )
+            } catch (e) {
+              return null
+            }
+          })
+          .filter(Boolean)
+        const lowerGroups = orGroups.map((andTerms) =>
+          andTerms.map((term) => term.toLowerCase()),
+        )
+        return {
+          query: q,
+          regexMode,
+          valid: true,
+          highlightRegexes,
+          orGroups: lowerGroups,
+          regex: null,
+        }
+      }
+      // For backwards compat (used by turnMatches for single-regex check path).
+      function buildChatSearchRegex(q) {
+        const plan = createChatSearchPlan(q)
+        if (!q) return null
+        if (!plan.valid) return null
+        return plan.regex || plan.highlightRegexes[0] || null
+      }
+      // Check if a string matches ALL AND-terms of ANY OR-group using chat query.
+      function chatQueryMatchesText(text, plan = createChatSearchPlan(chatQuery)) {
+        if (!text || !plan.query || !plan.valid) return false
+        if (plan.regexMode) {
+          plan.regex.lastIndex = 0
+          return plan.regex.test(text)
+        }
+        const lower = text.toLowerCase()
+        return plan.orGroups.some((andTerms) =>
           andTerms.every((term) =>
-            text.toLowerCase().includes(term.toLowerCase()),
+            lower.includes(term),
           ),
         )
       }
-      function chatHl(text, botMode = true) {
+      function chatHl(text, botMode = true, plan = createChatSearchPlan(chatQuery)) {
         const { body, options, ctas, asks } = parseCmOutput(text, botMode)
-        if (!chatQuery) return { body, options, ctas, asks }
-        const reGs = buildChatSearchRegexes(chatQuery)
+        if (!plan.query || !plan.valid) return { body, options, ctas, asks }
+        const reGs = plan.highlightRegexes
         if (!reGs.length) return { body, options, ctas, asks }
         let highlighted = body
         for (const reG of reGs) {
@@ -14886,104 +15098,218 @@
         detail.classList.toggle("open")
       }
 
-      function renderChatThread() {
-        const thread = document.getElementById("chatThread")
-        let interactions = activeInteractions
+      function chatRowIsGenAi(r) {
+        return (
+          r.mainInteractionType === "GenerativeAI" ||
+          (r.allInteractionTypes || "").includes("GenerativeAI")
+        )
+      }
 
-        // Apply chat filter
-        if (chatFilter !== "all") {
-          interactions = interactions.filter((i) => {
+      function chatRowHasBotOutput(r) {
+        return Boolean(r.outputText)
+      }
+
+      function parseChatFeedbackInfo(row) {
+        if (!row || !row.feedbackInfo) return null
+        try {
+          return typeof row.feedbackInfo === "object"
+            ? row.feedbackInfo
+            : JSON.parse(row.feedbackInfo)
+        } catch {
+          return null
+        }
+      }
+
+      function buildChatTurns(arr) {
+        const turns = []
+        let i = 0
+        while (i < arr.length) {
+          const row = arr[i]
+          const t = row.mainInteractionType
+          const isSystemOnly =
+            (t === "Event" || t === "LinkClick") &&
+            isInternalValue(row.interactionValue) &&
+            !row.outputText
+          if (isSystemOnly) {
+            turns.push({ system: row, userRow: null, botRows: [] })
+            i++
+            continue
+          }
+          const userRow =
+            t !== "Event" &&
+            t !== "LinkClick" &&
+            !isInternalValue(row.interactionValue) &&
+            row.interactionValue
+              ? row
+              : null
+          const linkClicked =
+            t === "LinkClick" && row.interactionValue
+              ? row.interactionValue
+              : null
+          const dialogNav =
+            t === "Dialog" && /^\d+:\d+$/.test(row.interactionValue || "")
+              ? row
+              : null
+          const botRows = []
+          let j = i
+          if (chatRowHasBotOutput(row)) {
+            botRows.push(row)
+            j++
+            while (j < arr.length) {
+              const next = arr[j]
+              if (
+                !isInternalValue(next.interactionValue) &&
+                next.interactionValue
+              )
+                break
+              if (!chatRowHasBotOutput(next)) {
+                j++
+                continue
+              }
+              botRows.push(next)
+              j++
+            }
+          } else {
+            j = i + 1
+          }
+          turns.push({
+            system: null,
+            userRow,
+            botRows,
+            linkClicked,
+            dialogNav,
+          })
+          i = j
+        }
+        return turns
+      }
+
+      function computeFeedbackOriginTurnScores(allTurns) {
+        const scores = new Map()
+        const feedbackOrigins = new Map()
+        allTurns.forEach((t) => {
+          const rows = [t.userRow, ...t.botRows].filter(Boolean)
+          rows.forEach((row) => {
+            const info = parseChatFeedbackInfo(row)
+            if (
+              (info?.score === -1 || info?.score === 1) &&
+              info.originatingInteractionId
+            ) {
+              feedbackOrigins.set(info.originatingInteractionId, info.score)
+            }
+          })
+        })
+        if (feedbackOrigins.size) {
+          allTurns.forEach((t) => {
+            const rows = [t.userRow, ...t.botRows].filter(Boolean)
+            const matchedRow = rows.find((row) =>
+              feedbackOrigins.has(row.interactionUuid),
+            )
+            if (matchedRow) {
+              const id = String((t.userRow || t.botRows[0])?.logId ?? "")
+              if (id)
+                scores.set(id, feedbackOrigins.get(matchedRow.interactionUuid))
+            }
+          })
+        }
+        allTurns.forEach((t, idx) => {
+          const rows = [t.userRow, ...t.botRows].filter(Boolean)
+          const fallbackScore = rows.reduce((score, row) => {
+            if (score) return score
+            const info = parseChatFeedbackInfo(row)
+            if (
+              (info?.score === -1 || info?.score === 1) &&
+              !info.originatingInteractionId
+            ) {
+              return info.score
+            }
+            if (row.mainInteractionType === "Feedback") {
+              if (row.interactionValue === "no") return -1
+              if (row.interactionValue === "yes") return 1
+            }
+            return 0
+          }, 0)
+          if (!fallbackScore) return
+          const targetTurn =
+            rows.some((row) => row.outputText) || idx === 0
+              ? t
+              : allTurns[idx - 1]
+          const id = String(
+            (targetTurn.userRow || targetTurn.botRows[0])?.logId ?? "",
+          )
+          if (id && !scores.has(id)) scores.set(id, fallbackScore)
+        })
+        return scores
+      }
+
+      function getCachedChatTurnData(interactions, filter) {
+        if (
+          chatTurnsCache.interactions === interactions &&
+          chatTurnsCache.filter === filter
+        ) {
+          return chatTurnsCache
+        }
+        let filtered = interactions
+        if (filter !== "all") {
+          filtered = interactions.filter((i) => {
             const t = i.mainInteractionType
-            if (chatFilter === "genai") return t === "GenerativeAI"
-            if (chatFilter === "user")
+            if (filter === "genai") return t === "GenerativeAI"
+            if (filter === "user")
               return (
                 !isInternalValue(i.interactionValue) &&
                 Boolean(i.interactionValue)
               )
-            if (chatFilter === "bot")
+            if (filter === "bot")
               return Boolean(i.outputText) && t !== "GenerativeAI"
             return true
           })
         }
+        const turns = buildChatTurns(filtered)
+        chatTurnsCache = {
+          interactions,
+          filter,
+          turns,
+          feedbackOriginTurnScores: computeFeedbackOriginTurnScores(turns),
+        }
+        return chatTurnsCache
+      }
 
-        if (!interactions.length) {
+      function getCachedBubbleDetail(interaction) {
+        const key = interaction.logId
+        if (chatDetailCache.has(key)) return chatDetailCache.get(key)
+        const html = renderBubbleDetail(interaction)
+        chatDetailCache.set(key, html)
+        return html
+      }
+
+      function resetChatRenderCaches() {
+        chatTurnsCache = {
+          interactions: null,
+          filter: "",
+          turns: [],
+          feedbackOriginTurnScores: new Map(),
+        }
+        chatDetailCache = new Map()
+        chatRenderSeq++
+      }
+
+      function renderChatThread() {
+        const perf = perfStart("chat render")
+        const renderSeq = ++chatRenderSeq
+        const thread = document.getElementById("chatThread")
+        const searchPlan = createChatSearchPlan(chatQuery)
+        const cachedTurnData = getCachedChatTurnData(
+          activeInteractions,
+          chatFilter,
+        )
+        const allTurnsCached = cachedTurnData.turns
+
+        if (!allTurnsCached.length) {
           thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
           document.getElementById("chatShowAllBtn").style.display = "none"
           document.getElementById("chatShowMatchedBtn").style.display = "none"
+          perfEnd(perf, "empty")
           return
-        }
-
-        const isGenAiRow = (r) =>
-          r.mainInteractionType === "GenerativeAI" ||
-          (r.allInteractionTypes || "").includes("GenerativeAI")
-        const hasBotOutput = (r) => Boolean(r.outputText)
-
-        // Build logical Q&A turns from the interaction list.
-        // A turn is one of:
-        //   { system: row, userRow: null, botRows: [] }  — a system event pill
-        //   { system: null, userRow: row|null, botRows: [] } — a Q&A turn
-        function buildChatTurns(arr) {
-          const turns = []
-          let i = 0
-          while (i < arr.length) {
-            const row = arr[i]
-            const t = row.mainInteractionType
-            const isSystemOnly =
-              (t === "Event" || t === "LinkClick") &&
-              isInternalValue(row.interactionValue) &&
-              !row.outputText
-            if (isSystemOnly) {
-              turns.push({ system: row, userRow: null, botRows: [] })
-              i++
-              continue
-            }
-            const userRow =
-              t !== "Event" &&
-              t !== "LinkClick" &&
-              !isInternalValue(row.interactionValue) &&
-              row.interactionValue
-                ? row
-                : null
-            const linkClicked =
-              t === "LinkClick" && row.interactionValue
-                ? row.interactionValue
-                : null
-            const dialogNav =
-              t === "Dialog" && /^\d+:\d+$/.test(row.interactionValue || "")
-                ? row
-                : null
-            const botRows = []
-            let j = i
-            if (hasBotOutput(row)) {
-              botRows.push(row)
-              j++
-              while (j < arr.length) {
-                const next = arr[j]
-                if (
-                  !isInternalValue(next.interactionValue) &&
-                  next.interactionValue
-                )
-                  break
-                if (!hasBotOutput(next)) {
-                  j++
-                  continue
-                }
-                botRows.push(next)
-                j++
-              }
-            } else {
-              j = i + 1
-            }
-            turns.push({
-              system: null,
-              userRow,
-              botRows,
-              linkClicked,
-              dialogNav,
-            })
-            i = j
-          }
-          return turns
         }
 
         // Check whether a turn contains a match for chatQuery (AND/OR aware).
@@ -14997,7 +15323,7 @@
               fields.push(r.articleIds || "", r.dialogPaths || "")
             }
             // Use AND/OR aware matching
-            return fields.some((f) => chatQueryMatchesText(f))
+            return fields.some((f) => chatQueryMatchesText(f, searchPlan))
           })
         }
 
@@ -15021,16 +15347,6 @@
         }
 
         let feedbackOriginTurnScores = new Map()
-        function parseFeedbackInfo(row) {
-          if (!row || !row.feedbackInfo) return null
-          try {
-            return typeof row.feedbackInfo === "object"
-              ? row.feedbackInfo
-              : JSON.parse(row.feedbackInfo)
-          } catch {
-            return null
-          }
-        }
 
         function renderTurnInner(turn) {
           let html = ""
@@ -15069,7 +15385,7 @@
             (posFeedbackActive && feedbackOriginScore === 1)
           const hasFeedbackScore = (rows, score) =>
             rows.some((br) => {
-              const f = parseFeedbackInfo(br)
+              const f = parseChatFeedbackInfo(br)
               return f?.score === score
             })
           const turnHasZeroRecog = turn.botRows.some(
@@ -15077,14 +15393,14 @@
               br.recognitionQuality === 0 &&
               br.recognitionType &&
               br.recognitionType !== "GenerativeAI" &&
-              !isGenAiRow(br),
+              !chatRowIsGenAi(br),
           )
           const turnHasLowRecog = turn.botRows.some(
             (br) =>
               br.recognitionQuality > 0 &&
               br.recognitionQuality <= lowRecogThreshold &&
               br.recognitionType !== "GenerativeAI" &&
-              !isGenAiRow(br),
+              !chatRowIsGenAi(br),
           )
           const turnHasNegFeedback =
             hasFeedbackScore(
@@ -15117,7 +15433,7 @@
             html += `<div class="user-group">
               <span class="user-label">User</span>
               <div class="bubble user${userHighlightClass}${feedbackOriginClass}">${
-              chatHl(turn.userRow.interactionValue, false).body
+              chatHl(turn.userRow.interactionValue, false, searchPlan).body
             }</div>
               <span class="bubble-ts">${esc(
                 fmtChatTime(turn.userRow.timestampStart),
@@ -15125,7 +15441,7 @@
             </div>`
           }
           if (turn.botRows.length) {
-            const hasAi = turn.botRows.some(isGenAiRow)
+            const hasAi = turn.botRows.some(chatRowIsGenAi)
             const avatarClass = hasAi ? "genai" : ""
             const label = hasAi
               ? `Bot <span class="bot-name-badge">AI</span>`
@@ -15136,9 +15452,13 @@
                 <span class="bot-name">${label}</span>
               </div>`
             turn.botRows.forEach((br) => {
-              const bubbleClass = isGenAiRow(br) ? "genai" : "bot"
-              const detail = renderBubbleDetail(br)
-              const { body, options, ctas, asks } = chatHl(br.outputText)
+              const bubbleClass = chatRowIsGenAi(br) ? "genai" : "bot"
+              const detail = getCachedBubbleDetail(br)
+              const { body, options, ctas, asks } = chatHl(
+                br.outputText,
+                true,
+                searchPlan,
+              )
               const optionsHtml = options.length
                 ? `<div class="dialog-options">${options
                     .map(
@@ -15182,12 +15502,12 @@
                 q === 0 &&
                 hasRecogType &&
                 br.recognitionType !== "GenerativeAI" &&
-                !isGenAiRow(br)
+                !chatRowIsGenAi(br)
               const isBrLowRecog =
                 q > 0 &&
                 q <= lowRecogThreshold &&
                 br.recognitionType !== "GenerativeAI" &&
-                !isGenAiRow(br)
+                !chatRowIsGenAi(br)
               const highlightClass =
                 zeroRecogActive && isBrZeroRecog
                   ? " zero-recog-highlight"
@@ -15196,7 +15516,7 @@
                   : turnMatchesActiveFeedback
                   ? " feedback-highlight"
                   : (() => {
-                      const f = parseFeedbackInfo(br)
+                      const f = parseChatFeedbackInfo(br)
                       if (negFeedbackActive && f?.score === -1)
                         return " feedback-highlight"
                       if (posFeedbackActive && f?.score === 1)
@@ -15222,110 +15542,28 @@
           return html
         } // end renderTurnInner
 
-        const allTurns = buildChatTurns(interactions)
-        feedbackOriginTurnScores = new Map()
-        const feedbackOrigins = new Map()
-        allTurns.forEach((t) => {
-          const rows = [t.userRow, ...t.botRows].filter(Boolean)
-          rows.forEach((row) => {
-            const info = parseFeedbackInfo(row)
-            if (
-              (info?.score === -1 || info?.score === 1) &&
-              info.originatingInteractionId
-            ) {
-              feedbackOrigins.set(info.originatingInteractionId, info.score)
-            }
-          })
-        })
-        if (feedbackOrigins.size) {
-          allTurns.forEach((t) => {
-            const rows = [t.userRow, ...t.botRows].filter(Boolean)
-            const matchedRow = rows.find((row) =>
-              feedbackOrigins.has(row.interactionUuid),
-            )
-            if (matchedRow) {
-              const id = String((t.userRow || t.botRows[0])?.logId ?? "")
-              if (id) {
-                feedbackOriginTurnScores.set(
-                  id,
-                  feedbackOrigins.get(matchedRow.interactionUuid),
-                )
-              }
-            }
-          })
-        }
-        allTurns.forEach((t, idx) => {
-          const rows = [t.userRow, ...t.botRows].filter(Boolean)
-          const fallbackScore = rows.reduce((score, row) => {
-            if (score) return score
-            const info = parseFeedbackInfo(row)
-            if (
-              (info?.score === -1 || info?.score === 1) &&
-              !info.originatingInteractionId
-            ) {
-              return info.score
-            }
-            if (row.mainInteractionType === "Feedback") {
-              if (row.interactionValue === "no") return -1
-              if (row.interactionValue === "yes") return 1
-            }
-            return 0
-          }, 0)
-          if (!fallbackScore) return
-          const targetTurn =
-            rows.some((row) => row.outputText) || idx === 0
-              ? t
-              : allTurns[idx - 1]
-          const id = String(
-            (targetTurn.userRow || targetTurn.botRows[0])?.logId ?? "",
-          )
-          if (id && !feedbackOriginTurnScores.has(id)) {
-            feedbackOriginTurnScores.set(id, fallbackScore)
-          }
-        })
+        const allTurns = allTurnsCached
+        feedbackOriginTurnScores = cachedTurnData.feedbackOriginTurnScores
 
-        if (chatQuery && !chatShowAll) {
-          // Show only the Q&A turns that contain a match
-          const matched = allTurns.filter(turnMatches)
-          if (!matched.length) {
-            thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
-            document.getElementById("chatShowAllBtn").style.display = "none"
-            document.getElementById("chatShowMatchedBtn").style.display = "none"
-            return
-          }
-          thread.innerHTML = matched.map(renderTurn).join("")
-          document.getElementById("chatShowAllBtn").style.display = "flex"
-          document.getElementById("chatShowMatchedBtn").style.display = "none"
-          return
-        }
-
-        // Render full conversation
-        let html = allTurns.map(renderTurn).join("")
-        thread.innerHTML = html
-        document.getElementById("chatShowAllBtn").style.display = "none"
-        document.getElementById("chatShowMatchedBtn").style.display = chatQuery
-          ? "flex"
-          : "none"
-
-        // Scroll to the first highlighted turn (or the originating interaction for feedback filters) at the top
-        const isFilterScroll =
-          convSessionFilter === "zero_recog" ||
-          convSessionFilter === "low_recog" ||
-          convSessionFilter === "neg_feedback" ||
-          convSessionFilter === "pos_feedback"
-        if (isFilterScroll) {
+        function scrollToFilterMatch() {
+          const isFilterScroll =
+            convSessionFilter === "zero_recog" ||
+            convSessionFilter === "low_recog" ||
+            convSessionFilter === "neg_feedback" ||
+            convSessionFilter === "pos_feedback"
+          if (!isFilterScroll) return
           const isFeedbackFilter =
             convSessionFilter === "neg_feedback" ||
             convSessionFilter === "pos_feedback"
           requestAnimationFrame(() => {
+            if (renderSeq !== chatRenderSeq) return
             if (isFeedbackFilter) {
-              // Find the first feedback turn and resolve its originatingInteractionId
               const negActive = convSessionFilter === "neg_feedback"
               const feedbackTurn =
                 allTurns.find((t) => {
                   const rows = [t.userRow, ...t.botRows].filter(Boolean)
                   return rows.some((row) => {
-                    const fi = parseFeedbackInfo(row)
+                    const fi = parseChatFeedbackInfo(row)
                     return negActive ? fi?.score === -1 : fi?.score === 1
                   })
                 }) ||
@@ -15338,36 +15576,30 @@
                 )
               if (!feedbackTurn) return
               let targetEl = null
-              {
-                const feedbackRow = [
-                  feedbackTurn.userRow,
-                  ...feedbackTurn.botRows,
-                ]
-                  .filter(Boolean)
-                  .find((row) => {
-                    const fi = parseFeedbackInfo(row)
-                    return negActive ? fi?.score === -1 : fi?.score === 1
-                  })
-                const fi = parseFeedbackInfo(feedbackRow)
-                const originatingId = fi?.originatingInteractionId
-                if (originatingId) {
-                  const originatingTurn = allTurns.find((t) =>
-                    [t.userRow, ...t.botRows]
-                      .filter(Boolean)
-                      .some((r) => r.interactionUuid === originatingId),
+              const feedbackRow = [feedbackTurn.userRow, ...feedbackTurn.botRows]
+                .filter(Boolean)
+                .find((row) => {
+                  const fi = parseChatFeedbackInfo(row)
+                  return negActive ? fi?.score === -1 : fi?.score === 1
+                })
+              const fi = parseChatFeedbackInfo(feedbackRow)
+              const originatingId = fi?.originatingInteractionId
+              if (originatingId) {
+                const originatingTurn = allTurns.find((t) =>
+                  [t.userRow, ...t.botRows]
+                    .filter(Boolean)
+                    .some((r) => r.interactionUuid === originatingId),
+                )
+                if (originatingTurn) {
+                  const logId = String(
+                    (originatingTurn.userRow || originatingTurn.botRows[0])
+                      ?.logId,
                   )
-                  if (originatingTurn) {
-                    const logId = String(
-                      (originatingTurn.userRow || originatingTurn.botRows[0])
-                        ?.logId,
-                    )
-                    targetEl = thread.querySelector(
-                      `.chat-turn[data-turn-id="${logId}"]`,
-                    )
-                  }
+                  targetEl = thread.querySelector(
+                    `.chat-turn[data-turn-id="${logId}"]`,
+                  )
                 }
               }
-              // Fallback: turn before the feedback-highlighted element in the DOM
               if (!targetEl) {
                 const allTurnEls = [...thread.querySelectorAll(".chat-turn")]
                 const feedbackEl = allTurnEls.find((el) =>
@@ -15392,6 +15624,59 @@
             }
           })
         }
+
+        function renderTurnList(turns, done) {
+          const shouldChunk =
+            turns.length > 90 && !(chatShowAll && chatQuery)
+          if (!shouldChunk) {
+            thread.innerHTML = turns.map(renderTurn).join("")
+            done()
+            perfEnd(perf, turns.length + " turns")
+            return
+          }
+          const firstBatch = 60
+          const chunkSize = 90
+          thread.innerHTML = turns.slice(0, firstBatch).map(renderTurn).join("")
+          let idx = firstBatch
+          function appendChunk() {
+            if (renderSeq !== chatRenderSeq) return
+            const next = turns.slice(idx, idx + chunkSize)
+            if (next.length) {
+              thread.insertAdjacentHTML(
+                "beforeend",
+                next.map(renderTurn).join(""),
+              )
+              idx += chunkSize
+            }
+            if (idx < turns.length) requestAnimationFrame(appendChunk)
+            else {
+              done()
+              perfEnd(perf, turns.length + " turns chunked")
+            }
+          }
+          requestAnimationFrame(appendChunk)
+        }
+
+        if (chatQuery && !chatShowAll) {
+          const matched = searchPlan.valid ? allTurns.filter(turnMatches) : []
+          if (!matched.length) {
+            thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
+            document.getElementById("chatShowAllBtn").style.display = "none"
+            document.getElementById("chatShowMatchedBtn").style.display = "none"
+            perfEnd(perf, "no matches")
+            return
+          }
+          document.getElementById("chatShowAllBtn").style.display = "flex"
+          document.getElementById("chatShowMatchedBtn").style.display = "none"
+          renderTurnList(matched, function () {})
+          return
+        }
+
+        document.getElementById("chatShowAllBtn").style.display = "none"
+        document.getElementById("chatShowMatchedBtn").style.display = chatQuery
+          ? "flex"
+          : "none"
+        renderTurnList(allTurns, scrollToFilterMatch)
       }
 
       // Chat filter pills

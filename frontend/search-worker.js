@@ -733,6 +733,9 @@ self.onmessage = function (e) {
     if (q && !searchContent && workerEntities.length) {
       // Match entities against each individual term in the union of all OR groups
       const allTerms = orGroups.flat()
+      const allTermRegexes = isPlain
+        ? []
+        : allTerms.map((term) => buildTermRegex(term))
       for (const entity of workerEntities) {
         const wordMatches = entity._searchWords.some((w) => {
           if (isPlain) {
@@ -743,9 +746,10 @@ self.onmessage = function (e) {
                 : w.toLowerCase().indexOf(n) !== -1
             })
           }
-          return allTerms.some((term) => {
-            const termRe = buildTermRegex(term)
-            return termRe && termRe.test(w)
+          return allTermRegexes.some((termRe) => {
+            if (!termRe) return false
+            termRe.lastIndex = 0
+            return termRe.test(w)
           })
         })
         if (wordMatches) matchingEntityNames.add(entity._nameUpper)
