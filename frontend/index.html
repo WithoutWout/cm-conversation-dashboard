@@ -61,6 +61,8 @@
         display: flex;
         align-items: center;
         gap: 9px;
+        min-width: 0;
+        flex: 0 0 auto;
       }
       .brand-logo {
         width: 30px;
@@ -100,6 +102,8 @@
         align-items: center;
         justify-content: flex-end;
         max-width: 42%;
+        min-width: 0;
+        overflow: hidden;
       }
       .file-tag {
         background: var(--bg);
@@ -107,6 +111,10 @@
         border-radius: 4px;
         padding: 2px 7px;
         white-space: nowrap;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .file-tag.is-folder {
         border-color: var(--teal);
@@ -4616,7 +4624,7 @@
           padding: 8px 12px;
         }
         .brand {
-          min-width: 180px;
+          min-width: 0;
         }
         .view-switcher {
           order: 2;
@@ -4629,14 +4637,16 @@
         }
         .header-files {
           max-width: none;
-          flex: 1 1 260px;
+          flex: 1 1 180px;
+          flex-wrap: nowrap;
           justify-content: flex-start;
-          overflow: hidden;
+          overflow-x: auto;
+          overflow-y: hidden;
+          scrollbar-width: thin;
         }
-        .file-tag:not(.is-folder) {
+        .file-tag {
           max-width: 170px;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          flex: 0 1 auto;
         }
         .global-search-bar {
           padding: 10px 12px;
@@ -4674,6 +4684,20 @@
         }
         .brand-text {
           display: none;
+        }
+        .brand {
+          flex-basis: 30px;
+          width: 30px;
+          gap: 0;
+        }
+        .header-files {
+          order: 3;
+          flex: 1 1 100%;
+          width: 100%;
+          margin-left: 0;
+        }
+        .file-tag {
+          max-width: 220px;
         }
         .icon-btn,
         .view-btn {
