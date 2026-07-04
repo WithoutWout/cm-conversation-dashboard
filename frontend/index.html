@@ -5320,6 +5320,26 @@
           </svg>
           Manage DB
         </button>
+        <button
+          class="conv-manage-btn"
+          id="convAiExportBtn"
+          title="Export current conversation search results for ChatGPT or another LLM"
+          disabled
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export for AI
+        </button>
         <span class="conv-drag-hint" id="convDragHint"></span>
         <div class="conv-spacer"></div>
       </div>
@@ -6775,6 +6795,8 @@
           importInteractionsCsv: (filePath, maxAgeDays) =>
             invoke("import_interactions_csv", { filePath, maxAgeDays }),
           getSessions: (args) => invoke("get_sessions", { args }),
+          exportConversationsForAi: (args) =>
+            invoke("export_conversations_for_ai", { args }),
           cancelSessionSearch: () => invoke("cancel_session_search"),
           getSessionInteractions: (sessionUuid) =>
             invoke("get_session_interactions", { sessionUuid }),
@@ -6848,6 +6870,16 @@
       if (!window.electronAPI.getSessions)
         window.electronAPI.getSessions = () =>
           Promise.resolve({ sessions: [], total: 0, page: 1 })
+      if (!window.electronAPI.exportConversationsForAi)
+        window.electronAPI.exportConversationsForAi = () =>
+          Promise.resolve({
+            ok: false,
+            canceled: true,
+            jsonlPath: null,
+            sessionCount: 0,
+            feedbackCount: 0,
+            interactionCount: 0,
+          })
       if (!window.electronAPI.cancelSessionSearch)
         window.electronAPI.cancelSessionSearch = _convStub
       if (!window.electronAPI.getSessionInteractions)
@@ -6992,7 +7024,9 @@
       let convIdType = "article" // "article" | "dialog" | "node" — active ID search type
       let chatSearchRegex = false // when true, treat chatQuery as a regex
       let convImporting = false
+      let convAiExporting = false
       let convSearchSeq = 0 // incremented on each search; used to discard stale results
+      let lastConvSearchArgs = null
       let convContextFilters = [] // [{name, value}] — active context filters
       let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
@@ -12667,8 +12701,12 @@
       function setConvDbBusy(busy) {
         const importBtn = document.getElementById("convImportBtn")
         const manageBtn = document.getElementById("convManageDbBtn")
+        const exportBtn = document.getElementById("convAiExportBtn")
         if (importBtn) importBtn.disabled = busy || !convDbPath
         if (manageBtn) manageBtn.disabled = busy
+        if (exportBtn)
+          exportBtn.disabled =
+            busy || !convDbPath || !convHasSearched || convTotalSessions <= 0
       }
 
       // ── CSV Import ──────────────────────────────────────────────────
@@ -12740,6 +12778,9 @@
             await doImport(res.paths)
           }
         })
+      document
+        .getElementById("convAiExportBtn")
+        .addEventListener("click", exportConversationsForAi)
 
       // ── Manage DB modal ─────────────────────────────────────────────
       let _manageDbSelectedDates = new Set()
@@ -12986,6 +13027,24 @@
       })
 
       // ── Session list ────────────────────────────────────────────────
+      function buildConvSessionArgs(page) {
+        return {
+          page,
+          filter: convSessionFilter,
+          query: convQuery || null,
+          queryRegex: convSearchIds ? false : convSearchRegex,
+          queryScope: convSearchIds ? "both" : convSearchScope,
+          queryIds: convSearchIds,
+          queryIdsOnly: convSearchIds,
+          queryIdType: convIdType,
+          dateFrom: convDateFrom || null,
+          dateTo: convDateTo || null,
+          contextFilters:
+            convContextFilters.length > 0 ? convContextFilters : null,
+          lowRecogThreshold,
+        }
+      }
+
       async function loadSessions() {
         const convSearchEl = document.getElementById("convSearch")
         const idWarning = document.getElementById("convIdWarning")
@@ -13026,21 +13085,7 @@
           }
         }
 
-        const args = {
-          page: convPage,
-          filter: convSessionFilter,
-          query: convQuery || null,
-          queryRegex: convSearchIds ? false : convSearchRegex,
-          queryScope: convSearchIds ? "both" : convSearchScope,
-          queryIds: convSearchIds,
-          queryIdsOnly: convSearchIds,
-          queryIdType: convIdType,
-          dateFrom: convDateFrom || null,
-          dateTo: convDateTo || null,
-          contextFilters:
-            convContextFilters.length > 0 ? convContextFilters : null,
-          lowRecogThreshold,
-        }
+        const args = buildConvSessionArgs(convPage)
         const _submitBtn = document.getElementById("convSearchSubmit")
         _submitBtn.classList.add("loading")
         setConvDbBusy(true)
@@ -13059,6 +13104,7 @@
           if (mySeq !== convSearchSeq) return
           convSessions = res.sessions || []
           convTotalSessions = res.total || 0
+          lastConvSearchArgs = { ...args }
           _submitBtn.classList.remove("loading")
           setConvDbBusy(false)
           document
@@ -13079,6 +13125,44 @@
           ).innerHTML = `<div class="sessions-empty">Error loading sessions:<br>${esc(
             String(e),
           )}</div>`
+        }
+      }
+
+      async function exportConversationsForAi() {
+        if (!convDbPath) {
+          openDbSetupModal()
+          return
+        }
+        if (!convHasSearched || convTotalSessions <= 0 || convAiExporting) return
+        const args = lastConvSearchArgs || buildConvSessionArgs(convPage)
+        const btn = document.getElementById("convAiExportBtn")
+        const oldHtml = btn ? btn.innerHTML : ""
+        convAiExporting = true
+        setConvDbBusy(true)
+        if (btn) {
+          btn.innerHTML = '<span class="mini-spinner"></span> Exporting…'
+        }
+        try {
+          const res = await window.electronAPI.exportConversationsForAi(args)
+          if (!res || res.canceled) return
+          if (!res.ok) {
+            showImportToast("error", "Export canceled or failed.")
+            return
+          }
+          const count = res.sessionCount || 0
+          const pathText = res.jsonlPath ? ` to ${res.jsonlPath}` : ""
+          showImportToast(
+            "success",
+            `Exported ${count.toLocaleString()} search result${
+              count !== 1 ? "s" : ""
+            } for AI analysis${pathText}`,
+          )
+        } catch (e) {
+          showImportToast("error", "AI export failed: " + e)
+        } finally {
+          convAiExporting = false
+          if (btn) btn.innerHTML = oldHtml
+          setConvDbBusy(false)
         }
       }
 

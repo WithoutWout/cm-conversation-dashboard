@@ -82,6 +82,9 @@ function compiledGroupsHaveInvalidRegex(groups) {
 // Built once per search message and shared across all match calls.
 let _orRegexGroups = [] // [{re, needle}[]][]
 
+// Cache key for matchingEntityNames so it isn't rebuilt on filter/sort-only changes.
+let _entityCacheKey = ""
+
 function buildOrRegexGroups(orGroups) {
   return orGroups.map((andTerms) =>
     andTerms.map((term) => ({
@@ -96,23 +99,24 @@ function buildOrRegexGroups(orGroups) {
 }
 
 // Test a single string against one compiled term {re, needle}.
-function testTerm(compiled, str) {
+// strLower is an optional pre-lowercased version of str for case-insensitive plain matches.
+function testTerm(compiled, str, strLower) {
   if (!str) return false
   if (compiled.re) {
     compiled.re.lastIndex = 0
     return compiled.re.test(str)
   }
   if (compiled.needle !== null) {
-    return searchCase
-      ? str.indexOf(compiled.needle) !== -1
-      : str.toLowerCase().indexOf(compiled.needle) !== -1
+    if (searchCase) return str.indexOf(compiled.needle) !== -1
+    return (strLower !== undefined ? strLower : str.toLowerCase()).indexOf(compiled.needle) !== -1
   }
   return false
 }
 
 // Test a single term against multiple field strings (any match = term is found).
-function termFoundInFields(compiled, fields) {
-  return fields.some((f) => f != null && testTerm(compiled, f))
+// fieldsLower is an optional parallel array of pre-lowercased strings.
+function termFoundInFields(compiled, fields, fieldsLower) {
+  return fields.some((f, i) => f != null && testTerm(compiled, f, fieldsLower && fieldsLower[i]))
 }
 
 // Entity enrichment: does this specific compiled term match any word of any entity
@@ -126,13 +130,13 @@ function termMatchesEntityByNames(compiled, entityNameUppers) {
 }
 
 // Check if ALL terms in an AND-group are each found somewhere in the given fields.
-function andGroupMatchesFields(andGroup, fields) {
-  return andGroup.every((compiled) => termFoundInFields(compiled, fields))
+function andGroupMatchesFields(andGroup, fields, fieldsLower) {
+  return andGroup.every((compiled) => termFoundInFields(compiled, fields, fieldsLower))
 }
 
 // Check if ANY OR-group's AND terms all match the given fields.
-function orGroupsMatchFields(groups, fields) {
-  return groups.some((andGroup) => andGroupMatchesFields(andGroup, fields))
+function orGroupsMatchFields(groups, fields, fieldsLower) {
+  return groups.some((andGroup) => andGroupMatchesFields(andGroup, fields, fieldsLower))
 }
 
 // Expand %{ConversationVariable(N)} and %{ContextVariable(N)} to their names
@@ -279,10 +283,16 @@ function precomputeArticle(a) {
     }
     const _aEscGroup = _ao.OutputMetaData && _ao.OutputMetaData.escalationGroup
     if (_aEscGroup) _aCtx.escalationGroup = [_aEscGroup]
+    const _as = strip(_aExp)
+    const _ar = _arT
+    const _ae = expandVarNames(_aExp)
     a._answerItems.push({
-      s: strip(_aExp),
-      r: _arT,
-      e: expandVarNames(_aExp),
+      s: _as,
+      r: _ar,
+      e: _ae,
+      sl: _as.toLowerCase(),
+      rl: _ar.toLowerCase(),
+      el: _ae.toLowerCase(),
       ctxSet: _aCtx,
       isNonDefault: _ao !== o && !_ao.IsDefault,
     })
@@ -327,10 +337,16 @@ function precomputeDialog(item) {
       }
       const _nEscGroup = _nai.metadata && _nai.metadata.escalationGroup
       if (_nEscGroup) _nCtx.escalationGroup = [_nEscGroup]
+      const _ns = strip(_nExp)
+      const _nr = _nrT
+      const _ne = expandVarNames(_nExp)
       _nodeAnsItems.push({
-        s: strip(_nExp),
-        r: _nrT,
-        e: expandVarNames(_nExp),
+        s: _ns,
+        r: _nr,
+        e: _ne,
+        sl: _ns.toLowerCase(),
+        rl: _nr.toLowerCase(),
+        el: _ne.toLowerCase(),
         ctxSet: _nCtx,
         isNonDefault: _nai !== ans && !_nai.isDefault,
       })
@@ -518,7 +534,8 @@ function ctxSetMatchesFilters(ctxSet) {
 // The AND terms can be spread across the s/r/e fields of the same answer item.
 function answerMatchesAndGroup(ai, andGroup) {
   const fields = [ai.s, ai.r, ai.e]
-  return andGroupMatchesFields(andGroup, fields)
+  const fieldsLower = [ai.sl, ai.rl, ai.el]
+  return andGroupMatchesFields(andGroup, fields, fieldsLower)
 }
 
 // Check if any answer item satisfies both context filter AND ALL terms of ANY OR-group.
@@ -575,8 +592,9 @@ function matchArticle(a) {
     (a._answerItems || []).some((ai) => {
       if (searchExcludeNonDefault && ai.isNonDefault) return false
       const fields = [ai.s, ai.r, ai.e]
+      const fieldsLower = [ai.sl, ai.rl, ai.el]
       return andGroup.every(
-        (compiled) => termFoundInFields(compiled, fields),
+        (compiled) => termFoundInFields(compiled, fields, fieldsLower),
       )
     }),
   )
@@ -617,8 +635,9 @@ function matchDialog(item) {
       (sn._answerItems || []).some((ai) => {
         if (searchExcludeNonDefault && ai.isNonDefault) return false
         const fields = [ai.s, ai.r, ai.e]
+        const fieldsLower = [ai.sl, ai.rl, ai.el]
         return andGroup.every(
-          (compiled) => termFoundInFields(compiled, fields),
+          (compiled) => termFoundInFields(compiled, fields, fieldsLower),
         )
       }),
     ),
@@ -728,55 +747,74 @@ self.onmessage = function (e) {
 
     const isPlain = q ? canUsePlainMatch() : false
 
-    // Pre-compute entity names matched by the current query
-    matchingEntityNames = new Set()
-    if (q && !searchContent && workerEntities.length) {
-      // Match entities against each individual term in the union of all OR groups
-      const allTerms = orGroups.flat()
-      const allTermRegexes = isPlain
-        ? []
-        : allTerms.map((term) => buildTermRegex(term))
-      for (const entity of workerEntities) {
-        const wordMatches = entity._searchWords.some((w) => {
-          if (isPlain) {
-            return allTerms.some((term) => {
-              const n = searchCase ? term : term.toLowerCase()
-              return searchCase
-                ? w.indexOf(n) !== -1
-                : w.toLowerCase().indexOf(n) !== -1
+    // Pre-compute entity names matched by the current query.
+    // Cache by query+mode key so filter/sort-only changes skip this step.
+    const entityCacheKey = q
+      ? `${q}|${searchCase}|${searchWord}|${searchRegex}|${searchContent}`
+      : ""
+    if (entityCacheKey !== _entityCacheKey) {
+      _entityCacheKey = entityCacheKey
+      matchingEntityNames = new Set()
+      if (q && !searchContent && workerEntities.length) {
+        // Match entities against each individual term in the union of all OR groups
+        const allTerms = orGroups.flat()
+        const allTermRegexes = isPlain
+          ? []
+          : allTerms.map((term) => buildTermRegex(term))
+        for (const entity of workerEntities) {
+          const wordMatches = entity._searchWords.some((w) => {
+            if (isPlain) {
+              return allTerms.some((term) => {
+                const n = searchCase ? term : term.toLowerCase()
+                return searchCase
+                  ? w.indexOf(n) !== -1
+                  : w.toLowerCase().indexOf(n) !== -1
+              })
+            }
+            return allTermRegexes.some((termRe) => {
+              if (!termRe) return false
+              termRe.lastIndex = 0
+              return termRe.test(w)
             })
-          }
-          return allTermRegexes.some((termRe) => {
-            if (!termRe) return false
-            termRe.lastIndex = 0
-            return termRe.test(w)
           })
-        })
-        if (wordMatches) matchingEntityNames.add(entity._nameUpper)
+          if (wordMatches) matchingEntityNames.add(entity._nameUpper)
+        }
       }
     }
 
     // Short-circuit: no query and no filter → return everything
     const noQuery = !q || !hasValidQuery
     const hasCtxFilter = contentContextFilters.length > 0
+
+    // ── Match pass: compute each item's match result once ─────────────────
+    // Stored as _mc (match+context) so the per-tab filter passes can reuse it
+    // without re-running expensive match functions on the same data.
+    const needsMatch = !noQuery || hasCtxFilter
+    if (needsMatch) {
+      for (const item of allItems) {
+        if (noQuery) {
+          item._mc = matchesContentContext(item)
+        } else if (hasCtxFilter) {
+          item._mc = item._kind === "article"
+            ? matchArticleCombined(item)
+            : matchDialogCombined(item)
+        } else {
+          item._mc = matchesContentContext(item) &&
+            (item._kind === "article" ? matchArticle(item) : matchDialog(item))
+        }
+      }
+    }
+
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
     let filteredAll
-    if (noQuery && !hasCtxFilter && allFilterPill === "all") {
+    if (!needsMatch && allFilterPill === "all") {
       filteredAll = allItems
     } else {
       filteredAll = allItems.filter((item) => {
-        if (allFilterPill === "articles" && item._kind !== "article")
-          return false
+        if (allFilterPill === "articles" && item._kind !== "article") return false
         if (allFilterPill === "dialogs" && item._kind !== "dialog") return false
-        if (allFilterPill === "tdialogs" && item._kind !== "tdialog")
-          return false
-        if (noQuery) return matchesContentContext(item)
-        if (hasCtxFilter)
-          return item._kind === "article"
-            ? matchArticleCombined(item)
-            : matchDialogCombined(item)
-        if (!matchesContentContext(item)) return false
-        return item._kind === "article" ? matchArticle(item) : matchDialog(item)
+        if (allFilterPill === "tdialogs" && item._kind !== "tdialog") return false
+        return needsMatch ? item._mc : true
       })
     }
     filteredAll = sortBy(
@@ -788,16 +826,13 @@ self.onmessage = function (e) {
 
     // ── Filter: Articles ──────────────────────────────────────────────────
     let filteredArticles
-    if (noQuery && !hasCtxFilter && aFilter === "all") {
+    if (!needsMatch && aFilter === "all") {
       filteredArticles = workerArticles
     } else {
       filteredArticles = workerArticles.filter((a) => {
         if (aFilter === "answer" && aKind(a) !== "answer") return false
         if (aFilter === "dialog" && aKind(a) === "answer") return false
-        if (noQuery) return matchesContentContext(a)
-        if (hasCtxFilter) return matchArticleCombined(a)
-        if (!matchesContentContext(a)) return false
-        return matchArticle(a)
+        return needsMatch ? a._mc : true
       })
     }
     filteredArticles = sortBy(
@@ -809,7 +844,7 @@ self.onmessage = function (e) {
 
     // ── Filter: Dialogs ───────────────────────────────────────────────────
     let filteredDialogs
-    if (noQuery && !hasCtxFilter && dFilter === "all") {
+    if (!needsMatch && dFilter === "all") {
       filteredDialogs = workerDialogs
     } else {
       filteredDialogs = workerDialogs.filter((item) => {
@@ -817,10 +852,7 @@ self.onmessage = function (e) {
         if (dFilter === "tdialogs" && item._kind !== "tdialog") return false
         if (dFilter === "recognition" && item._kind === "tdialog") return false
         if (dFilter === "recognition" && !item._hasAnswerOutput) return false
-        if (noQuery) return matchesContentContext(item)
-        if (hasCtxFilter) return matchDialogCombined(item)
-        if (!matchesContentContext(item)) return false
-        return matchDialog(item)
+        return needsMatch ? item._mc : true
       })
     }
     filteredDialogs = sortBy(
@@ -869,16 +901,15 @@ self.onmessage = function (e) {
 
     // Send index arrays as Int32Array with buffer transfer — zero-copy, no Structured Clone.
     // The main thread reconstructs filtered arrays from its own allCombinedItems etc.
-    const filteredAllIdx = new Int32Array(filteredAll.map((x) => x._gidx))
-    const filteredArticlesIdx = new Int32Array(
-      filteredArticles.map((a) => a._widx),
-    )
-    const filteredDialogsIdx = new Int32Array(
-      filteredDialogs.map((d) => d._widx),
-    )
-    const filteredEntitiesIdx = new Int32Array(
-      filteredEntities.map((e) => e._widx),
-    )
+    // Fill typed arrays directly to avoid allocating intermediate JS arrays via .map().
+    const filteredAllIdx = new Int32Array(filteredAll.length)
+    for (let i = 0; i < filteredAll.length; i++) filteredAllIdx[i] = filteredAll[i]._gidx
+    const filteredArticlesIdx = new Int32Array(filteredArticles.length)
+    for (let i = 0; i < filteredArticles.length; i++) filteredArticlesIdx[i] = filteredArticles[i]._widx
+    const filteredDialogsIdx = new Int32Array(filteredDialogs.length)
+    for (let i = 0; i < filteredDialogs.length; i++) filteredDialogsIdx[i] = filteredDialogs[i]._widx
+    const filteredEntitiesIdx = new Int32Array(filteredEntities.length)
+    for (let i = 0; i < filteredEntities.length; i++) filteredEntitiesIdx[i] = filteredEntities[i]._widx
     self.postMessage(
       {
         type: "results",

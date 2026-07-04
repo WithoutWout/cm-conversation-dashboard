@@ -1,8 +1,10 @@
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::types::ToSql;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -218,7 +220,7 @@ struct ContextOption {
     count: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ContextFilter {
     name: String,
@@ -232,6 +234,14 @@ struct SessionsPage {
     total: i64,
     page: i64,
     timing_ms: i64,
+    search_mode: String,
+}
+
+struct SessionFilterQuery {
+    base_where: String,
+    search_cte: String,
+    filtered_from: String,
+    param_values: Vec<Box<dyn ToSql>>,
     search_mode: String,
 }
 
@@ -278,6 +288,17 @@ struct FileSaveResult {
     ok: bool,
     canceled: bool,
     path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationAiExportResult {
+    ok: bool,
+    canceled: bool,
+    jsonl_path: Option<String>,
+    session_count: i64,
+    feedback_count: i64,
+    interaction_count: i64,
 }
 
 struct WatchState {
@@ -1018,6 +1039,17 @@ CREATE TABLE IF NOT EXISTS flagged_interactions (
 CREATE INDEX IF NOT EXISTS idx_fi_flag_id ON flagged_interactions(flag_id);
 "#;
 
+// Best-effort performance pragmas. Some pragma setters return a result row,
+// so each runs via query_row; a failure only costs speed, never correctness.
+fn apply_perf_pragmas(conn: &Connection) {
+    // 64 MiB page cache (negative value = KiB units)
+    let _ = conn.query_row("PRAGMA cache_size = -65536", [], |_| Ok(()));
+    // Keep temp b-trees (CTE materialization, GROUP BY, ORDER BY) in memory
+    let _ = conn.query_row("PRAGMA temp_store = MEMORY", [], |_| Ok(()));
+    // 256 MiB memory-mapped I/O window for read-heavy scans
+    let _ = conn.query_row("PRAGMA mmap_size = 268435456", [], |_| Ok(()));
+}
+
 fn open_flagged_db(path: &str) -> Result<Connection, String> {
     if let Some(parent) = Path::new(path).parent() {
         let _ = fs::create_dir_all(parent);
@@ -1027,6 +1059,7 @@ fn open_flagged_db(path: &str) -> Result<Connection, String> {
         .map_err(|e| format!("PRAGMA error: {e}"))?;
     conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
         .map_err(|e| format!("PRAGMA error: {e}"))?;
+    apply_perf_pragmas(&conn);
     conn.execute_batch(FLAGGED_DB_SCHEMA)
         .map_err(|e| format!("Schema error: {e}"))?;
     // Migrations for existing DBs (ignore errors if column already exists)
@@ -1259,6 +1292,7 @@ fn open_db(path: &str) -> Result<Connection, String> {
         .map_err(|e| format!("PRAGMA error: {e}"))?;
     conn.execute_batch("PRAGMA synchronous=NORMAL;")
         .map_err(|e| format!("PRAGMA error: {e}"))?;
+    apply_perf_pragmas(&conn);
     conn.execute_batch(DB_SCHEMA)
         .map_err(|e| format!("Schema error: {e}"))?;
     // Migrate existing databases: add recognition_details column if absent
@@ -1288,6 +1322,20 @@ fn open_db(path: &str) -> Result<Connection, String> {
     // Optional FTS5 and materialized summaries are repairable caches.
     repair_fts_index(&conn);
     ensure_session_summary(&conn)?;
+    // One-time bounded ANALYZE so the query planner has statistics for the
+    // session_summary/context_index indexes; "PRAGMA optimize" after imports
+    // keeps them fresh.
+    let has_stats = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_stat1'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !has_stats {
+        let _ = conn.query_row("PRAGMA analysis_limit = 1000", [], |_| Ok(()));
+        let _ = conn.execute_batch("ANALYZE;");
+    }
     Ok(conn)
 }
 
@@ -1603,6 +1651,43 @@ async fn import_interactions_csv(
             Ok(t) => t,
             Err(e) => { errors.push(format!("Transaction error: {e}")); return; }
         };
+        // Prepare each statement once per batch (cached on the connection
+        // across batches) instead of re-parsing the SQL for every row.
+        let mut ins_stmt = match tx.prepare_cached(
+            r#"INSERT OR IGNORE INTO interactions (
+                log_id, interaction_uuid, session_uuid,
+                timestamp_start, timestamp_end, culture,
+                main_interaction_type, all_interaction_types,
+                interaction_value, output_text,
+                article_ids, dialog_paths, tdialog_status,
+                recognition_type, recognition_quality,
+                generative_ai_sources, articles, faqs_found,
+                contexts, pages, link_click_info, feedback_info,
+                output_metadata, recognition_details, imported_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)"#,
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
+        let mut fts_stmt = match tx.prepare_cached(
+            "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
+        let mut ctx_stmt = match tx.prepare_cached(
+            "INSERT OR IGNORE INTO context_index(name, value, session_uuid) VALUES (?1, ?2, ?3)",
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
+        let mut backfill_stmt = match tx.prepare_cached(
+            "UPDATE interactions SET recognition_details = ?1 WHERE log_id = ?2 AND (recognition_details IS NULL OR recognition_details = '')",
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
         for record in batch {
             let get_r = |idx: Option<usize>| -> &str {
                 idx.and_then(|i| record.get(i)).unwrap_or("")
@@ -1614,18 +1699,7 @@ async fn import_interactions_csv(
             };
             let ts_start = parse_ts(get_r(c_ts_start));
             let quality: f64 = get_r(c_recog_quality).parse().unwrap_or(0.0);
-            let result = tx.execute(
-                r#"INSERT OR IGNORE INTO interactions (
-                    log_id, interaction_uuid, session_uuid,
-                    timestamp_start, timestamp_end, culture,
-                    main_interaction_type, all_interaction_types,
-                    interaction_value, output_text,
-                    article_ids, dialog_paths, tdialog_status,
-                    recognition_type, recognition_quality,
-                    generative_ai_sources, articles, faqs_found,
-                    contexts, pages, link_click_info, feedback_info,
-                    output_metadata, recognition_details, imported_at
-                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)"#,
+            let result = ins_stmt.execute(
                 params![
                     log_id,
                     get_r(c_uuid),
@@ -1657,17 +1731,13 @@ async fn import_interactions_csv(
             match result {
                 Ok(1) => {
                     // Also index in FTS5
-                    let _ = tx.execute(
-                        "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                        params![
-                            log_id,
-                            get_r(c_value),
-                            get_r(c_output),
-                            get_r(c_article_ids),
-                            get_r(c_dialog_paths),
-                        ],
-                    );
+                    let _ = fts_stmt.execute(params![
+                        log_id,
+                        get_r(c_value),
+                        get_r(c_output),
+                        get_r(c_article_ids),
+                        get_r(c_dialog_paths),
+                    ]);
                     // Index context (name, value) pairs for fast context-filter lookups
                     let ctx_str = get_r(c_contexts);
                     if !ctx_str.is_empty() && ctx_str != "[]" && ctx_str != "null" {
@@ -1678,10 +1748,7 @@ async fn import_interactions_csv(
                                     let name  = item.get("name") .and_then(|v| v.as_str()).unwrap_or("");
                                     let value = item.get("value").and_then(|v| v.as_str()).unwrap_or("");
                                     if !name.is_empty() {
-                                        let _ = tx.execute(
-                                            "INSERT OR IGNORE INTO context_index(name, value, session_uuid) VALUES (?1, ?2, ?3)",
-                                            params![name, value, session_id],
-                                        );
+                                        let _ = ctx_stmt.execute(params![name, value, session_id]);
                                     }
                                 }
                             }
@@ -1693,16 +1760,18 @@ async fn import_interactions_csv(
                     // Row already exists — backfill recognition_details if it was NULL
                     let rd = get_r(c_recog_details);
                     if !rd.is_empty() {
-                        let _ = tx.execute(
-                            "UPDATE interactions SET recognition_details = ?1 WHERE log_id = ?2 AND (recognition_details IS NULL OR recognition_details = '')",
-                            params![rd, log_id],
-                        );
+                        let _ = backfill_stmt.execute(params![rd, log_id]);
                     }
                     *skipped += 1
                 }
                 Err(e) => errors.push(format!("Row {log_id}: {e}")),
             }
         }
+        // Cached statements borrow the transaction; drop them before commit.
+        drop(ins_stmt);
+        drop(fts_stmt);
+        drop(ctx_stmt);
+        drop(backfill_stmt);
         let _ = tx.commit();
     };
 
@@ -1743,6 +1812,12 @@ async fn import_interactions_csv(
     if inserted > 0 || purged > 0 {
         cleanup_orphan_contexts(conn);
         rebuild_session_summary(conn)?;
+        // Merge FTS5 b-tree segments so MATCH queries read fewer pages, and
+        // refresh planner statistics for the tables this import touched.
+        let _ = conn.execute_batch(
+            "INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');",
+        );
+        let _ = conn.execute_batch("PRAGMA optimize;");
     }
 
     Ok(ImportResult { inserted, skipped, purged, errors })
@@ -1797,6 +1872,534 @@ struct GetSessionsArgs {
     context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
 }
 
+fn build_session_filter_query(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+) -> Result<SessionFilterQuery, String> {
+    let filter = args.filter.as_deref().unwrap_or("all");
+    let query = args.query.as_deref().unwrap_or("").trim().to_string();
+    let query_regex = args.query_regex.unwrap_or(false);
+    let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
+    let query_ids = args.query_ids.unwrap_or(false);
+    let query_ids_only = args.query_ids_only.unwrap_or(false);
+    let query_id_type = args
+        .query_id_type
+        .as_deref()
+        .unwrap_or("article")
+        .to_string();
+    let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
+
+    fn tokenize_segment(s: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut chars = s.chars().peekable();
+        while let Some(&c) = chars.peek() {
+            if c.is_whitespace() {
+                chars.next();
+            } else if c == '"' {
+                chars.next();
+                let phrase: String = chars.by_ref().take_while(|&ch| ch != '"').collect();
+                if !phrase.is_empty() {
+                    tokens.push(phrase);
+                }
+            } else {
+                let word: String = chars
+                    .by_ref()
+                    .take_while(|&ch| !ch.is_whitespace() && ch != '"')
+                    .collect();
+                if !word.is_empty() {
+                    tokens.push(word);
+                }
+            }
+        }
+        tokens
+    }
+
+    let mut param_values: Vec<Box<dyn ToSql>> = Vec::new();
+    let mut param_idx = 0usize;
+    let next_param = |idx: &mut usize| -> String {
+        *idx += 1;
+        format!("?{}", *idx)
+    };
+    let is_feedback_filter = matches!(filter, "neg_feedback" | "pos_feedback");
+    if is_feedback_filter {
+        conn.create_scalar_function(
+            "feedback_origin",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx: &rusqlite::functions::Context<'_>| {
+                // Borrow the column text directly — no per-row String allocation
+                let text = ctx.get_raw(0).as_str().unwrap_or("");
+                let origin = serde_json::from_str::<serde_json::Value>(text)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("originatingInteractionId")
+                            .and_then(|id| id.as_str())
+                            .map(|id| id.to_string())
+                    })
+                    .unwrap_or_default();
+                Ok(origin)
+            },
+        )
+        .ok();
+    }
+
+    let mut base_conditions = vec!["s.has_real_user_input = 1".to_string()];
+    match filter {
+        "genai" => base_conditions.push("s.has_gen_ai = 1".to_string()),
+        "neg_feedback" => base_conditions.push("s.has_neg_feedback = 1".to_string()),
+        "pos_feedback" => base_conditions.push("s.has_pos_feedback = 1".to_string()),
+        "low_recog" => {
+            base_conditions.push(format!(
+                "s.min_positive_recognition_quality > 0 AND s.min_positive_recognition_quality < {low_recog_threshold}"
+            ));
+        }
+        "zero_recog" => base_conditions.push("s.has_zero_recog = 1".to_string()),
+        _ => {}
+    }
+
+    if let Some(ref df) = args.date_from {
+        if !df.is_empty() {
+            let p = next_param(&mut param_idx);
+            base_conditions.push(format!("s.last_ts >= {p}"));
+            param_values.push(Box::new(df.clone()));
+        }
+    }
+    if let Some(ref dt) = args.date_to {
+        if !dt.is_empty() {
+            let p = next_param(&mut param_idx);
+            base_conditions.push(format!("s.first_ts <= {p}"));
+            param_values.push(Box::new(dt.clone()));
+        }
+    }
+
+    if let Some(ref ctx_filters) = args.context_filters {
+        if !ctx_filters.is_empty() {
+            let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+            for f in ctx_filters {
+                groups
+                    .entry(f.name.clone())
+                    .or_default()
+                    .push(f.value.clone());
+            }
+            for (name, values) in groups {
+                let has_not_set = values.iter().any(|v| v == "__not_set__");
+                let regular_values: Vec<String> =
+                    values.into_iter().filter(|v| v != "__not_set__").collect();
+                let mut subclauses = Vec::new();
+                if has_not_set {
+                    let pn = next_param(&mut param_idx);
+                    param_values.push(Box::new(name.clone()));
+                    subclauses.push(format!(
+                        "NOT EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn})"
+                    ));
+                }
+                if !regular_values.is_empty() {
+                    let pn = next_param(&mut param_idx);
+                    param_values.push(Box::new(name.clone()));
+                    let value_placeholders = regular_values
+                        .iter()
+                        .map(|v| {
+                            let pv = next_param(&mut param_idx);
+                            param_values.push(Box::new(v.clone()));
+                            pv
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    subclauses.push(format!(
+                        "EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn} AND ci.value IN ({value_placeholders}))"
+                    ));
+                }
+                if subclauses.len() == 1 {
+                    base_conditions.push(subclauses.remove(0));
+                } else if !subclauses.is_empty() {
+                    base_conditions.push(format!("({})", subclauses.join(" OR ")));
+                }
+            }
+        }
+    }
+
+    let base_where = format!("WHERE {}", base_conditions.join(" AND "));
+    let mut search_mode = "none".to_string();
+    let mut search_cte = String::new();
+    let mut filtered_from = "SELECT b.*, NULL AS match_log_id FROM base_sessions b".to_string();
+    let is_recognition_filter = matches!(filter, "low_recog" | "zero_recog");
+    let search_row_filter = match filter {
+        "genai" => {
+            " AND (i.main_interaction_type = 'GenerativeAI' OR i.all_interaction_types LIKE '%GenerativeAI%')".to_string()
+        }
+        "low_recog" => format!(
+            " AND i.recognition_quality > 0 \
+              AND i.recognition_quality < {low_recog_threshold} \
+              AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+              AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI'"
+        ),
+        "zero_recog" => {
+            " AND i.recognition_quality = 0 \
+              AND COALESCE(i.recognition_type, '') != '' \
+              AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+              AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI'".to_string()
+        }
+        _ => String::new(),
+    };
+    let search_row_filter = search_row_filter.as_str();
+    let feedback_score_filter = match filter {
+        "neg_feedback" => {
+            "AND (fb.feedback_info LIKE '%\"score\": -1%' OR fb.feedback_info LIKE '%\"score\":-1%')"
+        }
+        "pos_feedback" => {
+            "AND (fb.feedback_info LIKE '%\"score\": 1%' OR fb.feedback_info LIKE '%\"score\":1%') \
+             AND fb.feedback_info NOT LIKE '%\"score\": -1%' \
+             AND fb.feedback_info NOT LIKE '%\"score\":-1%'"
+        }
+        _ => "",
+    };
+    let feedback_origins_cte = if is_feedback_filter {
+        format!(
+            ", feedback_origins AS (\
+                SELECT \
+                    fb.session_uuid, \
+                    COALESCE(origin.log_id, (\
+                        SELECT prev.log_id \
+                        FROM interactions prev \
+                        WHERE prev.session_uuid = fb.session_uuid \
+                          AND prev.log_id < fb.log_id \
+                          AND COALESCE(prev.output_text, '') != '' \
+                          AND COALESCE(prev.main_interaction_type, '') != 'Feedback' \
+                        ORDER BY prev.log_id DESC \
+                        LIMIT 1\
+                    ), fb.log_id) AS match_log_id \
+                FROM interactions fb \
+                JOIN base_sessions b ON b.session_uuid = fb.session_uuid \
+                LEFT JOIN interactions origin \
+                  ON origin.session_uuid = fb.session_uuid \
+                 AND origin.interaction_uuid = feedback_origin(fb.feedback_info) \
+                WHERE COALESCE(fb.feedback_info, '') != '' {feedback_score_filter}\
+            )"
+        )
+    } else {
+        String::new()
+    };
+    let recognition_matches_cte = if is_recognition_filter {
+        format!(
+            ", recognition_matches AS (\
+                SELECT i.session_uuid, i.log_id AS match_log_id \
+                FROM interactions i \
+                JOIN base_sessions b ON b.session_uuid = i.session_uuid \
+                WHERE 1 = 1{search_row_filter}\
+            )"
+        )
+    } else {
+        String::new()
+    };
+
+    if !query.is_empty() {
+        if query_ids_only {
+            search_mode = "id".to_string();
+            let (column, like_val) = match query_id_type.as_str() {
+                "dialog" => (
+                    "i.dialog_paths",
+                    format!("%\"{}:%", query.replace('%', "\\%").replace('_', "\\_")),
+                ),
+                "node" => (
+                    "i.article_ids",
+                    format!("%dn-{}%", query.replace('%', "\\%").replace('_', "\\_")),
+                ),
+                _ => (
+                    "i.article_ids",
+                    format!("%qa-{}%", query.replace('%', "\\%").replace('_', "\\_")),
+                ),
+            };
+            let p = next_param(&mut param_idx);
+            param_values.push(Box::new(like_val));
+            let search_from = if is_feedback_filter {
+                "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+            } else {
+                "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+            };
+            let row_filter = if is_feedback_filter {
+                ""
+            } else {
+                search_row_filter
+            };
+            search_cte = format!(
+                "{feedback_origins_cte}, search_matches AS (\
+                    SELECT i.session_uuid, i.log_id AS match_log_id \
+                    FROM {search_from} \
+                    WHERE {column} LIKE {p} ESCAPE '\\'{row_filter}\
+                ), search_sessions AS (\
+                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                    FROM search_matches \
+                    GROUP BY session_uuid\
+                )"
+            );
+            filtered_from =
+                "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+        } else if query_regex {
+            search_mode = "regex".to_string();
+            use regex::Regex;
+            let compiled = Arc::new(Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?);
+            conn.create_scalar_function(
+                "regexp",
+                2,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+                move |ctx: &rusqlite::functions::Context<'_>| {
+                    // Borrow the column text directly — no per-row String allocation
+                    let text = ctx.get_raw(1).as_str().unwrap_or("");
+                    Ok(compiled.is_match(text) as i32)
+                },
+            )
+            .ok();
+
+            let p = next_param(&mut param_idx);
+            param_values.push(Box::new(query.clone()));
+            let text_cond = match query_scope.as_str() {
+                "user" => format!("regexp({p}, i.interaction_value)"),
+                "bot" => format!("regexp({p}, i.output_text)"),
+                _ => format!("(regexp({p}, i.interaction_value) OR regexp({p}, i.output_text))"),
+            };
+            let final_cond = if query_ids {
+                let p2 = next_param(&mut param_idx);
+                param_values.push(Box::new(query.clone()));
+                format!(
+                    "({text_cond} OR regexp({p2}, i.article_ids) OR regexp({p2}, i.dialog_paths))"
+                )
+            } else {
+                text_cond
+            };
+            let search_from = if is_feedback_filter {
+                "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+            } else {
+                "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+            };
+            let row_filter = if is_feedback_filter {
+                ""
+            } else {
+                search_row_filter
+            };
+            search_cte = format!(
+                "{feedback_origins_cte}, search_matches AS (\
+                    SELECT i.session_uuid, i.log_id AS match_log_id \
+                    FROM {search_from} \
+                    WHERE {final_cond}{row_filter}\
+                ), search_sessions AS (\
+                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                    FROM search_matches \
+                    GROUP BY session_uuid\
+                )"
+            );
+            filtered_from =
+                "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+        } else {
+            let fts_available = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
+                    [],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            let or_groups: Vec<Vec<String>> = query
+                .split('|')
+                .map(|g| tokenize_segment(g.trim()))
+                .filter(|g| !g.is_empty())
+                .collect();
+
+            if fts_available {
+                let fts_groups = or_groups
+                    .iter()
+                    .map(|group| {
+                        group
+                            .iter()
+                            .filter_map(|t| {
+                                if t.contains(' ') {
+                                    let phrase_terms = t
+                                        .split_whitespace()
+                                        .map(|w| {
+                                            w.chars()
+                                                .filter(|c| {
+                                                    c.is_alphanumeric()
+                                                        || matches!(*c, '-' | '_' | '.')
+                                                })
+                                                .collect::<String>()
+                                        })
+                                        .filter(|w| !w.is_empty())
+                                        .collect::<Vec<_>>();
+                                    if phrase_terms.is_empty() {
+                                        None
+                                    } else {
+                                        Some(format!("\"{}\"", phrase_terms.join(" ")))
+                                    }
+                                } else {
+                                    let clean = t
+                                        .chars()
+                                        .filter(|c| {
+                                            c.is_alphanumeric() || matches!(*c, '-' | '_' | '.')
+                                        })
+                                        .collect::<String>();
+                                    if clean.is_empty() {
+                                        None
+                                    } else {
+                                        Some(format!("{clean}*"))
+                                    }
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|g| !g.is_empty())
+                    .collect::<Vec<_>>();
+
+                if !fts_groups.is_empty() {
+                    search_mode = "fts".to_string();
+                    let fts_query = fts_groups
+                        .iter()
+                        .map(|terms| {
+                            if terms.len() == 1 {
+                                terms[0].clone()
+                            } else {
+                                format!("({})", terms.join(" "))
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" OR ");
+                    let fts_match_expr = match (query_scope.as_str(), query_ids) {
+                        ("user", false) => format!("interaction_value : {fts_query}"),
+                        ("user", true) => {
+                            format!("{{interaction_value article_ids dialog_paths}} : {fts_query}")
+                        }
+                        ("bot", false) => format!("output_text : {fts_query}"),
+                        ("bot", true) => {
+                            format!("{{output_text article_ids dialog_paths}} : {fts_query}")
+                        }
+                        (_, _) => fts_query,
+                    };
+                    let p = next_param(&mut param_idx);
+                    param_values.push(Box::new(fts_match_expr));
+                    let search_from = if is_feedback_filter {
+                        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id JOIN interactions_fts ON interactions_fts.rowid = i.log_id"
+                    } else {
+                        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+                    };
+                    let row_filter = if is_feedback_filter {
+                        ""
+                    } else {
+                        search_row_filter
+                    };
+                    search_cte = format!(
+                        "{feedback_origins_cte}, search_matches AS (\
+                            SELECT i.session_uuid, i.log_id AS match_log_id \
+                            FROM {search_from} \
+                            WHERE interactions_fts MATCH {p}{row_filter}\
+                        ), search_sessions AS (\
+                            SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                            FROM search_matches \
+                            GROUP BY session_uuid\
+                        )"
+                    );
+                    filtered_from =
+                        "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                }
+            } else if !or_groups.is_empty() {
+                search_mode = "like".to_string();
+                let or_clauses = or_groups
+                    .iter()
+                    .map(|and_terms| {
+                        and_terms
+                            .iter()
+                            .map(|term| {
+                                let like_val =
+                                    format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
+                                let text_cond = match query_scope.as_str() {
+                                    "user" => {
+                                        let p = next_param(&mut param_idx);
+                                        param_values.push(Box::new(like_val.clone()));
+                                        format!("i.interaction_value LIKE {p} ESCAPE '\\'")
+                                    }
+                                    "bot" => {
+                                        let p = next_param(&mut param_idx);
+                                        param_values.push(Box::new(like_val.clone()));
+                                        format!("i.output_text LIKE {p} ESCAPE '\\'")
+                                    }
+                                    _ => {
+                                        let p1 = next_param(&mut param_idx);
+                                        param_values.push(Box::new(like_val.clone()));
+                                        let p2 = next_param(&mut param_idx);
+                                        param_values.push(Box::new(like_val.clone()));
+                                        format!("(i.interaction_value LIKE {p1} ESCAPE '\\' OR i.output_text LIKE {p2} ESCAPE '\\')")
+                                    }
+                                };
+                                if query_ids {
+                                    let pi1 = next_param(&mut param_idx);
+                                    param_values.push(Box::new(like_val.clone()));
+                                    let pi2 = next_param(&mut param_idx);
+                                    param_values.push(Box::new(like_val));
+                                    format!("({text_cond} OR i.article_ids LIKE {pi1} ESCAPE '\\' OR i.dialog_paths LIKE {pi2} ESCAPE '\\')")
+                                } else {
+                                    text_cond
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" AND ")
+                    })
+                    .map(|g| format!("({g})"))
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                let search_from = if is_feedback_filter {
+                    "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+                } else {
+                    "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+                };
+                let row_filter = if is_feedback_filter {
+                    ""
+                } else {
+                    search_row_filter
+                };
+                search_cte = format!(
+                    "{feedback_origins_cte}, search_matches AS (\
+                        SELECT i.session_uuid, i.log_id AS match_log_id \
+                        FROM {search_from} \
+                        WHERE {or_clauses}{row_filter}\
+                    ), search_sessions AS (\
+                        SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                        FROM search_matches \
+                        GROUP BY session_uuid\
+                    )"
+                );
+                filtered_from =
+                    "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+            }
+        }
+    } else if is_feedback_filter {
+        search_cte = format!(
+            "{feedback_origins_cte}, feedback_sessions AS (\
+                SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                FROM feedback_origins \
+                GROUP BY session_uuid\
+            )"
+        );
+        filtered_from =
+            "SELECT b.*, fs.match_log_id FROM base_sessions b JOIN feedback_sessions fs ON fs.session_uuid = b.session_uuid".to_string();
+    } else if is_recognition_filter {
+        search_cte = format!(
+            "{recognition_matches_cte}, recognition_sessions AS (\
+                SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                FROM recognition_matches \
+                GROUP BY session_uuid\
+            )"
+        );
+        filtered_from =
+            "SELECT b.*, rs.match_log_id FROM base_sessions b JOIN recognition_sessions rs ON rs.session_uuid = b.session_uuid".to_string();
+    }
+
+    Ok(SessionFilterQuery {
+        base_where,
+        search_cte,
+        filtered_from,
+        param_values,
+        search_mode,
+    })
+}
+
 #[tauri::command]
 async fn get_sessions(
     db_state: State<'_, SharedDbState>,
@@ -1812,516 +2415,26 @@ async fn get_sessions(
         let limit = 50i64;
         let offset = (page - 1) * limit;
 
-        let filter = args.filter.as_deref().unwrap_or("all");
-        let query = args.query.as_deref().unwrap_or("").trim().to_string();
-        let query_regex = args.query_regex.unwrap_or(false);
-        let query_scope = args.query_scope.as_deref().unwrap_or("both").to_string();
-        let query_ids = args.query_ids.unwrap_or(false);
-        let query_ids_only = args.query_ids_only.unwrap_or(false);
-        let query_id_type = args.query_id_type.as_deref().unwrap_or("article").to_string();
-        let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
+        let mut filter_query = build_session_filter_query(conn, &args)?;
 
-        fn tokenize_segment(s: &str) -> Vec<String> {
-            let mut tokens = Vec::new();
-            let mut chars = s.chars().peekable();
-            while let Some(&c) = chars.peek() {
-                if c.is_whitespace() {
-                    chars.next();
-                } else if c == '"' {
-                    chars.next();
-                    let phrase: String = chars.by_ref().take_while(|&ch| ch != '"').collect();
-                    if !phrase.is_empty() {
-                        tokens.push(phrase);
-                    }
-                } else {
-                    let word: String = chars
-                        .by_ref()
-                        .take_while(|&ch| !ch.is_whitespace() && ch != '"')
-                        .collect();
-                    if !word.is_empty() {
-                        tokens.push(word);
-                    }
-                }
-            }
-            tokens
-        }
-
-        let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        let mut param_idx = 0usize;
-        let next_param = |idx: &mut usize| -> String {
-            *idx += 1;
-            format!("?{}", *idx)
-        };
-        let is_feedback_filter = matches!(filter, "neg_feedback" | "pos_feedback");
-        if is_feedback_filter {
-            conn.create_scalar_function(
-                "feedback_origin",
-                1,
-                rusqlite::functions::FunctionFlags::SQLITE_UTF8
-                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-                |ctx: &rusqlite::functions::Context<'_>| {
-                    let text: String = ctx.get(0).unwrap_or_default();
-                    let origin = serde_json::from_str::<serde_json::Value>(&text)
-                        .ok()
-                        .and_then(|v| {
-                            v.get("originatingInteractionId")
-                                .and_then(|id| id.as_str())
-                                .map(|id| id.to_string())
-                        })
-                        .unwrap_or_default();
-                    Ok(origin)
-                },
-            )
-            .ok();
-        }
-
-        let mut base_conditions = vec!["s.has_real_user_input = 1".to_string()];
-        match filter {
-            "genai" => base_conditions.push("s.has_gen_ai = 1".to_string()),
-            "neg_feedback" => base_conditions.push("s.has_neg_feedback = 1".to_string()),
-            "pos_feedback" => base_conditions.push("s.has_pos_feedback = 1".to_string()),
-            "low_recog" => {
-                base_conditions.push(format!(
-                    "s.min_positive_recognition_quality > 0 AND s.min_positive_recognition_quality < {low_recog_threshold}"
-                ));
-            }
-            "zero_recog" => base_conditions.push("s.has_zero_recog = 1".to_string()),
-            _ => {}
-        }
-
-        if let Some(ref df) = args.date_from {
-            if !df.is_empty() {
-                let p = next_param(&mut param_idx);
-                base_conditions.push(format!("s.last_ts >= {p}"));
-                param_values.push(Box::new(df.clone()));
-            }
-        }
-        if let Some(ref dt) = args.date_to {
-            if !dt.is_empty() {
-                let p = next_param(&mut param_idx);
-                base_conditions.push(format!("s.first_ts <= {p}"));
-                param_values.push(Box::new(dt.clone()));
-            }
-        }
-
-        if let Some(ref ctx_filters) = args.context_filters {
-            if !ctx_filters.is_empty() {
-                let mut groups: HashMap<String, Vec<String>> = HashMap::new();
-                for f in ctx_filters {
-                    groups.entry(f.name.clone()).or_default().push(f.value.clone());
-                }
-                for (name, values) in groups {
-                    let has_not_set = values.iter().any(|v| v == "__not_set__");
-                    let regular_values: Vec<String> = values
-                        .into_iter()
-                        .filter(|v| v != "__not_set__")
-                        .collect();
-                    let mut subclauses = Vec::new();
-                    if has_not_set {
-                        let pn = next_param(&mut param_idx);
-                        param_values.push(Box::new(name.clone()));
-                        subclauses.push(format!(
-                            "NOT EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn})"
-                        ));
-                    }
-                    if !regular_values.is_empty() {
-                        let pn = next_param(&mut param_idx);
-                        param_values.push(Box::new(name.clone()));
-                        let value_placeholders = regular_values
-                            .iter()
-                            .map(|v| {
-                                let pv = next_param(&mut param_idx);
-                                param_values.push(Box::new(v.clone()));
-                                pv
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        subclauses.push(format!(
-                            "EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn} AND ci.value IN ({value_placeholders}))"
-                        ));
-                    }
-                    if subclauses.len() == 1 {
-                        base_conditions.push(subclauses.remove(0));
-                    } else if !subclauses.is_empty() {
-                        base_conditions.push(format!("({})", subclauses.join(" OR ")));
-                    }
-                }
-            }
-        }
-
-        let base_where = format!("WHERE {}", base_conditions.join(" AND "));
-        let mut search_mode = "none".to_string();
-        let mut search_cte = String::new();
-        let mut filtered_from = "SELECT b.*, NULL AS match_log_id FROM base_sessions b".to_string();
-        let is_recognition_filter = matches!(filter, "low_recog" | "zero_recog");
-        let search_row_filter = match filter {
-            "genai" => {
-                " AND (i.main_interaction_type = 'GenerativeAI' OR i.all_interaction_types LIKE '%GenerativeAI%')".to_string()
-            }
-            "low_recog" => format!(
-                " AND i.recognition_quality > 0 \
-                  AND i.recognition_quality < {low_recog_threshold} \
-                  AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
-                  AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI'"
-            ),
-            "zero_recog" => {
-                " AND i.recognition_quality = 0 \
-                  AND COALESCE(i.recognition_type, '') != '' \
-                  AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
-                  AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI'".to_string()
-            }
-            _ => String::new(),
-        };
-        let search_row_filter = search_row_filter.as_str();
-        let feedback_score_filter = match filter {
-            "neg_feedback" => {
-                "AND (fb.feedback_info LIKE '%\"score\": -1%' OR fb.feedback_info LIKE '%\"score\":-1%')"
-            }
-            "pos_feedback" => {
-                "AND (fb.feedback_info LIKE '%\"score\": 1%' OR fb.feedback_info LIKE '%\"score\":1%') \
-                 AND fb.feedback_info NOT LIKE '%\"score\": -1%' \
-                 AND fb.feedback_info NOT LIKE '%\"score\":-1%'"
-            }
-            _ => "",
-        };
-        let feedback_origins_cte = if is_feedback_filter {
-            format!(
-                ", feedback_origins AS (\
-                    SELECT \
-                        fb.session_uuid, \
-                        COALESCE(origin.log_id, (\
-                            SELECT prev.log_id \
-                            FROM interactions prev \
-                            WHERE prev.session_uuid = fb.session_uuid \
-                              AND prev.log_id < fb.log_id \
-                              AND COALESCE(prev.output_text, '') != '' \
-                              AND COALESCE(prev.main_interaction_type, '') != 'Feedback' \
-                            ORDER BY prev.log_id DESC \
-                            LIMIT 1\
-                        ), fb.log_id) AS match_log_id \
-                    FROM interactions fb \
-                    JOIN base_sessions b ON b.session_uuid = fb.session_uuid \
-                    LEFT JOIN interactions origin \
-                      ON origin.session_uuid = fb.session_uuid \
-                     AND origin.interaction_uuid = feedback_origin(fb.feedback_info) \
-                    WHERE COALESCE(fb.feedback_info, '') != '' {feedback_score_filter}\
-                )"
-            )
-        } else {
-            String::new()
-        };
-        let recognition_matches_cte = if is_recognition_filter {
-            format!(
-                ", recognition_matches AS (\
-                    SELECT i.session_uuid, i.log_id AS match_log_id \
-                    FROM interactions i \
-                    JOIN base_sessions b ON b.session_uuid = i.session_uuid \
-                    WHERE 1 = 1{search_row_filter}\
-                )"
-            )
-        } else {
-            String::new()
-        };
-
-        if !query.is_empty() {
-            if query_ids_only {
-                search_mode = "id".to_string();
-                let (column, like_val) = match query_id_type.as_str() {
-                    "dialog" => (
-                        "i.dialog_paths",
-                        format!("%\"{}:%", query.replace('%', "\\%").replace('_', "\\_")),
-                    ),
-                    "node" => (
-                        "i.article_ids",
-                        format!("%dn-{}%", query.replace('%', "\\%").replace('_', "\\_")),
-                    ),
-                    _ => (
-                        "i.article_ids",
-                        format!("%qa-{}%", query.replace('%', "\\%").replace('_', "\\_")),
-                    ),
-                };
-                let p = next_param(&mut param_idx);
-                param_values.push(Box::new(like_val));
-                let search_from = if is_feedback_filter {
-                    "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
-                } else {
-                    "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-                };
-                let row_filter = if is_feedback_filter { "" } else { search_row_filter };
-                search_cte = format!(
-                    "{feedback_origins_cte}, search_matches AS (\
-                        SELECT i.session_uuid, i.log_id AS match_log_id \
-                        FROM {search_from} \
-                        WHERE {column} LIKE {p} ESCAPE '\\'{row_filter}\
-                    ), search_sessions AS (\
-                        SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                        FROM search_matches \
-                        GROUP BY session_uuid\
-                    )"
-                );
-                filtered_from =
-                    "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
-            } else if query_regex {
-                search_mode = "regex".to_string();
-                use regex::Regex;
-                let compiled = Arc::new(
-                    Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?,
-                );
-                conn.create_scalar_function(
-                    "regexp",
-                    2,
-                    rusqlite::functions::FunctionFlags::SQLITE_UTF8
-                        | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-                    move |ctx: &rusqlite::functions::Context<'_>| {
-                        let text: String = ctx.get(1).unwrap_or_default();
-                        Ok(compiled.is_match(&text) as i32)
-                    },
-                )
-                .ok();
-
-                let p = next_param(&mut param_idx);
-                param_values.push(Box::new(query.clone()));
-                let text_cond = match query_scope.as_str() {
-                    "user" => format!("regexp({p}, i.interaction_value)"),
-                    "bot" => format!("regexp({p}, i.output_text)"),
-                    _ => format!("(regexp({p}, i.interaction_value) OR regexp({p}, i.output_text))"),
-                };
-                let final_cond = if query_ids {
-                    let p2 = next_param(&mut param_idx);
-                    param_values.push(Box::new(query.clone()));
-                    format!(
-                        "({text_cond} OR regexp({p2}, i.article_ids) OR regexp({p2}, i.dialog_paths))"
-                    )
-                } else {
-                    text_cond
-                };
-                let search_from = if is_feedback_filter {
-                    "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
-                } else {
-                    "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-                };
-                let row_filter = if is_feedback_filter { "" } else { search_row_filter };
-                search_cte = format!(
-                    "{feedback_origins_cte}, search_matches AS (\
-                        SELECT i.session_uuid, i.log_id AS match_log_id \
-                        FROM {search_from} \
-                        WHERE {final_cond}{row_filter}\
-                    ), search_sessions AS (\
-                        SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                        FROM search_matches \
-                        GROUP BY session_uuid\
-                    )"
-                );
-                filtered_from =
-                    "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
-            } else {
-                let fts_available = conn
-                    .query_row(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
-                        [],
-                        |_| Ok(true),
-                    )
-                    .unwrap_or(false);
-                let or_groups: Vec<Vec<String>> = query
-                    .split('|')
-                    .map(|g| tokenize_segment(g.trim()))
-                    .filter(|g| !g.is_empty())
-                    .collect();
-
-                if fts_available {
-                    let fts_groups = or_groups
-                        .iter()
-                        .map(|group| {
-                            group
-                                .iter()
-                                .filter_map(|t| {
-                                    if t.contains(' ') {
-                                        let phrase_terms = t
-                                            .split_whitespace()
-                                            .map(|w| {
-                                                w.chars()
-                                                    .filter(|c| {
-                                                        c.is_alphanumeric()
-                                                            || matches!(*c, '-' | '_' | '.')
-                                                    })
-                                                    .collect::<String>()
-                                            })
-                                            .filter(|w| !w.is_empty())
-                                            .collect::<Vec<_>>();
-                                        if phrase_terms.is_empty() {
-                                            None
-                                        } else {
-                                            Some(format!("\"{}\"", phrase_terms.join(" ")))
-                                        }
-                                    } else {
-                                        let clean = t
-                                            .chars()
-                                            .filter(|c| {
-                                                c.is_alphanumeric()
-                                                    || matches!(*c, '-' | '_' | '.')
-                                            })
-                                            .collect::<String>();
-                                        if clean.is_empty() {
-                                            None
-                                        } else {
-                                            Some(format!("{clean}*"))
-                                        }
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .filter(|g| !g.is_empty())
-                        .collect::<Vec<_>>();
-
-                if !fts_groups.is_empty() {
-                        search_mode = "fts".to_string();
-                        let fts_query = fts_groups
-                            .iter()
-                            .map(|terms| {
-                                if terms.len() == 1 {
-                                    terms[0].clone()
-                                } else {
-                                    format!("({})", terms.join(" "))
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" OR ");
-                        let fts_match_expr = match (query_scope.as_str(), query_ids) {
-                            ("user", false) => format!("interaction_value : {fts_query}"),
-                            ("user", true) => {
-                                format!("{{interaction_value article_ids dialog_paths}} : {fts_query}")
-                            }
-                            ("bot", false) => format!("output_text : {fts_query}"),
-                            ("bot", true) => {
-                                format!("{{output_text article_ids dialog_paths}} : {fts_query}")
-                            }
-                            (_, _) => fts_query,
-                        };
-                        let p = next_param(&mut param_idx);
-                        param_values.push(Box::new(fts_match_expr));
-                        let search_from = if is_feedback_filter {
-                            "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id JOIN interactions_fts ON interactions_fts.rowid = i.log_id"
-                        } else {
-                            "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-                        };
-                        let row_filter = if is_feedback_filter { "" } else { search_row_filter };
-                        search_cte = format!(
-                            "{feedback_origins_cte}, search_matches AS (\
-                                SELECT i.session_uuid, i.log_id AS match_log_id \
-                                FROM {search_from} \
-                                WHERE interactions_fts MATCH {p}{row_filter}\
-                            ), search_sessions AS (\
-                                SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                                FROM search_matches \
-                                GROUP BY session_uuid\
-                            )"
-                        );
-                        filtered_from =
-                            "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
-                    }
-                } else if !or_groups.is_empty() {
-                    search_mode = "like".to_string();
-                    let or_clauses = or_groups
-                        .iter()
-                        .map(|and_terms| {
-                            and_terms
-                                .iter()
-                                .map(|term| {
-                                    let like_val =
-                                        format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
-                                    let text_cond = match query_scope.as_str() {
-                                        "user" => {
-                                            let p = next_param(&mut param_idx);
-                                            param_values.push(Box::new(like_val.clone()));
-                                            format!("i.interaction_value LIKE {p} ESCAPE '\\'")
-                                        }
-                                        "bot" => {
-                                            let p = next_param(&mut param_idx);
-                                            param_values.push(Box::new(like_val.clone()));
-                                            format!("i.output_text LIKE {p} ESCAPE '\\'")
-                                        }
-                                        _ => {
-                                            let p1 = next_param(&mut param_idx);
-                                            param_values.push(Box::new(like_val.clone()));
-                                            let p2 = next_param(&mut param_idx);
-                                            param_values.push(Box::new(like_val.clone()));
-                                            format!("(i.interaction_value LIKE {p1} ESCAPE '\\' OR i.output_text LIKE {p2} ESCAPE '\\')")
-                                        }
-                                    };
-                                    if query_ids {
-                                        let pi1 = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val.clone()));
-                                        let pi2 = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val));
-                                        format!("({text_cond} OR i.article_ids LIKE {pi1} ESCAPE '\\' OR i.dialog_paths LIKE {pi2} ESCAPE '\\')")
-                                    } else {
-                                        text_cond
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join(" AND ")
-                        })
-                        .map(|g| format!("({g})"))
-                        .collect::<Vec<_>>()
-                        .join(" OR ");
-                    let search_from = if is_feedback_filter {
-                        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
-                    } else {
-                        "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-                    };
-                    let row_filter = if is_feedback_filter { "" } else { search_row_filter };
-                    search_cte = format!(
-                        "{feedback_origins_cte}, search_matches AS (\
-                            SELECT i.session_uuid, i.log_id AS match_log_id \
-                            FROM {search_from} \
-                            WHERE {or_clauses}{row_filter}\
-                        ), search_sessions AS (\
-                            SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                            FROM search_matches \
-                            GROUP BY session_uuid\
-                        )"
-                    );
-                    filtered_from =
-                        "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
-                }
-            }
-        } else if is_feedback_filter {
-            search_cte = format!(
-                "{feedback_origins_cte}, feedback_sessions AS (\
-                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                    FROM feedback_origins \
-                    GROUP BY session_uuid\
-                )"
-            );
-            filtered_from =
-                "SELECT b.*, fs.match_log_id FROM base_sessions b JOIN feedback_sessions fs ON fs.session_uuid = b.session_uuid".to_string();
-        } else if is_recognition_filter {
-            search_cte = format!(
-                "{recognition_matches_cte}, recognition_sessions AS (\
-                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                    FROM recognition_matches \
-                    GROUP BY session_uuid\
-                )"
-            );
-            filtered_from =
-                "SELECT b.*, rs.match_log_id FROM base_sessions b JOIN recognition_sessions rs ON rs.session_uuid = b.session_uuid".to_string();
-        }
-
-        let p_limit = next_param(&mut param_idx);
-        param_values.push(Box::new(limit));
-        let p_offset = next_param(&mut param_idx);
-        param_values.push(Box::new(offset));
-        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-            param_values.iter().map(|b| b.as_ref()).collect();
+        filter_query.param_values.push(Box::new(limit));
+        filter_query.param_values.push(Box::new(offset));
+        let p_limit = format!("?{}", filter_query.param_values.len() - 1);
+        let p_offset = format!("?{}", filter_query.param_values.len());
+        let params_ref: Vec<&dyn ToSql> = filter_query
+            .param_values
+            .iter()
+            .map(|b| b.as_ref())
+            .collect();
 
         let sql = format!(
             r#"WITH
 base_sessions AS (
     SELECT s.*
     FROM session_summary s
-    {base_where}
-)
-{search_cte},
+	    {base_where}
+	)
+	{search_cte},
 filtered_sessions AS (
     {filtered_from}
 ),
@@ -2359,10 +2472,19 @@ SELECT
     t.total_count
 FROM total t
 LEFT JOIN page_rows p ON 1 = 1
-ORDER BY p.first_ts DESC"#
+ORDER BY p.first_ts DESC"#,
+            base_where = filter_query.base_where.as_str(),
+            search_cte = filter_query.search_cte.as_str(),
+            filtered_from = filter_query.filtered_from.as_str(),
+            p_limit = p_limit,
+            p_offset = p_offset
         );
 
-        let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query error: {e}"))?;
+        // Cached: pagination and repeated searches with the same filter shape
+        // reuse the already-compiled statement.
+        let mut stmt = conn
+            .prepare_cached(&sql)
+            .map_err(|e| format!("Query error: {e}"))?;
         let mut rows = stmt
             .query(params_ref.as_slice())
             .map_err(|e| format!("Query error: {e}"))?;
@@ -2370,21 +2492,39 @@ ORDER BY p.first_ts DESC"#
         let mut total = 0i64;
         while let Some(row) = rows.next().map_err(|e| format!("Query error: {e}"))? {
             total = row.get::<_, i64>(10).unwrap_or(0);
-            let session_uuid = row.get::<_, Option<String>>(0).unwrap_or(None).unwrap_or_default();
+            let session_uuid = row
+                .get::<_, Option<String>>(0)
+                .unwrap_or(None)
+                .unwrap_or_default();
             if session_uuid.is_empty() {
                 continue;
             }
             sessions.push(SessionSummary {
                 session_uuid,
-                first_ts: row.get::<_, Option<String>>(1).unwrap_or(None).unwrap_or_default(),
-                last_ts: row.get::<_, Option<String>>(2).unwrap_or(None).unwrap_or_default(),
+                first_ts: row
+                    .get::<_, Option<String>>(1)
+                    .unwrap_or(None)
+                    .unwrap_or_default(),
+                last_ts: row
+                    .get::<_, Option<String>>(2)
+                    .unwrap_or(None)
+                    .unwrap_or_default(),
                 interaction_count: row.get::<_, Option<i64>>(3).unwrap_or(None).unwrap_or(0),
                 has_gen_ai: row.get::<_, Option<i64>>(4).unwrap_or(None).unwrap_or(0) == 1,
-                culture: row.get::<_, Option<String>>(5).unwrap_or(None).unwrap_or_default(),
-                user_message_preview: row.get::<_, Option<String>>(6).unwrap_or(None).unwrap_or_default(),
+                culture: row
+                    .get::<_, Option<String>>(5)
+                    .unwrap_or(None)
+                    .unwrap_or_default(),
+                user_message_preview: row
+                    .get::<_, Option<String>>(6)
+                    .unwrap_or(None)
+                    .unwrap_or_default(),
                 has_neg_feedback: row.get::<_, Option<i64>>(7).unwrap_or(None).unwrap_or(0) == 1,
                 has_pos_feedback: row.get::<_, Option<i64>>(8).unwrap_or(None).unwrap_or(0) == 1,
-                contexts: row.get::<_, Option<String>>(9).unwrap_or(None).unwrap_or_default(),
+                contexts: row
+                    .get::<_, Option<String>>(9)
+                    .unwrap_or(None)
+                    .unwrap_or_default(),
             });
         }
 
@@ -2393,7 +2533,751 @@ ORDER BY p.first_ts DESC"#
             total,
             page,
             timing_ms: started.elapsed().as_millis() as i64,
-            search_mode,
+            search_mode: filter_query.search_mode.clone(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn json_or_text(text: &str) -> serde_json::Value {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_str::<serde_json::Value>(trimmed)
+            .unwrap_or_else(|_| serde_json::Value::String(text.to_string()))
+    }
+}
+
+fn feedback_origin_id(feedback_info: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(feedback_info)
+        .ok()
+        .and_then(|v| {
+            v.get("originatingInteractionId")
+                .and_then(|id| id.as_str())
+                .map(|id| id.to_string())
+        })
+        .unwrap_or_default()
+}
+
+fn feedback_score(feedback_info: &str) -> Option<i64> {
+    let value = serde_json::from_str::<serde_json::Value>(feedback_info).ok()?;
+    value
+        .get("score")
+        .and_then(|score| score.as_i64().or_else(|| score.as_str()?.parse().ok()))
+}
+
+fn is_empty_json(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => true,
+        serde_json::Value::String(s) => s.trim().is_empty(),
+        serde_json::Value::Array(a) => a.is_empty(),
+        serde_json::Value::Object(o) => o.is_empty(),
+        _ => false,
+    }
+}
+
+fn prune_empty_json(value: serde_json::Value) -> Option<serde_json::Value> {
+    match value {
+        serde_json::Value::Array(items) => {
+            let pruned = items
+                .into_iter()
+                .filter_map(prune_empty_json)
+                .collect::<Vec<_>>();
+            if pruned.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Array(pruned))
+            }
+        }
+        serde_json::Value::Object(map) => {
+            let pruned = map
+                .into_iter()
+                .filter_map(|(key, value)| prune_empty_json(value).map(|value| (key, value)))
+                .collect::<serde_json::Map<_, _>>();
+            if pruned.is_empty() {
+                None
+            } else {
+                Some(serde_json::Value::Object(pruned))
+            }
+        }
+        other if is_empty_json(&other) => None,
+        other => Some(other),
+    }
+}
+
+fn insert_if_useful(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: serde_json::Value,
+) {
+    if !is_empty_json(&value) {
+        map.insert(key.to_string(), value);
+    }
+}
+
+fn strip_html_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                out.push(' ');
+            }
+            '&' if !in_tag => {
+                let mut entity = String::new();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == ';' || entity.len() > 12 {
+                        break;
+                    }
+                    entity.push(next);
+                }
+                match entity.as_str() {
+                    "nbsp" => out.push(' '),
+                    "amp" => out.push('&'),
+                    "lt" => out.push('<'),
+                    "gt" => out.push('>'),
+                    "quot" => out.push('"'),
+                    _ => {
+                        out.push('&');
+                        out.push_str(&entity);
+                        out.push(';');
+                    }
+                }
+            }
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.replace("__", " ")
+        .replace("_", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn compact_entity_matches(recognition_details: &serde_json::Value) -> serde_json::Value {
+    let Some(matches) = recognition_details
+        .get("entityMatches")
+        .and_then(|value| value.as_array())
+    else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    serde_json::Value::Array(
+        matches
+            .iter()
+            .filter_map(|item| {
+                let mut map = serde_json::Map::new();
+                insert_if_useful(
+                    &mut map,
+                    "entity_id",
+                    item.get("entityId")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                insert_if_useful(
+                    &mut map,
+                    "display_name",
+                    item.get("displayName")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                insert_if_useful(
+                    &mut map,
+                    "name",
+                    item.get("name").cloned().unwrap_or(serde_json::Value::Null),
+                );
+                insert_if_useful(
+                    &mut map,
+                    "matched_text",
+                    item.get("match")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                );
+                if map.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::Value::Object(map))
+                }
+            })
+            .collect(),
+    )
+}
+
+fn compact_triggered_content(
+    article_ids: &serde_json::Value,
+    dialog_paths: &serde_json::Value,
+    articles: &serde_json::Value,
+) -> serde_json::Value {
+    let mut article_list = Vec::new();
+    let mut dialog_list = Vec::new();
+    let mut event_list = Vec::new();
+
+    if let Some(ids) = article_ids.as_array() {
+        for id_value in ids {
+            let Some(id) = id_value.as_str() else {
+                continue;
+            };
+            if let Some(rest) = id.strip_prefix("qa-") {
+                if !article_list.iter().any(|item: &serde_json::Value| {
+                    item.get("id").and_then(|v| v.as_str()) == Some(rest)
+                }) {
+                    article_list.push(serde_json::json!({ "id": rest }));
+                }
+            } else if let Some(rest) = id.strip_prefix("dn-") {
+                let mut parts = rest.split('-');
+                let dialog_id = parts.next().unwrap_or("");
+                let node_id = parts.next().unwrap_or("");
+                let mut map = serde_json::Map::new();
+                insert_if_useful(
+                    &mut map,
+                    "dialog_id",
+                    serde_json::Value::String(dialog_id.to_string()),
+                );
+                insert_if_useful(
+                    &mut map,
+                    "node_id",
+                    serde_json::Value::String(node_id.to_string()),
+                );
+                if !map.is_empty() {
+                    dialog_list.push(serde_json::Value::Object(map));
+                }
+            } else if let Some(rest) = id.strip_prefix("e-") {
+                event_list.push(serde_json::json!({ "id": rest }));
+            }
+        }
+    }
+
+    if let Some(dialogs) = articles.get("dialog").and_then(|value| value.as_array()) {
+        for dialog in dialogs {
+            let mut map = serde_json::Map::new();
+            insert_if_useful(
+                &mut map,
+                "dialog_id",
+                dialog
+                    .get("dialogId")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            insert_if_useful(
+                &mut map,
+                "dialog_name",
+                dialog
+                    .get("dialogName")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            insert_if_useful(
+                &mut map,
+                "node_id",
+                dialog
+                    .get("nodeId")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            insert_if_useful(
+                &mut map,
+                "node_name",
+                dialog
+                    .get("nodeName")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            insert_if_useful(
+                &mut map,
+                "status",
+                dialog
+                    .get("dialogStatus")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            insert_if_useful(
+                &mut map,
+                "node_type",
+                dialog
+                    .get("nodeType")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            if !map.is_empty() {
+                dialog_list.push(serde_json::Value::Object(map));
+            }
+        }
+    }
+
+    if let Some(qas) = articles.get("qa").and_then(|value| value.as_array()) {
+        for qa in qas {
+            let mut map = serde_json::Map::new();
+            insert_if_useful(
+                &mut map,
+                "id",
+                qa.get("articleId")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            if !map.is_empty() {
+                article_list.push(serde_json::Value::Object(map));
+            }
+        }
+    }
+
+    if let Some(events) = articles.get("event").and_then(|value| value.as_array()) {
+        for event in events {
+            let mut map = serde_json::Map::new();
+            insert_if_useful(
+                &mut map,
+                "id",
+                event
+                    .get("eventId")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            insert_if_useful(
+                &mut map,
+                "name",
+                event
+                    .get("eventName")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            if !map.is_empty() {
+                event_list.push(serde_json::Value::Object(map));
+            }
+        }
+    }
+
+    let mut map = serde_json::Map::new();
+    insert_if_useful(&mut map, "articles", serde_json::Value::Array(article_list));
+    insert_if_useful(&mut map, "dialogs", serde_json::Value::Array(dialog_list));
+    insert_if_useful(&mut map, "events", serde_json::Value::Array(event_list));
+    insert_if_useful(&mut map, "dialog_paths", dialog_paths.clone());
+    serde_json::Value::Object(map)
+}
+
+fn compact_turn(row: &serde_json::Value, is_feedback_target: bool) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    let interaction_type = row
+        .get("interactionType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let answer_text = row
+        .get("botOutput")
+        .and_then(|v| v.as_str())
+        .map(strip_html_text)
+        .unwrap_or_default();
+    let triggered_content = compact_triggered_content(
+        row.get("articleIds").unwrap_or(&serde_json::Value::Null),
+        row.get("dialogPaths").unwrap_or(&serde_json::Value::Null),
+        row.get("articles").unwrap_or(&serde_json::Value::Null),
+    );
+    let entity_matches = compact_entity_matches(
+        row.get("recognitionDetails")
+            .unwrap_or(&serde_json::Value::Null),
+    );
+
+    insert_if_useful(
+        &mut map,
+        "log_id",
+        row.get("logId").cloned().unwrap_or(serde_json::Value::Null),
+    );
+    insert_if_useful(
+        &mut map,
+        "role",
+        row.get("role").cloned().unwrap_or(serde_json::Value::Null),
+    );
+    insert_if_useful(
+        &mut map,
+        "type",
+        serde_json::Value::String(interaction_type.to_string()),
+    );
+    insert_if_useful(
+        &mut map,
+        "user_text",
+        row.get("userText")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    insert_if_useful(
+        &mut map,
+        "answer_text",
+        serde_json::Value::String(answer_text),
+    );
+    insert_if_useful(
+        &mut map,
+        "recognition_type",
+        row.get("recognitionType")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    insert_if_useful(
+        &mut map,
+        "recognition_quality",
+        row.get("recognitionQuality")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    insert_if_useful(&mut map, "triggered_content", triggered_content);
+    insert_if_useful(&mut map, "entity_matches", entity_matches);
+    map.insert(
+        "is_feedback_target".to_string(),
+        serde_json::Value::Bool(is_feedback_target),
+    );
+    serde_json::Value::Object(map)
+}
+
+fn build_feedback_targets(rows: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut targets = Vec::new();
+    for (idx, row) in rows.iter().enumerate() {
+        let feedback_info = row
+            .get("feedbackInfoRaw")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if feedback_info.trim().is_empty() {
+            continue;
+        }
+        let Some(score) = feedback_score(feedback_info) else {
+            continue;
+        };
+        if score != -1 && score != 1 {
+            continue;
+        }
+
+        let origin_uuid = feedback_origin_id(feedback_info);
+        let origin_idx = if origin_uuid.is_empty() {
+            None
+        } else {
+            rows.iter().position(|candidate| {
+                candidate
+                    .get("interactionUuid")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    == origin_uuid
+            })
+        };
+        let target_idx = origin_idx.or_else(|| {
+            rows[..idx].iter().rposition(|candidate| {
+                !candidate
+                    .get("botOutput")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .is_empty()
+                    && candidate
+                        .get("interactionType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        != "Feedback"
+            })
+        });
+        let target = target_idx.and_then(|i| rows.get(i));
+        let nearest_user_question = target_idx.and_then(|target_i| {
+            rows[..=target_i]
+                .iter()
+                .rposition(|candidate| {
+                    !candidate
+                        .get("userText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .is_empty()
+                        && candidate
+                            .get("interactionType")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            != "Feedback"
+                })
+                .and_then(|user_i| rows.get(user_i))
+                .and_then(|candidate| candidate.get("userText"))
+                .cloned()
+        });
+
+        targets.push(serde_json::json!({
+            "feedbackLogId": row.get("logId").cloned().unwrap_or(serde_json::Value::Null),
+            "feedbackScore": score,
+            "feedbackType": if score < 0 { "negative" } else { "positive" },
+            "feedbackInfo": row.get("feedbackInfo").cloned().unwrap_or(serde_json::Value::Null),
+            "originatingInteractionUuid": if origin_uuid.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(origin_uuid) },
+            "targetIndex": target_idx.map(|i| i as i64),
+            "targetLogId": target.and_then(|t| t.get("logId")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetInteractionUuid": target.and_then(|t| t.get("interactionUuid")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetUserQuestion": nearest_user_question.unwrap_or(serde_json::Value::Null),
+            "targetBotAnswer": target.and_then(|t| t.get("botOutput")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetRecognitionType": target.and_then(|t| t.get("recognitionType")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetRecognitionQuality": target.and_then(|t| t.get("recognitionQuality")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetArticleIds": target.and_then(|t| t.get("articleIds")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetDialogPaths": target.and_then(|t| t.get("dialogPaths")).cloned().unwrap_or(serde_json::Value::Null),
+            "targetTriggeredContent": target.map(|t| compact_triggered_content(
+                t.get("articleIds").unwrap_or(&serde_json::Value::Null),
+                t.get("dialogPaths").unwrap_or(&serde_json::Value::Null),
+                t.get("articles").unwrap_or(&serde_json::Value::Null),
+            )).unwrap_or(serde_json::Value::Null),
+            "targetEntityMatches": target.map(|t| compact_entity_matches(
+                t.get("recognitionDetails").unwrap_or(&serde_json::Value::Null),
+            )).unwrap_or(serde_json::Value::Null),
+            "targetResolution": if target_idx.is_some() { if origin_idx.is_some() { "originatingInteractionId" } else { "previousBotOutputFallback" } } else { "none" },
+        }));
+    }
+    targets
+}
+
+fn role_for_interaction(interaction_type: &str, user_text: &str, bot_output: &str) -> &'static str {
+    if interaction_type == "Feedback" {
+        "feedback"
+    } else if !user_text.trim().is_empty() && bot_output.trim().is_empty() {
+        "user"
+    } else if user_text.trim().is_empty() && !bot_output.trim().is_empty() {
+        "assistant"
+    } else if !user_text.trim().is_empty() || !bot_output.trim().is_empty() {
+        "turn"
+    } else {
+        "system"
+    }
+}
+
+#[tauri::command]
+async fn export_conversations_for_ai(
+    app: AppHandle,
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+) -> Result<ConversationAiExportResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+    app.dialog()
+        .file()
+        .add_filter("JSONL", &["jsonl"])
+        .set_file_name("conversation-analysis-export.jsonl")
+        .save_file(move |path| {
+            let p = path.and_then(|fp| fp.into_path().ok());
+            let _ = tx.send(p);
+        });
+
+    let Some(mut jsonl_path) = rx.await.ok().flatten() else {
+        return Ok(ConversationAiExportResult {
+            ok: false,
+            canceled: true,
+            jsonl_path: None,
+            session_count: 0,
+            feedback_count: 0,
+            interaction_count: 0,
+        });
+    };
+    if jsonl_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        jsonl_path.set_extension("jsonl");
+    }
+    let jsonl_path_for_work = jsonl_path.clone();
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let exported_at = now_iso();
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let filter_query = build_session_filter_query(conn, &args)?;
+        let params_ref: Vec<&dyn ToSql> =
+            filter_query.param_values.iter().map(|b| b.as_ref()).collect();
+        let sql = format!(
+            r#"WITH
+base_sessions AS (
+    SELECT s.*
+    FROM session_summary s
+    {base_where}
+)
+{search_cte},
+filtered_sessions AS (
+    {filtered_from}
+)
+SELECT
+    p.session_uuid,
+    p.first_ts,
+    p.last_ts,
+    p.interaction_count,
+    p.culture,
+    p.first_user_message,
+    p.has_neg_feedback,
+    p.has_pos_feedback
+FROM filtered_sessions p
+ORDER BY p.first_ts DESC"#,
+            base_where = filter_query.base_where.as_str(),
+            search_cte = filter_query.search_cte.as_str(),
+            filtered_from = filter_query.filtered_from.as_str(),
+        );
+
+        let sessions = {
+            let mut stmt = conn.prepare(&sql).map_err(|e| format!("Export query error: {e}"))?;
+            let mut rows = stmt
+                .query(params_ref.as_slice())
+                .map_err(|e| format!("Export query error: {e}"))?;
+            let mut sessions = Vec::new();
+            while let Some(row) = rows.next().map_err(|e| format!("Export query error: {e}"))? {
+                let session_uuid = row.get::<_, Option<String>>(0).unwrap_or(None).unwrap_or_default();
+                if session_uuid.is_empty() {
+                    continue;
+                }
+                sessions.push(serde_json::json!({
+                    "sessionUuid": session_uuid,
+                    "firstTs": row.get::<_, Option<String>>(1).unwrap_or(None).unwrap_or_default(),
+                    "lastTs": row.get::<_, Option<String>>(2).unwrap_or(None).unwrap_or_default(),
+                    "interactionCount": row.get::<_, Option<i64>>(3).unwrap_or(None).unwrap_or(0),
+                    "culture": row.get::<_, Option<String>>(4).unwrap_or(None).unwrap_or_default(),
+                    "firstUserMessage": row.get::<_, Option<String>>(5).unwrap_or(None).unwrap_or_default(),
+                    "hasNegFeedback": row.get::<_, Option<i64>>(6).unwrap_or(None).unwrap_or(0) == 1,
+                    "hasPosFeedback": row.get::<_, Option<i64>>(7).unwrap_or(None).unwrap_or(0) == 1,
+                }));
+            }
+            sessions
+        };
+
+        let mut out = fs::File::create(&jsonl_path_for_work)
+            .map_err(|e| format!("Cannot create export file: {e}"))?;
+        let mut interaction_total = 0i64;
+        let mut feedback_total = 0i64;
+
+        // Prepared once; re-run per session instead of re-parsing the SQL.
+        let mut inter_stmt = conn
+            .prepare_cached(
+                r#"SELECT
+                log_id, interaction_uuid, timestamp_start,
+                main_interaction_type, interaction_value, output_text,
+                article_ids, dialog_paths, recognition_type, recognition_quality,
+                articles, feedback_info, recognition_details
+            FROM interactions
+            WHERE session_uuid = ?1
+            ORDER BY log_id ASC"#,
+            )
+            .map_err(|e| format!("Prepare interactions export error: {e}"))?;
+        for session in &sessions {
+            let session_uuid = session
+                .get("sessionUuid")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let mapped = inter_stmt
+                .query_map(params![session_uuid], |row| {
+                    let interaction_type = row.get::<_, String>(3).unwrap_or_default();
+                    let user_text = row.get::<_, String>(4).unwrap_or_default();
+                    let bot_output = row.get::<_, String>(5).unwrap_or_default();
+                    let feedback_info = row.get::<_, String>(11).unwrap_or_default();
+                    Ok(serde_json::json!({
+                        "logId": row.get::<_, i64>(0).unwrap_or(0),
+                        "interactionUuid": row.get::<_, String>(1).unwrap_or_default(),
+                        "timestampStart": row.get::<_, String>(2).unwrap_or_default(),
+                        "role": role_for_interaction(&interaction_type, &user_text, &bot_output),
+                        "interactionType": interaction_type,
+                        "userText": user_text,
+                        "botOutput": bot_output,
+                        "articleIds": json_or_text(&row.get::<_, String>(6).unwrap_or_default()),
+                        "dialogPaths": json_or_text(&row.get::<_, String>(7).unwrap_or_default()),
+                        "recognitionType": row.get::<_, String>(8).unwrap_or_default(),
+                        "recognitionQuality": row.get::<_, f64>(9).unwrap_or(0.0),
+                        "articles": json_or_text(&row.get::<_, String>(10).unwrap_or_default()),
+                        "feedbackInfo": json_or_text(&feedback_info),
+                        "feedbackInfoRaw": feedback_info,
+                        "recognitionDetails": json_or_text(&row.get::<_, String>(12).unwrap_or_default()),
+                    }))
+                })
+                .map_err(|e| format!("Query interactions export error: {e}"))?;
+
+            let mut conversation = Vec::new();
+            for item in mapped {
+                conversation.push(item.map_err(|e| format!("Read interactions export error: {e}"))?);
+            }
+            interaction_total += conversation.len() as i64;
+            let feedback_targets = build_feedback_targets(&conversation);
+            let feedback_count = feedback_targets.len() as i64;
+            let target_indexes = feedback_targets
+                .iter()
+                .filter_map(|target| {
+                    target
+                        .get("targetIndex")
+                        .and_then(|v| v.as_i64())
+                        .map(|i| i as usize)
+                })
+                .collect::<std::collections::HashSet<_>>();
+            let chat_trace = || -> Vec<serde_json::Value> {
+                conversation
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, row)| compact_turn(row, target_indexes.contains(&idx)))
+                    .collect()
+            };
+
+            feedback_total += feedback_count;
+            let compact_feedback_targets = feedback_targets
+                .into_iter()
+                .map(|target| {
+                    let feedback_info = target
+                        .get("feedbackInfo")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    let target_answer = target
+                        .get("targetBotAnswer")
+                        .and_then(|v| v.as_str())
+                        .map(strip_html_text)
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "feedback": {
+                            "score": target.get("feedbackScore").cloned().unwrap_or(serde_json::Value::Null),
+                            "label": feedback_info.get("label").cloned().unwrap_or(serde_json::Value::Null),
+                            "comment": feedback_info.get("comment").cloned().unwrap_or(serde_json::Value::Null),
+                            "log_id": target.get("feedbackLogId").cloned().unwrap_or(serde_json::Value::Null),
+                            "target_resolution": target.get("targetResolution").cloned().unwrap_or(serde_json::Value::Null),
+                        },
+                        "target": {
+                            "log_id": target.get("targetLogId").cloned().unwrap_or(serde_json::Value::Null),
+                            "user_question": target.get("targetUserQuestion").cloned().unwrap_or(serde_json::Value::Null),
+                            "answer_text": target_answer,
+                            "recognition_type": target.get("targetRecognitionType").cloned().unwrap_or(serde_json::Value::Null),
+                            "recognition_quality": target.get("targetRecognitionQuality").cloned().unwrap_or(serde_json::Value::Null),
+                            "triggered_content": target.get("targetTriggeredContent").cloned().unwrap_or(serde_json::Value::Null),
+                            "entity_matches": target.get("targetEntityMatches").cloned().unwrap_or(serde_json::Value::Null),
+                        },
+                    })
+                })
+                .filter_map(prune_empty_json)
+                .collect::<Vec<_>>();
+
+            let record = serde_json::json!({
+                "schema_version": 3,
+                "exported_at": exported_at.clone(),
+                "search_context": {
+                    "filter": args.filter.clone(),
+                    "query": args.query.clone(),
+                    "queryRegex": args.query_regex.unwrap_or(false),
+                    "queryScope": args.query_scope.clone(),
+                    "queryIds": args.query_ids.unwrap_or(false),
+                    "queryIdsOnly": args.query_ids_only.unwrap_or(false),
+                    "queryIdType": args.query_id_type.clone(),
+                    "dateFrom": args.date_from.clone(),
+                    "dateTo": args.date_to.clone(),
+                    "contextFilters": args.context_filters.clone(),
+                    "lowRecogThreshold": args.low_recog_threshold.unwrap_or(60).clamp(1, 99),
+                    "resolvedSearchMode": filter_query.search_mode.clone(),
+                },
+                "session": {
+                    "session_uuid": session.get("sessionUuid").cloned().unwrap_or(serde_json::Value::Null),
+                    "first_ts": session.get("firstTs").cloned().unwrap_or(serde_json::Value::Null),
+                    "last_ts": session.get("lastTs").cloned().unwrap_or(serde_json::Value::Null),
+                    "culture": session.get("culture").cloned().unwrap_or(serde_json::Value::Null),
+                    "feedback_count": feedback_count,
+                },
+                "feedback_targets": compact_feedback_targets,
+                "chat_trace": chat_trace(),
+            });
+            let record = prune_empty_json(record).unwrap_or(serde_json::Value::Null);
+            serde_json::to_writer(&mut out, &record)
+                .map_err(|e| format!("Cannot write export JSON: {e}"))?;
+            writeln!(&mut out).map_err(|e| format!("Cannot write export file: {e}"))?;
+        }
+
+        Ok(ConversationAiExportResult {
+            ok: true,
+            canceled: false,
+            jsonl_path: Some(jsonl_path_for_work.to_string_lossy().into_owned()),
+            session_count: sessions.len() as i64,
+            feedback_count: feedback_total,
+            interaction_count: interaction_total,
         })
     })
     .await
@@ -2435,19 +3319,28 @@ async fn get_context_options(
 
     // "Not set" options: for each known name, count sessions that have NO entry for that name.
     // not_set_count = total_sessions - sessions_with_that_name
+    // Total computed once here instead of as a scalar subquery in both the
+    // SELECT and the HAVING clause.
+    let total_sessions: i64 = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT session_uuid) FROM interactions",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
     let mut stmt2 = conn
         .prepare(
             "SELECT ci.name, \
-              (SELECT COUNT(DISTINCT session_uuid) FROM interactions) - COUNT(DISTINCT ci.session_uuid) \
+              ?1 - COUNT(DISTINCT ci.session_uuid) \
              FROM context_index ci \
              GROUP BY ci.name \
-             HAVING (SELECT COUNT(DISTINCT session_uuid) FROM interactions) - COUNT(DISTINCT ci.session_uuid) > 0 \
+             HAVING ?1 - COUNT(DISTINCT ci.session_uuid) > 0 \
              ORDER BY ci.name ASC",
         )
         .map_err(|e| format!("Prepare error: {e}"))?;
 
     let not_set_opts: Vec<ContextOption> = stmt2
-        .query_map([], |row| {
+        .query_map(params![total_sessions], |row| {
             Ok(ContextOption {
                 name:  row.get(0)?,
                 value: "__not_set__".to_string(),
@@ -2477,7 +3370,7 @@ async fn get_session_interactions(
         let conn = state.conn.as_ref().ok_or("No database open.")?;
 
         let mut stmt = conn
-            .prepare(
+            .prepare_cached(
                 r#"SELECT
                 log_id, interaction_uuid, session_uuid,
                 timestamp_start, timestamp_end, culture,
@@ -2629,38 +3522,22 @@ async fn delete_interactions_by_dates(
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             args.dates.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
 
-        // Get log_ids to delete from FTS
-        let log_ids: Vec<i64> = {
-            let mut stmt = tx
-                .prepare(&format!(
-                    "SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders})"
-                ))
-                .map_err(|e| format!("Prepare error: {e}"))?;
-            let ids = stmt.query_map(params_refs.as_slice(), |row| row.get::<_, i64>(0))
-                .map_err(|e| format!("Query error: {e}"))?
-                .filter_map(|r| r.ok())
-                .collect();
-            ids
-        };
-
-        let params_refs2: Vec<&dyn rusqlite::types::ToSql> =
-            args.dates.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        // Remove stale FTS5 entries in one set-based statement before deleting
+        let _ = tx.execute(
+            &format!(
+                "DELETE FROM interactions_fts WHERE rowid IN \
+                 (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
+            ),
+            params_refs.as_slice(),
+        );
 
         // Delete from interactions
         let deleted = tx
             .execute(
                 &format!("DELETE FROM interactions WHERE DATE(timestamp_start) IN ({placeholders})"),
-                params_refs2.as_slice(),
+                params_refs.as_slice(),
             )
             .map_err(|e| format!("Delete error: {e}"))? as i64;
-
-        // Clean up FTS index for deleted rows
-        for log_id in &log_ids {
-            let _ = tx.execute(
-                "DELETE FROM interactions_fts WHERE rowid = ?1",
-                params![log_id],
-            );
-        }
 
         tx.commit().map_err(|e| format!("Commit error: {e}"))?;
         if deleted > 0 {
@@ -2766,9 +3643,8 @@ async fn flag_session(
 
         {
             let tx = fconn.transaction().map_err(|e| format!("Transaction error: {e}"))?;
-            for row in &rows {
-                let is_flagged = if flagged_set.contains(&row.log_id) { 1i64 } else { 0i64 };
-                tx.execute(
+            let mut ins_stmt = tx
+                .prepare_cached(
                     "INSERT INTO flagged_interactions \
                      (flag_id, log_id, interaction_uuid, session_uuid, timestamp_start, timestamp_end, \
                       culture, main_interaction_type, all_interaction_types, interaction_value, output_text, \
@@ -2776,6 +3652,11 @@ async fn flag_session(
                       generative_ai_sources, articles, faqs_found, contexts, pages, link_click_info, \
                       feedback_info, output_metadata, recognition_details, is_flagged) \
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)",
+                )
+                .map_err(|e| format!("Prepare error: {e}"))?;
+            for row in &rows {
+                let is_flagged = if flagged_set.contains(&row.log_id) { 1i64 } else { 0i64 };
+                ins_stmt.execute(
                     params![
                         flag_id,
                         row.log_id,
@@ -2807,6 +3688,7 @@ async fn flag_session(
                 )
                 .map_err(|e| format!("Insert interaction error: {e}"))?;
             }
+            drop(ins_stmt);
             tx.commit().map_err(|e| format!("Commit error: {e}"))?;
         }
 
@@ -3170,6 +4052,7 @@ pub fn run() {
             select_db_open_path,
             import_interactions_csv,
             get_sessions,
+            export_conversations_for_ai,
             cancel_session_search,
             get_session_interactions,
             get_date_range,
@@ -3304,5 +4187,128 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
             .expect("summary count");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn feedback_targets_use_origin_and_previous_bot_fallback() {
+        let rows = vec![
+            serde_json::json!({
+                "logId": 1,
+                "interactionUuid": "user-1",
+                "interactionType": "Question",
+                "userText": "What time does the park close?",
+                "botOutput": "",
+                "feedbackInfoRaw": "",
+            }),
+            serde_json::json!({
+                "logId": 2,
+                "interactionUuid": "bot-1",
+                "interactionType": "Answer",
+                "userText": "",
+                "botOutput": "The park closes at 18:00.",
+                "articleIds": ["qa-1"],
+                "dialogPaths": null,
+                "articles": { "qa": [{ "articleId": 1, "categories": [{ "name": "noise" }] }] },
+                "recognitionDetails": {
+                    "entityMatches": [
+                        { "entityId": 7, "displayName": "OPENINGSTIJD", "name": "OPENINGSTIJD_1", "match": "time" }
+                    ],
+                    "missingWords": "noise"
+                },
+                "feedbackInfoRaw": "",
+            }),
+            serde_json::json!({
+                "logId": 3,
+                "interactionUuid": "feedback-1",
+                "interactionType": "Feedback",
+                "userText": "",
+                "botOutput": "",
+                "feedbackInfo": { "score": -1, "originatingInteractionId": "bot-1" },
+                "feedbackInfoRaw": "{\"score\":-1,\"originatingInteractionId\":\"bot-1\"}",
+            }),
+            serde_json::json!({
+                "logId": 4,
+                "interactionUuid": "feedback-2",
+                "interactionType": "Feedback",
+                "userText": "",
+                "botOutput": "",
+                "feedbackInfo": { "score": 1 },
+                "feedbackInfoRaw": "{\"score\":1}",
+            }),
+        ];
+
+        let targets = build_feedback_targets(&rows);
+
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0]["targetLogId"], 2);
+        assert_eq!(targets[0]["targetResolution"], "originatingInteractionId");
+        assert_eq!(
+            targets[0]["targetUserQuestion"],
+            "What time does the park close?"
+        );
+        assert_eq!(
+            targets[0]["targetTriggeredContent"]["articles"][0]["id"],
+            "1"
+        );
+        assert_eq!(
+            targets[0]["targetEntityMatches"][0]["display_name"],
+            "OPENINGSTIJD"
+        );
+        assert_eq!(targets[1]["targetLogId"], 2);
+        assert_eq!(targets[1]["targetResolution"], "previousBotOutputFallback");
+    }
+
+    #[test]
+    fn compact_turn_keeps_fix_signals_and_drops_noisy_raw_fields() {
+        let row = serde_json::json!({
+            "logId": 2,
+            "role": "assistant",
+            "interactionType": "QA",
+            "userText": "Where can I buy a souvenir?",
+            "botOutput": "Go to <a href=\"https://example.com\">shops</a>__please.",
+            "recognitionType": "Entity Recognition",
+            "recognitionQuality": 88.0,
+            "articleIds": ["qa-42", "dn-12-34"],
+            "dialogPaths": { "DropOut": "12:34" },
+            "articles": {
+                "qa": [{ "articleId": 42, "categories": [{ "name": "noise" }] }],
+                "dialog": [{
+                    "dialogId": 12,
+                    "dialogName": "Retail",
+                    "nodeId": 34,
+                    "nodeName": "Souvenirs",
+                    "dialogStatus": "End",
+                    "nodeType": "Output",
+                    "categories": [{ "name": "noise" }]
+                }]
+            },
+            "recognitionDetails": {
+                "entityMatches": [
+                    { "entityId": 5, "displayName": "SOUVENIR", "name": "SOUVENIR_1", "match": "souvenir" }
+                ],
+                "missingWords": "noise"
+            },
+            "contexts": [{ "name": "noise", "value": "noise" }],
+            "pages": { "originatingPage": "https://example.com" },
+            "faqsFound": { "noise": true }
+        });
+
+        let compact = compact_turn(&row, true);
+
+        assert_eq!(compact["answer_text"], "Go to shops please.");
+        assert_eq!(compact["is_feedback_target"], true);
+        assert_eq!(compact["triggered_content"]["articles"][0]["id"], "42");
+        let dialogs = compact["triggered_content"]["dialogs"]
+            .as_array()
+            .expect("dialogs array");
+        assert!(dialogs
+            .iter()
+            .any(|d| d.get("dialog_name").and_then(|v| v.as_str()) == Some("Retail")));
+        assert_eq!(compact["entity_matches"][0]["matched_text"], "souvenir");
+        assert!(compact.get("contexts").is_none());
+        assert!(compact.get("pages").is_none());
+        assert!(compact.get("faqsFound").is_none());
+        assert!(compact.get("articles").is_none());
+        assert!(compact.get("recognitionDetails").is_none());
     }
 }
