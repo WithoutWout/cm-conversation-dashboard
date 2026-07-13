@@ -64,13 +64,15 @@ jobs:
           releaseBody: |
             ## What's new in v0.9.1
 
-            ### Collections: curate and export content for HALO
-            - Select Articles and Dialogs in the Content tab (toggle **Select** to reveal checkboxes; **Select page** or **Select all** for bulk selection) and group them into named **Collections**.
-            - Export a collection as `trigger`/`content` JSON, ready for CM.com HALO's knowledge tool — pick a filename and save location via a native dialog.
-            - Export automatically excludes unreachable content (non-default answers with no real context), walks dialog entry points via their referencing Articles so routed-into dialogs still produce real trigger/content pairs, and merges rows that end up with identical content into one, combining their triggers.
-            - **Smart filters** let you exclude junk or test content from every export — by entity (trigger phrase), by content (answer text), or by context (e.g. escalation group) — with plain substring or regex matching.
-            - A new **Filtered Out** view shows exactly which rows a smart filter is dropping and why, so a filter meant to catch one thing doesn't silently catch something else.
-            - **View content** on any collection lets you search its actual exported rows before you export.
+            ### Collections: build knowledge-tool exports for HALO
+            Curate a set of Articles and Dialogs from the Content tab and export them as ready-to-import JSON for CM.com HALO's knowledge tool.
+
+            - **Select and collect** — turn on **Select** in the Content tab to check off Articles/Dialogs (or use **Select all** to grab everything matching your current search/filter), then add them to a named Collection.
+            - **Export as trigger/content JSON** — pick a Collection, hit Export, and save the file. Only genuinely reachable content is included, matching how the CM.com bot itself would actually serve it to users.
+            - **Dialogs export their real entry points** — if a Dialog is normally only reached through an Article, that Article's questions become the export trigger for the Dialog's content, so dialogs that are pure routers still produce usable rows.
+            - **Smart filters** — set up reusable rules to exclude junk or test content, matching on trigger phrase, answer text, or context (like escalation group), with plain text or regex.
+            - **Filtered Out view** — see exactly which rows a smart filter is removing and why, so a filter that's too broad doesn't quietly eat content you wanted.
+            - **Search inside a Collection** — preview and search a Collection's actual exported content before you save it.
 
             ### Release readiness
             - Bumped the application version to **0.9.1** across the Tauri and package metadata.
