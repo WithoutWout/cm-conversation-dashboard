@@ -62,27 +62,18 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.9.0
+            ## What's new in v0.9.1
 
-            ### AI-assisted conversation analysis
-            - New **Export for AI** button in the Conversations view exports the current search results as a structured file for analysis in ChatGPT, Claude, or another LLM.
-            - Each exported conversation includes the full chat trace and any feedback (positive/negative), paired with the turn that caused it.
-            - Export honors the exact same filters, date range, context filters, and ID search as the on-screen results, so what you export matches what you see.
-
-            ### Faster search and imports
-            - Conversation search and CSV import are significantly faster, especially on larger databases and imports.
-            - Content search (Articles, Dialogs, Transactional Dialogs, Entities) is faster too: repeated searches and tab switches now reuse cached results instead of re-scanning content from scratch.
-
-            ### UI polish
-            - Header, file tags, and chat layout now respond better to narrow windows, with improved wrapping and overflow handling instead of clipped or cramped content.
-            - Clearer error states in chat and search views.
-
-            ### Documentation
-            - README now documents the Flagged View (saving, annotating, and organizing flagged conversation turns) and the Share Content export formats.
-            - Windows install instructions clarify that the download is a portable `.exe`, not an installer.
+            ### Collections: curate and export content for HALO
+            - Select Articles and Dialogs in the Content tab (toggle **Select** to reveal checkboxes; **Select page** or **Select all** for bulk selection) and group them into named **Collections**.
+            - Export a collection as `trigger`/`content` JSON, ready for CM.com HALO's knowledge tool — pick a filename and save location via a native dialog.
+            - Export automatically excludes unreachable content (non-default answers with no real context), walks dialog entry points via their referencing Articles so routed-into dialogs still produce real trigger/content pairs, and merges rows that end up with identical content into one, combining their triggers.
+            - **Smart filters** let you exclude junk or test content from every export — by entity (trigger phrase), by content (answer text), or by context (e.g. escalation group) — with plain substring or regex matching.
+            - A new **Filtered Out** view shows exactly which rows a smart filter is dropping and why, so a filter meant to catch one thing doesn't silently catch something else.
+            - **View content** on any collection lets you search its actual exported rows before you export.
 
             ### Release readiness
-            - Bumped the application version to **0.9.0** across the Tauri and package metadata.
+            - Bumped the application version to **0.9.1** across the Tauri and package metadata.
 
             ---
 
