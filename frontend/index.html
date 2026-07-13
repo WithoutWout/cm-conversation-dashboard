@@ -2284,6 +2284,26 @@
         border-bottom-color: var(--accent);
         font-weight: 600;
       }
+      .collections-view-tab {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.78rem;
+        padding: 7px 14px;
+        font-family: inherit;
+        transition: color 0.15s, border-color 0.15s;
+        margin-bottom: -1px;
+      }
+      .collections-view-tab:hover {
+        color: var(--text);
+      }
+      .collections-view-tab.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
       .export-modal-box .modal-body {
         flex: 1;
         overflow: hidden;
@@ -2994,6 +3014,109 @@
       .btn-danger:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+      }
+      .collection-list {
+        padding-bottom: 6px;
+      }
+      .collection-row {
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .collection-row-main {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-bottom: 6px;
+      }
+      .collection-row-name {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .collection-row-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .collection-items-panel {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .collection-content-panel {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
+      }
+      .collection-content-search-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .collection-content-search {
+        flex: 1;
+      }
+      .collection-content-list {
+        max-height: 320px;
+        overflow-y: auto;
+      }
+      .collection-content-row {
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .collection-content-row:last-child {
+        border-bottom: none;
+      }
+      .collection-content-trigger {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 2px;
+      }
+      .collection-content-text {
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .export-filter-add-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .export-filter-add-row input[type="text"] {
+        flex: 1;
+      }
+      .export-filter-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 18px;
+      }
+      .export-filter-row:hover {
+        background: var(--surface2);
+      }
+      .export-filter-pattern {
+        flex: 1;
+        font-size: 0.8rem;
+        font-family: monospace;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .export-filter-label {
+        font-size: 0.7rem;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
       }
       .conv-drag-hint {
         font-size: 0.7rem;
@@ -4038,6 +4161,102 @@
         color: var(--text);
         background: rgba(255, 255, 255, 0.06);
       }
+      .card-select-checkbox {
+        accent-color: var(--accent);
+        width: 14px;
+        height: 14px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .btn-select-mode {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 3px 10px;
+        font-size: 0.72rem;
+        color: var(--muted);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+      }
+      .btn-select-mode:hover {
+        color: var(--text);
+        border-color: var(--text);
+      }
+      .btn-select-mode.active {
+        background: rgba(124, 106, 247, 0.15);
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .btn-sel-action {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.72rem;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .btn-sel-action:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .btn-add-to-collection {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 4px 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-add-to-collection:hover {
+        opacity: 0.85;
+      }
+      .add-to-collection-wrap {
+        position: relative;
+      }
+      .add-to-collection-menu {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: calc(100% + 4px);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
+        z-index: 200;
+        padding: 6px;
+        min-width: 200px;
+        max-height: 280px;
+        overflow-y: auto;
+      }
+      .add-to-collection-menu.open {
+        display: block;
+      }
+      .add-to-collection-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 0.78rem;
+        color: var(--text);
+      }
+      .add-to-collection-row:hover {
+        background: var(--surface2);
+      }
+      .add-to-collection-row.add-to-collection-new {
+        color: var(--accent);
+        font-weight: 600;
+        border-top: 1px solid var(--border);
+        margin-top: 4px;
+        padding-top: 8px;
+      }
       .chat-empty {
         flex: 1;
         display: flex;
@@ -4898,6 +5117,21 @@
         </svg>
         Share Content
       </button>
+      <button class="icon-btn" id="collectionsBtn">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            d="M4 4a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4z"
+          />
+        </svg>
+        Collections
+      </button>
     </header>
 
     <div id="view-content">
@@ -5131,6 +5365,43 @@
             <span class="ts-val c-muted" id="e-stat-words">--</span
             ><span class="ts-lbl"> words</span>
           </div>
+        </button>
+      </div>
+
+      <!-- COLLECTIONS SELECT BAR -->
+      <div class="toolbar content-select-bar" id="contentSelectBar">
+        <span class="chat-meta" id="contentSelCount"></span>
+        <span id="contentSelectActions" style="display: none">
+          <button class="btn-sel-action" onclick="selectAllVisibleContent()">
+            Select page
+          </button>
+          <button class="btn-sel-action" onclick="selectAllFilteredContent()">
+            Select all
+          </button>
+          <button class="btn-sel-action" onclick="deselectAllContent()">
+            Clear
+          </button>
+        </span>
+        <div class="chat-spacer"></div>
+        <div
+          class="add-to-collection-wrap"
+          id="addToCollectionWrap"
+          style="display: none"
+        >
+          <button
+            class="btn-add-to-collection"
+            onclick="toggleAddToCollectionMenu()"
+          >
+            + Add to Collection
+          </button>
+          <div class="add-to-collection-menu" id="addToCollectionMenu"></div>
+        </div>
+        <button
+          class="btn-select-mode"
+          id="contentSelectModeBtn"
+          onclick="toggleContentSelectMode()"
+        >
+          Select
         </button>
       </div>
 
@@ -6420,6 +6691,38 @@
       </div>
     </div>
 
+    <!-- COLLECTIONS MODAL -->
+    <div class="modal-overlay" id="collectionsModal">
+      <div class="modal-box export-modal-box">
+        <div class="modal-header">
+          <h3 style="flex: 1">Collections</h3>
+          <button class="close-btn" id="closeCollections">&#x2715;</button>
+        </div>
+        <div class="export-view-tabs" id="collectionsViewTabs">
+          <button
+            class="collections-view-tab active"
+            data-collections-view="list"
+          >
+            Collections
+          </button>
+          <button class="collections-view-tab" data-collections-view="filters">
+            Smart Filters
+          </button>
+          <button class="collections-view-tab" data-collections-view="excluded">
+            Filtered Out
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="collectionsListBody"></div>
+          <div id="collectionsFiltersBody" style="display: none"></div>
+          <div id="collectionsExcludedBody" style="display: none"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="closeCollections2">Close</button>
+        </div>
+      </div>
+    </div>
+
     <!-- ARTICLE INFO MODAL -->
     <div class="modal-overlay" id="articleInfoModal">
       <div class="modal-box dialog-info-modal-box">
@@ -6786,6 +7089,8 @@
               : Promise.resolve(() => {}),
           checkForUpdates: () => invoke("check_for_updates"),
           getVersion: () => invoke("get_version"),
+          saveCollectionExport: (defaultName, content) =>
+            invoke("save_collection_export", { defaultName, content }),
           // Conversations DB commands
           setDbPath: (path) => invoke("set_db_path", { path }),
           getDbPath: () => invoke("get_db_path"),
@@ -6850,6 +7155,9 @@
       if (!window.electronAPI.onDataFolderUpdated) {
         window.electronAPI.onDataFolderUpdated = () => Promise.resolve(() => {})
       }
+      if (!window.electronAPI.saveCollectionExport)
+        window.electronAPI.saveCollectionExport = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
       // Stub out conversation commands when running outside Tauri (dev preview)
       const _convStub = () => Promise.resolve(null)
       if (!window.electronAPI.setDbPath)
@@ -6978,6 +7286,37 @@
       let flowDirection = localStorage.getItem("cm-flow-direction") || "LR"
       let flowCurrentDialogId = null
       let renderFlowNodeInfo = function () {}
+
+      // ── Collections state ───────────────────────────────────────────
+      function loadCollections() {
+        try {
+          const v = JSON.parse(localStorage.getItem("cm-collections") || "[]")
+          return Array.isArray(v) ? v : []
+        } catch (e) {
+          return []
+        }
+      }
+      function saveCollections(list) {
+        localStorage.setItem("cm-collections", JSON.stringify(list))
+      }
+      function loadExportFilters() {
+        try {
+          const v = JSON.parse(
+            localStorage.getItem("cm-export-filters") || "[]",
+          )
+          return Array.isArray(v) ? v : []
+        } catch (e) {
+          return []
+        }
+      }
+      function saveExportFilters(list) {
+        localStorage.setItem("cm-export-filters", JSON.stringify(list))
+      }
+      let collectionSelectMode = false
+      let collectionSelection = new Set() // keys: "article:<Id>" | "dialog:<id>"
+      let cmCollections = loadCollections()
+      let cmExportFilters = loadExportFilters()
+      let _collectionsExcludedViewId = null // which collection the "Filtered Out" tab shows
 
       // ── Navigation history ──────────────────────────────────────────
       let navHistory = []
@@ -8019,6 +8358,14 @@
           nonDefaultArticleMatchSnippet(art, q),
           q,
         )
+        const _selKey = "article:" + art.Id
+        const _checkboxHtml = collectionSelectMode
+          ? '<input type="checkbox" class="card-select-checkbox" data-sel-key="' +
+            _selKey +
+            '"' +
+            (collectionSelection.has(_selKey) ? " checked" : "") +
+            ' onclick="toggleContentSelection(this);event.stopPropagation()" />'
+          : ""
         return (
           '<div class="card type-article">' +
           '<div class="card-header" onclick="goToArticle(' +
@@ -8026,6 +8373,7 @@
           ')"' +
           (hoverTitle ? ' data-tooltip="' + esc(hoverTitle) + '"' : "") +
           ">" +
+          _checkboxHtml +
           '<span class="card-id id-blue">' +
           art.Id +
           "</span>" +
@@ -8879,6 +9227,14 @@
           "Uses articles",
           dialogLinkedArticles(item),
         )
+        const _selKey = "dialog:" + item.id
+        const _checkboxHtml = collectionSelectMode
+          ? '<input type="checkbox" class="card-select-checkbox" data-sel-key="' +
+            _selKey +
+            '"' +
+            (collectionSelection.has(_selKey) ? " checked" : "") +
+            ' onclick="toggleContentSelection(this);event.stopPropagation()" />'
+          : ""
         return (
           '<div class="card type-dialog">' +
           '<div class="card-header" onclick="openDialogInfoModal(' +
@@ -8891,6 +9247,7 @@
               '"'
             : "") +
           ">" +
+          _checkboxHtml +
           '<span class="card-id id-blue">' +
           item.id +
           "</span>" +
@@ -9240,6 +9597,408 @@
           "goDPage",
         )
         document.getElementById("dialogList").scrollTop = 0
+      }
+
+      // ── Collections: export algorithm ───────────────────────────────
+      function _parseCollectionItemKey(key) {
+        const i = key.indexOf(":")
+        if (i === -1) return null
+        const kind = key.slice(0, i),
+          id = Number(key.slice(i + 1))
+        if ((kind !== "article" && kind !== "dialog") || !Number.isFinite(id))
+          return null
+        return { kind, id }
+      }
+
+      // Flattened, sorted "name:val1,val2 ..." string for one Answer's context —
+      // used only for Collections smart-filter "Context" matching. Mirrors the
+      // ctxSet normalization inside answerPassesContextFilters() (frontend/index.html)
+      // without touching that function, since it drives live search filtering.
+      function _rowContextText(contextVars, escGroup, isArticle) {
+        const ctxSet = {}
+        if (isArticle) {
+          for (const cv of contextVars || []) {
+            const name = ctxVarMap.get(cv.Id)
+            if (!name) continue
+            const vals = []
+            for (const valStr of cv.Values || []) {
+              for (const v of valStr.split(",")) {
+                const t = v.trim()
+                if (t && t !== "any") vals.push(t)
+              }
+            }
+            if (vals.length) ctxSet[name] = vals
+          }
+        } else {
+          for (const cv of contextVars || []) {
+            const name = ctxVarMap.get(cv.id)
+            if (!name || !cv.value) continue
+            const vals = cv.value
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+            if (vals.length) ctxSet[name] = vals
+          }
+        }
+        const parts = Object.keys(ctxSet)
+          .sort()
+          .map((name) => name + ":" + ctxSet[name].join(","))
+        if (escGroup) parts.push("escalationGroup:" + escGroup)
+        return parts.join(" ")
+      }
+
+      // Matches one export row against the Collections smart-filter list. Each
+      // pattern's `field` ("entity" | "content" | "context", default "entity")
+      // selects what gets tested against the pattern text/regex.
+      // Returns the subset of patterns that match this row (empty if none) — used both
+      // to decide exclusion and, for the "Filtered Out" tab, to explain *why*.
+      function _rowMatchingPatterns(row, patterns) {
+        return patterns.filter((p) => {
+          if (!p.pattern) return false
+          const field = p.field || "entity"
+          const haystacks =
+            field === "content"
+              ? [row.content]
+              : field === "context"
+              ? [row.ctxText || ""]
+              : row.phrases
+          return haystacks.some((h) => {
+            if (p.isRegex) {
+              try {
+                return new RegExp(p.pattern, "i").test(h)
+              } catch (e) {
+                return false
+              }
+            }
+            return h.toLowerCase().includes(p.pattern.toLowerCase())
+          })
+        })
+      }
+      function _rowMatchesExclusion(row, patterns) {
+        return _rowMatchingPatterns(row, patterns).length > 0
+      }
+
+      // Reachability-filtered rows for one article, NOT yet exclusion-filtered.
+      function _articleExportRows(art) {
+        const out = []
+        const entityPhrases = (art.Questions || [])
+          .map((q) => (q.Text || "").trim())
+          .filter(Boolean)
+        if (!entityPhrases.length) return out
+        const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
+        if (!answers.length) return out // routing article — no direct content
+        const def = defaultArticleAnswer(art)
+        for (const o of answers) {
+          if (o !== def && !articleAnswerHasContext(o)) continue // unreachable
+          const content = stripDisplay(o.Text, o.Links)
+          if (content) {
+            const ctxText = _rowContextText(
+              o.ContextVariables || [],
+              (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
+              true,
+            )
+            out.push({ phrases: entityPhrases, content, ctxText })
+          }
+        }
+        return out
+      }
+
+      // Articles whose Questions route directly into this dialog via a reachable
+      // DialogStart output (Article -> DialogStartNodeId), independent of whether that
+      // article itself is in the collection. This is the dialog's "entry" trigger
+      // source, distinct from dialogLinkedArticles() (kbaIdReference content-sourcing).
+      function _articlesRoutingIntoDialog(dialogId) {
+        const result = []
+        for (const art of articleMap.values()) {
+          const toThisDialog = (art.Outputs || []).filter(
+            (o) =>
+              o.Type === "DialogStart" &&
+              o.DialogId === dialogId &&
+              o.DialogStartNodeId != null,
+          )
+          if (!toThisDialog.length) continue
+          const def = toThisDialog.find((o) => o.IsDefault) || toThisDialog[0]
+          for (const o of toThisDialog) {
+            if (o !== def && !articleAnswerHasContext(o)) continue // unreachable route
+            result.push({ article: art, nodeId: o.DialogStartNodeId })
+          }
+        }
+        return result
+      }
+
+      // Reachability-filtered rows for one dialog: triggers come from (a) every
+      // non-fallback Recognition link within the dialog, and (b) every referencing
+      // Article's Questions routing directly into a node via DialogStart.
+      function _dialogExportRows(dialog) {
+        const out = []
+        const nodes = dialog.nodes || []
+        const nodeMap = new Map(nodes.map((n) => [n.id, n])) // local per-dialog map
+
+        const emitReachableAnswers = (phrases, targetNode) => {
+          if (!phrases.length || !targetNode) return
+          const items = (targetNode.output && targetNode.output.items) || []
+          const answerItems = items.filter((i) => i.type === "Answer")
+          if (!answerItems.length) return
+          const def = defaultDialogAnswerItem(items)
+          for (const item of answerItems) {
+            if (item !== def && !dialogAnswerHasContext(item)) continue
+            const content = stripDisplay(
+              (item.data && item.data.text) || "",
+              (item.data && item.data.hyperlinks) || [],
+            )
+            if (content) {
+              const ctxText = _rowContextText(
+                item.contextVariables || [],
+                (item.metadata && item.metadata.escalationGroup) || null,
+                false,
+              )
+              out.push({ phrases, content, ctxText })
+            }
+          }
+        }
+
+        for (const node of nodes) {
+          for (const link of node.links || []) {
+            const cond = link.condition
+            if (!cond || cond.type !== "Recognition") continue
+            const data = cond.data || {}
+            if (data.isFallback) continue
+            const phrases = (data.questions || [])
+              .map((q) => (q.text || "").trim())
+              .filter(Boolean)
+            emitReachableAnswers(phrases, nodeMap.get(link.childNodeId))
+          }
+        }
+
+        for (const { article, nodeId } of _articlesRoutingIntoDialog(dialog.id)) {
+          const phrases = (article.Questions || [])
+            .map((q) => (q.Text || "").trim())
+            .filter(Boolean)
+          emitReachableAnswers(phrases, nodeMap.get(nodeId))
+        }
+
+        return out
+      }
+
+      // Combines rows with byte-identical content into one row, unioning their
+      // trigger phrases (dedup, first-seen order preserved). Runs after exclusion
+      // filtering so a row dropped by a smart filter can't take an unrelated row's
+      // phrases down with it just because they happened to share content.
+      function _mergeRowsByContent(rows) {
+        const order = []
+        const phrasesByContent = new Map()
+        for (const r of rows) {
+          let set = phrasesByContent.get(r.content)
+          if (!set) {
+            set = new Set()
+            phrasesByContent.set(r.content, set)
+            order.push(r.content)
+          }
+          for (const p of r.phrases) set.add(p)
+        }
+        return order.map((content) => ({
+          phrases: [...phrasesByContent.get(content)],
+          content,
+        }))
+      }
+
+      // Public entry point used by both the modal's live row-count display and export.
+      function buildCollectionExportRows(collection, opts) {
+        const patterns =
+          (opts && opts.patterns) ||
+          cmExportFilters.filter((p) => p.enabled !== false && p.pattern)
+        const raw = []
+        for (const key of collection.itemKeys || []) {
+          const parsed = _parseCollectionItemKey(key)
+          if (!parsed) continue
+          if (parsed.kind === "article") {
+            const art = articleMap.get(parsed.id)
+            if (art) raw.push(..._articleExportRows(art))
+          } else {
+            const dialog = dialogMap.get(parsed.id)
+            if (dialog) raw.push(..._dialogExportRows(dialog))
+          }
+          // missing id (stale collection after a data reload) — silently skipped
+        }
+        const survivors = []
+        const excludedRows = []
+        for (const r of raw) {
+          const matched = _rowMatchingPatterns(r, patterns)
+          if (matched.length) {
+            excludedRows.push({
+              trigger: r.phrases.join(" | "),
+              content: r.content,
+              matchedFields: matched.map((p) => (p.field || "entity") + ": " + p.pattern),
+            })
+            continue
+          }
+          survivors.push(r)
+        }
+        const rows = _mergeRowsByContent(survivors).map((r) => ({
+          trigger: r.phrases.join(" | "),
+          content: r.content,
+        }))
+        return {
+          rows,
+          excludedRows,
+          excludedCount: excludedRows.length,
+          totalCandidates: raw.length,
+        }
+      }
+
+      function _itemExportRowCount(key) {
+        const parsed = _parseCollectionItemKey(key)
+        if (!parsed) return 0
+        if (parsed.kind === "article") {
+          const art = articleMap.get(parsed.id)
+          return art ? _articleExportRows(art).length : 0
+        }
+        const dialog = dialogMap.get(parsed.id)
+        return dialog ? _dialogExportRows(dialog).length : 0
+      }
+
+      // ── Collections: selection UX ───────────────────────────────────
+      function toggleContentSelection(checkboxEl) {
+        const key = checkboxEl.dataset.selKey
+        if (checkboxEl.checked) collectionSelection.add(key)
+        else collectionSelection.delete(key)
+        _updateContentSelectBar()
+      }
+      function _updateContentSelectBar() {
+        const n = collectionSelection.size
+        document.getElementById("contentSelCount").textContent =
+          n > 0 ? n + " selected" : ""
+        document.getElementById("addToCollectionWrap").style.display =
+          n > 0 ? "" : "none"
+      }
+      function selectAllVisibleContent() {
+        document.querySelectorAll(".card-select-checkbox").forEach((cb) => {
+          collectionSelection.add(cb.dataset.selKey)
+          cb.checked = true
+        })
+        _updateContentSelectBar()
+      }
+      // Selects every item in the active tab's current search/filter result set
+      // (all pages), not just the checkboxes currently rendered on screen.
+      function selectAllFilteredContent() {
+        const activeTab = document.querySelector(".tab.active")?.dataset.tab || "all"
+        if (activeTab === "articles") {
+          for (const i of filteredArticles) {
+            collectionSelection.add("article:" + allArticles[i].Id)
+          }
+        } else if (activeTab === "dialogs") {
+          for (const i of filteredDialogs) {
+            const item = allDialogsCombined[i]
+            if (item._kind !== "tdialog") collectionSelection.add("dialog:" + item.id)
+          }
+        } else {
+          for (const i of filteredAll) {
+            const item = allCombinedItems[i]
+            if (item._kind === "article") collectionSelection.add("article:" + item.Id)
+            else if (item._kind === "dialog") collectionSelection.add("dialog:" + item.id)
+          }
+        }
+        _updateContentSelectBar()
+        _rerenderActiveContentTab()
+      }
+      function deselectAllContent() {
+        collectionSelection.clear()
+        document
+          .querySelectorAll(".card-select-checkbox")
+          .forEach((cb) => (cb.checked = false))
+        _updateContentSelectBar()
+      }
+      function _rerenderActiveContentTab() {
+        allListDirty = true
+        articleListDirty = true
+        dialogListDirty = true
+        const activeTab = document.querySelector(".tab.active")?.dataset.tab || "all"
+        if (activeTab === "all") {
+          renderAllList()
+          allListDirty = false
+        } else if (activeTab === "articles") {
+          renderArticleList()
+          articleListDirty = false
+        } else if (activeTab === "dialogs") {
+          renderDialogList()
+          dialogListDirty = false
+        }
+      }
+      function toggleContentSelectMode() {
+        collectionSelectMode = !collectionSelectMode
+        document.getElementById("contentSelectModeBtn").textContent =
+          collectionSelectMode ? "Cancel" : "Select"
+        document
+          .getElementById("contentSelectModeBtn")
+          .classList.toggle("active", collectionSelectMode)
+        document.getElementById("contentSelectActions").style.display =
+          collectionSelectMode ? "" : "none"
+        if (!collectionSelectMode) collectionSelection.clear()
+        _updateContentSelectBar()
+        _rerenderActiveContentTab()
+      }
+
+      // ── Collections: "Add to Collection" popover ────────────────────
+      function toggleAddToCollectionMenu() {
+        const menu = document.getElementById("addToCollectionMenu")
+        if (menu.classList.toggle("open")) renderAddToCollectionMenu()
+      }
+      function renderAddToCollectionMenu() {
+        const rows = cmCollections
+          .map(
+            (c) =>
+              '<div class="add-to-collection-row" onclick="addSelectionToCollection(\'' +
+              esc(c.id) +
+              '\')"><span>' +
+              esc(c.name) +
+              '</span><span class="chat-meta">' +
+              c.itemKeys.length +
+              "</span></div>",
+          )
+          .join("")
+        document.getElementById("addToCollectionMenu").innerHTML =
+          (rows ||
+            '<div class="chat-meta" style="padding:6px 8px">No collections yet</div>') +
+          '<div class="add-to-collection-row add-to-collection-new" onclick="createCollectionFromSelection()">+ New collection…</div>'
+      }
+      document.addEventListener("click", (e) => {
+        const wrap = document.getElementById("addToCollectionWrap")
+        const menu = document.getElementById("addToCollectionMenu")
+        if (wrap && menu && !wrap.contains(e.target)) menu.classList.remove("open")
+      })
+      function addSelectionToCollection(collectionId) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        const merged = new Set(c.itemKeys)
+        collectionSelection.forEach((k) => merged.add(k))
+        c.itemKeys = [...merged]
+        c.updatedAt = Date.now()
+        saveCollections(cmCollections)
+        document.getElementById("addToCollectionMenu").classList.remove("open")
+        showImportToast(
+          "success",
+          `Added to "${c.name}" (${c.itemKeys.length} item${c.itemKeys.length !== 1 ? "s" : ""})`,
+        )
+        deselectAllContent()
+      }
+      function createCollectionFromSelection() {
+        document.getElementById("addToCollectionMenu").classList.remove("open")
+        _showFolderPrompt("New collection name", "", (name) => {
+          cmCollections.push({
+            id:
+              "col_" +
+              (crypto.randomUUID
+                ? crypto.randomUUID()
+                : Date.now() + Math.random().toString(36).slice(2)),
+            name,
+            itemKeys: [...collectionSelection],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+          saveCollections(cmCollections)
+          showImportToast("success", `Created collection "${name}"`)
+          deselectAllContent()
+        })
       }
 
       // ── Entity chip resolution ────────────────────────────────────────
@@ -10979,6 +11738,499 @@
         if (e.target === document.getElementById("exportModal"))
           closeExportModal()
       })
+
+      // ── Collections modal ────────────────────────────────────────────
+      function openCollectionsModal() {
+        renderCollectionsListBody()
+        renderCollectionsFiltersBody()
+        renderCollectionsExcludedBody()
+        document.getElementById("collectionsModal").classList.add("open")
+      }
+      function closeCollectionsModal() {
+        document.getElementById("collectionsModal").classList.remove("open")
+      }
+      document.querySelectorAll(".collections-view-tab").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document
+            .querySelectorAll(".collections-view-tab")
+            .forEach((b) => b.classList.remove("active"))
+          btn.classList.add("active")
+          const view = btn.dataset.collectionsView
+          document.getElementById("collectionsListBody").style.display =
+            view === "list" ? "" : "none"
+          document.getElementById("collectionsFiltersBody").style.display =
+            view === "filters" ? "" : "none"
+          document.getElementById("collectionsExcludedBody").style.display =
+            view === "excluded" ? "" : "none"
+          if (view === "excluded") renderCollectionsExcludedBody()
+        })
+      })
+      document
+        .getElementById("collectionsBtn")
+        .addEventListener("click", openCollectionsModal)
+      document
+        .getElementById("closeCollections")
+        .addEventListener("click", closeCollectionsModal)
+      document
+        .getElementById("closeCollections2")
+        .addEventListener("click", closeCollectionsModal)
+      document
+        .getElementById("collectionsModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("collectionsModal"))
+            closeCollectionsModal()
+        })
+
+      function renderCollectionsListBody() {
+        const body = document.getElementById("collectionsListBody")
+        const header =
+          '<div class="manage-db-days-header"><span class="manage-db-days-title">' +
+          cmCollections.length +
+          " collection" +
+          (cmCollections.length !== 1 ? "s" : "") +
+          '</span><button class="btn-secondary" onclick="createEmptyCollectionPrompt()">+ New Collection</button></div>'
+        if (!cmCollections.length) {
+          body.innerHTML =
+            header +
+            '<div class="manage-db-empty">No collections yet. Select Articles/Dialogs in Content and use "Add to Collection".</div>'
+          return
+        }
+        body.innerHTML =
+          header +
+          '<div class="collection-list">' +
+          cmCollections
+            .map((c) => {
+              const { rows } = buildCollectionExportRows(c)
+              const zeroCount = (c.itemKeys || []).filter(
+                (k) => _itemExportRowCount(k) === 0,
+              ).length
+              return (
+                '<div class="collection-row">' +
+                '<div class="collection-row-main">' +
+                '<span class="collection-row-name">' +
+                esc(c.name) +
+                "</span>" +
+                '<span class="chat-meta">' +
+                c.itemKeys.length +
+                " item" +
+                (c.itemKeys.length !== 1 ? "s" : "") +
+                " · " +
+                rows.length +
+                " export row" +
+                (rows.length !== 1 ? "s" : "") +
+                "</span>" +
+                (zeroCount
+                  ? '<span class="chat-meta" style="color:var(--orange)">' +
+                    zeroCount +
+                    " item" +
+                    (zeroCount !== 1 ? "s" : "") +
+                    " contribute 0 rows</span>"
+                  : "") +
+                "</div>" +
+                '<div class="collection-row-actions">' +
+                '<button class="btn-sel-action" onclick="toggleCollectionItemsView(\'' +
+                esc(c.id) +
+                '\')">View items</button>' +
+                '<button class="btn-sel-action" onclick="toggleCollectionContentView(\'' +
+                esc(c.id) +
+                '\')">View content</button>' +
+                '<button class="btn-sel-action" onclick="renameCollectionPrompt(\'' +
+                esc(c.id) +
+                '\')">Rename</button>' +
+                '<button class="btn-sel-action" onclick="exportCollection(\'' +
+                esc(c.id) +
+                '\')">Export</button>' +
+                '<button class="btn-sel-action" style="color:var(--red)" onclick="deleteCollectionConfirm(\'' +
+                esc(c.id) +
+                '\')">Delete</button>' +
+                "</div>" +
+                '<div class="collection-items-panel" id="collection-items-' +
+                esc(c.id) +
+                '" style="display:none"></div>' +
+                '<div class="collection-content-panel" id="collection-content-' +
+                esc(c.id) +
+                '" style="display:none"></div>' +
+                "</div>"
+              )
+            })
+            .join("") +
+          "</div>"
+      }
+
+      function toggleCollectionItemsView(collectionId) {
+        const panel = document.getElementById(
+          "collection-items-" + collectionId,
+        )
+        if (!panel) return
+        if (panel.style.display !== "none") {
+          panel.style.display = "none"
+          return
+        }
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        panel.innerHTML =
+          (c.itemKeys || [])
+            .map((key) => {
+              const parsed = _parseCollectionItemKey(key)
+              let label = "(missing)"
+              if (parsed) {
+                if (parsed.kind === "article") {
+                  const art = articleMap.get(parsed.id)
+                  label = art
+                    ? aFaqQ(art) || "Article #" + art.Id
+                    : "Article #" + parsed.id + " (missing)"
+                } else {
+                  const dialog = dialogMap.get(parsed.id)
+                  label = dialog
+                    ? dialog.name
+                    : "Dialog #" + parsed.id + " (missing)"
+                }
+              }
+              return (
+                '<span class="chip">' +
+                esc(label) +
+                ' <span style="cursor:pointer;opacity:.6" onclick="removeCollectionItem(\'' +
+                esc(collectionId) +
+                "','" +
+                esc(key) +
+                '\')" title="Remove">&#x2715;</span></span>'
+              )
+            })
+            .join("") || '<span class="chat-meta">No items</span>'
+        panel.style.display = "flex"
+      }
+
+      // Searchable preview of a collection's actual computed export rows (trigger +
+      // content), distinct from "View items" (the raw source Articles/Dialogs). The
+      // search <input> itself is only built once per open, so re-filtering on each
+      // keystroke only replaces the results list, not the input the user is typing in.
+      function toggleCollectionContentView(collectionId) {
+        const panel = document.getElementById("collection-content-" + collectionId)
+        if (!panel) return
+        if (panel.style.display !== "none") {
+          panel.style.display = "none"
+          return
+        }
+        panel.style.display = "block"
+        panel.innerHTML =
+          '<div class="collection-content-search-row">' +
+          '<input type="text" class="collection-content-search" placeholder="Search this collection’s content…" ' +
+          'oninput="_renderCollectionContentList(\'' +
+          esc(collectionId) +
+          '\', this.value)" />' +
+          '<span class="chat-meta" id="collection-content-count-' +
+          esc(collectionId) +
+          '"></span>' +
+          "</div>" +
+          '<div class="collection-content-list" id="collection-content-list-' +
+          esc(collectionId) +
+          '"></div>'
+        _renderCollectionContentList(collectionId, "")
+      }
+      function _renderCollectionContentList(collectionId, query) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        const listEl = document.getElementById(
+          "collection-content-list-" + collectionId,
+        )
+        const countEl = document.getElementById(
+          "collection-content-count-" + collectionId,
+        )
+        if (!c || !listEl) return
+        const { rows } = buildCollectionExportRows(c)
+        const q = (query || "").trim()
+        const qLower = q.toLowerCase()
+        const filtered = q
+          ? rows.filter(
+              (r) =>
+                r.trigger.toLowerCase().includes(qLower) ||
+                r.content.toLowerCase().includes(qLower),
+            )
+          : rows
+        if (countEl)
+          countEl.textContent =
+            filtered.length +
+            " / " +
+            rows.length +
+            " row" +
+            (rows.length !== 1 ? "s" : "")
+        listEl.innerHTML = filtered.length
+          ? filtered
+              .map(
+                (r) =>
+                  '<div class="collection-content-row">' +
+                  '<div class="collection-content-trigger">' +
+                  hl(r.trigger, q) +
+                  "</div>" +
+                  '<div class="collection-content-text">' +
+                  hl(r.content, q) +
+                  "</div>" +
+                  "</div>",
+              )
+              .join("")
+          : '<div class="manage-db-empty">' +
+            (rows.length
+              ? "No rows match your search."
+              : "This collection has 0 exportable rows.") +
+            "</div>"
+      }
+      function removeCollectionItem(collectionId, key) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.itemKeys = (c.itemKeys || []).filter((k) => k !== key)
+        c.updatedAt = Date.now()
+        saveCollections(cmCollections)
+        renderCollectionsListBody()
+        toggleCollectionItemsView(collectionId)
+      }
+      function renameCollectionPrompt(collectionId) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        _showFolderPrompt("Rename collection", c.name, (name) => {
+          c.name = name
+          c.updatedAt = Date.now()
+          saveCollections(cmCollections)
+          renderCollectionsListBody()
+        })
+      }
+      function deleteCollectionConfirm(collectionId) {
+        _showConfirm("Delete this collection? This cannot be undone.", () => {
+          cmCollections = cmCollections.filter((x) => x.id !== collectionId)
+          saveCollections(cmCollections)
+          renderCollectionsListBody()
+        })
+      }
+      function createEmptyCollectionPrompt() {
+        _showFolderPrompt("New collection name", "", (name) => {
+          cmCollections.push({
+            id:
+              "col_" +
+              (crypto.randomUUID
+                ? crypto.randomUUID()
+                : Date.now() + Math.random().toString(36).slice(2)),
+            name,
+            itemKeys: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+          saveCollections(cmCollections)
+          renderCollectionsListBody()
+        })
+      }
+
+      const EXPORT_FILTER_FIELDS = [
+        { value: "entity", label: "Entity" },
+        { value: "content", label: "Content" },
+        { value: "context", label: "Context" },
+      ]
+      function _exportFilterFieldOptions(selected) {
+        return EXPORT_FILTER_FIELDS.map(
+          (f) =>
+            '<option value="' +
+            f.value +
+            '"' +
+            (f.value === selected ? " selected" : "") +
+            ">" +
+            f.label +
+            "</option>",
+        ).join("")
+      }
+      function renderCollectionsFiltersBody() {
+        const body = document.getElementById("collectionsFiltersBody")
+        const addRow =
+          '<div class="export-filter-add-row">' +
+          '<select id="newFilterFieldInput" class="sort-select">' +
+          _exportFilterFieldOptions("entity") +
+          "</select>" +
+          '<input type="text" id="newFilterPatternInput" placeholder="Pattern to exclude, e.g. zzz" onkeydown="if(event.key===\'Enter\')addExportFilterFromInput()" />' +
+          '<label class="export-filter-label"><input type="checkbox" id="newFilterRegexInput" /> Regex</label>' +
+          '<button class="btn-secondary" onclick="addExportFilterFromInput()">Add</button>' +
+          "</div>" +
+          '<div class="hint" style="padding:0 18px 10px">' +
+          "Entity matches trigger phrases, Content matches the answer text. Context matches a flattened " +
+          '<code>name:value</code> string per answer, e.g. <code>escalationGroup:overnachten resort:R_EBR_BH12</code>.' +
+          "</div>"
+        const rows = cmExportFilters
+          .map(
+            (f) =>
+              '<div class="export-filter-row">' +
+              '<select class="sort-select" onchange="toggleExportFilterField(\'' +
+              esc(f.id) +
+              "', this.value)\">" +
+              _exportFilterFieldOptions(f.field || "entity") +
+              "</select>" +
+              '<span class="export-filter-pattern" title="' +
+              esc(f.pattern) +
+              '">' +
+              esc(f.pattern) +
+              "</span>" +
+              '<label class="export-filter-label"><input type="checkbox" ' +
+              (f.isRegex ? "checked" : "") +
+              ' onchange="toggleExportFilterRegex(\'' +
+              esc(f.id) +
+              "', this.checked)\" /> Regex</label>" +
+              '<label class="export-filter-label"><input type="checkbox" ' +
+              (f.enabled !== false ? "checked" : "") +
+              ' onchange="toggleExportFilterEnabled(\'' +
+              esc(f.id) +
+              "', this.checked)\" /> Enabled</label>" +
+              '<button class="btn-sel-action" style="color:var(--red)" onclick="removeExportFilter(\'' +
+              esc(f.id) +
+              '\')">Remove</button>' +
+              "</div>",
+          )
+          .join("")
+        body.innerHTML =
+          addRow +
+          (rows ||
+            '<div class="manage-db-empty">No exclusion patterns yet.</div>')
+      }
+      function addExportFilterFromInput() {
+        const inp = document.getElementById("newFilterPatternInput")
+        const pattern = (inp.value || "").trim()
+        if (!pattern) return
+        const isRegex = document.getElementById("newFilterRegexInput").checked
+        const field = document.getElementById("newFilterFieldInput").value
+        cmExportFilters.push({
+          id:
+            "ef_" +
+            (crypto.randomUUID
+              ? crypto.randomUUID()
+              : Date.now() + Math.random().toString(36).slice(2)),
+          field,
+          pattern,
+          isRegex,
+          enabled: true,
+        })
+        saveExportFilters(cmExportFilters)
+        renderCollectionsFiltersBody()
+        renderCollectionsListBody()
+      }
+      function toggleExportFilterField(id, field) {
+        const f = cmExportFilters.find((x) => x.id === id)
+        if (!f) return
+        f.field = field
+        saveExportFilters(cmExportFilters)
+        renderCollectionsListBody()
+      }
+      function toggleExportFilterRegex(id, checked) {
+        const f = cmExportFilters.find((x) => x.id === id)
+        if (!f) return
+        f.isRegex = checked
+        saveExportFilters(cmExportFilters)
+        renderCollectionsListBody()
+      }
+      function toggleExportFilterEnabled(id, checked) {
+        const f = cmExportFilters.find((x) => x.id === id)
+        if (!f) return
+        f.enabled = checked
+        saveExportFilters(cmExportFilters)
+        renderCollectionsListBody()
+      }
+      function removeExportFilter(id) {
+        cmExportFilters = cmExportFilters.filter((x) => x.id !== id)
+        saveExportFilters(cmExportFilters)
+        renderCollectionsFiltersBody()
+        renderCollectionsListBody()
+      }
+
+      // "Filtered Out" tab: shows exactly which rows an enabled smart filter is
+      // dropping from a chosen collection, and which pattern(s) matched each one —
+      // an audit view so a filter meant to catch "zzz" doesn't silently also eat
+      // something the user actually wanted.
+      function _setCollectionsExcludedView(collectionId) {
+        _collectionsExcludedViewId = collectionId
+        renderCollectionsExcludedBody()
+      }
+      function renderCollectionsExcludedBody() {
+        const body = document.getElementById("collectionsExcludedBody")
+        if (!body) return
+        if (!cmCollections.length) {
+          body.innerHTML = '<div class="manage-db-empty">No collections yet.</div>'
+          return
+        }
+        if (
+          !_collectionsExcludedViewId ||
+          !cmCollections.some((c) => c.id === _collectionsExcludedViewId)
+        ) {
+          _collectionsExcludedViewId = cmCollections[0].id
+        }
+        const pickerHtml =
+          '<div class="export-filter-add-row">' +
+          '<select class="sort-select" onchange="_setCollectionsExcludedView(this.value)">' +
+          cmCollections
+            .map(
+              (c) =>
+                '<option value="' +
+                esc(c.id) +
+                '"' +
+                (c.id === _collectionsExcludedViewId ? " selected" : "") +
+                ">" +
+                esc(c.name) +
+                "</option>",
+            )
+            .join("") +
+          "</select>" +
+          "</div>"
+        const c = cmCollections.find((x) => x.id === _collectionsExcludedViewId)
+        const { excludedRows } = buildCollectionExportRows(c)
+        const listHtml = excludedRows.length
+          ? '<div class="collection-content-list">' +
+            excludedRows
+              .map(
+                (r) =>
+                  '<div class="collection-content-row">' +
+                  '<div class="collection-content-trigger">' +
+                  esc(r.trigger) +
+                  "</div>" +
+                  '<div class="collection-content-text">' +
+                  esc(r.content) +
+                  "</div>" +
+                  '<div class="chat-meta" style="color:var(--orange)">Matched: ' +
+                  esc(r.matchedFields.join(", ")) +
+                  "</div>" +
+                  "</div>",
+              )
+              .join("") +
+            "</div>"
+          : '<div class="manage-db-empty">Nothing is being filtered out for this collection.</div>'
+        body.innerHTML = pickerHtml + listHtml
+      }
+
+      async function exportCollection(collectionId) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        const { rows } = buildCollectionExportRows(c)
+        const run = async () => {
+          const defaultName =
+            (c.name || "collection").replace(/[\\/:*?"<>|]/g, "_") + ".json"
+          try {
+            const res = await window.electronAPI.saveCollectionExport(
+              defaultName,
+              JSON.stringify(rows, null, 2),
+            )
+            if (res.canceled) return
+            if (!res.ok) {
+              showImportToast("error", "Export failed.")
+              return
+            }
+            showImportToast(
+              "success",
+              `Exported ${rows.length} row${rows.length !== 1 ? "s" : ""} to ${res.path}`,
+            )
+          } catch (e) {
+            showImportToast("error", "Export failed: " + e)
+          }
+        }
+        if (rows.length === 0) {
+          _showConfirm(
+            "This collection has 0 exportable rows. Export an empty file anyway?",
+            run,
+          )
+        } else {
+          run()
+        }
+      }
+
       document.getElementById("flowModal").addEventListener("click", (e) => {
         if (e.target === document.getElementById("flowModal")) {
           closeFlowModal()
@@ -11373,6 +12625,8 @@
           buildContentContextOptions()
           contentContextFilters = []
           _updateContentCtxBadge()
+          collectionSelectMode = false
+          collectionSelection.clear()
           document.getElementById("all-stat-total").textContent =
             allCombinedItems.length
           document.getElementById("all-stat-articles").textContent =

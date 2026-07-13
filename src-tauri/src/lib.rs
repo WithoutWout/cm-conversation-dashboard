@@ -1545,6 +1545,45 @@ async fn select_db_save_path(app: AppHandle) -> FileSaveResult {
 }
 
 #[tauri::command]
+async fn save_collection_export(
+    app: AppHandle,
+    default_name: String,
+    content: String,
+) -> Result<FileSaveResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .set_file_name(&default_name)
+        .save_file(move |path| {
+            let p = path.and_then(|fp| fp.into_path().ok());
+            let _ = tx.send(p);
+        });
+
+    let Some(mut path) = rx.await.ok().flatten() else {
+        return Ok(FileSaveResult {
+            ok: false,
+            canceled: true,
+            path: None,
+        });
+    };
+    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        path.set_extension("json");
+    }
+    fs::write(&path, content).map_err(|e| format!("Cannot write export file: {e}"))?;
+
+    Ok(FileSaveResult {
+        ok: true,
+        canceled: false,
+        path: Some(path.to_string_lossy().into_owned()),
+    })
+}
+
+#[tauri::command]
 async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
     use tauri_plugin_dialog::DialogExt;
     use tokio::sync::oneshot;
@@ -4045,6 +4084,7 @@ pub fn run() {
             select_data_folder,
             check_for_updates,
             get_version,
+            save_collection_export,
             set_db_path,
             get_db_path,
             select_csv_files,
