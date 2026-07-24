@@ -10,6 +10,8 @@ Keep changes simple, scoped, and in line with the current architecture. Avoid un
 
 Libraries may be used, but must be vendored locally (e.g. `frontend/vendor/`) so the app works fully offline. Never load dependencies from a CDN.
 
+**CM.com Analytics API:** `CM_Analytics_API_SOP.md` (gitignored, local-only) documents OAuth2 token generation and the Analytics API's interaction log export flow. Consult it for any upcoming work extending the Analytics API integration (e.g. `sync_conversations_from_api` in `src-tauri/src/lib.rs`).
+
 ---
 
 ## File structure
