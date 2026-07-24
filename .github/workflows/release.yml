@@ -62,38 +62,41 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.9.1
+            ## What's new in v0.10.0
 
-            ### Collections: build knowledge-tool exports for HALO
-            Curate a set of Articles and Dialogs from the Content tab and export them as ready-to-import JSON for CM.com HALO's knowledge tool.
+            ### Automated Analytics API import
+            Interaction logs no longer have to be downloaded by hand, one day at a time, from the CM.com portal.
 
-            - **Select and collect** — turn on **Select** in the Content tab to check off Articles/Dialogs (or use **Select all** to grab everything matching your current search/filter), then add them to a named Collection.
-            - **Export as trigger/content JSON** — pick a Collection, hit Export, and save the file. Only genuinely reachable content is included, matching how the CM.com bot itself would actually serve it to users.
-            - **Dialogs export their real entry points** — if a Dialog is normally only reached through an Article, that Article's questions become the export trigger for the Dialog's content, so dialogs that are pure routers still produce usable rows.
-            - **Smart filters** — set up reusable rules to exclude junk or test content, matching on trigger phrase, answer text, or context (like escalation group), with plain text or regex.
-            - **Filtered Out view** — see exactly which rows a smart filter is removing and why, so a filter that's too broad doesn't quietly eat content you wanted.
-            - **Search inside a Collection** — preview and search a Collection's actual exported content before you save it.
+            - **Import → Analytics API** — pick a date/time range (with a **Now** shortcut and a calendar that marks which days are already in your database) and the app downloads and imports every day in the range itself.
+            - **Respects the API's limits automatically** — requests never exceed 24 hours, only one download is ever in flight, and a day that times out is transparently split into smaller windows and retried.
+            - **Efficient pipeline** — the next day downloads while the current one imports, so waiting time is minimised.
+            - **Safe by construction** — duplicate detection reuses the app's existing import logic, so re-running an import (or retrying after a failure) never creates duplicate data. A day that was only partly imported is detected per hour and completed, not skipped.
+            - **Clear progress and control** — see exactly what's downloading, what's importing, and what's done; cancel at any point and keep everything imported so far; retry from the day that failed.
+            - **Credentials live in Settings** — add your Analytics API client ID and secret once under Settings → Conversations.
+            - The manual CSV import is still there, right next to it, for when you'd rather use a downloaded file.
 
-            ### Release readiness
-            - Bumped the application version to **0.9.1** across the Tauri and package metadata.
+            ### Content selection, redesigned
+            - The Collections select bar no longer takes up space when you're not using it — turn it on with a single icon next to the search options, and a compact bar appears only while you're selecting.
+            - Selecting is now as simple as clicking a card — no more hunting for a small checkbox.
+            - **Hover preview** — while selecting, hover an Article or Dialog to see exactly what it would contribute to your Collection (its trigger phrases and response text) before you select it, including a clear note when an item would add nothing at all.
 
             ---
 
             ## Download
 
             ### Windows (geen admin nodig, geen installatie) — aanbevolen
-            - Klik hieronder op **Assets** en download:  
-              `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`  
-            - Pak het zip-bestand uit en dubbelklik op `CAIDashboard.exe`.  
-            - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren.  
+            - Klik hieronder op **Assets** en download:
+              `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`
+            - Pak het zip-bestand uit en dubbelklik op `CAIDashboard.exe`.
+            - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren.
 
-            > ⚠️ Let op: de app is niet gecode‑signed. Windows Defender/SmartScreen kan een waarschuwing tonen.  
+            > ⚠️ Let op: de app is niet gecode‑signed. Windows Defender/SmartScreen kan een waarschuwing tonen.
             > Klik op **"Meer informatie" → "Toch uitvoeren"** om de app te starten.
 
             ---
 
             ### macOS
-            - Download het `.dmg`‑bestand.  
+            - Download het `.dmg`‑bestand.
             - Open het `.dmg`, sleep de app naar `Applications` en open hem via `Launchpad`/`Programma's`.
           releaseDraft: false
           prerelease: false
