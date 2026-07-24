@@ -610,33 +610,8 @@
       .card:hover {
         border-color: #3a3d55;
       }
-      .card-header[data-tooltip] {
-        position: relative;
-      }
-      .card-header[data-tooltip]::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        top: calc(100% + 5px);
-        left: 11px;
-        right: 11px;
-        background: var(--surface2);
-        border: 1px solid var(--border);
-        color: var(--muted);
-        font-size: 0.75rem;
-        font-weight: 400;
-        white-space: pre-wrap;
-        word-break: break-word;
-        padding: 6px 10px;
-        border-radius: 6px;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.08s;
-        z-index: 50;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-      }
-      .card-header[data-tooltip]:hover::after {
-        opacity: 1;
-      }
+      /* The old card-header hover tooltip was replaced by the richer
+         #contentHoverPreview panel (see "Collections: hover preview"). */
       .card-header {
         display: flex;
         align-items: center;
@@ -3653,9 +3628,13 @@
         position: relative;
         white-space: nowrap;
       }
-      .conv-ctx-btn:hover {
+      .conv-ctx-btn:hover:not(:disabled) {
         border-color: var(--accent);
         color: var(--text);
+      }
+      .conv-ctx-btn:disabled {
+        opacity: 0.35;
+        cursor: default;
       }
       .conv-ctx-btn.has-filters {
         border-color: var(--accent);
@@ -4168,25 +4147,176 @@
         cursor: pointer;
         flex-shrink: 0;
       }
-      .btn-select-mode {
-        background: none;
+      /* Card headers become selection targets in select mode */
+      .card-header.sel-mode {
+        transition: background 0.12s, box-shadow 0.12s;
+      }
+      .card-header.sel-mode:hover {
+        background: var(--surface2);
+      }
+      .card-header.sel-mode.selected {
+        background: rgba(124, 106, 247, 0.13);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+
+      /* Hover preview of an item's exportable content */
+      #contentHoverPreview {
+        position: fixed;
+        z-index: 400;
+        width: 380px;
+        max-width: calc(100vw - 24px);
+        max-height: 60vh;
+        overflow: hidden;
+        background: var(--surface);
         border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 3px 10px;
+        border-radius: 10px;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.42);
+        padding: 11px 13px;
+        /* Never intercept the pointer — it must not fight the card it describes */
+        pointer-events: none;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.13s;
+      }
+      #contentHoverPreview.open {
+        opacity: 1;
+        visibility: visible;
+      }
+      .chp-head {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        margin-bottom: 7px;
+      }
+      .chp-id {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.67rem;
+        color: var(--blue);
+        flex-shrink: 0;
+      }
+      .chp-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+        line-height: 1.35;
+      }
+      .chp-desc {
         font-size: 0.72rem;
         color: var(--muted);
-        cursor: pointer;
-        white-space: nowrap;
-        transition: all 0.15s;
+        line-height: 1.5;
+        margin: -3px 0 7px;
       }
-      .btn-select-mode:hover {
+      .chp-count {
+        font-size: 0.67rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 7px;
+      }
+      .chp-row {
+        border-top: 1px solid var(--border);
+        padding: 7px 0 0;
+        margin-top: 7px;
+      }
+      .chp-row:first-of-type {
+        border-top: none;
+        margin-top: 0;
+        padding-top: 0;
+      }
+      .chp-trigger {
+        font-size: 0.68rem;
+        color: var(--teal);
+        margin-bottom: 3px;
+        line-height: 1.4;
+      }
+      .chp-content {
+        font-size: 0.73rem;
         color: var(--text);
-        border-color: var(--text);
+        line-height: 1.5;
       }
-      .btn-select-mode.active {
-        background: rgba(124, 106, 247, 0.15);
-        border-color: var(--accent);
-        color: var(--accent);
+      .chp-more,
+      .chp-empty {
+        font-size: 0.7rem;
+        color: var(--muted);
+        margin-top: 7px;
+        font-style: italic;
+        line-height: 1.5;
+      }
+      .chp-empty {
+        margin-top: 0;
+      }
+
+      /* Contextual selection bar: floats over the list and only exists while
+         select mode is on, so idle browsing gives up no vertical space to it. */
+      .content-select-bar {
+        position: fixed;
+        left: 50%;
+        bottom: 22px;
+        z-index: 150;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px 4px;
+        padding: 7px 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        /* Reads as a pill at its normal single-line height, and still looks
+           right on a narrow window where it has to wrap. */
+        border-radius: 24px;
+        /* max-content is required: a fixed box anchored with left:50% and no
+           right gets only half the viewport as its available width, so it
+           would wrap long before it actually needs to. */
+        width: max-content;
+        max-width: calc(100vw - 24px);
+        flex-wrap: wrap;
+        box-shadow: 0 6px 26px rgba(0, 0, 0, 0.32);
+        transform: translate(-50%, calc(100% + 40px));
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1),
+          opacity 0.18s;
+      }
+      .content-select-bar.open {
+        transform: translate(-50%, 0);
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .csb-count {
+        font-size: 0.74rem;
+        font-weight: 600;
+        color: var(--text);
+        padding: 0 4px 0 8px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .csb-sep {
+        width: 1px;
+        height: 15px;
+        background: var(--border);
+        flex-shrink: 0;
+        margin: 0 3px;
+      }
+      .btn-sel-done {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.73rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 4px 10px;
+        border-radius: 6px;
+        white-space: nowrap;
+        transition: background 0.12s, color 0.12s;
+      }
+      .btn-sel-done:hover {
+        background: var(--surface2);
+        color: var(--text);
+      }
+      .btn-sel-action:disabled {
+        opacity: 0.38;
+        cursor: default;
+        background: none;
+        color: var(--muted);
       }
       .btn-sel-action {
         background: none;
@@ -4211,6 +4341,11 @@
         font-weight: 600;
         cursor: pointer;
         white-space: nowrap;
+        transition: opacity 0.12s;
+      }
+      .btn-add-to-collection:disabled {
+        opacity: 0.4;
+        cursor: default;
       }
       .btn-add-to-collection:hover {
         opacity: 0.85;
@@ -4222,7 +4357,8 @@
         display: none;
         position: absolute;
         right: 0;
-        top: calc(100% + 4px);
+        /* Opens upward — the bar it belongs to sits at the bottom of the view. */
+        bottom: calc(100% + 8px);
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -5568,6 +5704,28 @@
                 >0</span
               >
             </button>
+            <button
+              class="conv-ctx-btn"
+              id="contentSelectModeBtn"
+              onclick="toggleContentSelectMode()"
+              title="Select items for a Collection"
+              data-tooltip="Select items for a Collection"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                style="display: block"
+              >
+                <polyline points="9 11 12 14 22 4" />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+            </button>
           </div>
         </div>
       </div>
@@ -5695,43 +5853,6 @@
         </button>
       </div>
 
-      <!-- COLLECTIONS SELECT BAR -->
-      <div class="toolbar content-select-bar" id="contentSelectBar">
-        <span class="chat-meta" id="contentSelCount"></span>
-        <span id="contentSelectActions" style="display: none">
-          <button class="btn-sel-action" onclick="selectAllVisibleContent()">
-            Select page
-          </button>
-          <button class="btn-sel-action" onclick="selectAllFilteredContent()">
-            Select all
-          </button>
-          <button class="btn-sel-action" onclick="deselectAllContent()">
-            Clear
-          </button>
-        </span>
-        <div class="chat-spacer"></div>
-        <div
-          class="add-to-collection-wrap"
-          id="addToCollectionWrap"
-          style="display: none"
-        >
-          <button
-            class="btn-add-to-collection"
-            onclick="toggleAddToCollectionMenu()"
-          >
-            + Add to Collection
-          </button>
-          <div class="add-to-collection-menu" id="addToCollectionMenu"></div>
-        </div>
-        <button
-          class="btn-select-mode"
-          id="contentSelectModeBtn"
-          onclick="toggleContentSelectMode()"
-        >
-          Select
-        </button>
-      </div>
-
       <!-- ALL RESULTS PANEL -->
       <div id="panel-all" class="panel active">
         <div class="toolbar">
@@ -5852,6 +5973,49 @@
           </div>
         </div>
         <div class="pagination" id="e-pagination"></div>
+      </div>
+
+      <!-- Hover preview shown while selecting: what this item contributes to
+           a Collection. Positioned against the viewport in JS. -->
+      <div id="contentHoverPreview"></div>
+
+      <!-- COLLECTIONS SELECT BAR — floats over the list, only in select mode.
+           Lives inside #view-content so it hides with the view. -->
+      <div class="content-select-bar" id="contentSelectBar">
+        <span class="csb-count" id="contentSelCount">0 selected</span>
+        <span class="csb-sep"></span>
+        <button class="btn-sel-action" onclick="selectAllVisibleContent()">
+          Page
+        </button>
+        <button class="btn-sel-action" onclick="selectAllFilteredContent()">
+          All results
+        </button>
+        <button
+          class="btn-sel-action"
+          id="contentSelClearBtn"
+          onclick="deselectAllContent()"
+        >
+          Clear
+        </button>
+        <span class="csb-sep"></span>
+        <div class="add-to-collection-wrap" id="addToCollectionWrap">
+          <button
+            class="btn-add-to-collection"
+            id="addToCollectionBtn"
+            onclick="toggleAddToCollectionMenu()"
+            disabled
+          >
+            + Add to Collection
+          </button>
+          <div class="add-to-collection-menu" id="addToCollectionMenu"></div>
+        </div>
+        <button
+          class="btn-sel-done"
+          onclick="toggleContentSelectMode()"
+          title="Leave select mode (Esc)"
+        >
+          Done
+        </button>
       </div>
     </div>
     <!-- end #view-content -->
@@ -8835,8 +8999,9 @@
               hiddenQs.length +
               " more</button>"
             : visibleChips
-        const hoverTitle =
-          kind === "answer" ? (art._displayResponse || "").slice(0, 250) : ""
+        // The old data-tooltip (a raw 250-char slice of the response) is
+        // superseded by the hover preview, which shows the same text plus its
+        // triggers and how many responses the item actually contributes.
         const snippetHtml = cardSnippetHtml(
           nonDefaultArticleMatchSnippet(art, q),
           q,
@@ -8851,11 +9016,10 @@
           : ""
         return (
           '<div class="card type-article">' +
-          '<div class="card-header" onclick="goToArticle(' +
-          art.Id +
-          ')"' +
-          (hoverTitle ? ' data-tooltip="' + esc(hoverTitle) + '"' : "") +
-          ">" +
+          selectableCardHeader(
+            _selKey,
+            'onclick="goToArticle(' + art.Id + ')"',
+          ) +
           _checkboxHtml +
           '<span class="card-id id-blue">' +
           art.Id +
@@ -9720,16 +9884,10 @@
           : ""
         return (
           '<div class="card type-dialog">' +
-          '<div class="card-header" onclick="openDialogInfoModal(' +
-          item.id +
-          ', false)"' +
-          (desc
-            ? ' data-tooltip="' +
-              esc(desc.slice(0, 250)) +
-              (desc.length > 250 ? "…" : "") +
-              '"'
-            : "") +
-          ">" +
+          selectableCardHeader(
+            _selKey,
+            'onclick="openDialogInfoModal(' + item.id + ', false)"',
+          ) +
           _checkboxHtml +
           '<span class="card-id id-blue">' +
           item.id +
@@ -10341,23 +10499,69 @@
       }
 
       // ── Collections: selection UX ───────────────────────────────────
+
+      /**
+       * Opening tag for a card header.
+       *
+       * In select mode the whole header becomes the selection target — clicking
+       * a card picks it instead of opening its modal, which is what you want
+       * when you're curating rather than reading. `normalAttrs` (the navigate
+       * handler and its small tooltip) only applies outside select mode; the
+       * hover preview replaces the tooltip while selecting.
+       */
+      function selectableCardHeader(selKey, normalAttrs) {
+        // data-sel-key is always present — it identifies the card for the hover
+        // preview, which runs in both modes. Only the click behaviour differs.
+        const key = ' data-sel-key="' + esc(selKey) + '"'
+        if (!collectionSelectMode) {
+          return '<div class="card-header"' + key + " " + normalAttrs + ">"
+        }
+        return (
+          '<div class="card-header sel-mode' +
+          (collectionSelection.has(selKey) ? " selected" : "") +
+          '"' +
+          key +
+          ' onclick="selectCardFromHeader(this)">'
+        )
+      }
+
+      /// Click anywhere on a card header in select mode toggles that card.
+      function selectCardFromHeader(headerEl) {
+        const key = headerEl.dataset.selKey
+        if (!key) return
+        const on = !collectionSelection.has(key)
+        if (on) collectionSelection.add(key)
+        else collectionSelection.delete(key)
+        headerEl.classList.toggle("selected", on)
+        const cb = headerEl.querySelector(".card-select-checkbox")
+        if (cb) cb.checked = on
+        _updateContentSelectBar()
+      }
+
       function toggleContentSelection(checkboxEl) {
         const key = checkboxEl.dataset.selKey
         if (checkboxEl.checked) collectionSelection.add(key)
         else collectionSelection.delete(key)
+        checkboxEl
+          .closest(".card-header")
+          ?.classList.toggle("selected", checkboxEl.checked)
         _updateContentSelectBar()
       }
       function _updateContentSelectBar() {
         const n = collectionSelection.size
+        // The bar's buttons stay in place and disable rather than appearing and
+        // disappearing, so it doesn't reflow while you're clicking through it.
         document.getElementById("contentSelCount").textContent =
-          n > 0 ? n + " selected" : ""
-        document.getElementById("addToCollectionWrap").style.display =
-          n > 0 ? "" : "none"
+          n === 1 ? "1 selected" : n + " selected"
+        document.getElementById("addToCollectionBtn").disabled = n === 0
+        document.getElementById("contentSelClearBtn").disabled = n === 0
+        if (n === 0) closeAddToCollectionMenu()
       }
       function selectAllVisibleContent() {
         document.querySelectorAll(".card-select-checkbox").forEach((cb) => {
           collectionSelection.add(cb.dataset.selKey)
           cb.checked = true
+          cb.closest(".card-header")?.classList.add("selected")
         })
         _updateContentSelectBar()
       }
@@ -10386,9 +10590,10 @@
       }
       function deselectAllContent() {
         collectionSelection.clear()
-        document
-          .querySelectorAll(".card-select-checkbox")
-          .forEach((cb) => (cb.checked = false))
+        document.querySelectorAll(".card-select-checkbox").forEach((cb) => {
+          cb.checked = false
+          cb.closest(".card-header")?.classList.remove("selected")
+        })
         _updateContentSelectBar()
       }
       function _rerenderActiveContentTab() {
@@ -10408,23 +10613,243 @@
         }
       }
       function toggleContentSelectMode() {
-        collectionSelectMode = !collectionSelectMode
-        document.getElementById("contentSelectModeBtn").textContent =
-          collectionSelectMode ? "Cancel" : "Select"
+        setContentSelectMode(!collectionSelectMode)
+      }
+      function setContentSelectMode(on) {
+        if (collectionSelectMode === on) return
+        collectionSelectMode = on
         document
           .getElementById("contentSelectModeBtn")
-          .classList.toggle("active", collectionSelectMode)
-        document.getElementById("contentSelectActions").style.display =
-          collectionSelectMode ? "" : "none"
-        if (!collectionSelectMode) collectionSelection.clear()
+          .classList.toggle("has-filters", on)
+        document.getElementById("contentSelectBar").classList.toggle("open", on)
+        if (!on) {
+          collectionSelection.clear()
+          closeAddToCollectionMenu()
+          _hideContentPreview()
+        }
         _updateContentSelectBar()
         _rerenderActiveContentTab()
       }
+
+      // Esc leaves select mode — but only when it isn't already doing something
+      // more specific (closing a popover or a modal).
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape" || !collectionSelectMode) return
+        if (document.querySelector(".modal-overlay.open")) return
+        const menu = document.getElementById("addToCollectionMenu")
+        if (menu && menu.classList.contains("open")) {
+          closeAddToCollectionMenu()
+          return
+        }
+        setContentSelectMode(false)
+      })
+
+      // ── Collections: hover preview while selecting ──────────────────
+      // Shows what an item would actually contribute to a Collection, so you
+      // can curate without opening each card's modal. Deliberately built from
+      // the same _*ExportRows() the export uses — a preview that disagreed with
+      // the export would be worse than none.
+
+      let _cpTimer = null
+      let _cpKey = ""
+      /// Panel width and top are measured once per hover; only x tracks the
+      /// cursor, so moving the mouse never forces a re-layout.
+      let _cpWidth = 0
+      let _cpLastX = 0
+      let _cpRaf = 0
+      const CP_CURSOR_GAP = 18
+
+      function _cpTrunc(s, n) {
+        s = String(s || "").replace(/\s+/g, " ").trim()
+        return s.length > n ? s.slice(0, n - 1) + "…" : s
+      }
+
+      function _contentPreviewHtml(key) {
+        const parsed = _parseCollectionItemKey(key)
+        if (!parsed) return ""
+        let idLabel, title, rows, emptyReason
+        let desc = ""
+        if (parsed.kind === "article") {
+          const art = articleMap.get(parsed.id)
+          if (!art) return ""
+          idLabel = "qa-" + art.Id
+          title = ((art.Questions || [])[0] || {}).Text || "no question"
+          rows = _articleExportRows(art)
+          const k = aKind(art)
+          emptyReason =
+            k === "dialog"
+              ? "Routes into a Dialog — no content of its own."
+              : k === "tdialog"
+                ? "Routes into a Transactional Dialog — no content of its own."
+                : "No reachable response text."
+        } else {
+          const d = dialogMap.get(parsed.id)
+          if (!d) return ""
+          idLabel = "dn-" + d.id
+          title = d.name || "Dialog"
+          // Carried over from the tooltip this preview replaced.
+          desc = strip(d.description || "")
+          rows = _dialogExportRows(d)
+          emptyReason =
+            "No reachable responses — this dialog only routes to others."
+        }
+
+        const head =
+          '<div class="chp-head"><span class="chp-id">' +
+          esc(idLabel) +
+          '</span><span class="chp-title">' +
+          esc(_cpTrunc(title, 90)) +
+          "</span></div>" +
+          (desc
+            ? '<div class="chp-desc">' + esc(_cpTrunc(desc, 160)) + "</div>"
+            : "")
+
+        if (!rows.length) {
+          return (
+            head +
+            '<div class="chp-empty">' +
+            esc(emptyReason) +
+            " Selecting it adds nothing to the export.</div>"
+          )
+        }
+
+        // Deliberately skimmable: three rows, trimmed. A hover preview is for
+        // deciding whether to select, not for reading — the card's modal is
+        // still there for the full text, and the "+N more" line says what's
+        // being left out rather than letting the panel clip silently.
+        const shown = rows.slice(0, 3)
+        const body = shown
+          .map(
+            (r) =>
+              '<div class="chp-row"><div class="chp-trigger">' +
+              esc(_cpTrunc((r.phrases || []).join(" · "), 100)) +
+              '</div><div class="chp-content">' +
+              esc(_cpTrunc(r.content, 200)) +
+              "</div></div>",
+          )
+          .join("")
+        const more =
+          rows.length > shown.length
+            ? '<div class="chp-more">+ ' +
+              (rows.length - shown.length) +
+              " more response" +
+              (rows.length - shown.length === 1 ? "" : "s") +
+              "</div>"
+            : ""
+        return (
+          head +
+          '<div class="chp-count">' +
+          rows.length +
+          " response" +
+          (rows.length === 1 ? "" : "s") +
+          " would be exported</div>" +
+          body +
+          more
+        )
+      }
+
+      /// Horizontal only — the panel follows the cursor sideways while its
+      /// vertical position stays anchored to the card it describes.
+      function _positionContentPreviewX(clientX) {
+        const el = document.getElementById("contentHoverPreview")
+        if (!el || !el.classList.contains("open")) return
+        let left = clientX + CP_CURSOR_GAP
+        // Flip to the cursor's left when it would overflow the right edge.
+        if (left + _cpWidth > window.innerWidth - 8)
+          left = clientX - _cpWidth - CP_CURSOR_GAP
+        if (left < 8) left = 8
+        el.style.left = left + "px"
+      }
+
+      function _showContentPreview(headerEl, key) {
+        const el = document.getElementById("contentHoverPreview")
+        if (!el || !headerEl.isConnected) return
+        const html = _contentPreviewHtml(key)
+        if (!html) return
+        el.innerHTML = html
+        el.classList.add("open")
+        // Vertically: anchored to the card, clamped so it can't run off-screen.
+        const r = headerEl.getBoundingClientRect()
+        _cpWidth = el.offsetWidth
+        const ph = el.offsetHeight
+        let top = r.top - 4
+        if (top + ph > window.innerHeight - 8) top = window.innerHeight - ph - 8
+        if (top < 8) top = 8
+        el.style.top = top + "px"
+        _positionContentPreviewX(_cpLastX)
+      }
+
+      function _hideContentPreview() {
+        clearTimeout(_cpTimer)
+        if (_cpRaf) {
+          cancelAnimationFrame(_cpRaf)
+          _cpRaf = 0
+        }
+        _cpKey = ""
+        const el = document.getElementById("contentHoverPreview")
+        if (el) el.classList.remove("open")
+      }
+
+      document.addEventListener("mouseover", (e) => {
+        const h = e.target.closest(".card-header[data-sel-key]")
+        if (!h) return
+        _cpLastX = e.clientX
+        const key = h.dataset.selKey
+        if (key === _cpKey) return
+        _cpKey = key
+        clearTimeout(_cpTimer)
+        // Short delay so sweeping the pointer down the list doesn't flash a
+        // preview for every card it passes over.
+        _cpTimer = setTimeout(() => _showContentPreview(h, key), 160)
+      })
+      // Track the cursor sideways. Coalesced into one frame so a fast sweep
+      // can't queue up more work than the browser can paint.
+      document.addEventListener(
+        "mousemove",
+        (e) => {
+          if (!_cpKey) return
+          _cpLastX = e.clientX
+          if (_cpRaf) return
+          _cpRaf = requestAnimationFrame(() => {
+            _cpRaf = 0
+            _positionContentPreviewX(_cpLastX)
+          })
+        },
+        { passive: true },
+      )
+      document.addEventListener("mouseout", (e) => {
+        const h = e.target.closest(".card-header[data-sel-key]")
+        if (!h) return
+        if (e.relatedTarget && h.contains(e.relatedTarget)) return
+        _hideContentPreview()
+      })
+      // The panel is positioned against the viewport, so any scroll invalidates it.
+      document.addEventListener("scroll", _hideContentPreview, true)
+      document.addEventListener(
+        "click",
+        (e) => {
+          // Keep the preview up while picking — selecting several cards in a
+          // row shouldn't make it flicker away on every click. Outside select
+          // mode a card click opens a modal, and the preview sits above it
+          // (z-index 400 vs 100), so it must go.
+          if (
+            collectionSelectMode &&
+            e.target.closest(".card-header[data-sel-key]")
+          )
+            return
+          _hideContentPreview()
+        },
+        true,
+      )
 
       // ── Collections: "Add to Collection" popover ────────────────────
       function toggleAddToCollectionMenu() {
         const menu = document.getElementById("addToCollectionMenu")
         if (menu.classList.toggle("open")) renderAddToCollectionMenu()
+      }
+      function closeAddToCollectionMenu() {
+        const menu = document.getElementById("addToCollectionMenu")
+        if (menu) menu.classList.remove("open")
       }
       function renderAddToCollectionMenu() {
         const rows = cmCollections
@@ -11566,8 +11991,26 @@
             renderEntityList()
             entityListDirty = false
           }
+          // Entities can't belong to a Collection (no checkbox on their cards),
+          // so leaving select mode armed there would show a bar that does
+          // nothing — and "All results" would silently select content items.
+          if (t === "entities") setContentSelectMode(false)
+          _syncContentSelectAvailability()
         })
       })
+
+      /// Disable the select toggle on the Entities tab.
+      function _syncContentSelectAvailability() {
+        const tab = document.querySelector(".tab.active")?.dataset.tab || "all"
+        const btn = document.getElementById("contentSelectModeBtn")
+        if (!btn) return
+        const off = tab === "entities"
+        btn.disabled = off
+        btn.title = off
+          ? "Entities can't be added to a Collection"
+          : "Select items for a Collection"
+        btn.dataset.tooltip = btn.title
+      }
 
       // ── Filter pills ────────────────────────────────────────────────
       document.querySelectorAll("#panel-all .pill").forEach((btn) => {
@@ -13215,8 +13658,15 @@
           buildContentContextOptions()
           contentContextFilters = []
           _updateContentCtxBadge()
+          // A data reload invalidates the selection. Reset the bar's UI too —
+          // the lists aren't rendered yet, so don't go through
+          // setContentSelectMode() (it would re-render mid-load).
           collectionSelectMode = false
           collectionSelection.clear()
+          document.getElementById("contentSelectBar").classList.remove("open")
+          document
+            .getElementById("contentSelectModeBtn")
+            .classList.remove("has-filters")
           document.getElementById("all-stat-total").textContent =
             allCombinedItems.length
           document.getElementById("all-stat-articles").textContent =
