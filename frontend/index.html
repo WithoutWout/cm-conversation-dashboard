@@ -4796,6 +4796,333 @@
         font-size: 0.72rem;
         color: var(--muted);
       }
+
+      /* === ANALYTICS API SETTINGS === */
+      .analytics-cfg-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 10px;
+      }
+      .analytics-cfg-grid label {
+        font-size: 0.72rem;
+        margin-bottom: 3px;
+      }
+      .analytics-cfg-grid input {
+        width: 100%;
+      }
+
+      /* === IMPORT MODAL === */
+      .import-modal-box {
+        max-width: 620px;
+        width: 620px;
+      }
+      .import-modal-box .modal-body {
+        max-height: calc(90vh - 150px);
+        overflow-y: auto;
+      }
+      .import-source-tabs {
+        display: flex;
+        gap: 4px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 3px;
+        margin-bottom: 14px;
+      }
+      .import-source-tab {
+        flex: 1;
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 7px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .import-source-tab:hover {
+        color: var(--text);
+      }
+      .import-source-tab.active {
+        background: var(--surface2);
+        color: var(--text);
+      }
+      .import-range-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .import-range-row > label {
+        width: 42px;
+        margin: 0;
+        font-size: 0.75rem;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .import-date-btn {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.8rem;
+        font-family: inherit;
+        padding: 7px 10px;
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.15s;
+      }
+      .import-date-btn:hover,
+      .import-date-btn.active {
+        border-color: var(--accent);
+      }
+      .import-range-row input[type="time"] {
+        width: 108px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.8rem;
+        font-family: inherit;
+        padding: 6px 8px;
+      }
+      .import-now-btn {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 6px 10px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .import-now-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      /* Two-month calendar, reusing the .cal-* day/grid styles. Always
+         visible — picking the range is the point of this modal. */
+      .import-cal {
+        display: flex;
+        gap: 18px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 4px 0 10px;
+      }
+      .import-cal-month {
+        flex: 1;
+        min-width: 0;
+      }
+      /* Inset shadow rather than a border so marking a day doesn't shift the
+         grid by a pixel. */
+      .import-cal .cal-day.has-data {
+        box-shadow: inset 0 0 0 1px var(--green);
+      }
+      .import-cal .cal-day.partial-data {
+        box-shadow: inset 0 0 0 1px var(--orange);
+      }
+      .import-cal .cal-day.range-start,
+      .import-cal .cal-day.range-end {
+        box-shadow: none;
+      }
+      .import-cal .cal-day.range-start.has-data,
+      .import-cal .cal-day.range-end.has-data {
+        box-shadow: inset 0 0 0 2px var(--green);
+      }
+      .import-cal .cal-day.range-start.partial-data,
+      .import-cal .cal-day.range-end.partial-data {
+        box-shadow: inset 0 0 0 2px var(--orange);
+      }
+      .import-cal-legend {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        font-size: 0.68rem;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .import-cal-legend .swatch {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        margin-right: 5px;
+        vertical-align: -1px;
+      }
+      .import-cal-legend .swatch.full {
+        box-shadow: inset 0 0 0 1.5px var(--green);
+      }
+      .import-cal-legend .swatch.partial {
+        box-shadow: inset 0 0 0 1.5px var(--orange);
+      }
+      .import-summary {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 0.78rem;
+        color: var(--text);
+        line-height: 1.6;
+      }
+      .import-summary .muted {
+        color: var(--muted);
+      }
+      .import-warn {
+        color: var(--orange);
+        font-size: 0.74rem;
+        margin-top: 6px;
+      }
+      .import-err {
+        color: var(--red);
+        font-size: 0.74rem;
+        margin-top: 6px;
+      }
+      /* Running state */
+      .import-progress-op {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 4px;
+      }
+      .import-progress-sub {
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .import-progress-bar {
+        height: 6px;
+        background: var(--bg);
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 14px;
+      }
+      .import-progress-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 3px;
+        transition: width 0.25s ease;
+      }
+      .import-progress-fill.done {
+        background: var(--green);
+      }
+      .import-progress-fill.failed {
+        background: var(--red);
+      }
+      .import-progress-fill.cancelled {
+        background: var(--orange);
+      }
+      .import-spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        flex-shrink: 0;
+      }
+      .import-day-list {
+        max-height: 210px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .import-day {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 11px;
+        font-size: 0.78rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .import-day:last-child {
+        border-bottom: none;
+      }
+      .import-day-date {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.75rem;
+        color: var(--text);
+        width: 92px;
+        flex-shrink: 0;
+      }
+      .import-day-detail {
+        color: var(--muted);
+        font-size: 0.73rem;
+        margin-left: auto;
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .import-day-chip {
+        font-size: 0.66rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 2px 7px;
+        border-radius: 999px;
+        flex-shrink: 0;
+      }
+      .chip-queued {
+        background: var(--surface2);
+        color: var(--muted);
+      }
+      .chip-downloading,
+      .chip-importing {
+        background: rgba(124, 106, 247, 0.16);
+        color: var(--accent);
+      }
+      .chip-done {
+        background: rgba(46, 178, 122, 0.16);
+        color: var(--green);
+      }
+      .chip-skipped {
+        background: rgba(120, 130, 150, 0.16);
+        color: var(--muted);
+      }
+      .chip-failed {
+        background: rgba(226, 84, 84, 0.16);
+        color: var(--red);
+      }
+      .chip-cancelled {
+        background: rgba(230, 150, 60, 0.16);
+        color: var(--orange);
+      }
+      .import-log {
+        margin-top: 12px;
+      }
+      .import-log summary {
+        cursor: pointer;
+        font-size: 0.74rem;
+        color: var(--muted);
+        user-select: none;
+      }
+      .import-log summary:hover {
+        color: var(--text);
+      }
+      .import-log-body {
+        margin-top: 8px;
+        max-height: 180px;
+        overflow: auto;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 9px 11px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.68rem;
+        line-height: 1.65;
+        color: var(--muted);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
       /* Import toast */
       .import-toast {
         position: fixed;
@@ -5556,7 +5883,7 @@
           class="conv-import-btn"
           id="convImportBtn"
           disabled
-          title="Import InteractionLog CSV files"
+          title="Import interaction logs from the Analytics API or a CSV file"
         >
           <svg
             width="12"
@@ -5570,7 +5897,7 @@
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          Import CSV…
+          Import
         </button>
         <button
           class="conv-manage-btn"
@@ -6051,6 +6378,18 @@
       </div>
     </div>
 
+    <!-- IMPORT MODAL -->
+    <div class="modal-overlay" id="convImportModal">
+      <div class="modal-box import-modal-box">
+        <div class="modal-header">
+          <h3 id="convImportTitle">Import interactions</h3>
+          <button class="close-btn" id="closeConvImportModal">&#x2715;</button>
+        </div>
+        <div class="modal-body" id="convImportBody"></div>
+        <div class="modal-footer" id="convImportFooter"></div>
+      </div>
+    </div>
+
     <!-- ENTITY INFO MODAL -->
     <div class="modal-overlay" id="entityInfoModal">
       <div class="modal-box dialog-info-modal-box">
@@ -6282,6 +6621,110 @@
                 >
               </div>
             </div>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label>Analytics API</label>
+              <p class="hint" style="margin-bottom: 8px">
+                Credentials for the CM.com Analytics API, used by
+                <strong>Import</strong> &rarr; <strong>Analytics API</strong> to
+                download interaction logs automatically. Provided by CM.com; the
+                customer and project keys are the two segments after the
+                <code>#</code> in your portal URL.
+              </p>
+              <div class="analytics-cfg-grid">
+                <div>
+                  <label for="setting-analytics-client-id">Client ID</label>
+                  <input
+                    id="setting-analytics-client-id"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div>
+                  <label for="setting-analytics-client-secret"
+                    >Client secret</label
+                  >
+                  <input
+                    id="setting-analytics-client-secret"
+                    type="password"
+                    autocomplete="new-password"
+                    spellcheck="false"
+                  />
+                </div>
+                <div>
+                  <label for="setting-analytics-customer-key"
+                    >Customer key</label
+                  >
+                  <input
+                    id="setting-analytics-customer-key"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div>
+                  <label for="setting-analytics-project-key">Project key</label>
+                  <input
+                    id="setting-analytics-project-key"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div>
+                  <label for="setting-analytics-culture">Culture</label>
+                  <input
+                    id="setting-analytics-culture"
+                    type="text"
+                    placeholder="nl"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <div>
+                  <label for="setting-analytics-environment">Environment</label>
+                  <select
+                    id="setting-analytics-environment"
+                    class="sort-select"
+                    style="width: 100%"
+                  >
+                    <option value="Production">Production</option>
+                    <option value="Staging">Staging</option>
+                  </select>
+                </div>
+              </div>
+              <label
+                class="radio-option"
+                style="margin-top: 10px; display: flex"
+              >
+                <input type="checkbox" id="setting-analytics-active-only" />
+                Only include active sessions (filters out background and system
+                events)
+              </label>
+              <div
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 10px;
+                  margin-top: 10px;
+                "
+              >
+                <button class="btn-secondary" id="analyticsTestBtn">
+                  Test connection
+                </button>
+                <span
+                  class="hint"
+                  id="analyticsTestStatus"
+                  style="min-height: 1.2em"
+                ></span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="modal-footer" style="justify-content: space-between">
@@ -6460,9 +6903,11 @@
             <div class="instructions-step">
               <span class="instructions-step-num">6</span>
               <span class="instructions-step-text"
-                >In the <strong>Conversations</strong> tab of this app, use the
-                <strong>Import CSV</strong> button to load the downloaded
-                file.</span
+                >In the <strong>Conversations</strong> tab of this app, click
+                <strong>Import</strong>, switch to <strong>CSV file</strong> and
+                load the downloaded file. To skip this manual export entirely,
+                configure the Analytics API in Settings and use the
+                <strong>Analytics API</strong> tab instead.</span
               >
             </div>
           </div>
@@ -7097,8 +7542,17 @@
           selectCsvFiles: () => invoke("select_csv_files"),
           selectDbSavePath: () => invoke("select_db_save_path"),
           selectDbOpenPath: () => invoke("select_db_open_path"),
-          importInteractionsCsv: (filePath, maxAgeDays) =>
-            invoke("import_interactions_csv", { filePath, maxAgeDays }),
+          importInteractionsCsv: (filePath, maxAgeDays, delimiter) =>
+            invoke("import_interactions_csv", { filePath, maxAgeDays, delimiter }),
+          // Analytics API commands
+          getAnalyticsConfig: () => invoke("get_analytics_config"),
+          saveAnalyticsConfig: (args) =>
+            invoke("save_analytics_config", { args }),
+          testAnalyticsConnection: () => invoke("test_analytics_connection"),
+          fetchAnalyticsWindow: (startUtc, endUtc) =>
+            invoke("fetch_analytics_window", { args: { startUtc, endUtc } }),
+          cleanupAnalyticsTemp: (paths) =>
+            invoke("cleanup_analytics_temp", { paths: paths || null }),
           getSessions: (args) => invoke("get_sessions", { args }),
           exportConversationsForAi: (args) =>
             invoke("export_conversations_for_ai", { args }),
@@ -7108,6 +7562,7 @@
           getDateRange: () => invoke("get_date_range"),
           getContextOptions: () => invoke("get_context_options"),
           getDbDailyStats: () => invoke("get_db_daily_stats"),
+          getDbHourCoverage: () => invoke("get_db_hour_coverage"),
           deleteInteractionsByDates: (dates) =>
             invoke("delete_interactions_by_dates", { args: { dates } }),
           // Flagged conversations commands
@@ -7175,6 +7630,32 @@
           Promise.resolve({ ok: false, canceled: true, path: null })
       if (!window.electronAPI.importInteractionsCsv)
         window.electronAPI.importInteractionsCsv = _convStub
+      if (!window.electronAPI.getAnalyticsConfig)
+        window.electronAPI.getAnalyticsConfig = () =>
+          Promise.resolve({
+            configured: false,
+            hasSecret: false,
+            clientId: "",
+            customerKey: "",
+            projectKey: "",
+            culture: "",
+            environment: "Production",
+            activeSessionOnly: false,
+          })
+      if (!window.electronAPI.saveAnalyticsConfig)
+        window.electronAPI.saveAnalyticsConfig = _convStub
+      if (!window.electronAPI.testAnalyticsConnection)
+        window.electronAPI.testAnalyticsConnection = () =>
+          Promise.resolve({ ok: false, message: "Not running in Tauri." })
+      if (!window.electronAPI.fetchAnalyticsWindow)
+        window.electronAPI.fetchAnalyticsWindow = () =>
+          Promise.reject({
+            kind: "config",
+            message: "Not running in Tauri.",
+            retryable: false,
+          })
+      if (!window.electronAPI.cleanupAnalyticsTemp)
+        window.electronAPI.cleanupAnalyticsTemp = () => Promise.resolve(0)
       if (!window.electronAPI.getSessions)
         window.electronAPI.getSessions = () =>
           Promise.resolve({ sessions: [], total: 0, page: 1 })
@@ -7197,6 +7678,8 @@
       if (!window.electronAPI.getDbDailyStats)
         window.electronAPI.getDbDailyStats = () =>
           Promise.resolve({ total: 0, days: [] })
+      if (!window.electronAPI.getDbHourCoverage)
+        window.electronAPI.getDbHourCoverage = () => Promise.resolve([])
       if (!window.electronAPI.deleteInteractionsByDates)
         window.electronAPI.deleteInteractionsByDates = _convStub
       if (!window.electronAPI.flagSession)
@@ -12354,8 +12837,114 @@
         if (_cfRadio) _cfRadio.checked = true
         renderDataFolderState()
         setDataFolderFeedback(dataFolderFeedback.text, dataFolderFeedback.color)
+        loadAnalyticsConfigIntoSettings()
         document.getElementById("settingsModal").classList.add("open")
       })
+
+      // ── Analytics API credentials ────────────────────────────────────
+      // The client secret lives in a config file owned by the Rust side and is
+      // never sent to the renderer; we only learn whether one is stored.
+      let analyticsConfig = null
+
+      async function loadAnalyticsConfigIntoSettings() {
+        const status = document.getElementById("analyticsTestStatus")
+        if (status) status.textContent = ""
+        try {
+          analyticsConfig = await window.electronAPI.getAnalyticsConfig()
+        } catch (e) {
+          analyticsConfig = null
+        }
+        const c = analyticsConfig || {}
+        document.getElementById("setting-analytics-client-id").value =
+          c.clientId || ""
+        document.getElementById("setting-analytics-customer-key").value =
+          c.customerKey || ""
+        document.getElementById("setting-analytics-project-key").value =
+          c.projectKey || ""
+        document.getElementById("setting-analytics-culture").value =
+          c.culture || ""
+        document.getElementById("setting-analytics-environment").value =
+          c.environment || "Production"
+        document.getElementById("setting-analytics-active-only").checked =
+          !!c.activeSessionOnly
+        const secretEl = document.getElementById(
+          "setting-analytics-client-secret",
+        )
+        secretEl.value = ""
+        secretEl.placeholder = c.hasSecret
+          ? "•••••••• saved — leave blank to keep"
+          : "Paste your client secret"
+      }
+
+      function readAnalyticsConfigFromSettings() {
+        return {
+          clientId: document
+            .getElementById("setting-analytics-client-id")
+            .value.trim(),
+          // Blank means "keep the stored secret".
+          clientSecret: document.getElementById(
+            "setting-analytics-client-secret",
+          ).value,
+          customerKey: document
+            .getElementById("setting-analytics-customer-key")
+            .value.trim(),
+          projectKey: document
+            .getElementById("setting-analytics-project-key")
+            .value.trim(),
+          culture: document
+            .getElementById("setting-analytics-culture")
+            .value.trim(),
+          environment: document.getElementById("setting-analytics-environment")
+            .value,
+          activeSessionOnly: document.getElementById(
+            "setting-analytics-active-only",
+          ).checked,
+        }
+      }
+
+      async function saveAnalyticsConfigFromSettings() {
+        try {
+          analyticsConfig = await window.electronAPI.saveAnalyticsConfig(
+            readAnalyticsConfigFromSettings(),
+          )
+          return true
+        } catch (e) {
+          const status = document.getElementById("analyticsTestStatus")
+          if (status) {
+            status.textContent = "Could not save credentials: " + String(e)
+            status.style.color = "var(--red)"
+          }
+          return false
+        }
+      }
+
+      document
+        .getElementById("analyticsTestBtn")
+        .addEventListener("click", async () => {
+          const btn = document.getElementById("analyticsTestBtn")
+          const status = document.getElementById("analyticsTestStatus")
+          btn.disabled = true
+          btn.textContent = "Testing…"
+          status.style.color = "var(--muted)"
+          status.textContent = "Requesting access token…"
+          // Test against what's currently typed, so the user doesn't have to
+          // save first to find out whether the credentials work.
+          if (!(await saveAnalyticsConfigFromSettings())) {
+            btn.disabled = false
+            btn.textContent = "Test connection"
+            return
+          }
+          try {
+            const res = await window.electronAPI.testAnalyticsConnection()
+            status.style.color = res.ok ? "var(--green)" : "var(--red)"
+            status.textContent = res.message
+          } catch (e) {
+            status.style.color = "var(--red)"
+            status.textContent = String(e)
+          }
+          btn.disabled = false
+          btn.textContent = "Test connection"
+        })
       function closeSettings() {
         document.getElementById("settingsModal").classList.remove("open")
       }
@@ -12428,6 +13017,7 @@
           chatCopyFormat = _cfChecked.value
           localStorage.setItem("chat-copy-format", chatCopyFormat)
         }
+        saveAnalyticsConfigFromSettings()
         closeSettings()
         renderAllList()
         renderArticleList()
@@ -14019,22 +14609,1192 @@
         } finally {
           convImporting = false
           setImportOverlay(false)
-          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import CSV…`
+          btn.innerHTML = _CONV_IMPORT_BTN_HTML
           setConvDbBusy(false)
         }
       }
 
-      document
-        .getElementById("convImportBtn")
-        .addEventListener("click", async () => {
-          const res = await window.electronAPI.selectCsvFiles()
-          if (res && res.ok && res.paths && res.paths.length) {
-            await doImport(res.paths)
-          }
-        })
+      const _CONV_IMPORT_BTN_HTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import`
+
       document
         .getElementById("convAiExportBtn")
         .addEventListener("click", exportConversationsForAi)
+
+      // ── Import modal ────────────────────────────────────────────────
+      // Two sources share one modal: the Analytics API (scheduled, automated)
+      // and a manually downloaded CSV. Both end up in the same DB through
+      // importInteractionsCsv, so duplicate detection is identical either way.
+
+      const IMP_HOUR_MS = 3600 * 1000
+      const IMP_DAY_MS = 24 * IMP_HOUR_MS
+      /// SOP: the Analytics API only retains 90 days.
+      const IMP_RETENTION_DAYS = 90
+      /// Never produce a sub-window shorter than one hour, so a window is only
+      /// halved while both halves would still be at least this long.
+      const IMP_MIN_SPLIT_MS = IMP_HOUR_MS
+      /// Hard cap on how many times a day may be halved (24h → 1.5h), so a
+      /// window that times out at every size can't fan out into hundreds of
+      /// requests against the API.
+      const IMP_MAX_SPLIT_DEPTH = 4
+
+      let _impSource = "api"
+      let _impFromDate = ""
+      let _impFromTime = "00:00"
+      let _impToDate = ""
+      let _impToTime = "23:59"
+      let _impPickPhase = 0
+      let _impPickHover = ""
+      let _impCalMonth = null
+      let _impDbDays = new Map()
+      /// UTC date → bitmask of hours 0..23 that already hold interactions.
+      let _impDbHours = new Map()
+      /// All 24 hour bits set.
+      const IMP_ALL_HOURS = (1 << 24) - 1
+      let _impSkipExisting = true
+      let _impPhase = "setup" // setup | running | finished
+      let _impCancelled = false
+      let _impQueue = []
+      let _impLog = []
+      let _impOpText = ""
+      let _impOpDetail = ""
+      let _impDoneCount = 0
+      let _impOutcome = null
+      let _impTotals = null
+
+      // ── time helpers ──
+      function _impIsoZ(ms) {
+        return new Date(ms).toISOString().slice(0, 19) + "Z"
+      }
+      function _impIsoMs(iso) {
+        return Date.parse(iso)
+      }
+      function _impUtcKey(ms) {
+        return new Date(ms).toISOString().slice(0, 10)
+      }
+      function _impLocalKey(d) {
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0",
+        )}-${String(d.getDate()).padStart(2, "0")}`
+      }
+      /**
+       * True when every UTC hour this window touches already holds data.
+       *
+       * Checked per hour rather than per day on purpose: a local-time range
+       * leaves a partial UTC day behind (e.g. only 22:00–23:59), and treating
+       * that day as "already imported" would silently skip its other 22 hours.
+       * Chunks never span two UTC days, so one day's mask is enough.
+       */
+      function _impWindowCovered(startUtc, endUtc) {
+        const mask = _impDbHours.get(startUtc.slice(0, 10))
+        if (!mask) return false
+        const h0 = parseInt(startUtc.slice(11, 13), 10)
+        const h1 = parseInt(endUtc.slice(11, 13), 10)
+        for (let h = h0; h <= h1; h++) {
+          if (!((mask >> h) & 1)) return false
+        }
+        return true
+      }
+
+      /// "full" (every hour present), "partial" (some hours), or "" (none).
+      function _impDayCoverage(dateKey) {
+        const mask = _impDbHours.get(dateKey)
+        if (!mask) return ""
+        return mask === IMP_ALL_HOURS ? "full" : "partial"
+      }
+
+      function _impMissingHours(dateKey) {
+        const mask = _impDbHours.get(dateKey) || 0
+        let n = 0
+        for (let h = 0; h < 24; h++) if (!((mask >> h) & 1)) n++
+        return n
+      }
+
+      /// Combine a local date string and a local HH:MM into a Date.
+      function _impLocalDate(dateStr, timeStr) {
+        const [y, m, d] = dateStr.split("-").map(Number)
+        const [hh, mm] = (timeStr || "00:00").split(":").map(Number)
+        return new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0)
+      }
+
+      /**
+       * Split a local date range into one request per UTC day.
+       *
+       * Each chunk runs 00:00:00 → 23:59:59 of a UTC day (clipped to the
+       * selected range at both ends), so every window is strictly under 24
+       * hours — the API rejects a span of exactly 24h — and chunks are
+       * consecutive with no overlap.
+       */
+      function buildImportQueue(fromLocal, toLocal, opts) {
+        const skipExisting = !!(opts && opts.skipExisting)
+        const startMs = fromLocal.getTime()
+        const endMs = toLocal.getTime()
+        const chunks = []
+        let cur = startMs
+        // Guard against a pathological range producing an unbounded loop.
+        let guard = 0
+        while (cur < endMs && guard++ < 1000) {
+          const d = new Date(cur)
+          const nextUtcMidnight = Date.UTC(
+            d.getUTCFullYear(),
+            d.getUTCMonth(),
+            d.getUTCDate() + 1,
+          )
+          // 23:59:59 of the UTC day `cur` falls in.
+          const dayEnd = nextUtcMidnight - 1000
+          const chunkEnd = Math.min(endMs, dayEnd)
+          if (chunkEnd - cur >= 1000) {
+            const startUtc = _impIsoZ(cur)
+            const endUtc = _impIsoZ(chunkEnd)
+            chunks.push({
+              key: _impUtcKey(cur),
+              startUtc,
+              endUtc,
+              // Only the hours this chunk actually covers count as "already
+              // imported" — a day imported in part is still re-fetched.
+              existing: _impWindowCovered(startUtc, endUtc),
+              status: "queued",
+              detail: "",
+            })
+          }
+          cur = nextUtcMidnight
+        }
+        return skipExisting ? chunks.filter((c) => !c.existing) : chunks
+      }
+
+      // ── logging ──
+      function _impLogLine(msg) {
+        const t = new Date().toTimeString().slice(0, 8)
+        _impLog.push(`[${t}] ${msg}`)
+        const body = document.getElementById("convImportLogBody")
+        if (body) {
+          body.textContent = _impLog.join("\n")
+          body.scrollTop = body.scrollHeight
+        }
+      }
+
+      function _impNormErr(e) {
+        if (e && typeof e === "object" && typeof e.message === "string") {
+          return {
+            kind: e.kind || "http",
+            message: e.message,
+            retryable: !!e.retryable,
+          }
+        }
+        return { kind: "http", message: String(e), retryable: false }
+      }
+
+      async function _impCleanup(paths) {
+        if (!paths || !paths.length) return
+        try {
+          await window.electronAPI.cleanupAnalyticsTemp(paths)
+        } catch (_) {}
+      }
+
+      // ── download, with timeout subdivision ──
+      /**
+       * Fetch one window, halving it on timeout down to a one-hour floor.
+       *
+       * Sub-windows are awaited in sequence, so this never has more than one
+       * API request in flight — the SOP's hard constraint. Every sub-window
+       * keeps the 00:00:00 → 11:59:59 / 12:00:00 → 23:59:59 shape, so none
+       * ever reaches 24 hours.
+       */
+      async function _impFetchWindow(item, startUtc, endUtc, depth) {
+        if (_impCancelled) throw { kind: "cancelled", message: "Cancelled" }
+        const sMs = _impIsoMs(startUtc)
+        const eMs = _impIsoMs(endUtc)
+        const spanMs = eMs - sMs + 1000
+        try {
+          if (depth === 0) {
+            _impSetOp(`Downloading ${item.key}`, "Requesting interaction log…")
+          } else {
+            _impSetOp(
+              `Downloading ${item.key}`,
+              `Split into smaller windows — ${startUtc.slice(
+                11,
+                19,
+              )} to ${endUtc.slice(11, 19)}`,
+            )
+          }
+          _impLogLine(`API request start ${startUtc} → ${endUtc}`)
+          const res = await window.electronAPI.fetchAnalyticsWindow(
+            startUtc,
+            endUtc,
+          )
+          _impLogLine(
+            `API request done ${startUtc} → ${endUtc}: ${res.rowCount} rows, ${res.bytes} bytes, ${res.durationMs}ms`,
+          )
+          _impSetOp(`Validating response…`, `${item.key} — ${res.rowCount} rows`)
+          return [res]
+        } catch (raw) {
+          const e = _impNormErr(raw)
+          // Only halve while both halves stay at or above the one-hour floor,
+          // and never beyond the depth cap.
+          if (
+            !e.retryable ||
+            depth >= IMP_MAX_SPLIT_DEPTH ||
+            spanMs < 2 * IMP_MIN_SPLIT_MS
+          )
+            throw e
+          // The SOP warns that large windows time out and recommends querying
+          // in smaller slices; halve and retry rather than failing the day.
+          const halfMs = Math.floor(spanMs / 2000) * 1000
+          const midMs = sMs + halfMs
+          _impLogLine(
+            `${e.message} — splitting ${startUtc} → ${endUtc} into two ${Math.round(
+              halfMs / 60000,
+            )}min windows`,
+          )
+          const first = await _impFetchWindow(
+            item,
+            startUtc,
+            _impIsoZ(midMs - 1000),
+            depth + 1,
+          )
+          let second
+          try {
+            second = await _impFetchWindow(item, _impIsoZ(midMs), endUtc, depth + 1)
+          } catch (err) {
+            // Don't leak the first half's temp file when the second half fails.
+            await _impCleanup(first.map((p) => p.tempPath))
+            throw err
+          }
+          return first.concat(second)
+        }
+      }
+
+      // ── import one day's parts ──
+      async function _impImportParts(item, parts) {
+        const remaining = parts.map((p) => p.tempPath)
+        const tally = { inserted: 0, skipped: 0, purged: 0, errors: [] }
+        try {
+          for (let i = 0; i < parts.length; i++) {
+            const p = parts[i]
+            _impSetOp(
+              `Importing ${item.key}`,
+              parts.length > 1
+                ? `Part ${i + 1} of ${parts.length}`
+                : `${p.rowCount} rows`,
+            )
+            _impLogLine(
+              `Import start ${item.key}${
+                parts.length > 1 ? ` (part ${i + 1}/${parts.length})` : ""
+              }`,
+            )
+            const res = await window.electronAPI.importInteractionsCsv(
+              p.tempPath,
+              dataRetentionDays,
+              p.delimiter,
+            )
+            const idx = remaining.indexOf(p.tempPath)
+            if (idx >= 0) remaining.splice(idx, 1)
+            // Free the disk as soon as the rows are safely in the database.
+            await _impCleanup([p.tempPath])
+            if (res) {
+              tally.inserted += res.inserted || 0
+              tally.skipped += res.skipped || 0
+              tally.purged += res.purged || 0
+              if (res.errors && res.errors.length)
+                tally.errors.push(...res.errors.slice(0, 3))
+            }
+            _impLogLine(
+              `Import done ${item.key}: ${res ? res.inserted : 0} new, ${
+                res ? res.skipped : 0
+              } duplicates`,
+            )
+          }
+        } finally {
+          await _impCleanup(remaining)
+        }
+        return tally
+      }
+
+      /// Overall progress counts skipped days as completed — they need no work,
+      /// so the bar reflects "days accounted for", not just days downloaded.
+      function _impRecountDone() {
+        _impDoneCount = _impQueue.filter(
+          (c) => c.status === "done" || c.status === "skipped",
+        ).length
+      }
+
+      function _impSetOp(text, detail) {
+        _impOpText = text
+        _impOpDetail = detail || ""
+        _impRenderProgress()
+      }
+
+      /**
+       * Kick off a day's download.
+       *
+       * The returned promise never rejects — a download is started one
+       * iteration before it is awaited, and a bare rejection sitting unhandled
+       * in between would surface as an unhandled-rejection error. The caller
+       * inspects `ok` instead.
+       */
+      function _impStartFetch(i) {
+        const item = _impQueue[i]
+        item.status = "downloading"
+        item.detail = ""
+        _impRenderProgress()
+        return _impFetchWindow(item, item.startUtc, item.endUtc, 0).then(
+          (parts) => ({ ok: true, parts }),
+          (error) => ({ ok: false, error }),
+        )
+      }
+
+      /**
+       * Run the queue: while day N imports, day N+1 downloads. Only ever one
+       * download is in flight, and cancellation is only checked between steps
+       * so an in-flight request or import always completes safely.
+       */
+      async function _impRunQueue(startIndex) {
+        _impPhase = "running"
+        _impCancelled = false
+        _impOutcome = null
+        convImporting = true
+        setConvDbBusy(true)
+        const totals = { inserted: 0, skipped: 0, purged: 0, days: 0 }
+        _impTotals = totals
+
+        // Days already imported (and, on a retry, days done in an earlier run)
+        // stay in the list so the user can see them, but aren't downloaded.
+        const todo = []
+        for (let i = startIndex; i < _impQueue.length; i++) {
+          const s = _impQueue[i].status
+          if (s !== "skipped" && s !== "done") todo.push(i)
+        }
+        _impRecountDone()
+
+        let nextFetch = null
+        let failure = null
+        let failedIndex = -1
+        try {
+          // Guarded rather than an early return: the outcome block below must
+          // still run so the modal leaves the "running" phase.
+          for (let k = 0; k < todo.length; k++) {
+            if (k === 0) nextFetch = _impStartFetch(todo[0])
+            const i = todo[k]
+            const item = _impQueue[i]
+            if (_impCancelled) break
+            const dl = await nextFetch
+            nextFetch = null
+            if (!dl.ok) {
+              const e = _impNormErr(dl.error)
+              if (e.kind === "cancelled") break
+              failure = e
+              failedIndex = i
+              break
+            }
+            const parts = dl.parts
+            if (_impCancelled) {
+              // Downloaded but not imported — discard rather than half-import.
+              await _impCleanup(parts.map((p) => p.tempPath))
+              break
+            }
+            // Start the next download now so it overlaps this import.
+            if (k + 1 < todo.length && !_impCancelled) {
+              nextFetch = _impStartFetch(todo[k + 1])
+            }
+            item.status = "importing"
+            _impRenderProgress()
+            try {
+              const tally = await _impImportParts(item, parts)
+              item.status = "done"
+              item.detail = `${tally.inserted} new · ${tally.skipped} duplicates`
+              totals.inserted += tally.inserted
+              totals.skipped += tally.skipped
+              totals.purged += tally.purged
+              totals.days += 1
+              _impRecountDone()
+              _impSetOp(`Finished ${item.key}`, item.detail)
+            } catch (raw) {
+              const e = _impNormErr(raw)
+              failure = e
+              failedIndex = i
+              break
+            }
+          }
+        } finally {
+          // A download may still be in flight after a break — wait for it and
+          // delete its temp file so nothing is left on disk.
+          if (nextFetch) {
+            const leftover = await nextFetch
+            if (leftover.ok)
+              await _impCleanup(leftover.parts.map((p) => p.tempPath))
+          }
+          convImporting = false
+          setConvDbBusy(false)
+        }
+
+        if (failure) {
+          const item = _impQueue[failedIndex]
+          item.status = "failed"
+          item.detail = failure.message
+          for (let j = failedIndex + 1; j < _impQueue.length; j++) {
+            if (_impQueue[j].status === "queued" ||
+                _impQueue[j].status === "downloading")
+              _impQueue[j].status = "queued"
+          }
+          _impLogLine(`ERROR on ${item.key}: ${failure.message}`)
+          _impOutcome = { type: "failed", index: failedIndex, error: failure }
+        } else if (_impCancelled) {
+          for (const c of _impQueue) {
+            if (c.status === "queued" || c.status === "downloading")
+              c.status = "cancelled"
+          }
+          _impLogLine(`Import cancelled after ${totals.days} day(s)`)
+          _impOutcome = { type: "cancelled" }
+        } else {
+          _impLogLine(
+            `Queue complete: ${totals.days} day(s), ${totals.inserted} new, ${totals.skipped} duplicates`,
+          )
+          _impOutcome = { type: "done" }
+        }
+
+        _impPhase = "finished"
+        _impRenderModal()
+        await _impAfterImport(totals)
+      }
+
+      /// Refresh everything downstream of the database, mirroring doImport().
+      async function _impAfterImport(totals) {
+        if (totals.inserted > 0 || totals.days > 0) {
+          contextOptionsLoaded = false
+          window.electronAPI
+            .getDateRange()
+            .then(({ min, max }) => initDatePicker(min, max))
+            .catch(() => {})
+          convHasSearched = true
+          try {
+            await loadSessions()
+          } catch (_) {}
+          try {
+            await _impLoadDbState()
+          } catch (_) {}
+        }
+        if (_impOutcome && _impOutcome.type === "done") {
+          let msg = `Imported ${totals.inserted} interactions across ${totals.days} day${
+            totals.days === 1 ? "" : "s"
+          }`
+          if (totals.skipped > 0) msg += `, ${totals.skipped} duplicates skipped`
+          if (totals.purged > 0) msg += `, ${totals.purged} old entries purged`
+          showImportToast("success", msg)
+        } else if (_impOutcome && _impOutcome.type === "cancelled") {
+          showImportToast(
+            "success",
+            `Import cancelled — ${totals.days} day${
+              totals.days === 1 ? "" : "s"
+            } imported and kept`,
+          )
+        }
+      }
+
+      /// Load per-day counts and per-hour coverage together — the counts drive
+      /// the summary and tooltips, the coverage drives what gets skipped.
+      async function _impLoadDbState() {
+        const days = new Map()
+        const hours = new Map()
+        try {
+          const stats = await window.electronAPI.getDbDailyStats()
+          for (const d of (stats && stats.days) || []) days.set(d.date, d.count)
+        } catch (_) {}
+        try {
+          for (const d of (await window.electronAPI.getDbHourCoverage()) || []) {
+            hours.set(d.date, d.hours)
+            if (!days.has(d.date)) days.set(d.date, d.count)
+          }
+        } catch (_) {}
+        _impDbDays = days
+        _impDbHours = hours
+      }
+
+      // ── Import modal: rendering ─────────────────────────────────────
+
+      /// The To time is inclusive to the end of the selected minute, so
+      /// "to 23:59" covers the whole day rather than stopping 59s short.
+      function _impToInstant() {
+        return new Date(
+          _impLocalDate(_impToDate, _impToTime).getTime() + 59 * 1000,
+        )
+      }
+
+      function _impPreview() {
+        if (!_impFromDate || !_impToDate)
+          return { error: "Pick a start and end date." }
+        const from = _impLocalDate(_impFromDate, _impFromTime)
+        const to = _impToInstant()
+        if (to <= from) return { error: "The end must be after the start." }
+        const all = buildImportQueue(from, to, { skipExisting: false })
+        if (!all.length) return { error: "That range is too short to import." }
+        const existing = all.filter((c) => c.existing).length
+        return {
+          all,
+          existing,
+          toDownload: _impSkipExisting ? all.length - existing : all.length,
+          from,
+          to,
+        }
+      }
+
+      function _impIsConfigured() {
+        return !!(analyticsConfig && analyticsConfig.configured)
+      }
+
+      function _impRenderModal() {
+        const body = document.getElementById("convImportBody")
+        const footer = document.getElementById("convImportFooter")
+        const title = document.getElementById("convImportTitle")
+        if (!body) return
+        if (_impPhase === "setup") {
+          title.textContent = "Import interactions"
+          body.innerHTML = _impSetupHtml()
+          footer.innerHTML = _impSetupFooterHtml()
+          _impBindSetupInputs()
+        } else {
+          title.textContent =
+            _impPhase === "running" ? "Importing…" : "Import finished"
+          body.innerHTML = _impProgressHtml()
+          footer.innerHTML = _impProgressFooterHtml()
+        }
+      }
+
+      function _impSetupHtml() {
+        const tabs = `
+          <div class="import-source-tabs">
+            <button class="import-source-tab ${
+              _impSource === "api" ? "active" : ""
+            }" onclick="impSetSource('api')">Analytics API</button>
+            <button class="import-source-tab ${
+              _impSource === "csv" ? "active" : ""
+            }" onclick="impSetSource('csv')">CSV file</button>
+          </div>`
+        if (_impSource === "csv") {
+          return (
+            tabs +
+            `<p class="hint" style="line-height:1.7">
+               Import an Interaction Log CSV you downloaded from the CM.com
+               portal. Rows already in the database are detected and skipped, so
+               re-importing a file is safe.
+             </p>`
+          )
+        }
+        if (!_impIsConfigured()) {
+          return (
+            tabs +
+            `<div class="import-summary">
+               <strong>Analytics API is not configured.</strong>
+               <div class="muted" style="margin-top:4px">
+                 Add your client ID, client secret, customer key, project key and
+                 culture under Settings &rarr; Conversations &rarr; Analytics API,
+                 then come back here.
+               </div>
+             </div>`
+          )
+        }
+        const p = _impPreview()
+        let summary = ""
+        if (p.error) {
+          summary = `<div class="import-summary muted">${esc(p.error)}</div>`
+        } else {
+          const parts = [
+            `<strong>${p.all.length}</strong> day${
+              p.all.length === 1 ? "" : "s"
+            }`,
+          ]
+          if (p.existing > 0)
+            parts.push(
+              `<span class="muted">${p.existing} fully imported</span>`,
+            )
+          parts.push(
+            `<strong>${p.toDownload}</strong> to download`,
+          )
+          // Days holding some data but not every hour are re-fetched, so say so
+          // rather than letting them look like they were skipped.
+          const partial = p.all.filter(
+            (c) => !c.existing && _impDayCoverage(c.key) === "partial",
+          ).length
+          const partialNote = partial
+            ? `<div class="muted" style="margin-top:5px">${partial} day${
+                partial === 1 ? " is" : "s are"
+              } only partly imported and will be fetched again — duplicates are skipped automatically.</div>`
+            : ""
+          const first = p.all[0]
+          const last = p.all[p.all.length - 1]
+          summary =
+            `<div class="import-summary">` +
+            parts.join(" &middot; ") +
+            partialNote +
+            `<div class="muted" style="margin-top:5px">Requests ${esc(
+              first.startUtc,
+            )} &rarr; ${esc(last.endUtc)} (UTC)</div>` +
+            _impWarningsHtml(p) +
+            `</div>`
+        }
+        return (
+          tabs +
+          `<div class="import-range-row">
+             <label>From</label>
+             <button class="import-date-btn ${
+               _impPickPhase === 0 ? "active" : ""
+             }" onclick="impPickEnd(0)" title="Click, then pick a start date below">${
+               _impFromDate ? esc(_impFmtDate(_impFromDate)) : "Pick a date…"
+             }</button>
+             <input type="time" id="impFromTime" value="${esc(_impFromTime)}" />
+           </div>
+           <div class="import-range-row">
+             <label>To</label>
+             <button class="import-date-btn ${
+               _impPickPhase === 1 ? "active" : ""
+             }" onclick="impPickEnd(1)" title="Click, then pick an end date below">${
+               _impToDate ? esc(_impFmtDate(_impToDate)) : "Pick a date…"
+             }</button>
+             <input type="time" id="impToTime" value="${esc(_impToTime)}" />
+             <button class="import-now-btn" onclick="impSetNow()" title="Set the end to the current local time">Now</button>
+           </div>
+           <div class="import-cal" id="impCal">${_impCalHtml()}</div>
+           <div class="import-cal-legend">
+             <span><span class="swatch full"></span>Fully imported</span>
+             <span><span class="swatch partial"></span>Partly imported</span>
+             <span>Times are local &middot; requests use UTC days</span>
+           </div>
+           <div>${summary}</div>
+           <label class="radio-option" style="margin-top:10px;display:flex">
+             <input type="checkbox" id="impSkipExisting" ${
+               _impSkipExisting ? "checked" : ""
+             } />
+             Skip days already imported in full
+           </label>`
+        )
+      }
+
+      function _impWarningsHtml(p) {
+        const out = []
+        const oldestAllowed = Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS
+        if (p.from.getTime() < oldestAllowed) {
+          out.push(
+            `<div class="import-err">The Analytics API only retains ${IMP_RETENTION_DAYS} days — the earliest days in this range cannot be downloaded.</div>`,
+          )
+        }
+        const retentionMs = dataRetentionDays * IMP_DAY_MS
+        if (p.from.getTime() < Date.now() - retentionMs) {
+          out.push(
+            `<div class="import-warn">Your data retention setting is ${dataRetentionDays} days — anything older than that is purged right after import.</div>`,
+          )
+        }
+        if (p.toDownload === 0) {
+          out.push(
+            `<div class="import-warn">Every day in this range is already imported in full. Untick “Skip days already imported in full” to fetch them again.</div>`,
+          )
+        }
+        return out.join("")
+      }
+
+      function _impFmtDate(key) {
+        const d = new Date(key + "T00:00:00")
+        return d.toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      }
+
+      function _impCalHtml() {
+        if (!_impCalMonth) _impCalMonth = new Date()
+        const base = new Date(
+          _impCalMonth.getFullYear(),
+          _impCalMonth.getMonth(),
+          1,
+        )
+        const second = new Date(base.getFullYear(), base.getMonth() + 1, 1)
+        return (
+          `<div class="import-cal-month">${_impMonthHtml(base, true)}</div>` +
+          `<div class="import-cal-month">${_impMonthHtml(second, false)}</div>`
+        )
+      }
+
+      function _impMonthHtml(monthDate, isFirst) {
+        const y = monthDate.getFullYear()
+        const m = monthDate.getMonth()
+        const label = monthDate.toLocaleDateString("en-GB", {
+          month: "long",
+          year: "numeric",
+        })
+        const today = _impLocalKey(new Date())
+        const oldest = _impLocalKey(
+          new Date(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS),
+        )
+        const nav = isFirst
+          ? `<div class="cal-nav">
+               <button onclick="impCalPrev()">&#x2039;</button>
+               <span>${esc(label)}</span>
+               <button onclick="impCalNext()">&#x203a;</button>
+             </div>`
+          : `<div class="cal-nav"><button style="visibility:hidden">&#x2039;</button><span>${esc(
+              label,
+            )}</span><button style="visibility:hidden">&#x203a;</button></div>`
+
+        let cells = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+          .map((h) => `<div class="cal-dow">${h}</div>`)
+          .join("")
+        const firstDow = (new Date(y, m, 1).getDay() + 6) % 7
+        const prevLastDay = new Date(y, m, 0).getDate()
+        for (let i = firstDow - 1; i >= 0; i--) {
+          cells += `<div class="cal-day outside disabled">${
+            prevLastDay - i
+          }</div>`
+        }
+        const lastDay = new Date(y, m + 1, 0).getDate()
+        const selStart = _impFromDate
+        const selEnd =
+          _impPickPhase === 1 && _impPickHover
+            ? _impPickHover >= selStart
+              ? _impPickHover
+              : selStart
+            : _impToDate
+        const selLow =
+          _impPickPhase === 1 && _impPickHover && _impPickHover < selStart
+            ? _impPickHover
+            : selStart
+        for (let day = 1; day <= lastDay; day++) {
+          const key = _impLocalKey(new Date(y, m, day))
+          const disabled = key > today || key < oldest
+          const coverage = _impDayCoverage(key)
+          let cls = "cal-day"
+          if (coverage === "full") cls += " has-data"
+          else if (coverage === "partial") cls += " partial-data"
+          if (disabled) {
+            cls += " disabled"
+          } else {
+            if (key === today) cls += " today"
+            if (selLow && key === selLow) cls += " range-start"
+            else if (selEnd && key === selEnd) cls += " range-end"
+            else if (selLow && selEnd && key > selLow && key < selEnd)
+              cls += " in-range"
+          }
+          const count = _impDbDays.get(key) || 0
+          let title = ""
+          if (coverage === "full") {
+            title = ` title="${count.toLocaleString()} interactions — all 24 hours imported"`
+          } else if (coverage === "partial") {
+            const missing = _impMissingHours(key)
+            title = ` title="${count.toLocaleString()} interactions — only ${
+              24 - missing
+            } of 24 hours imported, ${missing} still missing"`
+          }
+          const handlers = disabled
+            ? ""
+            : ` onclick="impPickDay('${key}')" data-imp-date="${key}"`
+          cells += `<div class="${cls}"${handlers}${title}>${day}</div>`
+        }
+        const totalCells = firstDow + lastDay
+        const trailing = (7 - (totalCells % 7)) % 7
+        for (let day = 1; day <= trailing; day++) {
+          cells += `<div class="cal-day outside disabled">${day}</div>`
+        }
+        return nav + `<div class="cal-grid">${cells}</div>`
+      }
+
+      function _impSetupFooterHtml() {
+        if (_impSource === "csv") {
+          return `<button class="btn-secondary" onclick="impClose()">Cancel</button>
+                  <button class="btn-primary" onclick="impPickCsv()">Choose CSV files…</button>`
+        }
+        const p = _impPreview()
+        const ready = _impIsConfigured() && !p.error && p.toDownload > 0
+        return `<button class="btn-secondary" onclick="impClose()">Cancel</button>
+                <button class="btn-primary" onclick="impStart()" ${
+                  ready ? "" : "disabled"
+                }>Start import</button>`
+      }
+
+      function _impProgressHtml() {
+        const total = _impQueue.length
+        const pct = total ? Math.round((_impDoneCount / total) * 100) : 0
+        let fillCls = ""
+        if (_impOutcome) {
+          fillCls =
+            _impOutcome.type === "failed"
+              ? "failed"
+              : _impOutcome.type === "cancelled"
+                ? "cancelled"
+                : "done"
+        }
+        const spinner =
+          _impPhase === "running" ? `<div class="import-spinner"></div>` : ""
+        let banner = ""
+        if (_impOutcome && _impOutcome.type === "failed") {
+          const item = _impQueue[_impOutcome.index]
+          banner = `<div class="import-summary" style="margin-bottom:12px">
+              <strong style="color:var(--red)">Import stopped on ${esc(
+                item.key,
+              )}</strong>
+              <div class="muted" style="margin-top:4px">${esc(
+                _impOutcome.error.message,
+              )}</div>
+              <div class="muted" style="margin-top:6px">Days imported before this point have been kept.</div>
+            </div>`
+        } else if (_impOutcome && _impOutcome.type === "cancelled") {
+          banner = `<div class="import-summary" style="margin-bottom:12px">
+              <strong style="color:var(--orange)">Import cancelled</strong>
+              <div class="muted" style="margin-top:4px">${
+                _impTotals ? _impTotals.days : 0
+              } of ${total} day${
+                total === 1 ? "" : "s"
+              } imported. Everything imported so far has been kept.</div>
+            </div>`
+        } else if (_impOutcome && _impOutcome.type === "done") {
+          banner = `<div class="import-summary" style="margin-bottom:12px">
+              <strong style="color:var(--green)">Import complete</strong>
+              <div class="muted" style="margin-top:4px">${
+                _impTotals ? _impTotals.inserted.toLocaleString() : 0
+              } new interactions, ${
+                _impTotals ? _impTotals.skipped.toLocaleString() : 0
+              } duplicates skipped.</div>
+            </div>`
+        }
+
+        const days = _impQueue
+          .map((c) => {
+            const chip = `<span class="import-day-chip chip-${c.status}">${
+              c.status === "done" ? "done" : esc(c.status)
+            }</span>`
+            return `<div class="import-day">
+                <span class="import-day-date">${esc(c.key)}</span>
+                ${chip}
+                <span class="import-day-detail" title="${esc(
+                  c.detail || "",
+                )}">${esc(c.detail || "")}</span>
+              </div>`
+          })
+          .join("")
+
+        return (
+          banner +
+          `<div class="import-progress-op">${spinner}<span>${esc(
+            _impOpText || "Preparing import…",
+          )}</span></div>
+           <div class="import-progress-sub">${esc(_impOpDetail || "")}</div>
+           <div class="import-progress-bar"><div class="import-progress-fill ${fillCls}" style="width:${pct}%"></div></div>
+           <div class="import-progress-sub" style="margin-bottom:8px"><strong>${_impDoneCount}</strong> of <strong>${total}</strong> day${
+             total === 1 ? "" : "s"
+           } completed${
+             _impPhase === "running"
+               ? ` &middot; ${total - _impDoneCount} remaining`
+               : ""
+           }</div>
+           <div class="import-day-list">${days}</div>
+           <details class="import-log" ${_impOutcome && _impOutcome.type === "failed" ? "open" : ""}>
+             <summary>Details</summary>
+             <div class="import-log-body" id="convImportLogBody">${esc(
+               _impLog.join("\n"),
+             )}</div>
+           </details>`
+        )
+      }
+
+      function _impProgressFooterHtml() {
+        if (_impPhase === "running") {
+          return `<button class="btn-secondary" onclick="impCancel()" id="impCancelBtn">Cancel import</button>`
+        }
+        let retry = ""
+        if (_impOutcome && _impOutcome.type === "failed") {
+          retry = `<button class="btn-primary" onclick="impRetry()">Retry from ${esc(
+            _impQueue[_impOutcome.index].key,
+          )}</button>`
+        } else if (_impOutcome && _impOutcome.type === "cancelled") {
+          const next = _impQueue.findIndex((c) => c.status === "cancelled")
+          if (next >= 0)
+            retry = `<button class="btn-primary" onclick="impRetry()">Resume from ${esc(
+              _impQueue[next].key,
+            )}</button>`
+        }
+        return `<button class="btn-secondary" onclick="impClose()">Close</button>${retry}`
+      }
+
+      /// Only the parts that change while running, so the details panel keeps
+      /// its open/closed state and scroll position.
+      function _impRenderProgress() {
+        if (_impPhase !== "running") return
+        const body = document.getElementById("convImportBody")
+        if (!body) return
+        const wasOpen = body.querySelector(".import-log")?.open
+        const scroll = body.querySelector(".import-log-body")?.scrollTop
+        body.innerHTML = _impProgressHtml()
+        const log = body.querySelector(".import-log")
+        if (log && wasOpen) {
+          log.open = true
+          const lb = body.querySelector(".import-log-body")
+          if (lb && scroll != null) lb.scrollTop = scroll
+        }
+      }
+
+      function _impBindSetupInputs() {
+        const ft = document.getElementById("impFromTime")
+        if (ft)
+          ft.addEventListener("change", () => {
+            _impFromTime = ft.value || "00:00"
+            _impRenderModal()
+          })
+        const tt = document.getElementById("impToTime")
+        if (tt)
+          tt.addEventListener("change", () => {
+            _impToTime = tt.value || "23:59"
+            _impRenderModal()
+          })
+        const sk = document.getElementById("impSkipExisting")
+        if (sk)
+          sk.addEventListener("change", () => {
+            _impSkipExisting = sk.checked
+            _impRenderModal()
+          })
+        const cal = document.getElementById("impCal")
+        if (cal) {
+          cal.addEventListener("mouseover", (e) => {
+            if (_impPickPhase !== 1) return
+            const el = e.target.closest("[data-imp-date]")
+            const next = el ? el.dataset.impDate : ""
+            if (next !== _impPickHover) {
+              _impPickHover = next
+              _impUpdateCalClasses()
+            }
+          })
+          cal.addEventListener("mouseleave", () => {
+            if (_impPickPhase === 1 && _impPickHover) {
+              _impPickHover = ""
+              _impUpdateCalClasses()
+            }
+          })
+        }
+      }
+
+      /// Hover preview only touches classes — re-rendering the whole calendar
+      /// on every mousemove would fight the pointer.
+      function _impUpdateCalClasses() {
+        const cal = document.getElementById("impCal")
+        if (!cal) return
+        let lo = _impFromDate
+        let hi = _impToDate
+        if (_impPickPhase === 1) {
+          hi = _impPickHover || ""
+          if (hi && hi < lo) {
+            hi = lo
+            lo = _impPickHover
+          }
+        }
+        cal.querySelectorAll("[data-imp-date]").forEach((el) => {
+          const d = el.dataset.impDate
+          el.classList.remove("range-start", "range-end", "in-range")
+          if (lo && d === lo) el.classList.add("range-start")
+          else if (hi && d === hi) el.classList.add("range-end")
+          else if (lo && hi && d > lo && d < hi) el.classList.add("in-range")
+        })
+      }
+
+      // ── Import modal: actions (inline handlers) ──────────────────────
+      function impSetSource(src) {
+        _impSource = src
+        _impRenderModal()
+      }
+      /// Choose which end of the range the next calendar click sets.
+      function impPickEnd(phase) {
+        _impPickPhase = phase
+        _impPickHover = ""
+        _impRenderModal()
+      }
+      function impCalPrev() {
+        _impCalMonth = new Date(
+          _impCalMonth.getFullYear(),
+          _impCalMonth.getMonth() - 1,
+          1,
+        )
+        _impRenderModal()
+      }
+      function impCalNext() {
+        _impCalMonth = new Date(
+          _impCalMonth.getFullYear(),
+          _impCalMonth.getMonth() + 1,
+          1,
+        )
+        _impRenderModal()
+      }
+      function impPickDay(key) {
+        // Picking an end day means "through the end of that day" — reset the
+        // To time to 23:59 so a leftover time (from Now, say) can't silently
+        // clip the day short. Only the Now button sets a partial end time.
+        const setTo = (k) => {
+          _impToDate = k
+          _impToTime = "23:59"
+        }
+        if (_impPickPhase === 0) {
+          _impFromDate = key
+          _impFromTime = "00:00"
+          // Keep a still-valid end date rather than forcing a second click.
+          if (!_impToDate || _impToDate < key) setTo(key)
+          _impPickPhase = 1
+        } else {
+          if (key < _impFromDate) {
+            setTo(_impFromDate)
+            _impFromDate = key
+            _impFromTime = "00:00"
+          } else {
+            setTo(key)
+          }
+          _impPickPhase = 0
+        }
+        _impPickHover = ""
+        _impRenderModal()
+      }
+      function impSetNow() {
+        const now = new Date()
+        _impToDate = _impLocalKey(now)
+        _impToTime = `${String(now.getHours()).padStart(2, "0")}:${String(
+          now.getMinutes(),
+        ).padStart(2, "0")}`
+        if (!_impFromDate) _impFromDate = _impToDate
+        if (_impToDate < _impFromDate) _impFromDate = _impToDate
+        _impPickPhase = 0
+        _impRenderModal()
+      }
+      async function impPickCsv() {
+        const res = await window.electronAPI.selectCsvFiles()
+        if (res && res.ok && res.paths && res.paths.length) {
+          impClose()
+          await doImport(res.paths)
+        }
+      }
+      function impCancel() {
+        if (_impPhase !== "running") return
+        _impCancelled = true
+        _impLogLine("Cancellation requested — finishing the current step")
+        const btn = document.getElementById("impCancelBtn")
+        if (btn) {
+          btn.disabled = true
+          btn.textContent = "Cancelling…"
+        }
+      }
+      function impClose() {
+        if (_impPhase === "running") return
+        document.getElementById("convImportModal").classList.remove("open")
+      }
+      async function impStart() {
+        const p = _impPreview()
+        if (p.error || !p.all) return
+        // Keep every day in the list — days already in the database are marked
+        // skipped rather than dropped, so the user can see what was left alone.
+        _impQueue = buildImportQueue(p.from, p.to, { skipExisting: false })
+        if (!_impQueue.length) return
+        if (_impSkipExisting) {
+          for (const c of _impQueue) {
+            if (c.existing) {
+              c.status = "skipped"
+              c.detail = `all 24 hours already imported (${(
+                _impDbDays.get(c.key) || 0
+              ).toLocaleString()} rows)`
+            }
+          }
+        }
+        _impLog = []
+        _impDoneCount = 0
+        _impOpText = "Preparing import…"
+        _impOpDetail = ""
+        _impLogLine(
+          `Queue created: ${_impQueue.length} day(s), ${_impQueue[0].startUtc} → ${
+            _impQueue[_impQueue.length - 1].endUtc
+          }`,
+        )
+        if (p.existing > 0 && _impSkipExisting) {
+          _impLogLine(
+            `Skipping ${p.existing} day(s) already present in the database`,
+          )
+        }
+        _impPhase = "running"
+        _impRenderModal()
+        await _impRunQueue(0)
+      }
+      async function impRetry() {
+        // Resume at the first day that didn't complete, keeping everything
+        // already imported.
+        const from = _impQueue.findIndex(
+          (c) => c.status === "failed" || c.status === "cancelled",
+        )
+        if (from < 0) return
+        for (let i = from; i < _impQueue.length; i++) {
+          // Days already in the database stay skipped across a retry.
+          if (_impQueue[i].status === "skipped") continue
+          _impQueue[i].status = "queued"
+          _impQueue[i].detail = ""
+        }
+        _impLogLine(`Retrying from ${_impQueue[from].key}`)
+        _impPhase = "running"
+        _impRenderModal()
+        await _impRunQueue(from)
+      }
+
+      /**
+       * Default the range to "catch me up": start the day after the newest day
+       * already in the database (or yesterday when it's empty) and end now.
+       * Clamped to the API's 90-day retention window.
+       */
+      function _impApplyDefaultRange() {
+        const now = new Date()
+        let start = new Date(now.getTime() - IMP_DAY_MS)
+        if (_impDbDays.size > 0) {
+          const newest = [..._impDbDays.keys()].sort().pop()
+          const next = new Date(newest + "T00:00:00")
+          next.setDate(next.getDate() + 1)
+          // If the DB is already current, re-check today rather than a future day.
+          start = next > now ? new Date(newest + "T00:00:00") : next
+        }
+        const oldest = new Date(now.getTime() - IMP_RETENTION_DAYS * IMP_DAY_MS)
+        if (start < oldest) start = oldest
+        _impFromDate = _impLocalKey(start)
+        _impFromTime = "00:00"
+        _impToDate = _impLocalKey(now)
+        _impToTime = `${String(now.getHours()).padStart(2, "0")}:${String(
+          now.getMinutes(),
+        ).padStart(2, "0")}`
+        _impCalMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      }
+
+      async function openImportModal() {
+        if (!convDbPath) {
+          openDbSetupModal()
+          return
+        }
+        if (convImporting) return
+        _impPhase = "setup"
+        _impOutcome = null
+        _impQueue = []
+        _impLog = []
+        _impPickPhase = 0
+        _impPickHover = ""
+        if (!_impCalMonth) _impCalMonth = new Date()
+        document.getElementById("convImportModal").classList.add("open")
+        _impRenderModal()
+        // Sweep anything a previous crash left behind, then load the day
+        // markers and re-render with them.
+        window.electronAPI.cleanupAnalyticsTemp().catch(() => {})
+        try {
+          analyticsConfig = await window.electronAPI.getAnalyticsConfig()
+        } catch (_) {}
+        await _impLoadDbState()
+        if (!_impFromDate) _impApplyDefaultRange()
+        if (_impPhase === "setup") _impRenderModal()
+      }
+
+      document
+        .getElementById("convImportBtn")
+        .addEventListener("click", openImportModal)
+      document
+        .getElementById("closeConvImportModal")
+        .addEventListener("click", impClose)
+      document
+        .getElementById("convImportModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("convImportModal"))
+            impClose()
+        })
 
       // ── Manage DB modal ─────────────────────────────────────────────
       let _manageDbSelectedDates = new Set()

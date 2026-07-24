@@ -1,3 +1,6 @@
+mod analytics_api;
+
+use analytics_api::{AnalyticsConfig, AnalyticsConfigView, AnalyticsState, FetchError, FetchOutcome};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rusqlite::types::ToSql;
 use rusqlite::{params, Connection};
@@ -1340,6 +1343,12 @@ fn open_db(path: &str) -> Result<Connection, String> {
 }
 
 /// Convert MM/DD/YYYY HH:MM:SS to ISO-8601 (YYYY-MM-DDTHH:MM:SS)
+///
+/// Also normalizes timestamps that already arrive in ISO form. The Analytics
+/// API can return `2026-03-25T09:30:22.605Z`; truncating to seconds keeps rows
+/// imported from the API byte-identical to rows imported from a portal CSV,
+/// which every `DATE(timestamp_start)` and range comparison in this app relies
+/// on.
 fn parse_ts(s: &str) -> String {
     // expected: "03/25/2026 09:30:22"
     let s = s.trim();
@@ -1354,8 +1363,28 @@ fn parse_ts(s: &str) -> String {
                 );
             }
         }
+        if is_iso_second_prefix(s) {
+            // Normalize the date/time separator to 'T' so a space-separated
+            // ISO timestamp stores identically to a 'T'-separated one.
+            return format!("{}T{}", &s[..10], &s[11..19]);
+        }
     }
     s.to_string()
+}
+
+/// True when the first 19 bytes look exactly like `YYYY-MM-DDTHH:MM:SS`.
+fn is_iso_second_prefix(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 19 {
+        return false;
+    }
+    let digits = [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18];
+    let dashes = [4, 7];
+    let colons = [13, 16];
+    digits.iter().all(|&i| b[i].is_ascii_digit())
+        && dashes.iter().all(|&i| b[i] == b'-')
+        && colons.iter().all(|&i| b[i] == b':')
+        && (b[10] == b'T' || b[10] == b' ')
 }
 
 fn purge_old(conn: &Connection, max_days: u64) -> i64 {
@@ -1617,7 +1646,20 @@ async fn import_interactions_csv(
     db_state: State<'_, SharedDbState>,
     file_path: String,
     max_age_days: Option<i64>,
+    delimiter: Option<String>,
 ) -> Result<ImportResult, String> {
+    // Portal exports are pipe-delimited; the Analytics API client sniffs the
+    // delimiter off the response header and passes it through.
+    let delim = match delimiter.as_deref() {
+        None | Some("") => b'|',
+        Some(d) => {
+            let bytes = d.as_bytes();
+            if bytes.len() != 1 {
+                return Err(format!("Invalid CSV delimiter: {d:?}"));
+            }
+            bytes[0]
+        }
+    };
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
     let mut state = db.lock().map_err(|e| e.to_string())?;
@@ -1627,7 +1669,7 @@ async fn import_interactions_csv(
     let buf = std::io::BufReader::with_capacity(4 * 1024 * 1024, file);
 
     let mut rdr = csv::ReaderBuilder::new()
-        .delimiter(b'|')
+        .delimiter(delim)
         .quoting(true)
         .double_quote(true)
         .flexible(true)
@@ -3519,6 +3561,75 @@ async fn get_db_daily_stats(db_state: State<'_, SharedDbState>) -> Result<DbDail
     .map_err(|e| e.to_string())?
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DayCoverage {
+    date: String,
+    /// Bitmask of the UTC hours (0..23) that hold at least one interaction.
+    /// A day imported only in part — e.g. the 22:00–23:59 tail a local-time
+    /// range leaves behind — has gaps here, which is what stops the importer
+    /// from treating it as complete and skipping the rest of the day.
+    hours: i64,
+    count: i64,
+}
+
+#[tauri::command]
+async fn get_db_hour_coverage(
+    db_state: State<'_, SharedDbState>,
+) -> Result<Vec<DayCoverage>, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+
+        // substr rather than DATE()/strftime: timestamp_start is always stored
+        // as "YYYY-MM-DDTHH:MM:SS", so this is both exact and index-friendly.
+        let mut stmt = conn
+            .prepare(
+                "SELECT substr(timestamp_start, 1, 10) AS day, \
+                        CAST(substr(timestamp_start, 12, 2) AS INTEGER) AS hr, \
+                        COUNT(*) \
+                 FROM interactions \
+                 WHERE length(timestamp_start) >= 13 \
+                 GROUP BY day, hr \
+                 ORDER BY day",
+            )
+            .map_err(|e| format!("Prepare error: {e}"))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0).unwrap_or_default(),
+                    row.get::<_, i64>(1).unwrap_or(-1),
+                    row.get::<_, i64>(2).unwrap_or(0),
+                ))
+            })
+            .map_err(|e| format!("Query error: {e}"))?;
+
+        let mut out: Vec<DayCoverage> = Vec::new();
+        for r in rows.flatten() {
+            let (day, hr, count) = r;
+            if day.is_empty() || !(0..24).contains(&hr) {
+                continue;
+            }
+            match out.last_mut() {
+                Some(last) if last.date == day => {
+                    last.hours |= 1 << hr;
+                    last.count += count;
+                }
+                _ => out.push(DayCoverage {
+                    date: day,
+                    hours: 1 << hr,
+                    count,
+                }),
+            }
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeleteByDatesArgs {
@@ -3588,6 +3699,145 @@ async fn delete_interactions_by_dates(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ── Analytics API commands ────────────────────────────────────────────────────
+
+type SharedAnalytics = Arc<AnalyticsState>;
+
+fn analytics_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("Cannot resolve the app data directory: {e}"))
+}
+
+fn analytics_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map_err(|e| format!("Cannot resolve the app cache directory: {e}"))
+}
+
+#[tauri::command]
+fn get_analytics_config(app: AppHandle) -> Result<AnalyticsConfigView, String> {
+    let dir = analytics_data_dir(&app)?;
+    Ok((&analytics_api::load_config(&dir)).into())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveAnalyticsConfigArgs {
+    client_id: String,
+    /// Blank means "keep the stored secret" so the renderer never has to hold it.
+    client_secret: Option<String>,
+    customer_key: String,
+    project_key: String,
+    culture: String,
+    environment: String,
+    active_session_only: bool,
+}
+
+#[tauri::command]
+fn save_analytics_config(
+    app: AppHandle,
+    analytics: State<'_, SharedAnalytics>,
+    args: SaveAnalyticsConfigArgs,
+) -> Result<AnalyticsConfigView, String> {
+    if !matches!(args.environment.as_str(), "Production" | "Staging") {
+        return Err("Environment must be Production or Staging".into());
+    }
+    let dir = analytics_data_dir(&app)?;
+    let existing = analytics_api::load_config(&dir);
+    let secret = match args.client_secret {
+        Some(s) if !s.is_empty() => s,
+        _ => existing.client_secret.clone(),
+    };
+    let cfg = AnalyticsConfig {
+        client_id: args.client_id.trim().to_string(),
+        client_secret: secret,
+        customer_key: args.customer_key.trim().to_string(),
+        project_key: args.project_key.trim().to_string(),
+        culture: args.culture.trim().to_string(),
+        environment: args.environment,
+        active_session_only: args.active_session_only,
+    };
+    analytics_api::save_config(&dir, &cfg)?;
+    // Credentials changed — the cached bearer token may no longer apply.
+    analytics.clear_token();
+    log::info!(target: "analytics", "credentials saved (configured: {})", cfg.is_complete());
+    Ok((&cfg).into())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionTestResult {
+    ok: bool,
+    message: String,
+}
+
+#[tauri::command]
+async fn test_analytics_connection(
+    app: AppHandle,
+    analytics: State<'_, SharedAnalytics>,
+) -> Result<ConnectionTestResult, String> {
+    let dir = analytics_data_dir(&app)?;
+    let cfg = analytics_api::load_config(&dir);
+    if !cfg.is_complete() {
+        return Ok(ConnectionTestResult {
+            ok: false,
+            message: "Fill in every field before testing the connection.".into(),
+        });
+    }
+    let state = analytics.inner().clone();
+    // Force a real round-trip rather than reporting on a cached token.
+    state.clear_token();
+    match state.token(&cfg).await {
+        Ok(_) => Ok(ConnectionTestResult {
+            ok: true,
+            message: "Connected — access token received.".into(),
+        }),
+        Err(e) => Ok(ConnectionTestResult {
+            ok: false,
+            message: e.message,
+        }),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchWindowArgs {
+    start_utc: String,
+    end_utc: String,
+}
+
+#[tauri::command]
+async fn fetch_analytics_window(
+    app: AppHandle,
+    analytics: State<'_, SharedAnalytics>,
+    args: FetchWindowArgs,
+) -> Result<FetchOutcome, FetchError> {
+    let dir = analytics_data_dir(&app).map_err(|e| {
+        FetchError {
+            kind: analytics_api::FetchErrorKind::Config,
+            message: e,
+            retryable: false,
+        }
+    })?;
+    let cache = analytics_cache_dir(&app).map_err(|e| FetchError {
+        kind: analytics_api::FetchErrorKind::Config,
+        message: e,
+        retryable: false,
+    })?;
+    let cfg = analytics_api::load_config(&dir);
+    let state = analytics.inner().clone();
+    state
+        .fetch_window(&cfg, &cache, &args.start_utc, &args.end_utc)
+        .await
+}
+
+#[tauri::command]
+fn cleanup_analytics_temp(app: AppHandle, paths: Option<Vec<String>>) -> Result<u32, String> {
+    let cache = analytics_cache_dir(&app)?;
+    Ok(analytics_api::cleanup_temp(&cache, &paths.unwrap_or_default()))
 }
 
 // ── Flagged conversations commands ────────────────────────────────────────────
@@ -4055,13 +4305,20 @@ pub fn run() {
         .manage(Arc::new(Mutex::new(DbState::default())) as SharedDbState)
         .manage(Arc::new(Mutex::new(None)) as SharedSearchInterrupt)
         .manage(Arc::new(Mutex::new(FlaggedDbState::default())) as SharedFlaggedDb)
+        .manage(Arc::new(AnalyticsState::default()) as SharedAnalytics)
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+            // Registered in release too: the Analytics API import logs each
+            // step here, and those logs are what make a failed overnight
+            // import diagnosable in a shipped build.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
+            // Remove any Analytics API downloads orphaned by a crash or a
+            // force-quit mid-import, so temp CSVs never accumulate on disk.
+            if let Ok(cache_dir) = app.path().app_cache_dir() {
+                analytics_api::cleanup_temp(&cache_dir, &[]);
             }
             // Initialize flagged database in app data directory
             if let Ok(data_dir) = app.path().app_data_dir() {
@@ -4098,7 +4355,13 @@ pub fn run() {
             get_date_range,
             get_context_options,
             get_db_daily_stats,
+            get_db_hour_coverage,
             delete_interactions_by_dates,
+            get_analytics_config,
+            save_analytics_config,
+            test_analytics_connection,
+            fetch_analytics_window,
+            cleanup_analytics_temp,
             flag_session,
             get_flagged_sessions,
             get_flagged_session_interactions,
@@ -4122,6 +4385,133 @@ mod tests {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");
         conn.execute_batch(DB_SCHEMA).expect("schema");
         conn
+    }
+
+    /// Hour coverage is what tells a partially imported day apart from a
+    /// complete one, so the importer doesn't skip the rest of a day just
+    /// because a local-time range already pulled in its tail.
+    #[test]
+    fn hour_coverage_marks_a_partial_day_as_incomplete() {
+        let conn = test_conn();
+        let insert = |log_id: i64, ts: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, imported_at) VALUES (?1, 'u', 's', ?2, 0)",
+                params![log_id, ts],
+            )
+            .expect("insert");
+        };
+        // Day A: only the 22:00 and 23:00 hours — the tail a UTC+2 local day leaves.
+        insert(1, "2026-06-01T22:15:00");
+        insert(2, "2026-06-01T23:45:00");
+        // Day B: every hour present.
+        for h in 0..24 {
+            insert(100 + h, &format!("2026-06-02T{h:02}:30:00"));
+        }
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT substr(timestamp_start, 1, 10), \
+                        CAST(substr(timestamp_start, 12, 2) AS INTEGER) \
+                 FROM interactions WHERE length(timestamp_start) >= 13",
+            )
+            .unwrap();
+        let mut masks: HashMap<String, i64> = HashMap::new();
+        for r in stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .unwrap()
+            .flatten()
+        {
+            *masks.entry(r.0).or_insert(0) |= 1 << r.1;
+        }
+
+        const ALL_HOURS: i64 = (1 << 24) - 1;
+        let partial = masks["2026-06-01"];
+        let full = masks["2026-06-02"];
+        assert_ne!(partial, ALL_HOURS, "tail-only day must not look complete");
+        assert_eq!(partial, (1 << 22) | (1 << 23));
+        assert_eq!(full, ALL_HOURS, "every-hour day must look complete");
+        // The 00:00–23:59 chunk over the partial day is not covered.
+        assert!((0..24).any(|h| partial & (1 << h) == 0));
+    }
+
+    #[test]
+    fn parse_ts_normalizes_portal_and_api_timestamps_identically() {
+        // The portal CSV and the Analytics API describe the same instant in
+        // different formats; both must land in the DB byte-identical, because
+        // DATE(timestamp_start) and range comparisons compare these as text.
+        let expected = "2026-03-25T09:30:22";
+        assert_eq!(parse_ts("03/25/2026 09:30:22"), expected);
+        assert_eq!(parse_ts("2026-03-25T09:30:22.605Z"), expected);
+        assert_eq!(parse_ts("2026-03-25T09:30:22Z"), expected);
+        assert_eq!(parse_ts("2026-03-25T09:30:22"), expected);
+        assert_eq!(parse_ts("2026-03-25 09:30:22"), expected);
+        assert_eq!(parse_ts("  2026-03-25T09:30:22.605Z  "), expected);
+    }
+
+    /// Regression guard for the manual import path against a real portal
+    /// export. The interaction-log CSVs are gitignored, so this is a no-op
+    /// when one isn't present next to the repo.
+    #[test]
+    fn real_portal_csv_still_parses_with_the_default_delimiter() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let Some(csv_path) = std::fs::read_dir(&dir).ok().and_then(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| {
+                    p.to_string_lossy().contains("InteractionLog")
+                        && p.extension().map(|e| e == "csv").unwrap_or(false)
+                })
+        }) else {
+            return;
+        };
+
+        let file = fs::File::open(&csv_path).expect("open export");
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(b'|') // the default `import_interactions_csv` uses
+            .quoting(true)
+            .double_quote(true)
+            .flexible(true)
+            .from_reader(std::io::BufReader::new(file));
+
+        let headers = rdr.headers().expect("headers").clone();
+        // The API client validates the same header shape before importing.
+        let header_line = headers.iter().collect::<Vec<_>>().join("|");
+        assert_eq!(
+            analytics_api::validate_csv_header(&format!("{header_line}\n")).unwrap(),
+            '|'
+        );
+
+        let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
+        let c_log_id = col("LogId").expect("LogId column");
+        let c_ts = col("TimestampStart").expect("TimestampStart column");
+
+        let mut rows = 0;
+        for record in rdr.records().take(500) {
+            let record = record.expect("row parses");
+            rows += 1;
+            record
+                .get(c_log_id)
+                .unwrap()
+                .parse::<i64>()
+                .expect("LogId is numeric — a wrong delimiter would break this");
+            let ts = parse_ts(record.get(c_ts).unwrap());
+            assert_eq!(ts.len(), 19, "unexpected timestamp {ts:?}");
+            assert_eq!(&ts[4..5], "-");
+            assert_eq!(&ts[10..11], "T");
+        }
+        assert!(rows > 0, "export contained no rows");
+    }
+
+    #[test]
+    fn parse_ts_passes_through_unrecognized_input() {
+        assert_eq!(parse_ts(""), "");
+        assert_eq!(parse_ts("not a timestamp at all"), "not a timestamp at all");
+        // Right length, wrong separators — left untouched rather than truncated.
+        assert_eq!(parse_ts("2026-03-25X09:30:22"), "2026-03-25X09:30:22");
     }
 
     #[test]

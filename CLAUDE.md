@@ -10,7 +10,7 @@ Keep changes simple, scoped, and in line with the current architecture. Avoid un
 
 Libraries may be used, but must be vendored locally (e.g. `frontend/vendor/`) so the app works fully offline. Never load dependencies from a CDN.
 
-**CM.com Analytics API:** `CM_Analytics_API_SOP.md` (gitignored, local-only) documents OAuth2 token generation and the Analytics API's interaction log export flow. Consult it for any upcoming work extending the Analytics API integration (e.g. `sync_conversations_from_api` in `src-tauri/src/lib.rs`).
+**CM.com Analytics API:** `CM_Analytics_API_SOP.md` (gitignored, local-only) is the single source of truth for the Analytics API — OAuth2 token generation, the interactions endpoint, and its limits. The client lives in `src-tauri/src/analytics_api.rs`; consult the SOP before changing it. See `## Analytics API import` below.
 
 ---
 
@@ -21,6 +21,8 @@ src-tauri/
   src/
     lib.rs          — Tauri commands for content data, links, updates, and Conversations DB features
     main.rs         — Entry point, calls lib::run()
+    analytics_api.rs — Analytics API client: config storage, OAuth2 token cache,
+                       one-request-at-a-time fetch, CSV validation, temp files
   tauri.conf.json   — App config, window setup, frontendDist: ../frontend
   Cargo.toml        — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog)
   capabilities/
@@ -61,7 +63,16 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }` |
 
+| `get_analytics_config`     | `getAnalyticsConfig()`            | Analytics API settings **without the client secret** — returns `hasSecret` only |
+| `save_analytics_config`    | `saveAnalyticsConfig(args)`       | Writes `analytics-api.json` to the app data dir (`0600`); a blank secret keeps the stored one |
+| `test_analytics_connection`| `testAnalyticsConnection()`       | Requests an OAuth2 token only, returns `{ ok, message }` |
+| `fetch_analytics_window`   | `fetchAnalyticsWindow(startUtc, endUtc)` | Downloads one window to a temp CSV, returns `{ tempPath, delimiter, rowCount, bytes, durationMs }`; rejects with `{ kind, message, retryable }` |
+| `cleanup_analytics_temp`   | `cleanupAnalyticsTemp(paths?)`    | Deletes the given temp CSVs, or sweeps the whole temp dir when called with no argument |
+| `get_db_hour_coverage`     | `getDbHourCoverage()`             | Per UTC day, a bitmask of which of the 24 hours hold interactions — distinguishes a partially imported day from a complete one |
+
 There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context options, daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
+
+`import_interactions_csv(filePath, maxAgeDays, delimiter?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it.
 
 ## Events (Rust → renderer)
 
@@ -90,7 +101,9 @@ window.electronAPI = {
   getVersion: () => invoke("get_version"),
   saveCollectionExport: (defaultName, content) =>
     invoke("save_collection_export", { defaultName, content }),
-  // Conversations DB commands are also mapped here; keep them behind
+  fetchAnalyticsWindow: (startUtc, endUtc) =>
+    invoke("fetch_analytics_window", { args: { startUtc, endUtc } }),
+  // Conversations DB and Analytics API commands are also mapped here; keep them behind
   // window.electronAPI rather than adding direct renderer filesystem access.
 }
 ```
@@ -273,6 +286,32 @@ Three distinct search types:
 
 ---
 
+## Analytics API import
+
+The Conversations toolbar's **Import** button opens `#convImportModal`, which offers two sources that both end at the same place: **Analytics API** (automated) and **CSV file** (the original manual `doImport()` path, unchanged). `CM_Analytics_API_SOP.md` is authoritative for anything about the API itself.
+
+Responsibilities are split deliberately — keep them separate when extending this:
+
+| Layer | Where | Owns |
+| ----- | ----- | ---- |
+| UI | `index.html` (`_impRenderModal` and friends) | modal, calendar, progress, cancel/retry |
+| Scheduler | `index.html` (`buildImportQueue`, `_impRunQueue`, `_impFetchWindow`) | queueing, pipelining, subdivision, cancellation |
+| API client | `analytics_api.rs` | token cache, one-at-a-time fetch, response validation, temp files |
+| Import service + DB | `import_interactions_csv` (unchanged) | parsing, dedupe, FTS, context index, session summary |
+
+- **The API returns the same CSV the manual workflow downloads.** The API path writes the response to a temp `.csv` and hands it to `import_interactions_csv`, so there is exactly one import pipeline and one duplicate-detection mechanism. Do not add a parallel importer.
+- **Duplicate detection is `INSERT OR IGNORE` on the `log_id` primary key**, so re-importing a day is always safe and idempotent. Skipping already-imported days is therefore an optimisation, not a correctness requirement — never build a separate dedupe mechanism.
+- **The database stores raw UTC** (the portal CSV's `03/25/2026 09:30:22` is the same instant as the API's `2026-03-25T09:30:22.605Z`), so `get_db_daily_stats` groups by UTC date. `parse_ts` normalizes both formats to `YYYY-MM-DDTHH:MM:SS` so rows from either source are byte-identical — every `DATE(timestamp_start)` and range comparison depends on that.
+- **Windowing:** the picker is local time (**Now** = local now), but `buildImportQueue` snaps chunks to UTC days so each request maps 1:1 to a DB day. A full day is `00:00:00Z` → `23:59:59Z` — **strictly under 24h**, because a span of exactly 24 hours is rejected. `validate_window` in `analytics_api.rs` enforces this, along with the SOP's 90-day retention limit. A local range straddles UTC-day boundaries, so picking one local day legitimately produces two chunks.
+- **Pipeline:** while day *N* imports, day *N+1* downloads. Only ever one API request is in flight — the JS scheduler serialises downloads and a `tokio::sync::Semaphore(1)` in `AnalyticsState` enforces it at the client layer regardless. `_impStartFetch` returns a promise that never rejects (`{ ok, parts | error }`) because a download is started one iteration before it is awaited.
+- **Timeout subdivision:** the SOP warns full-day requests often time out. On a retryable error the window is halved (12h → 6h → …), sequentially, bounded by `IMP_MAX_SPLIT_DEPTH` and a one-hour floor — a window is only split while *both* halves would stay at or above an hour. Worst case is ~6 requests per day, not an exponential fan-out.
+- **`paginateData` is deliberately not sent.** The SOP requires confirming the pagination mechanism first, so instead the client fails loudly on anything paginated-looking rather than importing a partial day. Confirm the mechanism against the official spec before implementing it.
+- **Temp files** live in `app_cache_dir()/analytics-tmp` and are deleted the moment each part's import returns, in a `finally` so failure and cancellation clean up too. The dir is swept on app start and on modal open (crash recovery). `cleanup_analytics_temp` is path-confined to that directory.
+- **Credentials** live in `app_data_dir()/analytics-api.json` (`0600` on unix). The client secret never crosses the IPC bridge — `getAnalyticsConfig` returns `hasSecret` only, and saving with a blank secret keeps the stored one.
+- **Skipping is decided per hour, not per day** (`get_db_hour_coverage` → `_impWindowCovered`). Because a local-time range leaves a *partial* UTC day behind (e.g. only the 22:00–23:59 tail), a day-level "has rows?" check would silently skip that day's other 22 hours. A chunk is skipped only when every UTC hour it touches already holds data. The calendar shows this in three states: green outline = every hour imported, orange outline = partly imported (will be fetched again), no outline = nothing yet. Never regress this to a day-level check.
+- Skipped days stay in the queue marked `skipped` rather than being dropped, so the user can see what was left alone; they count toward overall progress.
+- Caveat worth knowing: an hour with genuinely zero interactions reads as "missing", so a quiet night can make a complete day look partial and be re-fetched. That errs toward re-downloading, which `INSERT OR IGNORE` makes harmless — the opposite error would lose data.
+
 ## Collections
 
 Lets users multi-select Articles/Dialogs on the Content tab and export them as `[{ trigger, content }]` JSON for CM.com HALO's knowledge tool.
@@ -327,9 +366,22 @@ Lets users multi-select Articles/Dialogs on the Content tab and export them as `
   entity list | pagination
 
 <div#settingsModal>
-  CM.com Context URL input
-  Other/HALO URL input
-  Open CM.com links: radio (popup / browser)
+  Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)
+  Conversations tab: Halo Studio URL, low recognition threshold, chat copy format,
+                     Analytics API (client ID / secret / customer key / project key /
+                     culture / environment / activeSessionOnly / Test connection)
+
+<div#convImportModal>
+  Source tabs (Analytics API / CSV file)
+  Setup:   From + To date fields (click to choose which end you're picking) and
+           time inputs | Now shortcut
+           always-visible two-month calendar — green outline = fully imported,
+           orange outline = partly imported
+           summary (N days · M fully imported · K to download, UTC request window)
+           "Skip days already imported in full" checkbox
+  Running: current operation | progress bar | "N of M days completed"
+           per-day list with status chips | collapsible Details log
+           Cancel import — or, when stopped, Retry/Resume from <date>
 
 <div#exportModal>
   List / Table / Grouped tabs | copy as links / table / plain text
@@ -388,6 +440,8 @@ Always use these terms in the UI:
 | `chat-copy-format`         | Chat copy format preference |
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }` |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
+
+Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer.
 
 Example `cm-base-url` value: `https://www.cm.com/en-gb/app/aicloud/dbd80c7c-e9b1-44d2-9762-fb5ad1664b7f/Efteling/EFTELING/nl/`
 
