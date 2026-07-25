@@ -1136,10 +1136,32 @@ CREATE VIRTUAL TABLE IF NOT EXISTS interactions_fts USING fts5(
 );
 "#;
 
-fn rebuild_session_summary(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(
+/// Per-connection temp table listing the sessions an import — and any purge that
+/// import triggered — actually touched. Populated during the CSV batches and by
+/// [`purge_old`], consumed by [`rebuild_session_summary_touched`].
+const TOUCHED_TABLE: &str = "temp.import_touched_sessions";
+
+/// (Re)create an empty touched-session table for a fresh import.
+fn reset_touched_sessions(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(&format!(
+        "DROP TABLE IF EXISTS {TOUCHED_TABLE};\
+         CREATE TEMP TABLE import_touched_sessions (session_uuid TEXT PRIMARY KEY);"
+    ))
+    .map_err(|e| format!("Touched-session table error: {e}"))
+}
+
+fn drop_touched_sessions(conn: &Connection) {
+    let _ = conn.execute_batch(&format!("DROP TABLE IF EXISTS {TOUCHED_TABLE};"));
+}
+
+/// The `SELECT` that derives one `session_summary` row per session.
+///
+/// Shared by the full rebuild and the scoped per-import rebuild so the two can
+/// never drift apart. `scope` is either empty (every session) or an extra
+/// `AND …` clause narrowing it to the sessions an import touched.
+fn session_summary_insert_sql(scope: &str) -> String {
+    format!(
         r#"
-DELETE FROM session_summary;
 INSERT INTO session_summary (
     session_uuid,
     first_ts,
@@ -1220,10 +1242,46 @@ SELECT
     CAST(strftime('%s', 'now') AS INTEGER) AS updated_at,
     MAX(s.log_id) AS last_log_id
 FROM interactions s
-WHERE s.session_uuid IS NOT NULL AND s.session_uuid != ''
+WHERE s.session_uuid IS NOT NULL AND s.session_uuid != '' {scope}
 GROUP BY s.session_uuid;
-"#,
+"#
     )
+}
+
+/// Recompute `session_summary` for every session in the database.
+///
+/// Used when opening a database and after bulk deletions that are not scoped to
+/// a known set of sessions. Cost is proportional to the whole database, so the
+/// import path uses [`rebuild_session_summary_touched`] instead.
+fn rebuild_session_summary(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch("DELETE FROM session_summary;")
+        .map_err(|e| format!("Session summary rebuild error: {e}"))?;
+    conn.execute_batch(&session_summary_insert_sql(""))
+        .map_err(|e| format!("Session summary rebuild error: {e}"))
+}
+
+/// Recompute `session_summary` for only the sessions in [`TOUCHED_TABLE`].
+///
+/// A session's summary is derived entirely from that session's own rows in
+/// `interactions`, so recomputing just the touched sessions is exact — every
+/// untouched summary was already correct. Unlike the full rebuild, the cost is
+/// proportional to the size of the import rather than to the size of the whole
+/// database, which is what keeps import time flat as the database grows.
+///
+/// Sessions whose rows were all purged are deleted here and produce no group in
+/// the re-insert, so they correctly drop out of the summary.
+fn rebuild_session_summary_touched(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        &format!(
+            "DELETE FROM session_summary \
+             WHERE session_uuid IN (SELECT session_uuid FROM {TOUCHED_TABLE})"
+        ),
+        [],
+    )
+    .map_err(|e| format!("Session summary rebuild error: {e}"))?;
+    conn.execute_batch(&session_summary_insert_sql(&format!(
+        "AND s.session_uuid IN (SELECT session_uuid FROM {TOUCHED_TABLE})"
+    )))
     .map_err(|e| format!("Session summary rebuild error: {e}"))
 }
 
@@ -1263,6 +1321,25 @@ fn cleanup_orphan_contexts(conn: &Connection) {
     let _ = conn.execute_batch(
         "DELETE FROM context_index \
          WHERE session_uuid NOT IN (SELECT DISTINCT session_uuid FROM interactions)",
+    );
+}
+
+/// Drop context rows whose session no longer has any interactions, limited to
+/// the sessions in [`TOUCHED_TABLE`].
+///
+/// Only deletions can orphan a context row, so a purge is the only thing in the
+/// import path that needs this — an import on its own strictly adds sessions and
+/// can never orphan anything.
+fn cleanup_orphan_contexts_touched(conn: &Connection) {
+    let _ = conn.execute(
+        &format!(
+            "DELETE FROM context_index \
+             WHERE session_uuid IN (SELECT session_uuid FROM {TOUCHED_TABLE}) \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM interactions i \
+                   WHERE i.session_uuid = context_index.session_uuid)"
+        ),
+        [],
     );
 }
 
@@ -1387,6 +1464,15 @@ fn is_iso_second_prefix(s: &str) -> bool {
         && (b[10] == b'T' || b[10] == b' ')
 }
 
+/// Delete interactions older than `max_days`.
+///
+/// Records every affected session in [`TOUCHED_TABLE`] rather than rebuilding
+/// `session_summary` itself, so one scoped rebuild in the caller covers both the
+/// import and the purge instead of running two full rebuilds back to back.
+///
+/// Callers must have created the touched-session table via
+/// [`reset_touched_sessions`] and must run [`rebuild_session_summary_touched`]
+/// afterwards when this returns a non-zero count.
 fn purge_old(conn: &Connection, max_days: u64) -> i64 {
     let cutoff = {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1453,6 +1539,16 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
             year, month, day, hrs, mins, s_secs
         )
     };
+    // Record the sessions about to lose rows *before* they are deleted, so the
+    // caller's scoped rebuild covers them.
+    let _ = conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO {TOUCHED_TABLE}(session_uuid) \
+             SELECT DISTINCT session_uuid FROM interactions \
+             WHERE timestamp_start < ?1 AND session_uuid != ''"
+        ),
+        params![cutoff_dt],
+    );
     // Remove stale FTS5 entries before deleting from interactions
     let _ = conn.execute(
         "DELETE FROM interactions_fts WHERE rowid IN \
@@ -1466,8 +1562,7 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
         )
         .unwrap_or(0) as i64;
     if deleted > 0 {
-        cleanup_orphan_contexts(conn);
-        let _ = rebuild_session_summary(conn);
+        cleanup_orphan_contexts_touched(conn);
     }
     deleted
 }
@@ -1662,10 +1757,28 @@ async fn import_interactions_csv(
     };
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-    let mut state = db.lock().map_err(|e| e.to_string())?;
-    let conn = state.conn.as_mut().ok_or("No database open. Set a database path first.")?;
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state
+            .conn
+            .as_mut()
+            .ok_or("No database open. Set a database path first.")?;
+        import_csv_into(conn, &file_path, max_age_days, delim)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-    let file = fs::File::open(&file_path).map_err(|e| format!("Cannot open CSV: {e}"))?;
+/// The whole import, against an open connection.
+///
+/// Split out of the command so tests can drive a real CSV into a real database
+/// without a Tauri `State`.
+fn import_csv_into(
+    conn: &mut Connection,
+    file_path: &str,
+    max_age_days: Option<i64>,
+    delim: u8,
+) -> Result<ImportResult, String> {
+    let file = fs::File::open(file_path).map_err(|e| format!("Cannot open CSV: {e}"))?;
     let buf = std::io::BufReader::with_capacity(4 * 1024 * 1024, file);
 
     let mut rdr = csv::ReaderBuilder::new()
@@ -1710,6 +1823,11 @@ async fn import_interactions_csv(
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
+
+    // Sessions this import (and any purge it triggers) touches, so the summary
+    // rebuild at the end costs the size of the import instead of the size of
+    // the whole database.
+    reset_touched_sessions(conn)?;
 
     let mut inserted: i64 = 0;
     let mut skipped: i64 = 0;
@@ -1769,6 +1887,12 @@ async fn import_interactions_csv(
             Ok(s) => s,
             Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
         };
+        let touched_sql =
+            format!("INSERT OR IGNORE INTO {TOUCHED_TABLE}(session_uuid) VALUES (?1)");
+        let mut touched_stmt = match tx.prepare_cached(&touched_sql) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
         for record in batch {
             let get_r = |idx: Option<usize>| -> &str {
                 idx.and_then(|i| record.get(i)).unwrap_or("")
@@ -1819,10 +1943,16 @@ async fn import_interactions_csv(
                         get_r(c_article_ids),
                         get_r(c_dialog_paths),
                     ]);
+                    // This session's summary is now stale — mark it for recompute.
+                    // Duplicates are deliberately not marked: an ignored row
+                    // changes nothing the summary is derived from.
+                    let session_id = get_r(c_session);
+                    if !session_id.is_empty() {
+                        let _ = touched_stmt.execute(params![session_id]);
+                    }
                     // Index context (name, value) pairs for fast context-filter lookups
                     let ctx_str = get_r(c_contexts);
                     if !ctx_str.is_empty() && ctx_str != "[]" && ctx_str != "null" {
-                        let session_id = get_r(c_session);
                         if let Ok(arr) = serde_json::from_str::<serde_json::Value>(ctx_str) {
                             if let Some(items) = arr.as_array() {
                                 for item in items {
@@ -1853,6 +1983,7 @@ async fn import_interactions_csv(
         drop(fts_stmt);
         drop(ctx_stmt);
         drop(backfill_stmt);
+        drop(touched_stmt);
         let _ = tx.commit();
     };
 
@@ -1889,10 +2020,14 @@ async fn import_interactions_csv(
             &mut inserted, &mut skipped, &mut errors);
     }
 
+    // purge_old adds the sessions it stripped to the same touched-session table
+    // and cleans up their contexts, so a single scoped rebuild below covers the
+    // import and the purge together. No orphan sweep is needed for the import
+    // itself: adding rows can never orphan a context row.
     let purged = purge_old(conn, max_age_days.unwrap_or(90).max(1) as u64);
+    let mut rebuild = Ok(());
     if inserted > 0 || purged > 0 {
-        cleanup_orphan_contexts(conn);
-        rebuild_session_summary(conn)?;
+        rebuild = rebuild_session_summary_touched(conn);
         // Merge FTS5 b-tree segments so MATCH queries read fewer pages, and
         // refresh planner statistics for the tables this import touched.
         let _ = conn.execute_batch(
@@ -1900,11 +2035,10 @@ async fn import_interactions_csv(
         );
         let _ = conn.execute_batch("PRAGMA optimize;");
     }
+    drop_touched_sessions(conn);
+    rebuild?;
 
     Ok(ImportResult { inserted, skipped, purged, errors })
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -4387,6 +4521,332 @@ mod tests {
         conn
     }
 
+    /// One interaction row, covering every column `session_summary` derives from.
+    struct Row<'a> {
+        log_id: i64,
+        session: &'a str,
+        ts: &'a str,
+        value: &'a str,
+        main_type: &'a str,
+        all_types: &'a str,
+        feedback: &'a str,
+        quality: f64,
+        recog_type: &'a str,
+        contexts: &'a str,
+    }
+
+    fn insert_row(conn: &Connection, r: Row) {
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             timestamp_end, culture, interaction_value, main_interaction_type, \
+             all_interaction_types, feedback_info, recognition_quality, recognition_type, \
+             contexts, imported_at) \
+             VALUES (?1,'u',?2,?3,?3,'nl',?4,?5,?6,?7,?8,?9,?10,0)",
+            params![
+                r.log_id, r.session, r.ts, r.value, r.main_type, r.all_types, r.feedback,
+                r.quality, r.recog_type, r.contexts
+            ],
+        )
+        .expect("insert interaction");
+    }
+
+    /// Every summary row as comparable text. `updated_at` is excluded — it is a
+    /// wall-clock stamp, not derived state.
+    fn summary_snapshot(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT session_uuid, first_ts, last_ts, interaction_count, culture, \
+                 first_user_message, contexts_snapshot, has_real_user_input, has_gen_ai, \
+                 has_neg_feedback, has_pos_feedback, min_positive_recognition_quality, \
+                 has_zero_recog, last_log_id FROM session_summary ORDER BY session_uuid",
+            )
+            .expect("prepare snapshot");
+        let rows = stmt
+            .query_map([], |row| {
+                let mut out = String::new();
+                for i in 0..14 {
+                    let v: rusqlite::types::Value = row.get(i)?;
+                    out.push_str(&format!("{v:?}|"));
+                }
+                Ok(out)
+            })
+            .expect("snapshot query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("snapshot rows");
+        rows
+    }
+
+    fn mark_touched(conn: &Connection, sessions: &[&str]) {
+        for s in sessions {
+            conn.execute(
+                &format!("INSERT OR IGNORE INTO {TOUCHED_TABLE}(session_uuid) VALUES (?1)"),
+                params![s],
+            )
+            .expect("mark touched");
+        }
+    }
+
+    /// A varied starting corpus: multiple sessions, each exercising a different
+    /// branch of the summary SELECT.
+    fn seed_corpus(conn: &Connection) {
+        insert_row(conn, Row { log_id: 1, session: "s1", ts: "2026-06-01T09:00:00", value: "hoe laat open", main_type: "Question", all_types: "Question", feedback: "", quality: 0.9, recog_type: "Faq", contexts: r#"[{"name":"park","value":"efteling"}]"# });
+        insert_row(conn, Row { log_id: 2, session: "s1", ts: "2026-06-01T09:01:00", value: "continue", main_type: "Event", all_types: "Event", feedback: r#"{"score": 1}"#, quality: 0.0, recog_type: "", contexts: "[]" });
+        insert_row(conn, Row { log_id: 3, session: "s2", ts: "2026-06-01T10:00:00", value: "#start#", main_type: "Event", all_types: "Event", feedback: "", quality: 0.0, recog_type: "Faq", contexts: "" });
+        insert_row(conn, Row { log_id: 4, session: "s2", ts: "2026-06-01T10:05:00", value: "parkeren", main_type: "GenerativeAI", all_types: "GenerativeAI", feedback: r#"{"score": -1}"#, quality: 0.4, recog_type: "GenerativeAI", contexts: r#"[{"name":"lang","value":"nl"}]"# });
+        insert_row(conn, Row { log_id: 5, session: "s3", ts: "2026-06-02T11:00:00", value: "kaartjes", main_type: "Question", all_types: "Question", feedback: "", quality: 0.55, recog_type: "Faq", contexts: r#"[{"name":"park","value":"efteling"}]"# });
+    }
+
+    /// The scoped rebuild is only safe if it is indistinguishable from the full
+    /// rebuild. This is the property the whole import speed-up rests on: adding
+    /// rows to some sessions must leave the summary exactly as a from-scratch
+    /// rebuild would, for touched and untouched sessions alike.
+    #[test]
+    fn scoped_summary_rebuild_matches_a_full_rebuild() {
+        let conn = test_conn();
+        seed_corpus(&conn);
+        rebuild_session_summary(&conn).expect("initial full rebuild");
+        let before = summary_snapshot(&conn);
+        assert_eq!(before.len(), 3);
+
+        reset_touched_sessions(&conn).expect("touched table");
+
+        // A later import: new rows for an existing session, plus a brand new one.
+        insert_row(&conn, Row { log_id: 6, session: "s1", ts: "2026-06-03T08:00:00", value: "en hotel?", main_type: "Question", all_types: "Question,GenerativeAI", feedback: r#"{"score": -1}"#, quality: 0.2, recog_type: "Faq", contexts: r#"[{"name":"stay","value":"hotel"}]"# });
+        insert_row(&conn, Row { log_id: 7, session: "s4", ts: "2026-06-03T08:30:00", value: "annuleren", main_type: "Question", all_types: "Question", feedback: "", quality: 0.0, recog_type: "Faq", contexts: "[]" });
+        mark_touched(&conn, &["s1", "s4"]);
+        rebuild_session_summary_touched(&conn).expect("scoped rebuild");
+        let scoped = summary_snapshot(&conn);
+
+        // The full rebuild is the oracle.
+        rebuild_session_summary(&conn).expect("full rebuild");
+        let full = summary_snapshot(&conn);
+
+        assert_eq!(scoped.len(), 4, "new session must appear");
+        assert_eq!(
+            scoped, full,
+            "scoped rebuild diverged from a full rebuild — import would corrupt session_summary"
+        );
+        // s2 and s3 were untouched and must be byte-identical to before.
+        assert!(before[1..].iter().all(|r| scoped.contains(r)));
+    }
+
+    /// End-to-end: run a real portal CSV through the real import and confirm the
+    /// summary it leaves behind is exactly what a full rebuild would produce.
+    ///
+    /// This is the one test that exercises the touched-session collection inside
+    /// the batch loop, rather than marking sessions by hand. Skips when the
+    /// gitignored sample export isn't present.
+    #[test]
+    fn a_real_import_leaves_the_same_summary_as_a_full_rebuild() {
+        let csv_path =
+            std::path::Path::new("../Efteling_EFTELING_nl_InteractionLog_2026-03-25-2.csv");
+        if !csv_path.exists() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("cai-import-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let db_path = dir.join("t.db");
+        let _ = fs::remove_file(&db_path);
+        let mut conn = Connection::open(&db_path).expect("open db");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+
+        // Retention has to be wide enough that the 2026 sample isn't purged.
+        let res = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|')
+            .expect("import succeeds");
+        assert!(res.inserted > 0, "sample export produced no rows");
+
+        let after_import = summary_snapshot(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        assert_eq!(
+            after_import,
+            summary_snapshot(&conn),
+            "a real import left session_summary different from a full rebuild"
+        );
+
+        // Re-importing the same file is a pure duplicate run: nothing inserted,
+        // and the summary must still be correct afterwards.
+        let again = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|')
+            .expect("re-import succeeds");
+        assert_eq!(again.inserted, 0, "re-import should insert nothing");
+        assert_eq!(
+            again.skipped,
+            res.inserted + res.skipped,
+            "every row should be skipped the second time"
+        );
+        assert_eq!(
+            summary_snapshot(&conn),
+            after_import,
+            "a duplicate re-import changed the summary"
+        );
+
+        // Third run with rows genuinely missing, so the batch loop actually
+        // writes to the touched-session table again. Each import drops and
+        // recreates that temp table, so this is also what proves the cached
+        // INSERT statement survives the recreate.
+        let cut: i64 = conn
+            .query_row("SELECT log_id FROM interactions ORDER BY log_id LIMIT 1", [], |r| r.get(0))
+            .expect("pick a row");
+        conn.execute("DELETE FROM interactions WHERE log_id <= ?1", params![cut])
+            .expect("delete a row");
+        conn.execute("DELETE FROM interactions_fts WHERE rowid <= ?1", params![cut])
+            .expect("delete fts row");
+        let refill = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|')
+            .expect("third import succeeds");
+        assert!(refill.inserted > 0, "deleted rows should come back");
+        let after_refill = summary_snapshot(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        assert_eq!(
+            after_refill,
+            summary_snapshot(&conn),
+            "summary diverged after re-inserting deleted rows"
+        );
+
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The same equivalence, against a real database when one is available.
+    ///
+    /// Synthetic corpora can't cover the shapes real interaction logs contain, so
+    /// point `CAI_TEST_DB` at a copy of a real conversations database to check
+    /// the scoped rebuild against a full one across every session in it. Skips
+    /// silently when the variable is unset, like the portal-CSV regression test.
+    #[test]
+    fn scoped_rebuild_matches_a_full_rebuild_on_a_real_database() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            return;
+        };
+        let conn = Connection::open(&path).expect("open test database");
+        rebuild_session_summary(&conn).expect("baseline full rebuild");
+
+        // Treat the most recent UTC day as "the day just imported".
+        let day: String = conn
+            .query_row(
+                "SELECT MAX(DATE(timestamp_start)) FROM interactions",
+                [],
+                |r| r.get(0),
+            )
+            .expect("latest day");
+        reset_touched_sessions(&conn).expect("touched table");
+        let touched = conn
+            .execute(
+                &format!(
+                    "INSERT OR IGNORE INTO {TOUCHED_TABLE}(session_uuid) \
+                     SELECT DISTINCT session_uuid FROM interactions \
+                     WHERE DATE(timestamp_start) = ?1 AND session_uuid != ''"
+                ),
+                params![day],
+            )
+            .expect("mark touched");
+        assert!(touched > 0, "no sessions on {day}");
+
+        rebuild_session_summary_touched(&conn).expect("scoped rebuild");
+        let scoped = summary_snapshot(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        let full = summary_snapshot(&conn);
+        assert_eq!(
+            scoped.len(),
+            full.len(),
+            "scoped rebuild changed the session count"
+        );
+        assert_eq!(
+            scoped, full,
+            "scoped rebuild diverged from a full rebuild on real data ({touched} sessions touched on {day})"
+        );
+    }
+
+    /// `ensure_session_summary` treats a mismatch in session count or max log_id
+    /// as corruption and triggers a full rebuild on open. A scoped rebuild must
+    /// therefore leave both invariants intact, or every launch would rebuild.
+    #[test]
+    fn scoped_rebuild_keeps_the_open_time_consistency_check_satisfied() {
+        let conn = test_conn();
+        seed_corpus(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        reset_touched_sessions(&conn).expect("touched table");
+
+        insert_row(&conn, Row { log_id: 99, session: "s5", ts: "2026-06-04T09:00:00", value: "nieuw", main_type: "Question", all_types: "Question", feedback: "", quality: 0.7, recog_type: "Faq", contexts: "[]" });
+        mark_touched(&conn, &["s5"]);
+        rebuild_session_summary_touched(&conn).expect("scoped rebuild");
+
+        let sessions: i64 = conn.query_row("SELECT COUNT(DISTINCT session_uuid) FROM interactions WHERE session_uuid != ''", [], |r| r.get(0)).unwrap();
+        let summaries: i64 = conn.query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0)).unwrap();
+        let max_log: i64 = conn.query_row("SELECT MAX(log_id) FROM interactions", [], |r| r.get(0)).unwrap();
+        let max_summary_log: i64 = conn.query_row("SELECT MAX(last_log_id) FROM session_summary", [], |r| r.get(0)).unwrap();
+        assert_eq!(sessions, summaries);
+        assert_eq!(max_log, max_summary_log);
+    }
+
+    /// A purge strips a session's rows entirely; its summary must disappear
+    /// rather than linger as a phantom session in search results.
+    #[test]
+    fn purge_drops_fully_removed_sessions_from_the_summary() {
+        let conn = test_conn();
+        seed_corpus(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        reset_touched_sessions(&conn).expect("touched table");
+
+        // Everything before 2026-06-02 goes: s1 and s2 vanish, s3 survives.
+        mark_touched(&conn, &["s1", "s2"]);
+        conn.execute("DELETE FROM interactions WHERE timestamp_start < '2026-06-02'", []).unwrap();
+        rebuild_session_summary_touched(&conn).expect("scoped rebuild");
+
+        let left: Vec<String> = conn
+            .prepare("SELECT session_uuid FROM session_summary ORDER BY 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["s3".to_string()]);
+        // And it still matches a full rebuild.
+        let scoped = summary_snapshot(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        assert_eq!(scoped, summary_snapshot(&conn));
+    }
+
+    /// Dropping the orphan-context sweep from the import path is only safe if an
+    /// import genuinely cannot orphan a context row. It can't: it only ever adds
+    /// sessions. A purge can, and the scoped sweep must catch exactly those.
+    #[test]
+    fn only_deletions_orphan_contexts_and_the_scoped_sweep_catches_them() {
+        let conn = test_conn();
+        seed_corpus(&conn);
+        let add_ctx = |session: &str| {
+            conn.execute(
+                "INSERT OR IGNORE INTO context_index(name, value, session_uuid) VALUES ('park','efteling',?1)",
+                params![session],
+            )
+            .unwrap();
+        };
+        for s in ["s1", "s2", "s3"] {
+            add_ctx(s);
+        }
+        reset_touched_sessions(&conn).expect("touched table");
+
+        // An import: new session + new context. Nothing may be swept away.
+        insert_row(&conn, Row { log_id: 8, session: "s9", ts: "2026-06-05T09:00:00", value: "x", main_type: "Question", all_types: "Question", feedback: "", quality: 0.5, recog_type: "Faq", contexts: "[]" });
+        add_ctx("s9");
+        mark_touched(&conn, &["s9"]);
+        cleanup_orphan_contexts_touched(&conn);
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM context_index", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 4, "an import must never orphan a context row");
+
+        // A purge: s1's rows go, so its context must go with them — and only its.
+        mark_touched(&conn, &["s1"]);
+        conn.execute("DELETE FROM interactions WHERE session_uuid = 's1'", []).unwrap();
+        cleanup_orphan_contexts_touched(&conn);
+        let left: Vec<String> = conn
+            .prepare("SELECT session_uuid FROM context_index ORDER BY 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["s2".to_string(), "s3".to_string(), "s9".to_string()]);
+    }
+
     /// Hour coverage is what tells a partially imported day apart from a
     /// complete one, so the importer doesn't skip the rest of a day just
     /// because a local-time range already pulled in its tail.
@@ -4742,3 +5202,4 @@ mod tests {
         assert!(compact.get("recognitionDetails").is_none());
     }
 }
+

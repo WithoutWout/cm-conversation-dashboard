@@ -312,6 +312,18 @@ Responsibilities are split deliberately — keep them separate when extending th
 - Skipped days stay in the queue marked `skipped` rather than being dropped, so the user can see what was left alone; they count toward overall progress.
 - Caveat worth knowing: an hour with genuinely zero interactions reads as "missing", so a quiet night can make a complete day look partial and be re-fetched. That errs toward re-downloading, which `INSERT OR IGNORE` makes harmless — the opposite error would lose data.
 
+### Why import stays fast as the database grows
+
+Import cost must be proportional to the size of the import, never to the size of the database. Everything below exists to keep it that way — measured at ~7× on a 107k-interaction / 11.9k-session database, and the gap widens as the DB grows.
+
+- **`session_summary` is rebuilt incrementally.** `import_csv_into` records the `session_uuid` of every row it actually inserts into `TOUCHED_TABLE` (a per-connection temp table), then calls `rebuild_session_summary_touched`, which recomputes only those sessions. This is exact, not an approximation: a session's summary is derived entirely from that session's own rows, so an untouched summary was already correct. **Do not** call the full `rebuild_session_summary` from the import path — it re-aggregates every session in the database and its two correlated subqueries dominate everything else (~10.5 s vs ~1.6 s on the DB above, and it grows without bound).
+- `rebuild_session_summary` (full) is still correct and still used where the touched set isn't known: on database open via `ensure_session_summary`, and after `delete_imported_dates`.
+- Both share `session_summary_insert_sql(scope)` so the scoped and full variants can never drift apart. `scoped_summary_rebuild_matches_a_full_rebuild` and `a_real_import_leaves_the_same_summary_as_a_full_rebuild` assert the equivalence — the second drives a real portal CSV through the real import. Point `CAI_TEST_DB` at a copy of a real database to run the same check across every session in it.
+- A scoped rebuild must leave `ensure_session_summary`'s two invariants intact (session count, and `MAX(last_log_id)` matching `MAX(log_id)`), or the app would do a full rebuild on every launch.
+- **The import path does not sweep orphaned contexts.** An import only ever adds sessions, so it cannot orphan a `context_index` row. Only deletion can — `purge_old` handles it via `cleanup_orphan_contexts_touched`, scoped to the sessions it stripped.
+- **`purge_old` does not rebuild the summary itself.** It adds the sessions it purged to the same `TOUCHED_TABLE` and lets the caller do one scoped rebuild covering both the import and the purge. It previously ran a full rebuild *and* the caller ran another.
+- **The FTS `'optimize'` call after an import is deliberately kept.** It costs ~1.1 s per import and grows, but measurement showed dropping it made the real `get_sessions` search query slower by an amount smaller than run-to-run noise, while it was only ~8% of the import tail. Not worth destabilising a search path that had real performance problems. If it ever grows to dominate, move it to an occasional/manual "compact database" action rather than deleting it — `purge_old` deletes FTS rows, and those tombstones only go away on merge.
+
 ## Collections
 
 Lets users multi-select Articles/Dialogs on the Content tab and export them as `[{ trigger, content }]` JSON for CM.com HALO's knowledge tool.
