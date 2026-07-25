@@ -62,23 +62,19 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.10.0
+            ## What's new in v0.10.1
 
-            ### Automated Analytics API import
-            Interaction logs no longer have to be downloaded by hand, one day at a time, from the CM.com portal.
+            ### Export for AI, made for LLMs to actually read
+            - The exported file now opens with a single header line — the search filter and a short field legend — instead of repeating that on every conversation. Same information, far fewer tokens for a model to read.
+            - Every conversation now carries an explicit conversation number and the header states the total, so it's obvious if a file got cut short.
+            - Timestamps are unambiguously UTC, and fields are named for what they actually contain instead of borrowed chat-app terms.
+            - A search that would produce more data than a model can realistically read now warns you before writing the file, with a rough token estimate.
+            - Exporting is noticeably faster, and the save dialog now opens instantly instead of waiting on the search to finish first.
 
-            - **Import → Analytics API** — pick a date/time range (with a **Now** shortcut and a calendar that marks which days are already in your database) and the app downloads and imports every day in the range itself.
-            - **Respects the API's limits automatically** — requests never exceed 24 hours, only one download is ever in flight, and a day that times out is transparently split into smaller windows and retried.
-            - **Efficient pipeline** — the next day downloads while the current one imports, so waiting time is minimised.
-            - **Safe by construction** — duplicate detection reuses the app's existing import logic, so re-running an import (or retrying after a failure) never creates duplicate data. A day that was only partly imported is detected per hour and completed, not skipped.
-            - **Clear progress and control** — see exactly what's downloading, what's importing, and what's done; cancel at any point and keep everything imported so far; retry from the day that failed.
-            - **Credentials live in Settings** — add your Analytics API client ID and secret once under Settings → Conversations.
-            - The manual CSV import is still there, right next to it, for when you'd rather use a downloaded file.
-
-            ### Content selection, redesigned
-            - The Collections select bar no longer takes up space when you're not using it — turn it on with a single icon next to the search options, and a compact bar appears only while you're selecting.
-            - Selecting is now as simple as clicking a card — no more hunting for a small checkbox.
-            - **Hover preview** — while selecting, hover an Article or Dialog to see exactly what it would contribute to your Collection (its trigger phrases and response text) before you select it, including a clear note when an item would add nothing at all.
+            ### Manage Database, rebuilt around the calendar
+            - Cleaning up old or unwanted interaction data now uses the same calendar you already know from importing — click a start day and an end day to select a range, instead of ticking boxes one by one.
+            - Quick actions cover the common cleanup jobs directly: everything older than your retention setting, everything stored, or jump straight to the newest data.
+            - Before anything is deleted, you get an exact readout — how many interactions, how many days, and which ones — plus a confirmation step.
 
             ---
 
