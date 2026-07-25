@@ -302,6 +302,10 @@ struct ConversationAiExportResult {
     session_count: i64,
     feedback_count: i64,
     interaction_count: i64,
+    bytes: i64,
+    /// Rough, from the real byte count — enough to tell whether the file fits a
+    /// context window, not a substitute for a tokenizer.
+    estimated_tokens: i64,
 }
 
 struct WatchState {
@@ -2869,11 +2873,25 @@ fn strip_html_text(input: &str) -> String {
             _ => {}
         }
     }
+    // `__` is a template-separator artifact in CAI answer text. A single `_` is
+    // left alone — it is usually part of a real word or identifier.
     out.replace("__", " ")
-        .replace("_", " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The DB stores naive UTC ("2026-03-25T09:30:22"). Exports mark it explicitly so
+/// a reader — a person or a model — cannot mistake it for local time.
+fn utc_iso(ts: &str) -> serde_json::Value {
+    let ts = ts.trim();
+    if ts.is_empty() {
+        serde_json::Value::Null
+    } else if ts.ends_with('Z') {
+        serde_json::Value::String(ts.to_string())
+    } else {
+        serde_json::Value::String(format!("{ts}Z"))
+    }
 }
 
 fn compact_entity_matches(recognition_details: &serde_json::Value) -> serde_json::Value {
@@ -3102,8 +3120,10 @@ fn compact_turn(row: &serde_json::Value, is_feedback_target: bool) -> serde_json
     );
     insert_if_useful(
         &mut map,
-        "role",
-        row.get("role").cloned().unwrap_or(serde_json::Value::Null),
+        "turn_kind",
+        row.get("turnKind")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
     );
     insert_if_useful(
         &mut map,
@@ -3138,10 +3158,14 @@ fn compact_turn(row: &serde_json::Value, is_feedback_target: bool) -> serde_json
     );
     insert_if_useful(&mut map, "triggered_content", triggered_content);
     insert_if_useful(&mut map, "entity_matches", entity_matches);
-    map.insert(
-        "is_feedback_target".to_string(),
-        serde_json::Value::Bool(is_feedback_target),
-    );
+    // Only ever emitted as `true`. Writing `false` on every other turn cost a lot
+    // of repeated tokens to say nothing, and `feedback_targets` already lists them.
+    if is_feedback_target {
+        map.insert(
+            "is_feedback_target".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
     serde_json::Value::Object(map)
 }
 
@@ -3238,17 +3262,94 @@ fn build_feedback_targets(rows: &[serde_json::Value]) -> Vec<serde_json::Value> 
     targets
 }
 
-fn role_for_interaction(interaction_type: &str, user_text: &str, bot_output: &str) -> &'static str {
+/// Deliberately *not* called `role` with `user`/`assistant` values: a CAI row
+/// usually holds a question **and** its answer, so it is not a chat message. The
+/// old naming looked like the chat convention while mostly meaning "both".
+fn turn_kind_for_interaction(
+    interaction_type: &str,
+    user_text: &str,
+    bot_output: &str,
+) -> &'static str {
     if interaction_type == "Feedback" {
         "feedback"
     } else if !user_text.trim().is_empty() && bot_output.trim().is_empty() {
-        "user"
+        "user_only"
     } else if user_text.trim().is_empty() && !bot_output.trim().is_empty() {
-        "assistant"
+        "bot_only"
     } else if !user_text.trim().is_empty() || !bot_output.trim().is_empty() {
-        "turn"
+        "user_and_bot"
     } else {
         "system"
+    }
+}
+
+/// Turns free text into a filename-safe slug: "Opening hours?" → "opening-hours".
+/// `max_len` is a byte cap, applied only after a whole char has been pushed, so
+/// the result is never cut mid-character.
+fn filename_slug(input: &str, max_len: usize) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_alphanumeric() {
+            out.extend(ch.to_lowercase());
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+        if out.len() >= max_len {
+            break;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Bytes per token, the usual rough ratio for prose. Only used to tell the user
+/// whether a file will fit in a context window.
+const AI_EXPORT_BYTES_PER_TOKEN: i64 = 4;
+/// Crude per-turn size used *before* the export runs, when only the session and
+/// interaction counts are known. The post-export figure uses real bytes.
+const AI_EXPORT_EST_BYTES_PER_TURN: i64 = 450;
+/// Above this the export is warned about — larger than most context windows.
+const AI_EXPORT_LARGE_TOKENS: i64 = 200_000;
+
+/// A `record_type: "export_header"` first line. Everything that is identical for
+/// the whole export lives here instead of being repeated on every session line,
+/// and the legend documents the fields a reader would otherwise have to guess at.
+fn ai_export_header(
+    exported_at: &str,
+    search_context: &serde_json::Value,
+    session_count: usize,
+) -> serde_json::Value {
+    serde_json::json!({
+        "record_type": "export_header",
+        "schema_version": 4,
+        "exported_at": exported_at,
+        "session_count": session_count,
+        "search_context": search_context,
+        "legend": {
+            "format": "JSONL. This header is line 1; each following line is one conversation, as record_type 'session' with a 0-based session_index. Conversations are ordered newest first; turns within a conversation are oldest first.",
+            "completeness": "session_count is how many conversation lines to expect. Fewer means the file was truncated.",
+            "timestamps": "UTC, ISO-8601 with a trailing Z.",
+            "turn_kind": "user_and_bot = one row holding a question and the answer to it (the common case, because that is how the source logs one exchange); user_only / bot_only = only one side present; feedback = a thumbs up/down row; system = neither.",
+            "type": "The source system's own interaction type, e.g. 'QA' or 'Feedback'.",
+            "recognition_quality": "How confident the bot was that it matched the user's question, 0-100. Compare against search_context.lowRecogThreshold.",
+            "recognition_type": "How the answer was found, e.g. 'Entity Recognition'. Absent when nothing matched — that is a failed answer.",
+            "triggered_content": "Which published content produced the answer: articles[].id, dialogs[] (dialog and node; status 'End' means the conversation finished there), events[].",
+            "entity_matches": "Entities the recognizer found in the user's text, with the text that matched.",
+            "feedback_targets": "Each thumbs up/down already joined to the answer it rated, so this join does not need redoing. target_resolution says how certain that join is: 'originatingInteractionId' = the log stated it; 'previousBotOutputFallback' = inferred from the preceding answer, so treat it as probable rather than certain.",
+            "is_feedback_target": "Present as true only on turns that received feedback; absent on all others.",
+            "conventions": "Empty fields are omitted rather than sent as null, so a missing key means no value. Answer HTML has been stripped to plain text."
+        },
+    })
+}
+
+/// Save-dialog default name: the search term, so exports are identifiable without
+/// opening them. Depends on nothing but the args, which is why the save dialog can
+/// open before the result set is queried.
+fn suggested_ai_export_name(query: &str) -> String {
+    let term = filename_slug(query, 60);
+    if term.is_empty() {
+        "conversation-analysis-export.jsonl".to_string()
+    } else {
+        format!("{term}.jsonl")
     }
 }
 
@@ -3261,33 +3362,54 @@ async fn export_conversations_for_ai(
     use tauri_plugin_dialog::DialogExt;
     use tokio::sync::oneshot;
 
+    // Identical for every record, so build it once instead of per session.
+    let mut search_context = serde_json::json!({
+        "filter": args.filter.clone(),
+        "query": args.query.clone(),
+        "queryRegex": args.query_regex.unwrap_or(false),
+        "queryScope": args.query_scope.clone(),
+        "queryIds": args.query_ids.unwrap_or(false),
+        "queryIdsOnly": args.query_ids_only.unwrap_or(false),
+        "queryIdType": args.query_id_type.clone(),
+        "dateFrom": args.date_from.clone(),
+        "dateTo": args.date_to.clone(),
+        "contextFilters": args.context_filters.clone(),
+        "lowRecogThreshold": args.low_recog_threshold.unwrap_or(60).clamp(1, 99),
+    });
+    let query_text = args.query.clone().unwrap_or_default();
+
+    let canceled = || ConversationAiExportResult {
+        ok: false,
+        canceled: true,
+        jsonl_path: None,
+        session_count: 0,
+        feedback_count: 0,
+        interaction_count: 0,
+        bytes: 0,
+        estimated_tokens: 0,
+    };
+
+    // Ask where to save first. The suggested name needs only the search term, so
+    // the dialog opens immediately rather than after querying the whole result set
+    // — and cancelling here costs no query at all.
     let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
     app.dialog()
         .file()
         .add_filter("JSONL", &["jsonl"])
-        .set_file_name("conversation-analysis-export.jsonl")
+        .set_file_name(suggested_ai_export_name(&query_text))
         .save_file(move |path| {
             let p = path.and_then(|fp| fp.into_path().ok());
             let _ = tx.send(p);
         });
-
     let Some(mut jsonl_path) = rx.await.ok().flatten() else {
-        return Ok(ConversationAiExportResult {
-            ok: false,
-            canceled: true,
-            jsonl_path: None,
-            session_count: 0,
-            feedback_count: 0,
-            interaction_count: 0,
-        });
+        return Ok(canceled());
     };
     if jsonl_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
         jsonl_path.set_extension("jsonl");
     }
-    let jsonl_path_for_work = jsonl_path.clone();
+
     let db = db_state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let exported_at = now_iso();
+    let (sessions, search_mode, planned_turns) = tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
         let filter_query = build_session_filter_query(conn, &args)?;
@@ -3345,11 +3467,108 @@ ORDER BY p.first_ts DESC"#,
             sessions
         };
 
-        let mut out = fs::File::create(&jsonl_path_for_work)
-            .map_err(|e| format!("Cannot create export file: {e}"))?;
-        let mut interaction_total = 0i64;
-        let mut feedback_total = 0i64;
+        let planned_turns = sessions
+            .iter()
+            .filter_map(|s| s.get("interactionCount").and_then(|v| v.as_i64()))
+            .sum::<i64>();
+        Ok::<_, String>((sessions, filter_query.search_mode.clone(), planned_turns))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
+    // A search can match far more than any model can read. Say so before the write,
+    // which is the part that actually costs time.
+    let planned_tokens = (planned_turns * AI_EXPORT_EST_BYTES_PER_TURN) / AI_EXPORT_BYTES_PER_TOKEN;
+    if planned_tokens > AI_EXPORT_LARGE_TOKENS {
+        let (ask_tx, ask_rx) = oneshot::channel::<bool>();
+        app.dialog()
+            .message(format!(
+                "This export covers {} conversations and about {} interactions — very roughly {}k tokens.\n\nThat is larger than most model context windows. Narrowing the search first, or analysing the file with a script instead of pasting it, will work better.",
+                sessions.len(),
+                planned_turns,
+                planned_tokens / 1000,
+            ))
+            .title("Large export")
+            .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancelCustom(
+                "Export anyway".to_string(),
+                "Cancel".to_string(),
+            ))
+            .show(move |confirmed| {
+                let _ = ask_tx.send(confirmed);
+            });
+        if !ask_rx.await.unwrap_or(false) {
+            return Ok(canceled());
+        }
+    }
+
+    if let Some(map) = search_context.as_object_mut() {
+        map.insert(
+            "resolvedSearchMode".to_string(),
+            serde_json::Value::String(search_mode),
+        );
+    }
+    let jsonl_path_for_work = jsonl_path.clone();
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        // Buffered on purpose. `serde_json::to_writer` emits many tiny writes per
+        // record, and straight onto an unbuffered File that is one syscall each —
+        // measured at 8.5s vs 2.4s for 5k sessions, i.e. ~73% of the export was
+        // syscall overhead. The remaining time is the query and JSON build.
+        let file = fs::File::create(&jsonl_path_for_work)
+            .map_err(|e| format!("Cannot create export file: {e}"))?;
+        let mut out = std::io::BufWriter::new(file);
+        let counts = write_ai_export(conn, &sessions, &search_context, &mut out)?;
+
+        out.flush()
+            .map_err(|e| format!("Cannot finish export file: {e}"))?;
+        let bytes = out
+            .get_ref()
+            .metadata()
+            .map(|m| m.len() as i64)
+            .unwrap_or(0);
+
+        Ok(ConversationAiExportResult {
+            ok: true,
+            canceled: false,
+            jsonl_path: Some(jsonl_path_for_work.to_string_lossy().into_owned()),
+            session_count: sessions.len() as i64,
+            feedback_count: counts.feedback_count,
+            interaction_count: counts.interaction_count,
+            bytes,
+            estimated_tokens: bytes / AI_EXPORT_BYTES_PER_TOKEN,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+struct AiExportCounts {
+    interaction_count: i64,
+    feedback_count: i64,
+}
+
+/// Writes the JSONL body: one header line, then one line per session. Split out
+/// from the command so the on-disk format is testable without a save dialog.
+fn write_ai_export(
+    conn: &Connection,
+    sessions: &[serde_json::Value],
+    search_context: &serde_json::Value,
+    out: &mut impl Write,
+) -> Result<AiExportCounts, String> {
+    let exported_at = now_iso();
+    let mut interaction_total = 0i64;
+    let mut feedback_total = 0i64;
+
+    // Line 1 carries everything that is constant for the export, so the
+    // session lines below hold only what actually varies.
+    let header = ai_export_header(&exported_at, search_context, sessions.len());
+    serde_json::to_writer(&mut *out, &header)
+        .map_err(|e| format!("Cannot write export header: {e}"))?;
+    writeln!(out).map_err(|e| format!("Cannot write export file: {e}"))?;
+
+    {
         // Prepared once; re-run per session instead of re-parsing the SQL.
         let mut inter_stmt = conn
             .prepare_cached(
@@ -3363,7 +3582,7 @@ ORDER BY p.first_ts DESC"#,
             ORDER BY log_id ASC"#,
             )
             .map_err(|e| format!("Prepare interactions export error: {e}"))?;
-        for session in &sessions {
+        for (session_index, session) in sessions.iter().enumerate() {
             let session_uuid = session
                 .get("sessionUuid")
                 .and_then(|v| v.as_str())
@@ -3378,7 +3597,7 @@ ORDER BY p.first_ts DESC"#,
                         "logId": row.get::<_, i64>(0).unwrap_or(0),
                         "interactionUuid": row.get::<_, String>(1).unwrap_or_default(),
                         "timestampStart": row.get::<_, String>(2).unwrap_or_default(),
-                        "role": role_for_interaction(&interaction_type, &user_text, &bot_output),
+                        "turnKind": turn_kind_for_interaction(&interaction_type, &user_text, &bot_output),
                         "interactionType": interaction_type,
                         "userText": user_text,
                         "botOutput": bot_output,
@@ -3454,49 +3673,31 @@ ORDER BY p.first_ts DESC"#,
                 .collect::<Vec<_>>();
 
             let record = serde_json::json!({
-                "schema_version": 3,
-                "exported_at": exported_at.clone(),
-                "search_context": {
-                    "filter": args.filter.clone(),
-                    "query": args.query.clone(),
-                    "queryRegex": args.query_regex.unwrap_or(false),
-                    "queryScope": args.query_scope.clone(),
-                    "queryIds": args.query_ids.unwrap_or(false),
-                    "queryIdsOnly": args.query_ids_only.unwrap_or(false),
-                    "queryIdType": args.query_id_type.clone(),
-                    "dateFrom": args.date_from.clone(),
-                    "dateTo": args.date_to.clone(),
-                    "contextFilters": args.context_filters.clone(),
-                    "lowRecogThreshold": args.low_recog_threshold.unwrap_or(60).clamp(1, 99),
-                    "resolvedSearchMode": filter_query.search_mode.clone(),
-                },
+                "record_type": "session",
+                "session_index": session_index,
                 "session": {
                     "session_uuid": session.get("sessionUuid").cloned().unwrap_or(serde_json::Value::Null),
-                    "first_ts": session.get("firstTs").cloned().unwrap_or(serde_json::Value::Null),
-                    "last_ts": session.get("lastTs").cloned().unwrap_or(serde_json::Value::Null),
+                    "first_ts": utc_iso(session.get("firstTs").and_then(|v| v.as_str()).unwrap_or("")),
+                    "last_ts": utc_iso(session.get("lastTs").and_then(|v| v.as_str()).unwrap_or("")),
                     "culture": session.get("culture").cloned().unwrap_or(serde_json::Value::Null),
                     "feedback_count": feedback_count,
                 },
                 "feedback_targets": compact_feedback_targets,
                 "chat_trace": chat_trace(),
             });
+            // `session_index: 0` must survive pruning — it is how a reader checks
+            // nothing is missing against the header's session_count.
             let record = prune_empty_json(record).unwrap_or(serde_json::Value::Null);
-            serde_json::to_writer(&mut out, &record)
+            serde_json::to_writer(&mut *out, &record)
                 .map_err(|e| format!("Cannot write export JSON: {e}"))?;
-            writeln!(&mut out).map_err(|e| format!("Cannot write export file: {e}"))?;
+            writeln!(out).map_err(|e| format!("Cannot write export file: {e}"))?;
         }
+    }
 
-        Ok(ConversationAiExportResult {
-            ok: true,
-            canceled: false,
-            jsonl_path: Some(jsonl_path_for_work.to_string_lossy().into_owned()),
-            session_count: sessions.len() as i64,
-            feedback_count: feedback_total,
-            interaction_count: interaction_total,
-        })
+    Ok(AiExportCounts {
+        interaction_count: interaction_total,
+        feedback_count: feedback_total,
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -5149,10 +5350,219 @@ mod tests {
     }
 
     #[test]
+    fn export_name_is_the_search_term() {
+        assert_eq!(
+            suggested_ai_export_name("openingstijden"),
+            "openingstijden.jsonl"
+        );
+        assert_eq!(
+            suggested_ai_export_name("Waar is de ingang?"),
+            "waar-is-de-ingang.jsonl"
+        );
+        // No search term → the static default.
+        assert_eq!(
+            suggested_ai_export_name(""),
+            "conversation-analysis-export.jsonl"
+        );
+        // A term of nothing but punctuation slugs to empty, so it falls back too.
+        assert_eq!(
+            suggested_ai_export_name("\"???\""),
+            "conversation-analysis-export.jsonl"
+        );
+    }
+
+    /// The whole point of the format work: assert the bytes that actually land on
+    /// disk, not just the helpers that build them.
+    #[test]
+    fn exported_jsonl_puts_constants_in_a_header_and_never_repeats_them() {
+        let conn = test_conn();
+        let insert = |log_id: i64, session: &str, ts: &str, value: &str, output: &str,
+                      main_type: &str, feedback: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, timestamp_end, culture, interaction_value, output_text, \
+                 main_interaction_type, all_interaction_types, feedback_info, \
+                 recognition_quality, recognition_type, contexts, imported_at) \
+                 VALUES (?1,?2,?3,?4,?4,'nl',?5,?6,?7,?7,?8,88.0,'Entity Recognition','',0)",
+                params![
+                    log_id,
+                    format!("uuid-{log_id}"),
+                    session,
+                    ts,
+                    value,
+                    output,
+                    main_type,
+                    feedback
+                ],
+            )
+            .expect("insert interaction");
+        };
+        insert(1, "s-a", "2026-03-25T09:30:22", "Openingstijden?", "Open van 10:00.", "QA", "");
+        insert(
+            2,
+            "s-a",
+            "2026-03-25T09:31:00",
+            "",
+            "",
+            "Feedback",
+            r#"{"score":-1,"comment":"onduidelijk","originatingInteractionId":"uuid-1"}"#,
+        );
+        insert(3, "s-b", "2026-03-26T11:00:00", "Waar is de ingang", "Bij de hoofdpoort.", "QA", "");
+
+        let sessions = vec![
+            serde_json::json!({
+                "sessionUuid": "s-b", "firstTs": "2026-03-26T11:00:00",
+                "lastTs": "2026-03-26T11:00:00", "interactionCount": 1,
+                "culture": "nl", "firstUserMessage": "Waar is de ingang",
+            }),
+            serde_json::json!({
+                "sessionUuid": "s-a", "firstTs": "2026-03-25T09:30:22",
+                "lastTs": "2026-03-25T09:31:00", "interactionCount": 2,
+                "culture": "nl", "firstUserMessage": "Openingstijden?",
+            }),
+        ];
+        let search_context = serde_json::json!({ "query": "ingang", "lowRecogThreshold": 60 });
+
+        let mut buf: Vec<u8> = Vec::new();
+        let counts =
+            write_ai_export(&conn, &sessions, &search_context, &mut buf).expect("write export");
+        assert_eq!(counts.interaction_count, 3);
+        assert_eq!(counts.feedback_count, 1);
+
+        let text = String::from_utf8(buf).expect("utf8");
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("each line is valid JSON"))
+            .collect();
+        assert_eq!(lines.len(), 3, "one header plus one line per session");
+
+        assert_eq!(lines[0]["record_type"], "export_header");
+        assert_eq!(lines[0]["session_count"], 2);
+        assert_eq!(lines[0]["search_context"]["query"], "ingang");
+
+        for (i, line) in lines[1..].iter().enumerate() {
+            assert_eq!(line["record_type"], "session");
+            assert_eq!(line["session_index"], i, "index must be contiguous from 0");
+            // The whole reason the header exists.
+            for constant in ["schema_version", "exported_at", "search_context", "legend"] {
+                assert!(
+                    line.get(constant).is_none(),
+                    "session line {i} still repeats {constant}"
+                );
+            }
+            for key in ["first_ts", "last_ts"] {
+                assert!(
+                    line["session"][key].as_str().is_some_and(|t| t.ends_with('Z')),
+                    "session {i} {key} is not marked UTC"
+                );
+            }
+            for turn in line["chat_trace"].as_array().expect("chat_trace") {
+                assert_ne!(
+                    turn["is_feedback_target"], false,
+                    "false is never written, only omitted"
+                );
+                assert!(turn["turn_kind"].is_string() || turn.get("turn_kind").is_none());
+                assert!(turn.get("role").is_none(), "role was renamed to turn_kind");
+            }
+        }
+
+        // Session s-a: the negative feedback is joined to the answer it rated.
+        let s_a = &lines[2];
+        assert_eq!(s_a["session"]["session_uuid"], "s-a");
+        assert_eq!(s_a["session"]["first_ts"], "2026-03-25T09:30:22Z");
+        let target = &s_a["feedback_targets"][0];
+        assert_eq!(target["feedback"]["score"], -1);
+        assert_eq!(target["feedback"]["comment"], "onduidelijk");
+        assert_eq!(target["target"]["answer_text"], "Open van 10:00.");
+        // How certain the feedback→answer join is, recorded alongside the feedback.
+        assert_eq!(
+            target["feedback"]["target_resolution"],
+            "originatingInteractionId"
+        );
+        assert_eq!(s_a["chat_trace"][0]["is_feedback_target"], true);
+        assert_eq!(s_a["chat_trace"][0]["turn_kind"], "user_and_bot");
+    }
+
+    #[test]
+    fn header_carries_the_constant_fields_and_documents_the_rest() {
+        let search_context = serde_json::json!({ "query": "openingstijden", "lowRecogThreshold": 60 });
+        let header = ai_export_header("2026-07-25T10:00:00Z", &search_context, 42);
+
+        assert_eq!(header["record_type"], "export_header");
+        assert_eq!(header["schema_version"], 4);
+        // The count is what lets a reader detect a truncated file.
+        assert_eq!(header["session_count"], 42);
+        assert_eq!(header["search_context"]["query"], "openingstijden");
+        // Every field a reader would otherwise have to guess at is explained once.
+        for key in [
+            "format",
+            "completeness",
+            "timestamps",
+            "turn_kind",
+            "recognition_quality",
+            "triggered_content",
+            "feedback_targets",
+            "is_feedback_target",
+            "conventions",
+        ] {
+            assert!(
+                header["legend"][key].as_str().is_some_and(|s| !s.is_empty()),
+                "legend is missing {key}"
+            );
+        }
+        // The header survives pruning intact.
+        assert_eq!(
+            prune_empty_json(header.clone()).as_ref(),
+            Some(&header),
+            "header must not be pruned"
+        );
+    }
+
+    #[test]
+    fn turn_kind_never_pretends_a_combined_row_is_a_chat_role() {
+        assert_eq!(
+            turn_kind_for_interaction("QA", "Openingstijden?", "Wij zijn open van 10:00."),
+            "user_and_bot"
+        );
+        assert_eq!(turn_kind_for_interaction("QA", "Openingstijden?", ""), "user_only");
+        assert_eq!(turn_kind_for_interaction("QA", "", "Welkom!"), "bot_only");
+        assert_eq!(turn_kind_for_interaction("Feedback", "", ""), "feedback");
+        assert_eq!(turn_kind_for_interaction("QA", "", ""), "system");
+    }
+
+    #[test]
+    fn exported_timestamps_are_explicitly_utc() {
+        assert_eq!(utc_iso("2026-03-25T09:30:22"), "2026-03-25T09:30:22Z");
+        // Already-marked values are not double-suffixed.
+        assert_eq!(utc_iso("2026-03-25T09:30:22Z"), "2026-03-25T09:30:22Z");
+        assert!(utc_iso("").is_null());
+        // now_iso already marks itself, so exported_at needs no fixing up.
+        assert!(now_iso().ends_with('Z'));
+    }
+
+    #[test]
+    fn html_stripping_keeps_single_underscores() {
+        // `__` is a real separator artifact in CAI answers...
+        assert_eq!(strip_html_text("shops__please"), "shops please");
+        // ...but a lone underscore is part of the text and must survive.
+        assert_eq!(strip_html_text("Use ENTITY_NAME here"), "Use ENTITY_NAME here");
+    }
+
+    #[test]
+    fn filename_slug_is_safe_and_bounded() {
+        assert_eq!(filename_slug("Opening hours?", 60), "opening-hours");
+        assert_eq!(filename_slug("a/b\\c:*?\"<>|", 60), "a-b-c");
+        assert_eq!(filename_slug("   ", 60), "");
+        // Truncation never splits a multi-byte char.
+        let long = filename_slug(&"é".repeat(50), 10);
+        assert!(long.len() <= 11 && long.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
     fn compact_turn_keeps_fix_signals_and_drops_noisy_raw_fields() {
         let row = serde_json::json!({
             "logId": 2,
-            "role": "assistant",
+            "turnKind": "user_and_bot",
             "interactionType": "QA",
             "userText": "Where can I buy a souvenir?",
             "botOutput": "Go to <a href=\"https://example.com\">shops</a>__please.",
@@ -5186,7 +5596,10 @@ mod tests {
         let compact = compact_turn(&row, true);
 
         assert_eq!(compact["answer_text"], "Go to shops please.");
+        assert_eq!(compact["turn_kind"], "user_and_bot");
         assert_eq!(compact["is_feedback_target"], true);
+        // ...and omitted entirely on the turns that did not get feedback.
+        assert!(compact_turn(&row, false).get("is_feedback_target").is_none());
         assert_eq!(compact["triggered_content"]["articles"][0]["id"], "42");
         let dialogs = compact["triggered_content"]["dialogs"]
             .as_array()

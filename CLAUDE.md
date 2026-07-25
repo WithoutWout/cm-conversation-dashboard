@@ -74,6 +74,25 @@ There are also Conversations DB commands exposed through `window.electronAPI` fo
 
 `import_interactions_csv(filePath, maxAgeDays, delimiter?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it.
 
+### Export for AI (`export_conversations_for_ai`)
+
+The Conversations toolbar's **Export for AI** button writes the *entire current search result set* (not just the visible page — the export SQL has no `LIMIT`) to a `.jsonl` file, one JSON object per session, for pasting into an LLM or analysing with a script.
+
+- Takes the same `GetSessionsArgs` as `get_sessions`, so the export is exactly what the user is looking at. The renderer reuses `lastConvSearchArgs`.
+- **Schema v4 is header + body, and that split is the point.** `write_ai_export` emits one `record_type: "export_header"` line (`schema_version`, `exported_at`, `session_count`, `search_context`, `legend`) followed by one `record_type: "session"` line per conversation (`session_index`, `session`, `feedback_targets`, `chat_trace`). Everything constant lives in the header — v3 repeated `schema_version`/`exported_at`/the whole `search_context` on every line, which on a few thousand sessions is a lot of tokens spent saying the same thing, and it invited a model to over-weight the filter metadata. Don't move them back.
+  - `session_count` in the header + contiguous `session_index` from 0 is how a reader detects a truncated file. `session_index: 0` survives `prune_empty_json` because numbers are never "empty" — don't switch it to a string.
+  - The `legend` documents every field a cold reader would otherwise guess at (the `recognition_quality` 0–100 scale, what `dialogs[].status: "End"` means, how certain a `target_resolution` is, that missing keys mean "no value"). It costs ~200 tokens once. If you add a field to a turn, add a legend line for it.
+- `chat_trace` is `compact_turn` per interaction in `log_id` order; `feedback_targets` pre-resolves each thumbs up/down to the answer it was about (via `originatingInteractionId`, falling back to the previous bot output — `feedback.target_resolution` records which, so a reader knows whether the join is certain or inferred).
+- **The compaction is deliberate.** `compact_turn`/`compact_triggered_content`/`compact_entity_matches` keep only the fields that explain *why* an answer was given (recognition type/quality, triggered articles + dialog nodes, entity matches) and drop raw passthrough noise (`contexts`, `pages`, `faqsFound`, raw `articles`/`recognitionDetails`). `strip_html_text` flattens answer HTML and `prune_empty_json` removes empty keys, so the file carries signal rather than schema. `compact_turn_keeps_fix_signals_and_drops_noisy_raw_fields` pins this — don't reintroduce raw columns.
+- `is_feedback_target` is written **only when true**. It used to be the one field exempt from pruning, so `false` appeared on every turn to convey nothing — and `feedback_targets` already enumerates them.
+- **`turn_kind`, not `role`.** A CAI row usually holds a question *and* its answer, so the old `role: "user" | "assistant" | "turn"` looked like the chat-message convention while mostly meaning "both". Values are self-describing: `user_and_bot` (the common case) / `user_only` / `bot_only` / `feedback` / `system`.
+- **Exported timestamps carry an explicit `Z`** via `utc_iso`. The DB stores naive UTC by design (see the import notes above), but an unmarked `2026-03-25T09:30:22` reads as local time to anything consuming the file. `now_iso` already marks itself.
+- **Order is: save dialog → query → size warning → write.** The save dialog must stay first so it opens instantly. `suggested_ai_export_name` is the search-term slug alone (`openingstijden.jsonl`, falling back to `conversation-analysis-export.jsonl` for an empty or punctuation-only query) — deliberately derived from nothing but `args`. An earlier version appended the most common `first_user_message`, which forced the full result query to run *before* the dialog and left the user staring at a spinner where they expected an immediate dialog; don't reintroduce a name that depends on the result set.
+- Above `AI_EXPORT_LARGE_TOKENS` (from the summed `interaction_count` × `AI_EXPORT_EST_BYTES_PER_TURN`) the user gets a confirm dialog after the query but before the write, because a search can easily match more than any model can read. That pre-estimate is deliberately crude and labelled "very roughly"; the toast afterwards reports **actual** bytes and `estimatedTokens` from the real file size. Query and write are separate `spawn_blocking` phases so the warning can sit between them — the write phase re-locks the DB.
+- `search_context` is built once outside the write loop — it is identical for the whole export, so don't rebuild (and re-clone every arg) per session.
+- **The output file must stay wrapped in a `BufWriter`.** `serde_json::to_writer` emits many small writes per record; against an unbuffered `fs::File` each one is a syscall. Measured on 5k sessions / 40k turns: 8.5 s unbuffered vs 2.4 s buffered — ~73% of the export was syscall overhead. The remaining ~2.4 s is the per-session query and JSON build, which is the floor without restructuring the read.
+- `write_ai_export` is split out of the command and takes `&mut impl Write` specifically so the on-disk format is testable without a save dialog. `exported_jsonl_puts_constants_in_a_header_and_never_repeats_them` asserts the real bytes: header first, no constant repeated on a session line, contiguous indexes, `Z`-marked timestamps, no `is_feedback_target: false`, no `role`.
+
 ## Events (Rust → renderer)
 
 | Event                 | Payload              | Description |
@@ -313,6 +332,33 @@ Responsibilities are split deliberately — keep them separate when extending th
 - Skipped days stay in the queue marked `skipped` rather than being dropped, so the user can see what was left alone; they count toward overall progress.
 - Caveat worth knowing: an hour with genuinely zero interactions reads as "missing", so a quiet night can make a complete day look partial and be re-fetched. That errs toward re-downloading, which `INSERT OR IGNORE` makes harmless — the opposite error would lose data.
 
+### The shared day calendar
+
+`calMonthHtml(monthDate, isFirst, cfg)` renders one month grid and is the **only** place a calendar month is built. The Import modal (`_impMonthHtml`) and the Manage Database modal (`_mdbMonthHtml`) are both thin wrappers over it, so the two calendars cannot drift apart visually. Everything modal-specific arrives through `cfg`: `keyFor(y, m, day)` (which date a cell means), `classify(key)` (its classes and tooltip), `clickFn`/`dataAttr`, and `prevFn`/`nextFn`. `_calRangeCls(key, lo, hi)` is the shared two-click range/hover-preview classifier.
+
+The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Manage DB modal adopted it) — including the green/orange coverage outlines, which are inset shadows rather than borders so marking a day never shifts the grid by a pixel. Both calendars also share the class-only hover update (`_impUpdateCalClasses` / `_mdbUpdateCalClasses`): a full re-render on every `mousemove` fights the pointer.
+
+Each wrapper keeps its own date semantics on purpose:
+
+| | Import | Manage Database |
+| --- | --- | --- |
+| Cell means | a **local** day (`_impLocalKey`) — the picker is local time | a **UTC** day (`_mdbKey`, plain string building, no timezone maths) |
+| Disabled | future, or older than the API's 90-day retention | future only — the DB may hold anything |
+| Range colour | accent | red (`.day-cal.danger`) |
+
+Manage DB is UTC because `DATE(timestamp_start)` is UTC and `delete_interactions_by_dates` matches on it: the day you click is exactly the set of rows that disappears. Don't "unify" that to local — it would make a destructive action off-by-one against the data it deletes.
+
+### Manage Database modal
+
+Two tabs: **Stored data** (calendar-driven cleanup) and **Database & retention** (file picker, retention setting, import help).
+
+- **Selection is a date range, not a checkbox per day.** Click a start, click an end (click one day twice for a single day); `_mdbFrom`/`_mdbTo`/`_mdbPickPhase`/`_mdbHover` mirror the import picker's state exactly. Ranges are what cleanup actually needs ("everything before March", "that bad import week") and they stay usable at hundreds of days, where the old checkbox list did not.
+- **Only days that hold data are ever sent to `delete_interactions_by_dates`.** `_mdbSelectedDays()` intersects the range with `get_db_daily_stats`, so an empty day inside a wide drag contributes nothing and cannot inflate the reported day count. The readout says so explicitly ("plus 3 days with no data") — a wide drag must not look like it will delete more than it will.
+- **Nothing is deleted without a full statement of what goes.** The readout gives interactions + day count + range, the list under it names every affected day with its row count (scrolls rather than truncating — hiding a tail before a delete is exactly wrong), and `manageDbDeleteSelected` then arms a separate confirm zone.
+- `_mdbDaySpan(lo, hi)` counts calendar days in **UTC**. Subtracting two local midnights across a DST change is an hour short, which turned the day count into `4.958…` — if you touch day arithmetic here, keep it in UTC.
+- **Older than retention (Nd)** applies the retention window on demand. `conv-data-retention-days` otherwise only takes effect during an import (`purge_old`), so this is what makes the setting usable as maintenance. It is disabled when nothing is older than the cutoff.
+- The Delete button is hidden on the Database tab — it only ever acts on the calendar selection, and leaving it visible next to unrelated settings invites a misclick.
+
 ### Why import stays fast as the database grows
 
 Import cost must be proportional to the size of the import, never to the size of the database. Everything below exists to keep it that way — measured at ~7× on a 107k-interaction / 11.9k-session database, and the gap widens as the DB grows.
@@ -395,6 +441,16 @@ Lets users multi-select Articles/Dialogs on the Content tab and export them as `
   Running: current operation | progress bar | "N of M days completed"
            per-day list with status chips | collapsible Details log
            Cancel import — or, when stopped, Retry/Resume from <date>
+
+<div#manageDbModal>
+  Stored data / Database & retention tabs
+  Stored data: interactions · days stored · date range
+               legend | same two-month calendar as Import, range picked in red
+               quick actions (Older than retention Nd / Everything stored /
+                              Clear / Jump to latest data)
+               readout of exactly what Delete removes
+               scrolling list of the affected days | confirm zone
+  Database & retention: Create new / Open existing | retention days | import help
 
 <div#exportModal>
   List / Table / Grouped tabs | copy as links / table / plain text

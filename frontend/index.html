@@ -2853,10 +2853,77 @@
 
       /* === MANAGE DB MODAL === */
       .manage-db-modal-box {
-        width: 480px;
-        max-height: 80vh;
+        /* Matches .import-modal-box so the two calendars are the same size. */
+        width: 620px;
+        max-width: 620px;
+        max-height: 88vh;
         display: flex;
         flex-direction: column;
+      }
+      /* Selecting days to delete is destructive, so the range reads red rather
+         than borrowing the accent colour the import picker uses. */
+      .day-cal.danger .cal-day.range-start,
+      .day-cal.danger .cal-day.range-end {
+        background: var(--red);
+      }
+      .day-cal.danger .cal-day.in-range {
+        background: color-mix(in srgb, var(--red) 20%, transparent);
+      }
+      .day-cal.danger .cal-day.range-start.has-data,
+      .day-cal.danger .cal-day.range-end.has-data,
+      .day-cal.danger .cal-day.range-start.partial-data,
+      .day-cal.danger .cal-day.range-end.partial-data {
+        box-shadow: inset 0 0 0 2px var(--red);
+      }
+      .day-cal-legend .swatch.doomed {
+        background: var(--red);
+      }
+      .manage-db-section {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .manage-db-quick {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 2px;
+      }
+      .manage-db-quick button {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        color: var(--text);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.72rem;
+        padding: 3px 11px;
+      }
+      .manage-db-quick button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .manage-db-quick button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      /* The readout is the safety net: it states exactly what Delete will remove. */
+      .manage-db-readout {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.78rem;
+        line-height: 1.55;
+        padding: 10px 12px;
+      }
+      .manage-db-readout.armed {
+        background: rgba(248, 113, 113, 0.08);
+        border-color: rgba(248, 113, 113, 0.3);
+      }
+      .manage-db-readout .count {
+        font-weight: 700;
+        color: var(--red);
+      }
+      .manage-db-readout .muted {
+        color: var(--muted);
       }
       .manage-db-modal-box .modal-body {
         overflow-y: auto;
@@ -2898,43 +2965,22 @@
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
-      .manage-db-select-links {
-        display: flex;
-        gap: 10px;
-      }
-      .manage-db-select-link {
-        font-size: 0.72rem;
-        color: var(--accent);
-        cursor: pointer;
-        background: none;
-        border: none;
-        padding: 0;
-        text-decoration: underline;
-      }
       .manage-db-day-list {
         padding: 0 18px 12px;
         display: flex;
         flex-direction: column;
         gap: 4px;
+        max-height: 190px;
+        overflow-y: auto;
       }
+      /* A read-out of what Delete will remove — the calendar is the control, so
+         these rows are not interactive. */
       .manage-db-day-row {
         display: flex;
         align-items: center;
         gap: 10px;
-        padding: 6px 10px;
+        padding: 4px 10px;
         border-radius: 6px;
-        cursor: pointer;
-        transition: background 0.1s;
-      }
-      .manage-db-day-row:hover {
-        background: var(--surface2);
-      }
-      .manage-db-day-row input[type="checkbox"] {
-        accent-color: var(--accent);
-        width: 14px;
-        height: 14px;
-        cursor: pointer;
-        flex-shrink: 0;
       }
       .manage-db-day-date {
         font-size: 0.82rem;
@@ -5041,7 +5087,7 @@
       }
       /* Two-month calendar, reusing the .cal-* day/grid styles. Always
          visible — picking the range is the point of this modal. */
-      .import-cal {
+      .day-cal {
         display: flex;
         gap: 18px;
         background: var(--bg);
@@ -5050,31 +5096,31 @@
         padding: 12px 14px;
         margin: 4px 0 10px;
       }
-      .import-cal-month {
+      .day-cal-month {
         flex: 1;
         min-width: 0;
       }
       /* Inset shadow rather than a border so marking a day doesn't shift the
          grid by a pixel. */
-      .import-cal .cal-day.has-data {
+      .day-cal .cal-day.has-data {
         box-shadow: inset 0 0 0 1px var(--green);
       }
-      .import-cal .cal-day.partial-data {
+      .day-cal .cal-day.partial-data {
         box-shadow: inset 0 0 0 1px var(--orange);
       }
-      .import-cal .cal-day.range-start,
-      .import-cal .cal-day.range-end {
+      .day-cal .cal-day.range-start,
+      .day-cal .cal-day.range-end {
         box-shadow: none;
       }
-      .import-cal .cal-day.range-start.has-data,
-      .import-cal .cal-day.range-end.has-data {
+      .day-cal .cal-day.range-start.has-data,
+      .day-cal .cal-day.range-end.has-data {
         box-shadow: inset 0 0 0 2px var(--green);
       }
-      .import-cal .cal-day.range-start.partial-data,
-      .import-cal .cal-day.range-end.partial-data {
+      .day-cal .cal-day.range-start.partial-data,
+      .day-cal .cal-day.range-end.partial-data {
         box-shadow: inset 0 0 0 2px var(--orange);
       }
-      .import-cal-legend {
+      .day-cal-legend {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
@@ -5083,7 +5129,7 @@
         color: var(--muted);
         margin-bottom: 12px;
       }
-      .import-cal-legend .swatch {
+      .day-cal-legend .swatch {
         display: inline-block;
         width: 9px;
         height: 9px;
@@ -5091,10 +5137,10 @@
         margin-right: 5px;
         vertical-align: -1px;
       }
-      .import-cal-legend .swatch.full {
+      .day-cal-legend .swatch.full {
         box-shadow: inset 0 0 0 1.5px var(--green);
       }
-      .import-cal-legend .swatch.partial {
+      .day-cal-legend .swatch.partial {
         box-shadow: inset 0 0 0 1.5px var(--orange);
       }
       .import-summary {
@@ -7180,73 +7226,84 @@
             &#x2715;
           </button>
         </div>
+        <div class="settings-tabs">
+          <button class="settings-tab-btn active" data-mdb-tab="data">
+            Stored data
+          </button>
+          <button class="settings-tab-btn" data-mdb-tab="database">
+            Database &amp; retention
+          </button>
+        </div>
         <div class="modal-body">
-          <div
-            style="
-              padding: 14px 18px 12px;
-              border-bottom: 1px solid var(--border);
-            "
-          >
-            <label>Database file</label>
-            <p class="hint" style="margin-bottom: 8px">
-              The SQLite database file storing imported conversation data. Can
-              be on a network share for shared team access.
-            </p>
-            <div style="display: flex; gap: 8px; margin-bottom: 6px">
-              <button class="btn-secondary" id="settingsDbCreateBtn">
-                Create new…
-              </button>
-              <button class="btn-secondary" id="settingsDbOpenBtn">
-                Open existing…
+          <!-- TAB: Stored data — calendar-driven cleanup, rendered by JS -->
+          <div class="settings-tab-panel active" id="mdb-panel-data">
+            <div id="manageDbBody">
+              <div class="manage-db-empty">Loading…</div>
+            </div>
+          </div>
+          <!-- TAB: Database & retention -->
+          <div class="settings-tab-panel" id="mdb-panel-database">
+            <div
+              style="
+                padding: 14px 18px 12px;
+                border-bottom: 1px solid var(--border);
+              "
+            >
+              <label>Database file</label>
+              <p class="hint" style="margin-bottom: 8px">
+                The SQLite database file storing imported conversation data. Can
+                be on a network share for shared team access.
+              </p>
+              <div style="display: flex; gap: 8px; margin-bottom: 6px">
+                <button class="btn-secondary" id="settingsDbCreateBtn">
+                  Create new…
+                </button>
+                <button class="btn-secondary" id="settingsDbOpenBtn">
+                  Open existing…
+                </button>
+              </div>
+              <p
+                class="hint"
+                id="settingsDbPath"
+                style="min-height: 1.2em; word-break: break-all"
+              ></p>
+            </div>
+            <div
+              style="
+                padding: 14px 18px 12px;
+                border-bottom: 1px solid var(--border);
+              "
+            >
+              <label for="setting-data-retention-days"
+                >Data retention (days)</label
+              >
+              <input
+                id="setting-data-retention-days"
+                type="number"
+                min="1"
+                max="365"
+                style="width: 80px"
+              />
+              <p class="hint" style="margin-top: 4px">
+                Interactions older than this many days are automatically removed
+                when importing new data (1&ndash;365). Use
+                <strong>Older than retention</strong> on the Stored data tab to
+                apply it right now.
+              </p>
+            </div>
+            <div style="padding: 14px 18px 12px">
+              <label>Interaction Log Import</label>
+              <p class="hint" style="margin-bottom: 8px">
+                Import daily interaction log exports (CSV) to populate the
+                Conversations view.
+              </p>
+              <button class="btn-link" id="openInteractionLogInstructionsBtn">
+                How to export the Interaction Log?
               </button>
             </div>
-            <p
-              class="hint"
-              id="settingsDbPath"
-              style="min-height: 1.2em; word-break: break-all"
-            ></p>
-          </div>
-          <div
-            style="
-              padding: 14px 18px 12px;
-              border-bottom: 1px solid var(--border);
-            "
-          >
-            <label for="setting-data-retention-days"
-              >Data retention (days)</label
-            >
-            <input
-              id="setting-data-retention-days"
-              type="number"
-              min="1"
-              max="365"
-              style="width: 80px"
-            />
-            <p class="hint" style="margin-top: 4px">
-              Interactions older than this many days are automatically removed
-              when importing new data (1&ndash;365).
-            </p>
-          </div>
-          <div
-            style="
-              padding: 14px 18px 12px;
-              border-bottom: 1px solid var(--border);
-            "
-          >
-            <label>Interaction Log Import</label>
-            <p class="hint" style="margin-bottom: 8px">
-              Import daily interaction log exports (CSV) to populate the
-              Conversations view.
-            </p>
-            <button class="btn-link" id="openInteractionLogInstructionsBtn">
-              How to export the Interaction Log?
-            </button>
-          </div>
-          <div id="manageDbBody">
-            <div class="manage-db-empty">Loading…</div>
           </div>
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer" id="manageDbFooter">
           <button class="btn-secondary" onclick="closeManageDbModal()">
             Close
           </button>
@@ -7256,7 +7313,7 @@
             disabled
             onclick="manageDbDeleteSelected()"
           >
-            Delete Selected Days
+            Delete selected
           </button>
         </div>
       </div>
@@ -7832,6 +7889,8 @@
             sessionCount: 0,
             feedbackCount: 0,
             interactionCount: 0,
+            bytes: 0,
+            estimatedTokens: 0,
           })
       if (!window.electronAPI.cancelSessionSearch)
         window.electronAPI.cancelSessionSearch = _convStub
@@ -15702,8 +15761,8 @@
              <input type="time" id="impToTime" value="${esc(_impToTime)}" />
              <button class="import-now-btn" onclick="impSetNow()" title="Set the end to the current local time">Now</button>
            </div>
-           <div class="import-cal" id="impCal">${_impCalHtml()}</div>
-           <div class="import-cal-legend">
+           <div class="day-cal" id="impCal">${_impCalHtml()}</div>
+           <div class="day-cal-legend">
              <span><span class="swatch full"></span>Fully imported</span>
              <span><span class="swatch partial"></span>Partly imported</span>
              <span>Times are local &middot; requests use UTC days</span>
@@ -15758,27 +15817,33 @@
         )
         const second = new Date(base.getFullYear(), base.getMonth() + 1, 1)
         return (
-          `<div class="import-cal-month">${_impMonthHtml(base, true)}</div>` +
-          `<div class="import-cal-month">${_impMonthHtml(second, false)}</div>`
+          `<div class="day-cal-month">${_impMonthHtml(base, true)}</div>` +
+          `<div class="day-cal-month">${_impMonthHtml(second, false)}</div>`
         )
       }
 
-      function _impMonthHtml(monthDate, isFirst) {
+      /**
+       * One month grid. The Import and Manage Database calendars both render
+       * through this so they stay visually identical; everything that differs
+       * between them comes from `cfg`:
+       *
+       *   keyFor(y, m, day) -> "YYYY-MM-DD"   which date a cell stands for
+       *   classify(key)     -> { cls, title } the cell's classes and tooltip
+       *   clickFn, dataAttr                   inline handler and hover hook
+       *   prevFn, nextFn                      month nav, only on the first month
+       */
+      function calMonthHtml(monthDate, isFirst, cfg) {
         const y = monthDate.getFullYear()
         const m = monthDate.getMonth()
         const label = monthDate.toLocaleDateString("en-GB", {
           month: "long",
           year: "numeric",
         })
-        const today = _impLocalKey(new Date())
-        const oldest = _impLocalKey(
-          new Date(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS),
-        )
         const nav = isFirst
           ? `<div class="cal-nav">
-               <button onclick="impCalPrev()">&#x2039;</button>
+               <button onclick="${cfg.prevFn}()">&#x2039;</button>
                <span>${esc(label)}</span>
-               <button onclick="impCalNext()">&#x203a;</button>
+               <button onclick="${cfg.nextFn}()">&#x203a;</button>
              </div>`
           : `<div class="cal-nav"><button style="visibility:hidden">&#x2039;</button><span>${esc(
               label,
@@ -15795,6 +15860,37 @@
           }</div>`
         }
         const lastDay = new Date(y, m + 1, 0).getDate()
+        for (let day = 1; day <= lastDay; day++) {
+          const key = cfg.keyFor(y, m, day)
+          const st = cfg.classify(key)
+          const handlers = st.cls.includes("disabled")
+            ? ""
+            : ` onclick="${cfg.clickFn}('${key}')" ${cfg.dataAttr}="${key}"`
+          const title = st.title ? ` title="${esc(st.title)}"` : ""
+          cells += `<div class="${st.cls}"${handlers}${title}>${day}</div>`
+        }
+        const totalCells = firstDow + lastDay
+        const trailing = (7 - (totalCells % 7)) % 7
+        for (let day = 1; day <= trailing; day++) {
+          cells += `<div class="cal-day outside disabled">${day}</div>`
+        }
+        return nav + `<div class="cal-grid">${cells}</div>`
+      }
+
+      /// Range classes for a two-click picker, including the hover preview shown
+      /// while the second end is still being chosen.
+      function _calRangeCls(key, lo, hi) {
+        if (lo && key === lo) return " range-start"
+        if (hi && key === hi) return " range-end"
+        if (lo && hi && key > lo && key < hi) return " in-range"
+        return ""
+      }
+
+      function _impMonthHtml(monthDate, isFirst) {
+        const today = _impLocalKey(new Date())
+        const oldest = _impLocalKey(
+          new Date(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS),
+        )
         const selStart = _impFromDate
         const selEnd =
           _impPickPhase === 1 && _impPickHover
@@ -15806,43 +15902,37 @@
           _impPickPhase === 1 && _impPickHover && _impPickHover < selStart
             ? _impPickHover
             : selStart
-        for (let day = 1; day <= lastDay; day++) {
-          const key = _impLocalKey(new Date(y, m, day))
-          const disabled = key > today || key < oldest
-          const coverage = _impDayCoverage(key)
-          let cls = "cal-day"
-          if (coverage === "full") cls += " has-data"
-          else if (coverage === "partial") cls += " partial-data"
-          if (disabled) {
-            cls += " disabled"
-          } else {
-            if (key === today) cls += " today"
-            if (selLow && key === selLow) cls += " range-start"
-            else if (selEnd && key === selEnd) cls += " range-end"
-            else if (selLow && selEnd && key > selLow && key < selEnd)
-              cls += " in-range"
-          }
-          const count = _impDbDays.get(key) || 0
-          let title = ""
-          if (coverage === "full") {
-            title = ` title="${count.toLocaleString()} interactions — all 24 hours imported"`
-          } else if (coverage === "partial") {
-            const missing = _impMissingHours(key)
-            title = ` title="${count.toLocaleString()} interactions — only ${
-              24 - missing
-            } of 24 hours imported, ${missing} still missing"`
-          }
-          const handlers = disabled
-            ? ""
-            : ` onclick="impPickDay('${key}')" data-imp-date="${key}"`
-          cells += `<div class="${cls}"${handlers}${title}>${day}</div>`
-        }
-        const totalCells = firstDow + lastDay
-        const trailing = (7 - (totalCells % 7)) % 7
-        for (let day = 1; day <= trailing; day++) {
-          cells += `<div class="cal-day outside disabled">${day}</div>`
-        }
-        return nav + `<div class="cal-grid">${cells}</div>`
+        return calMonthHtml(monthDate, isFirst, {
+          prevFn: "impCalPrev",
+          nextFn: "impCalNext",
+          clickFn: "impPickDay",
+          dataAttr: "data-imp-date",
+          keyFor: (y, m, day) => _impLocalKey(new Date(y, m, day)),
+          classify: (key) => {
+            const disabled = key > today || key < oldest
+            const coverage = _impDayCoverage(key)
+            let cls = "cal-day"
+            if (coverage === "full") cls += " has-data"
+            else if (coverage === "partial") cls += " partial-data"
+            if (disabled) {
+              cls += " disabled"
+            } else {
+              if (key === today) cls += " today"
+              cls += _calRangeCls(key, selLow, selEnd)
+            }
+            const count = _impDbDays.get(key) || 0
+            let title = ""
+            if (coverage === "full") {
+              title = `${count.toLocaleString()} interactions — all 24 hours imported`
+            } else if (coverage === "partial") {
+              const missing = _impMissingHours(key)
+              title = `${count.toLocaleString()} interactions — only ${
+                24 - missing
+              } of 24 hours imported, ${missing} still missing`
+            }
+            return { cls, title }
+          },
+        })
       }
 
       function _impSetupFooterHtml() {
@@ -16247,16 +16337,35 @@
         })
 
       // ── Manage DB modal ─────────────────────────────────────────────
-      let _manageDbSelectedDates = new Set()
+      // Cleanup is calendar-driven: the same two-month grid as the Import modal,
+      // so what a day looks like there is what it looks like here. The selection
+      // is a date range (click a start, click an end) rather than a checkbox per
+      // day — ranges are what cleanup actually needs ("everything before March",
+      // "that bad import week") and they stay readable at hundreds of days.
+      //
+      // Days are UTC, matching how interactions are stored and deleted, so the
+      // day you click is exactly the set of rows that disappears.
       let _manageDbStats = null
       let _manageDbConfirming = false
+      let _mdbDayCounts = new Map()
+      let _mdbDayHours = new Map()
+      let _mdbCalMonth = null
+      let _mdbFrom = ""
+      let _mdbTo = ""
+      /// 0 = the next click sets the start, 1 = it sets the end.
+      let _mdbPickPhase = 0
+      let _mdbHover = ""
 
       function openManageDbModal() {
-        _manageDbSelectedDates = new Set()
         _manageDbConfirming = false
+        _mdbFrom = ""
+        _mdbTo = ""
+        _mdbPickPhase = 0
+        _mdbHover = ""
         document.getElementById("setting-data-retention-days").value =
           dataRetentionDays
         document.getElementById("manageDbModal").classList.add("open")
+        mdbSetTab("data")
         refreshManageDbModal()
       }
       function closeManageDbModal() {
@@ -16268,6 +16377,23 @@
           if (e.target === document.getElementById("manageDbModal"))
             closeManageDbModal()
         })
+      document.querySelectorAll("[data-mdb-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => mdbSetTab(btn.dataset.mdbTab))
+      })
+      function mdbSetTab(tab) {
+        document.querySelectorAll("[data-mdb-tab]").forEach((b) => {
+          b.classList.toggle("active", b.dataset.mdbTab === tab)
+        })
+        document
+          .getElementById("mdb-panel-data")
+          .classList.toggle("active", tab === "data")
+        document
+          .getElementById("mdb-panel-database")
+          .classList.toggle("active", tab !== "data")
+        // Delete only ever acts on the calendar selection, so hide it elsewhere.
+        document.getElementById("manageDbDeleteBtn").style.display =
+          tab === "data" ? "" : "none"
+      }
 
       async function refreshManageDbModal() {
         const body = document.getElementById("manageDbBody")
@@ -16282,7 +16408,105 @@
           )}</div>`
           return
         }
+        _mdbDayCounts = new Map()
+        for (const d of _manageDbStats.days || [])
+          _mdbDayCounts.set(d.date, d.count)
+        // Same per-hour coverage the Import calendar shows, so a day that is only
+        // partly imported reads the same in both places.
+        _mdbDayHours = new Map()
+        try {
+          for (const d of (await window.electronAPI.getDbHourCoverage()) || [])
+            _mdbDayHours.set(d.date, d.hours)
+        } catch (_) {}
+        // Open on the newest data so the calendar lands where the data is.
+        if (!_mdbCalMonth) {
+          const newest = (_manageDbStats.days || [])[0]
+          const anchor = newest ? _mdbParseKey(newest.date) : new Date()
+          _mdbCalMonth = new Date(
+            anchor.getFullYear(),
+            anchor.getMonth() - 1,
+            1,
+          )
+        }
         renderManageDbBody()
+      }
+
+      // ── Manage DB: date helpers (UTC keys, no timezone maths) ─────────
+      function _mdbKey(y, m, day) {
+        return `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(
+          2,
+          "0",
+        )}`
+      }
+      function _mdbParseKey(key) {
+        const [y, m, d] = key.split("-").map(Number)
+        return new Date(y, m - 1, d)
+      }
+      /// Calendar days from `lo` to `hi` inclusive. Counted in UTC on purpose:
+      /// subtracting two local midnights across a DST change is off by an hour,
+      /// which turns a day count into something like 4.958.
+      function _mdbDaySpan(lo, hi) {
+        const ms = (key) => {
+          const [y, m, d] = key.split("-").map(Number)
+          return Date.UTC(y, m - 1, d)
+        }
+        return Math.round((ms(hi) - ms(lo)) / 86400000) + 1
+      }
+      function _mdbTodayKey() {
+        return new Date().toISOString().slice(0, 10)
+      }
+      /// The range as an ordered pair, following the hover preview mid-pick.
+      function _mdbRange() {
+        let lo = _mdbFrom
+        let hi = _mdbTo
+        if (_mdbPickPhase === 1 && _mdbHover) {
+          hi = _mdbHover
+          if (hi < lo) {
+            hi = lo
+            lo = _mdbHover
+          }
+        }
+        return { lo, hi }
+      }
+      /// Only days that actually hold data — an empty day in the range is
+      /// nothing to delete, and sending it would misreport the day count.
+      function _mdbSelectedDays() {
+        const { lo, hi } = _mdbRange()
+        if (!lo || !hi) return []
+        return (_manageDbStats?.days || [])
+          .filter((d) => d.date >= lo && d.date <= hi)
+          .sort((a, b) => (a.date < b.date ? 1 : -1))
+      }
+
+      function _mdbMonthHtml(monthDate, isFirst) {
+        const today = _mdbTodayKey()
+        const { lo, hi } = _mdbRange()
+        return calMonthHtml(monthDate, isFirst, {
+          prevFn: "mdbCalPrev",
+          nextFn: "mdbCalNext",
+          clickFn: "mdbPickDay",
+          dataAttr: "data-mdb-date",
+          keyFor: _mdbKey,
+          classify: (key) => {
+            const count = _mdbDayCounts.get(key) || 0
+            const mask = _mdbDayHours.get(key)
+            let cls = "cal-day"
+            if (count) {
+              cls += mask && mask !== IMP_ALL_HOURS ? " partial-data" : " has-data"
+            }
+            // Future days can hold no data, so there is nothing to select there.
+            if (key > today) {
+              cls += " disabled"
+            } else {
+              if (key === today) cls += " today"
+              cls += _calRangeCls(key, lo, hi)
+            }
+            const title = count
+              ? `${key} — ${count.toLocaleString()} interactions`
+              : `${key} — no data`
+            return { cls, title }
+          },
+        })
       }
 
       function renderManageDbBody() {
@@ -16291,32 +16515,65 @@
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
 
         if (!stats || stats.days.length === 0) {
-          body.innerHTML = `<div class="manage-db-empty">No data in the database yet.</div>`
+          body.innerHTML = `<div class="manage-db-empty">No data in the database yet.<br/>Use <strong>Import</strong> to add interaction logs.</div>`
           deleteBtn.disabled = true
+          deleteBtn.textContent = "Delete selected"
           return
         }
 
-        const selCount = _manageDbSelectedDates.size
-        deleteBtn.disabled = selCount === 0 || _manageDbConfirming
-        deleteBtn.textContent =
-          selCount > 0
-            ? `Delete ${selCount} day${selCount !== 1 ? "s" : ""}`
-            : "Delete Selected Days"
+        const selDays = _mdbSelectedDays()
+        const selRows = selDays.reduce((s, d) => s + d.count, 0)
+        const { lo, hi } = _mdbRange()
+        deleteBtn.disabled = selDays.length === 0 || _manageDbConfirming
+        deleteBtn.textContent = selDays.length
+          ? `Delete ${selDays.length} day${selDays.length !== 1 ? "s" : ""}…`
+          : "Delete selected"
 
-        // Build confirm zone HTML
+        const oldest = stats.days[stats.days.length - 1].date
+        const newest = stats.days[0].date
+        const retentionCutoff = new Date(
+          Date.now() - dataRetentionDays * 86400000,
+        )
+          .toISOString()
+          .slice(0, 10)
+        const stale = stats.days.filter((d) => d.date < retentionCutoff)
+        const staleRows = stale.reduce((s, d) => s + d.count, 0)
+
+        // What the range currently covers, stated in full before anything is
+        // deleted. Days without data are called out so a wide drag doesn't look
+        // like it will remove more than it will.
+        let readout
+        if (!lo || !hi) {
+          readout = `<span class="muted">Click a day to start a range, then click another to close it. A single day works too — click it twice.</span>`
+        } else if (!selDays.length) {
+          readout = `<strong>${esc(lo)}</strong> to <strong>${esc(
+            hi,
+          )}</strong><br/><span class="muted">No stored data in that range — nothing to delete.</span>`
+        } else {
+          const empty = _mdbDaySpan(lo, hi) - selDays.length
+          readout =
+            `<span class="count">${selRows.toLocaleString()} interactions</span> across <strong>${
+              selDays.length
+            }</strong> day${selDays.length !== 1 ? "s" : ""}` +
+            ` <span class="muted">(${esc(lo)} → ${esc(hi)}${
+              empty > 0
+                ? `, plus ${empty} day${empty !== 1 ? "s" : ""} with no data`
+                : ""
+            })</span>`
+        }
+
         let confirmHtml = ""
         if (_manageDbConfirming) {
-          const selDays = stats.days.filter((d) =>
-            _manageDbSelectedDates.has(d.date),
-          )
-          const totalRows = selDays.reduce((s, d) => s + d.count, 0)
-          const dateList = selDays
-            .map((d) => `<strong>${esc(d.date)}</strong>`)
+          const shown = selDays
+            .slice(0, 8)
+            .map((d) => esc(d.date))
             .join(", ")
+          const more =
+            selDays.length > 8 ? ` and ${selDays.length - 8} more` : ""
           confirmHtml = `
             <div class="manage-db-confirm-zone visible">
-              <strong>Permanently delete ${totalRows.toLocaleString()} interactions</strong>
-              on ${dateList}?<br/>This cannot be undone.
+              <strong>Permanently delete ${selRows.toLocaleString()} interactions</strong>
+              on ${shown}${more}?<br/>This cannot be undone.
               <div style="display:flex;gap:8px;margin-top:10px">
                 <button class="btn-danger" style="padding:5px 14px;font-size:0.78rem" onclick="manageDbConfirmDelete()">Yes, delete permanently</button>
                 <button class="btn-secondary" style="padding:5px 10px;font-size:0.78rem" onclick="manageDbCancelConfirm()">Cancel</button>
@@ -16324,65 +16581,208 @@
             </div>`
         }
 
-        // Day list
-        const rowsHtml = stats.days
-          .map((d) => {
-            const checked = _manageDbSelectedDates.has(d.date) ? "checked" : ""
-            return `
-            <label class="manage-db-day-row">
-              <input type="checkbox" ${checked} onchange="manageDbToggleDay('${esc(
-              d.date,
-            )}', this.checked)" />
-              <span class="manage-db-day-date">${esc(d.date)}</span>
-              <span class="manage-db-day-count">${d.count.toLocaleString()}</span>
-            </label>`
-          })
-          .join("")
+        // Every day the Delete button will touch, listed out. Scrolls rather than
+        // truncating — "Everything stored" can select hundreds of days and a
+        // hidden tail is exactly the wrong thing to hide before a delete.
+        const listHtml = selDays.length
+          ? `<div class="manage-db-days-header">
+               <span class="manage-db-days-title">Days that will be deleted</span>
+               <span class="manage-db-days-title">${selRows.toLocaleString()} rows</span>
+             </div>
+             <div class="manage-db-day-list">${selDays
+               .map(
+                 (d) => `
+               <div class="manage-db-day-row">
+                 <span class="manage-db-day-date">${esc(d.date)}</span>
+                 <span class="manage-db-day-count">${d.count.toLocaleString()}</span>
+               </div>`,
+               )
+               .join("")}</div>`
+          : ""
 
         body.innerHTML = `
           <div class="manage-db-summary">
             <div class="manage-db-stat">
               <span class="manage-db-stat-value">${stats.total.toLocaleString()}</span>
-              <span class="manage-db-stat-label">Total interactions</span>
+              <span class="manage-db-stat-label">Interactions</span>
             </div>
             <div class="manage-db-stat">
               <span class="manage-db-stat-value">${stats.days.length}</span>
               <span class="manage-db-stat-label">Days stored</span>
             </div>
-          </div>
-          <div class="manage-db-days-header">
-            <span class="manage-db-days-title">Days in database</span>
-            <div class="manage-db-select-links">
-              <button class="manage-db-select-link" onclick="manageDbSelectAll()">Select all</button>
-              <button class="manage-db-select-link" onclick="manageDbDeselectAll()">Deselect all</button>
+            <div class="manage-db-stat">
+              <span class="manage-db-stat-value" style="font-size:0.82rem;font-weight:600;padding-top:5px">${esc(
+                oldest,
+              )} → ${esc(newest)}</span>
+              <span class="manage-db-stat-label">Range</span>
             </div>
           </div>
-          <div class="manage-db-day-list">${rowsHtml}</div>
+          <div class="manage-db-section">
+            <div class="day-cal-legend">
+              <span><span class="swatch full"></span>Fully imported</span>
+              <span><span class="swatch partial"></span>Partly imported</span>
+              <span><span class="swatch doomed"></span>Selected to delete</span>
+              <span>Days are UTC &middot; hover for counts</span>
+            </div>
+            <div class="day-cal danger" id="mdbCal">
+              <div class="day-cal-month">${_mdbMonthHtml(
+                _mdbCalMonth,
+                true,
+              )}</div>
+              <div class="day-cal-month">${_mdbMonthHtml(
+                new Date(
+                  _mdbCalMonth.getFullYear(),
+                  _mdbCalMonth.getMonth() + 1,
+                  1,
+                ),
+                false,
+              )}</div>
+            </div>
+            <div class="manage-db-quick">
+              <button onclick="mdbSelectStale()" ${
+                stale.length ? "" : "disabled"
+              } title="${
+                stale.length
+                  ? `${staleRows.toLocaleString()} interactions before ${retentionCutoff}`
+                  : "Nothing is older than the retention window"
+              }">Older than retention (${dataRetentionDays}d)${
+                stale.length ? ` · ${stale.length}` : ""
+              }</button>
+              <button onclick="mdbSelectAllData()">Everything stored</button>
+              <button onclick="mdbClearSelection()" ${
+                lo ? "" : "disabled"
+              }>Clear</button>
+              <button onclick="mdbJumpToNewest()">Jump to latest data</button>
+            </div>
+          </div>
+          <div class="manage-db-section">
+            <div class="manage-db-readout ${
+              selDays.length ? "armed" : ""
+            }">${readout}</div>
+          </div>
+          ${listHtml}
           ${confirmHtml}`
+
+        _mdbWireCalHover()
       }
 
-      function manageDbToggleDay(date, checked) {
-        if (checked) _manageDbSelectedDates.add(date)
-        else _manageDbSelectedDates.delete(date)
+      /// Hover preview only touches classes — mirrors the Import calendar so a
+      /// re-render never fights the pointer mid-drag.
+      function _mdbWireCalHover() {
+        const cal = document.getElementById("mdbCal")
+        if (!cal) return
+        cal.addEventListener("mouseover", (e) => {
+          if (_mdbPickPhase !== 1) return
+          const el = e.target.closest("[data-mdb-date]")
+          const next = el ? el.dataset.mdbDate : ""
+          if (next !== _mdbHover) {
+            _mdbHover = next
+            _mdbUpdateCalClasses()
+          }
+        })
+        cal.addEventListener("mouseleave", () => {
+          if (_mdbPickPhase === 1 && _mdbHover) {
+            _mdbHover = ""
+            _mdbUpdateCalClasses()
+          }
+        })
+      }
+      function _mdbUpdateCalClasses() {
+        const cal = document.getElementById("mdbCal")
+        if (!cal) return
+        const { lo, hi } = _mdbRange()
+        cal.querySelectorAll("[data-mdb-date]").forEach((el) => {
+          el.classList.remove("range-start", "range-end", "in-range")
+          const cls = _calRangeCls(el.dataset.mdbDate, lo, hi).trim()
+          if (cls) el.classList.add(cls)
+        })
+      }
+
+      function mdbCalPrev() {
+        _mdbCalMonth = new Date(
+          _mdbCalMonth.getFullYear(),
+          _mdbCalMonth.getMonth() - 1,
+          1,
+        )
+        renderManageDbBody()
+      }
+      function mdbCalNext() {
+        _mdbCalMonth = new Date(
+          _mdbCalMonth.getFullYear(),
+          _mdbCalMonth.getMonth() + 1,
+          1,
+        )
+        renderManageDbBody()
+      }
+      function mdbPickDay(key) {
+        if (_mdbPickPhase === 0) {
+          _mdbFrom = key
+          _mdbTo = key
+          _mdbPickPhase = 1
+        } else {
+          if (key < _mdbFrom) {
+            _mdbTo = _mdbFrom
+            _mdbFrom = key
+          } else {
+            _mdbTo = key
+          }
+          _mdbPickPhase = 0
+        }
+        _mdbHover = ""
         _manageDbConfirming = false
         renderManageDbBody()
       }
-      function manageDbSelectAll() {
-        if (_manageDbStats)
-          _manageDbStats.days.forEach((d) => _manageDbSelectedDates.add(d.date))
+      /// Everything past the retention window — the maintenance sweep the
+      /// retention setting otherwise only performs during an import.
+      function mdbSelectStale() {
+        const cutoff = new Date(Date.now() - dataRetentionDays * 86400000)
+          .toISOString()
+          .slice(0, 10)
+        const stale = (_manageDbStats?.days || []).filter(
+          (d) => d.date < cutoff,
+        )
+        if (!stale.length) return
+        _mdbFrom = stale[stale.length - 1].date
+        _mdbTo = stale[0].date
+        _mdbPickPhase = 0
+        _mdbHover = ""
+        _manageDbConfirming = false
+        _mdbCalMonth = _mdbMonthStart(_mdbTo)
+        renderManageDbBody()
+      }
+      function mdbSelectAllData() {
+        const days = _manageDbStats?.days || []
+        if (!days.length) return
+        _mdbFrom = days[days.length - 1].date
+        _mdbTo = days[0].date
+        _mdbPickPhase = 0
+        _mdbHover = ""
         _manageDbConfirming = false
         renderManageDbBody()
       }
-      function manageDbDeselectAll() {
-        _manageDbSelectedDates.clear()
+      function mdbClearSelection() {
+        _mdbFrom = ""
+        _mdbTo = ""
+        _mdbPickPhase = 0
+        _mdbHover = ""
         _manageDbConfirming = false
         renderManageDbBody()
+      }
+      function mdbJumpToNewest() {
+        const newest = (_manageDbStats?.days || [])[0]
+        if (!newest) return
+        _mdbCalMonth = _mdbMonthStart(newest.date)
+        renderManageDbBody()
+      }
+      /// The month before `key`, so a two-month calendar shows it on the right.
+      function _mdbMonthStart(key) {
+        const d = _mdbParseKey(key)
+        return new Date(d.getFullYear(), d.getMonth() - 1, 1)
       }
       function manageDbDeleteSelected() {
-        if (_manageDbSelectedDates.size === 0) return
+        if (!_mdbSelectedDays().length) return
         _manageDbConfirming = true
         renderManageDbBody()
-        // Scroll to confirm zone
         const body = document.getElementById("manageDbBody")
         body.scrollTop = body.scrollHeight
       }
@@ -16391,11 +16791,10 @@
         renderManageDbBody()
       }
       async function manageDbConfirmDelete() {
-        const dates = Array.from(_manageDbSelectedDates)
+        const dates = _mdbSelectedDays().map((d) => d.date)
         if (!dates.length) return
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
         deleteBtn.disabled = true
-        const body = document.getElementById("manageDbBody")
         try {
           const res = await window.electronAPI.deleteInteractionsByDates(dates)
           const deleted = res?.deleted ?? 0
@@ -16405,7 +16804,10 @@
               dates.length
             } day${dates.length !== 1 ? "s" : ""}`,
           )
-          _manageDbSelectedDates.clear()
+          _mdbFrom = ""
+          _mdbTo = ""
+          _mdbPickPhase = 0
+          _mdbHover = ""
           _manageDbConfirming = false
           // Re-apply date range and reload sessions
           window.electronAPI
@@ -16615,11 +17017,26 @@
           }
           const count = res.sessionCount || 0
           const pathText = res.jsonlPath ? ` to ${res.jsonlPath}` : ""
+          // Size is the thing users need before pasting this anywhere, so it
+          // leads rather than sitting in a details panel.
+          const mb = (res.bytes || 0) / (1024 * 1024)
+          const tokens = res.estimatedTokens || 0
+          const sizeText = res.bytes
+            ? ` — ${
+                mb >= 0.1
+                  ? mb.toFixed(1) + " MB"
+                  : Math.round(res.bytes / 1024) + " KB"
+              }, ~${
+                tokens >= 1000
+                  ? Math.round(tokens / 1000).toLocaleString() + "k"
+                  : tokens
+              } tokens`
+            : ""
           showImportToast(
             "success",
             `Exported ${count.toLocaleString()} search result${
               count !== 1 ? "s" : ""
-            } for AI analysis${pathText}`,
+            } for AI analysis${sizeText}${pathText}`,
           )
         } catch (e) {
           showImportToast("error", "AI export failed: " + e)
