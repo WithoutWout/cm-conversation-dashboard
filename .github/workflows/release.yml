@@ -62,19 +62,43 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.10.1
+            ## What's new in v0.10.2
 
-            ### Export for AI, made for LLMs to actually read
-            - The exported file now opens with a single header line — the search filter and a short field legend — instead of repeating that on every conversation. Same information, far fewer tokens for a model to read.
-            - Every conversation now carries an explicit conversation number and the header states the total, so it's obvious if a file got cut short.
-            - Timestamps are unambiguously UTC, and fields are named for what they actually contain instead of borrowed chat-app terms.
-            - A search that would produce more data than a model can realistically read now warns you before writing the file, with a rough token estimate.
-            - Exporting is noticeably faster, and the save dialog now opens instantly instead of waiting on the search to finish first.
+            ### Collections, rebuilt
+            - One list on the left, everything about the selected collection on the right. You pick a collection once and it stays picked while you move between tabs — no more choosing it again in a separate dropdown.
+            - **Export preview**, **Items** and **Filtered out** are now tabs instead of panels that pushed the rest of the list down the page.
+            - **Export JSON** is a real button instead of the fifth in a row of identical grey links.
+            - **Filtered out** shows exactly which rows a smart filter is removing from the collection you're looking at, and which pattern did it.
+            - Smart filters open with a live summary of what they're currently doing — "Removing 7 rows across 3 collections" — instead of leaving you to guess.
+            - A collection that produces no export rows now tells you why: content that only routes into other Dialogs, everything caught by a filter, items that no longer exist in the loaded export, or simply an empty collection. Each one needs a different fix, so each one says something different.
 
-            ### Manage Database, rebuilt around the calendar
-            - Cleaning up old or unwanted interaction data now uses the same calendar you already know from importing — click a start day and an end day to select a range, instead of ticking boxes one by one.
-            - Quick actions cover the common cleanup jobs directly: everything older than your retention setting, everything stored, or jump straight to the newest data.
-            - Before anything is deleted, you get an exact readout — how many interactions, how many days, and which ones — plus a confirmation step.
+            ### Share Content, rebuilt
+            - You can now trim what you're about to share: filter the list, or remove individual rows with the ✕. The counter and the copy button follow along, so what you see is exactly what lands on the clipboard.
+            - The copy button says how much it will copy — "Copy 5 links", "Copy table (5 rows)".
+            - Each view now explains what it produces, so "Grouped" no longer silently swaps response text for Dialog → Article links without telling you.
+            - Every row carries a type badge, so a Dialog and a Transactional Dialog are finally distinguishable (both use the `dn-` prefix).
+            - If no CM.com Context URL is configured, the header now says so — copied "links" would otherwise quietly come out as plain IDs.
+
+            ### Article and Dialog windows
+            - Sized to their content instead of filling the whole screen. A short Article is now a short window, and answers wrap at a readable width instead of stretching across the display.
+            - Articles with many entity phrases collapse them behind a "+N more", so the response is visible immediately.
+            - Long answers get a **Show full response** button instead of their own hidden scrollbar.
+            - Section headings stay in view while you scroll a long list of nodes.
+            - **Matches only** replaces the old `⊵q` symbol, and only appears when a search is actually running.
+            - New **Linked from Articles**: which Articles route people into this Dialog. For Transactional Dialogs — which previously showed nothing at all — this is the whole story.
+            - **Back** only appears when there's somewhere to go back to.
+
+            ### Importing stays fast as your database grows
+            - Importing a long date range is around **7× faster** on a large database, and the gap widens the more data you have stored. The end-of-import work now runs once per import instead of once per day downloaded.
+            - The search index no longer keeps a second copy of every message: **23% faster to import, 37% smaller on disk**, with search speed unchanged.
+            - Three indexes that cost time on every imported row and were never actually used have been removed.
+            - The import window's Details log now reports where the time actually went, phase by phase.
+            - An import that is cancelled or interrupted now repairs itself the next time you open the database.
+
+            ### Smaller things
+            - A quiet hour — a night with genuinely no conversations — is no longer mistaken for a gap and re-downloaded on every run.
+            - New **Compact database** button (Manage Database → Database & retention) reclaims disk space after deletions.
+            - The top bar no longer shows "2/2 sources" when everything loaded fine. It now only speaks up when something is missing, and names it.
 
             ---
 
