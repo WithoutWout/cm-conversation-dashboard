@@ -6,9 +6,15 @@
 //! CSV that the existing `import_interactions_csv` command then imports, so the
 //! API path and the manual portal-download path share one import pipeline.
 //!
-//! Two constraints from the SOP are enforced here rather than left to callers:
-//! only one API request may be in flight at a time (`fetch_lock`), and a single
-//! request may never span 24 hours or more.
+//! Two constraints are enforced here rather than left to callers: only one API
+//! request may be in flight at a time (`fetch_lock`), and a single request may
+//! never span 24 hours or more.
+//!
+//! Neither comes from the SOP, despite what earlier comments here claimed. The
+//! SOP documents no rate limit and no concurrency limit; single-flight is our
+//! own politeness cap. The 24-hour rule is our invariant too — the SOP says a
+//! full-day request *frequently times out*, not that it is rejected — and it
+//! exists so every window maps 1:1 onto a UTC day the importer can reason about.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -25,7 +31,10 @@ pub const TEMP_DIR_NAME: &str = "analytics-tmp";
 const CONFIG_FILE_NAME: &str = "analytics-api.json";
 
 /// A single request must stay strictly under 24 hours (`00:00:00`–`23:59:59`).
-/// Requesting exactly 24 hours or more is rejected by the API.
+///
+/// Our own invariant, not an API rule: it keeps every window inside one UTC day
+/// so a request maps 1:1 onto a day the calendar and the hour-coverage skip
+/// logic can reason about.
 const MAX_WINDOW_SECS: i64 = 24 * 3600;
 /// SOP: data can only be queried up to 90 days back.
 const RETENTION_DAYS: i64 = 90;
@@ -140,7 +149,8 @@ struct CachedToken {
 
 pub struct AnalyticsState {
     token: Mutex<CachedToken>,
-    /// Guarantees a single in-flight API request, per the SOP. The renderer's
+    /// Caps in-flight API requests at one. Self-imposed politeness, not an API
+    /// rule — the SOP documents no rate or concurrency limit. The renderer's
     /// scheduler already serialises downloads; this makes it impossible for a
     /// scheduler bug to produce concurrent calls.
     fetch_lock: tokio::sync::Semaphore,
@@ -162,9 +172,17 @@ impl Default for AnalyticsState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FetchErrorKind {
-    /// Request timed out or the server returned a gateway/overload status.
-    /// The scheduler responds by splitting the window into smaller ones.
+    /// The window was too large for the server to answer in time. The scheduler
+    /// responds by splitting it into smaller ones, which is the documented
+    /// remedy — the SOP recommends querying in smaller slices.
     Timeout,
+    /// The server asked us to slow down. Splitting would make this *worse* by
+    /// issuing more requests, so the scheduler backs off and retries the same
+    /// window instead.
+    RateLimited,
+    /// A transient upstream failure. Like `RateLimited`, retry the same window
+    /// after a delay rather than assuming it was too big.
+    ServerError,
     Unauthorized,
     BadRequest,
     Network,
@@ -173,13 +191,25 @@ pub enum FetchErrorKind {
     Config,
 }
 
+impl FetchErrorKind {
+    /// Whether trying this window again — after a delay, or split smaller — has
+    /// any chance of succeeding.
+    fn is_retryable(self) -> bool {
+        matches!(self, Self::Timeout | Self::RateLimited | Self::ServerError)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchError {
     pub kind: FetchErrorKind,
     pub message: String,
-    /// True when retrying the same window with a shorter span may succeed.
+    /// True when this window is worth another attempt. `kind` decides *how*:
+    /// `Timeout` splits, the others wait and retry unchanged.
     pub retryable: bool,
+    /// Seconds the server asked us to wait, from a `Retry-After` header.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
 }
 
 impl FetchError {
@@ -187,8 +217,14 @@ impl FetchError {
         Self {
             kind,
             message: message.into(),
-            retryable: kind == FetchErrorKind::Timeout,
+            retryable: kind.is_retryable(),
+            retry_after_secs: None,
         }
+    }
+
+    fn with_retry_after(mut self, secs: Option<u64>) -> Self {
+        self.retry_after_secs = secs;
+        self
     }
 }
 
@@ -341,6 +377,18 @@ fn detect_pagination(headers: &reqwest::header::HeaderMap) -> Option<String> {
     None
 }
 
+/// Seconds to wait, from a `Retry-After` header.
+///
+/// Only the delta-seconds form is honoured. The HTTP-date form is legal but
+/// needs a date parser this crate deliberately doesn't carry; the scheduler's
+/// own exponential backoff covers that case.
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    // Cap it: a server asking us to wait an hour should stall the run, not hide
+    // a hang behind a progress bar.
+    raw.trim().parse::<u64>().ok().map(|s| s.min(300))
+}
+
 // ── Token ────────────────────────────────────────────────────────────────────
 
 fn http_client(timeout_secs: u64) -> Result<reqwest::Client, FetchError> {
@@ -487,7 +535,8 @@ pub struct FetchOutcome {
 
 impl AnalyticsState {
     /// Download one window into a temp CSV. Holds the single-request permit for
-    /// the whole call, so concurrent callers queue rather than overlap.
+    /// the whole call, so concurrent callers queue rather than overlap. See
+    /// `fetch_lock` — that cap is ours, not the API's.
     pub async fn fetch_window(
         &self,
         cfg: &AnalyticsConfig,
@@ -594,12 +643,18 @@ impl AnalyticsState {
         }
 
         if !status.is_success() {
+            // Read Retry-After before consuming the response body.
+            let retry_after = parse_retry_after(resp.headers());
             let body = resp.text().await.unwrap_or_default();
             let preview: String = body.chars().take(300).collect();
             let kind = match status.as_u16() {
                 401 => FetchErrorKind::Unauthorized,
                 400 => FetchErrorKind::BadRequest,
-                408 | 429 | 500 | 502 | 503 | 504 => FetchErrorKind::Timeout,
+                // Genuinely "this took too long" — splitting the window helps.
+                408 | 504 => FetchErrorKind::Timeout,
+                // Splitting a rate-limited request just sends more requests.
+                429 => FetchErrorKind::RateLimited,
+                500 | 502 | 503 => FetchErrorKind::ServerError,
                 _ => FetchErrorKind::Http,
             };
             let hint = if status.as_u16() == 400 {
@@ -610,7 +665,8 @@ impl AnalyticsState {
             return Err(FetchError::new(
                 kind,
                 format!("Analytics API returned {status}{hint}: {preview}"),
-            ));
+            )
+            .with_retry_after(retry_after));
         }
 
         resp.text().await.map_err(|e| {
@@ -706,6 +762,56 @@ pub fn cleanup_temp(cache_dir: &Path, paths: &[String]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 429 used to be folded into `Timeout`, which made the scheduler respond
+    /// to "you are sending too many requests" by splitting the window and
+    /// sending *more*. The kinds must stay distinct so backoff and subdivision
+    /// can't be confused for one another again.
+    #[test]
+    fn rate_limiting_is_not_mistaken_for_a_timeout() {
+        use FetchErrorKind::*;
+        // Splitting is only ever the right answer for a genuine timeout.
+        assert_ne!(RateLimited, Timeout);
+        assert_ne!(ServerError, Timeout);
+        // ...but all three are worth another attempt.
+        for kind in [Timeout, RateLimited, ServerError] {
+            assert!(
+                FetchError::new(kind, "x").retryable,
+                "{kind:?} should be retryable"
+            );
+        }
+        for kind in [Unauthorized, BadRequest, Network, Http, InvalidResponse, Config] {
+            assert!(
+                !FetchError::new(kind, "x").retryable,
+                "{kind:?} should not be retryable"
+            );
+        }
+        // The renderer branches on the serialized kind, so the wire names matter.
+        let json = serde_json::to_string(&FetchError::new(RateLimited, "slow down"))
+            .expect("serialize");
+        assert!(json.contains(r#""kind":"rateLimited""#), "got {json}");
+        // Absent Retry-After must not appear at all rather than as null.
+        assert!(!json.contains("retryAfterSecs"), "got {json}");
+    }
+
+    #[test]
+    fn retry_after_is_read_in_seconds_and_capped() {
+        let mut h = reqwest::header::HeaderMap::new();
+        assert_eq!(parse_retry_after(&h), None);
+        h.insert(reqwest::header::RETRY_AFTER, "12".parse().unwrap());
+        assert_eq!(parse_retry_after(&h), Some(12));
+        // A very long wait is clamped — the run should fail visibly rather than
+        // sit on a progress bar for an hour.
+        h.insert(reqwest::header::RETRY_AFTER, "3600".parse().unwrap());
+        assert_eq!(parse_retry_after(&h), Some(300));
+        // The HTTP-date form is legal but unparsed here; the caller's own
+        // exponential backoff covers it.
+        h.insert(
+            reqwest::header::RETRY_AFTER,
+            "Wed, 21 Oct 2026 07:28:00 GMT".parse().unwrap(),
+        );
+        assert_eq!(parse_retry_after(&h), None);
+    }
 
     #[test]
     fn parses_utc_iso_timestamps() {

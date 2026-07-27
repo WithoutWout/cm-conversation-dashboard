@@ -943,6 +943,46 @@
         word-break: break-word;
         max-height: 160px;
         overflow-y: auto;
+        /* Answers are prose; past ~78 characters a line stops being readable. */
+        max-width: 78ch;
+      }
+      /* Inside the info modals the box is clamped rather than independently
+         scrollable: a scroll region nested in a scrolling body hides content
+         with no outward sign that there is more of it. */
+      .dialog-info-modal-body .response-box {
+        max-height: 280px;
+        overflow: hidden;
+        position: relative;
+      }
+      .dialog-info-modal-body .response-box.is-clamped::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 46px;
+        pointer-events: none;
+        background: linear-gradient(transparent, var(--bg));
+      }
+      .dialog-info-modal-body .response-box.expanded {
+        max-height: none;
+      }
+      .response-expand {
+        align-self: flex-start;
+        margin-top: 5px;
+        background: none;
+        border: 1px dashed var(--border);
+        border-radius: 5px;
+        color: var(--muted);
+        font-family: inherit;
+        font-size: 0.71rem;
+        padding: 2px 9px;
+        cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .response-expand:hover {
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .var-token {
         color: var(--green);
@@ -1266,14 +1306,100 @@
         animation: pill-match-glow 2s ease-in-out infinite;
       }
 
+      /* Sized to its content, not to the screen. These modals routinely hold a
+         dozen chips and one response; at full viewport that was ~90% empty
+         space and a response line stretched to the width of the display. */
       .modal-box.dialog-info-modal-box {
-        width: calc(100vw - 32px) !important;
-        max-width: calc(100vw - 32px) !important;
-        height: calc(100vh - 32px);
-        max-height: calc(100vh - 32px);
+        width: min(1040px, 94vw) !important;
+        max-width: min(1040px, 94vw) !important;
+        height: auto;
+        max-height: min(880px, 92vh);
         display: flex;
         flex-direction: column;
         border-radius: 14px;
+      }
+      .dialog-info-modal-box .modal-header {
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      /* The title gives up space before the actions do; actions never wrap
+         mid-label. */
+      .dialog-info-modal-box .modal-header > div:nth-of-type(1) {
+        min-width: 0;
+      }
+      .dialog-info-modal-box .modal-header h3,
+      .dialog-info-modal-box .modal-header h3 + span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dialog-info-modal-box .modal-header .btn-show-dialog,
+      .dialog-info-modal-box .modal-header .btn-open-url {
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      /* One visual weight for the three header actions — "Open in CM.com" was
+         a solid accent button, i.e. the loudest thing on screen, for what is a
+         secondary action next to the item's own title. */
+      .dialog-info-modal-box .modal-header .btn-open-url {
+        background: rgba(124, 106, 247, 0.1);
+        border: 1px solid rgba(124, 106, 247, 0.45);
+        color: var(--accent);
+      }
+      .dialog-info-modal-box .modal-header .btn-open-url:hover {
+        opacity: 1;
+        background: rgba(124, 106, 247, 0.2);
+        border-color: var(--accent);
+      }
+      .info-modal-kind {
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-radius: 4px;
+        padding: 2px 7px;
+        white-space: nowrap;
+        align-self: flex-start;
+      }
+      .info-modal-kind.article {
+        background: rgba(74, 222, 128, 0.12);
+        color: var(--green);
+      }
+      .info-modal-kind.dialog {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--blue);
+      }
+      .info-modal-kind.tdialog {
+        background: rgba(45, 212, 191, 0.13);
+        color: var(--teal);
+      }
+      /* Replaces the "⊵q" glyph, which said what it did only in a tooltip and
+         sat there disabled whenever no search was running. */
+      .modal-match-toggle {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+        background: none;
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-family: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+      }
+      .modal-match-toggle:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .modal-match-toggle.on {
+        border-color: rgba(124, 106, 247, 0.55);
+        background: rgba(124, 106, 247, 0.14);
+        color: var(--accent);
       }
       .dialog-info-modal-body {
         flex: 1;
@@ -1283,6 +1409,16 @@
         display: flex;
         flex-direction: column;
         gap: 14px;
+      }
+      /* Long node lists scroll past their own heading otherwise, so halfway
+         down you no longer know what you're looking at. */
+      .dialog-info-modal-body .detail-section > h4 {
+        position: sticky;
+        top: -16px;
+        z-index: 2;
+        background: var(--surface);
+        padding: 4px 0 5px;
+        margin: -4px 0 4px;
       }
       /* === FLOW MODAL TREE === */
       .modal-box.flow-modal-box {
@@ -1482,6 +1618,7 @@
         line-height: 1.55;
         white-space: pre-wrap;
         word-break: break-word;
+        max-width: 78ch;
       }
 
       @keyframes mark-glow {
@@ -2150,6 +2287,25 @@
       .btn-secondary:hover {
         border-color: var(--accent);
       }
+      .btn-primary:disabled,
+      .btn-secondary:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .btn-primary:disabled:hover,
+      .btn-secondary:disabled:hover {
+        opacity: 0.4;
+        border-color: var(--border);
+      }
+      /* A copy button is disabled for ~2s while it shows "✓ Copied!" — that is
+         a confirmation, not an unavailable action, so it must not dim. */
+      .btn-primary.is-copied:disabled,
+      .btn-secondary.is-copied:disabled,
+      .btn-primary.is-copied:disabled:hover,
+      .btn-secondary.is-copied:disabled:hover {
+        opacity: 1;
+        cursor: default;
+      }
       /* === INSTRUCTIONS MODAL === */
       .instructions-modal-box {
         width: 560px;
@@ -2259,32 +2415,13 @@
         border-bottom-color: var(--accent);
         font-weight: 600;
       }
-      .collections-view-tab {
-        background: none;
-        border: none;
-        border-bottom: 2px solid transparent;
-        color: var(--muted);
-        cursor: pointer;
-        font-size: 0.78rem;
-        padding: 7px 14px;
-        font-family: inherit;
-        transition: color 0.15s, border-color 0.15s;
-        margin-bottom: -1px;
-      }
-      .collections-view-tab:hover {
-        color: var(--text);
-      }
-      .collections-view-tab.active {
-        color: var(--text);
-        border-bottom-color: var(--accent);
-        font-weight: 600;
-      }
       .export-modal-box .modal-body {
         flex: 1;
         overflow: hidden;
         display: flex;
         flex-direction: column;
         gap: 9px;
+        padding-top: 10px;
       }
       .export-list {
         flex: 1;
@@ -2295,7 +2432,7 @@
       }
       .export-row {
         display: grid;
-        grid-template-columns: auto 1fr 1.5fr auto;
+        grid-template-columns: auto auto 1fr 1.5fr auto auto;
         align-items: start;
         gap: 10px;
         padding: 8px 12px;
@@ -2309,7 +2446,55 @@
         background: var(--surface2);
       }
       .export-row.has-relations {
-        grid-template-columns: auto minmax(160px, 1fr) minmax(220px, 1.3fr) auto;
+        grid-template-columns:
+          auto auto minmax(160px, 1fr) minmax(220px, 1.3fr)
+          auto auto;
+      }
+      /* `dn-` prefixes both Dialogs and Transactional Dialogs, so in the flat
+         List view the ID alone cannot tell them apart — hence a type badge. */
+      .export-kind {
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-radius: 4px;
+        padding: 2px 6px;
+        white-space: nowrap;
+        margin-top: 1px;
+      }
+      .export-kind.article {
+        background: rgba(74, 222, 128, 0.12);
+        color: var(--green);
+      }
+      .export-kind.dialog {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--blue);
+      }
+      .export-kind.tdialog {
+        background: rgba(45, 212, 191, 0.13);
+        color: var(--teal);
+      }
+      /* Drops one item from this share without touching the search behind it. */
+      .export-row-drop {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.76rem;
+        cursor: pointer;
+        padding: 2px 5px;
+        border-radius: 4px;
+        opacity: 0;
+        align-self: center;
+        transition: opacity 0.12s, color 0.12s, background 0.12s;
+      }
+      .export-row:hover .export-row-drop,
+      .export-row-drop:focus-visible {
+        opacity: 0.65;
+      }
+      .export-row-drop:hover {
+        opacity: 1;
+        color: var(--red);
+        background: rgba(248, 113, 113, 0.1);
       }
       .export-row-id {
         color: var(--blue);
@@ -2441,20 +2626,33 @@
       .export-table tr:hover td {
         background: var(--surface2);
       }
-      .export-table td.td-id {
+      .export-table td.td-id,
+      .export-table td.td-id-plain {
         font-family: monospace;
         font-size: 0.73rem;
         white-space: nowrap;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .export-table td.td-id-plain {
+        color: var(--muted);
+      }
+      .export-table .td-id-link {
         color: var(--blue);
         text-decoration: underline;
         text-underline-offset: 2px;
         cursor: pointer;
       }
-      .export-table td.td-id-plain {
-        font-family: monospace;
-        font-size: 0.73rem;
-        white-space: nowrap;
-        color: var(--muted);
+      .export-table td.td-drop {
+        width: 1%;
+        text-align: right;
+      }
+      .export-table tr:hover .export-row-drop {
+        opacity: 0.65;
+      }
+      .export-table tr:hover .export-row-drop:hover {
+        opacity: 1;
       }
       .export-table td.td-response {
         font-style: italic;
@@ -2505,6 +2703,95 @@
       .export-meta {
         font-size: 0.71rem;
         color: var(--muted);
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .export-meta b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .export-meta-chip {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1px 8px;
+        color: var(--muted);
+      }
+      /* Clickable: an unset context URL silently turns every "link" copy into
+         plain text, so it points at the setting that fixes it. */
+      .export-meta-warn {
+        background: rgba(251, 146, 60, 0.12);
+        border: 1px solid rgba(251, 146, 60, 0.3);
+        border-radius: 10px;
+        padding: 1px 8px;
+        color: var(--orange);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.71rem;
+      }
+      .export-meta-warn:hover {
+        border-color: var(--orange);
+      }
+      .export-hint {
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.5;
+        padding: 9px 18px 0;
+        flex-shrink: 0;
+      }
+      .export-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 18px 0;
+        flex-shrink: 0;
+      }
+      .export-toolbar input[type="text"] {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .export-toolbar input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+      .export-toolbar-count {
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .export-restore {
+        font-size: 0.72rem;
+        white-space: nowrap;
+      }
+      .export-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 44px 28px;
+        text-align: center;
+        height: 100%;
+      }
+      .export-empty-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .export-empty-text {
+        font-size: 0.79rem;
+        color: var(--muted);
+        line-height: 1.6;
+        max-width: 400px;
       }
       /* === UPDATE BANNER === */
       .update-banner {
@@ -3036,72 +3323,465 @@
         opacity: 0.4;
         cursor: not-allowed;
       }
-      .collection-list {
-        padding-bottom: 6px;
+      /* === COLLECTIONS MODAL ===
+         Master/detail: the sidebar is the only place a collection is chosen,
+         the detail pane is the only place one is acted on. Everything that used
+         to be a row of five identical text buttons is now either a tab (the two
+         "View …" panels) or a properly weighted action in the detail header. */
+      .collections-modal-box {
+        width: min(1040px, 94vw);
+        height: min(680px, 88vh);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
       }
-      .collection-row {
-        padding: 10px 18px;
-        border-bottom: 1px solid var(--border);
+      .collections-modal-box .modal-header {
+        gap: 12px;
       }
-      .collection-row-main {
+      .col-layout {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      /* ── Sidebar ── */
+      .col-sidebar {
+        width: 232px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--border);
+        background: var(--bg);
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .col-sidebar-top {
+        padding: 10px 10px 8px;
+      }
+      .col-new-btn {
+        width: 100%;
+        background: var(--accent);
+        border: none;
+        border-radius: 7px;
+        color: #fff;
+        padding: 7px 10px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+      .col-new-btn:hover {
+        opacity: 0.85;
+      }
+      .col-nav-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 8px 8px;
         display: flex;
         flex-direction: column;
         gap: 2px;
+        min-height: 0;
+      }
+      .col-nav-section {
+        font-size: 0.66rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 8px 8px 4px;
+      }
+      .col-nav-item {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        align-items: flex-start;
+        text-align: left;
+        width: 100%;
+        background: none;
+        border: none;
+        border-radius: 7px;
+        padding: 7px 9px;
+        cursor: pointer;
+        font-family: inherit;
+        color: var(--text);
+        transition: background 0.12s;
+      }
+      .col-nav-item:hover {
+        background: var(--surface2);
+      }
+      .col-nav-item.active {
+        background: var(--surface2);
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
+      .col-nav-name {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+      }
+      .col-nav-meta {
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      .col-nav-empty {
+        font-size: 0.75rem;
+        color: var(--muted);
+        line-height: 1.5;
+        padding: 6px 9px 10px;
+      }
+      .col-sidebar-bottom {
+        border-top: 1px solid var(--border);
+        padding: 8px;
+      }
+      .col-nav-item.col-nav-filters {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+      }
+      .col-nav-filters .col-nav-name {
+        flex: 1;
+        font-weight: 500;
+      }
+      .col-count-badge {
+        font-size: 0.68rem;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0 7px;
+        color: var(--muted);
+      }
+      .col-count-badge.on {
+        background: rgba(96, 165, 250, 0.14);
+        border-color: rgba(96, 165, 250, 0.32);
+        color: var(--blue);
+      }
+      /* ── Detail pane ── */
+      .col-detail {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+      .col-detail-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 18px 10px;
+      }
+      .col-detail-titles {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .col-detail-name {
+        font-size: 1.02rem;
+        font-weight: 700;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .col-detail-sub {
+        font-size: 0.74rem;
+        color: var(--muted);
+      }
+      .col-detail-sub .warn {
+        color: var(--orange);
+      }
+      .col-detail-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .col-icon-btn {
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-family: inherit;
+        padding: 5px 9px;
+        cursor: pointer;
+        transition: color 0.12s, background 0.12s;
+      }
+      .col-icon-btn:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
+      .col-icon-btn.danger:hover {
+        color: var(--red);
+        background: rgba(248, 113, 113, 0.1);
+      }
+      .col-detail-tabs {
+        display: flex;
+        gap: 0;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .col-tab {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.78rem;
+        font-family: inherit;
+        padding: 7px 13px;
+        margin-bottom: -1px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .col-tab:hover {
+        color: var(--text);
+      }
+      .col-tab.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
+      .col-tab .col-count-badge {
+        font-size: 0.66rem;
+      }
+      .col-detail-body {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .col-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        background: var(--surface);
+        z-index: 2;
+      }
+      .col-toolbar input[type="text"] {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+      .col-toolbar input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+      .col-toolbar-count {
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      /* Explains a pane in one line, so the user never has to infer what a tab
+         is for from its contents. */
+      .col-note {
+        font-size: 0.74rem;
+        color: var(--muted);
+        line-height: 1.55;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .col-note.warn {
+        background: rgba(251, 146, 60, 0.07);
+        border-bottom-color: rgba(251, 146, 60, 0.22);
+        color: var(--text);
+      }
+      .col-note code {
+        font-family: monospace;
+        color: #9a90f0;
+        font-size: 0.72rem;
+      }
+      /* ── Export preview rows ── */
+      .col-rows {
+        padding: 4px 0 10px;
+      }
+      .col-row {
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .col-row:last-child {
+        border-bottom: none;
+      }
+      .col-row-triggers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
         margin-bottom: 6px;
       }
-      .collection-row-name {
-        font-size: 0.85rem;
+      .col-trigger-chip {
+        font-size: 0.72rem;
+        background: rgba(96, 165, 250, 0.1);
+        border: 1px solid rgba(96, 165, 250, 0.25);
+        color: var(--text);
+        border-radius: 5px;
+        padding: 1px 7px;
+      }
+      .col-row-content {
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .col-row-matched {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 7px;
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      .col-matched-chip {
+        background: rgba(251, 146, 60, 0.12);
+        border: 1px solid rgba(251, 146, 60, 0.3);
+        color: var(--orange);
+        border-radius: 5px;
+        padding: 1px 7px;
+        font-family: monospace;
+      }
+      /* ── Items pane ── */
+      .col-items {
+        padding: 4px 0 10px;
+      }
+      .col-item-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .col-item-row:last-child {
+        border-bottom: none;
+      }
+      .col-item-row:hover {
+        background: var(--surface2);
+      }
+      .col-item-kind {
+        font-size: 0.64rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-radius: 4px;
+        padding: 2px 6px;
+        flex-shrink: 0;
+      }
+      .col-item-kind.article {
+        background: rgba(74, 222, 128, 0.12);
+        color: var(--green);
+      }
+      .col-item-kind.dialog {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--blue);
+      }
+      .col-item-kind.missing {
+        background: rgba(248, 113, 113, 0.12);
+        color: var(--red);
+      }
+      .col-item-name {
+        flex: 1;
+        min-width: 0;
+        font-size: 0.8rem;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .col-item-rows {
+        font-size: 0.72rem;
+        color: var(--muted);
+        background: var(--bg);
+        border-radius: 10px;
+        padding: 1px 8px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .col-item-rows.zero {
+        color: var(--orange);
+        background: rgba(251, 146, 60, 0.12);
+      }
+      .col-item-remove {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.8rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+        opacity: 0.6;
+        flex-shrink: 0;
+      }
+      .col-item-remove:hover {
+        opacity: 1;
+        color: var(--red);
+        background: rgba(248, 113, 113, 0.1);
+      }
+      /* ── Empty states ── */
+      .col-empty {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 36px 28px;
+        text-align: center;
+      }
+      .col-empty-title {
+        font-size: 0.92rem;
         font-weight: 600;
         color: var(--text);
       }
-      .collection-row-actions {
+      .col-empty-text {
+        font-size: 0.79rem;
+        color: var(--muted);
+        line-height: 1.6;
+        max-width: 420px;
+      }
+      .col-empty-steps {
         display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 6px;
+        text-align: left;
+        max-width: 420px;
       }
-      .collection-items-panel {
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid var(--border);
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .collection-content-panel {
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid var(--border);
-      }
-      .collection-content-search-row {
+      /* ── Smart filters pane ── */
+      .col-filter-add {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 8px;
-      }
-      .collection-content-search {
-        flex: 1;
-      }
-      .collection-content-list {
-        max-height: 320px;
-        overflow-y: auto;
-      }
-      .collection-content-row {
-        padding: 8px 0;
+        padding: 12px 18px;
         border-bottom: 1px solid var(--border);
       }
-      .collection-content-row:last-child {
-        border-bottom: none;
-      }
-      .collection-content-trigger {
-        font-size: 0.78rem;
-        font-weight: 600;
+      .col-filter-add input[type="text"] {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
         color: var(--text);
-        margin-bottom: 2px;
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        font-family: inherit;
+        outline: none;
       }
-      .collection-content-text {
-        font-size: 0.78rem;
-        color: var(--muted);
-        line-height: 1.4;
+      .col-filter-add input[type="text"]:focus {
+        border-color: var(--accent);
       }
       .export-filter-add-row {
         display: flex;
@@ -4418,6 +5098,18 @@
       .add-to-collection-menu.open {
         display: block;
       }
+      /* Header of the popover — states what the click will actually do, since
+         the selection count lives at the other end of the bar. */
+      .atc-head {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 4px 8px 7px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 5px;
+      }
       .add-to-collection-row {
         display: flex;
         align-items: center;
@@ -4428,6 +5120,27 @@
         cursor: pointer;
         font-size: 0.78rem;
         color: var(--text);
+      }
+      .atc-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* How many of the selected items this collection doesn't have yet —
+         "+3" vs "all added" is the difference between a useful click and a
+         no-op, and the old menu showed neither. */
+      .atc-delta {
+        font-size: 0.7rem;
+        color: var(--accent);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .atc-delta.none {
+        color: var(--muted);
+        font-weight: 400;
+      }
+      .add-to-collection-row.all-added .atc-name {
+        color: var(--muted);
       }
       .add-to-collection-row:hover {
         background: var(--surface2);
@@ -4554,6 +5267,44 @@
         border-radius: 16px 16px 4px 16px;
         color: var(--text);
         align-self: flex-end;
+      }
+      /* Values the log never stored. Two shapes, one visual language:
+         .redacted-value is a whole user message (#Voornaam#), so it can afford
+         a label; .tpl-var sits mid-sentence in a bot answer ({{name}}), so it
+         stays tight enough to read as a word. */
+      .redacted-value {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+      }
+      .redacted-icon {
+        opacity: 0.65;
+        font-size: 0.85em;
+      }
+      .redacted-note {
+        font-size: 0.66rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: var(--muted);
+        background: var(--surface2);
+        border: 1px dashed var(--border);
+        border-radius: 6px;
+        padding: 1px 6px;
+        opacity: 0.85;
+      }
+      /* Kept nearly padding-free on purpose: a wider chip visually detaches the
+         punctuation that follows it ("Hoi {{name}} !"), which reads as a typo. */
+      .tpl-var {
+        background: rgba(124, 106, 247, 0.12);
+        border-radius: 3px;
+        padding: 0 2px;
+        color: var(--muted);
+        font-size: 0.92em;
+        text-decoration: underline dotted;
+        text-decoration-color: var(--muted);
+        text-underline-offset: 3px;
+        cursor: help;
       }
       /* System pill */
       .system-pill {
@@ -7291,6 +8042,28 @@
                 apply it right now.
               </p>
             </div>
+            <div
+              style="
+                padding: 14px 18px 12px;
+                border-bottom: 1px solid var(--border);
+              "
+            >
+              <label>Compact database</label>
+              <p class="hint" style="margin-bottom: 8px">
+                Deleting conversations frees space inside the database file but
+                does not shrink it. Compacting rebuilds the file and returns
+                that space to your disk. It needs roughly the file's own size
+                again in free space while it runs.
+              </p>
+              <div
+                style="display: flex; gap: 8px; align-items: center"
+              >
+                <button class="btn-secondary" id="manageDbCompactBtn">
+                  Compact now
+                </button>
+                <span class="hint" id="manageDbCompactStatus"></span>
+              </div>
+            </div>
             <div style="padding: 14px 18px 12px">
               <label>Interaction Log Import</label>
               <p class="hint" style="margin-bottom: 8px">
@@ -7323,9 +8096,12 @@
     <div class="modal-overlay" id="exportModal">
       <div class="modal-box export-modal-box">
         <div class="modal-header">
-          <div style="display: flex; flex-direction: column; gap: 3px">
+          <div style="display: flex; flex-direction: column; gap: 4px">
             <h3>Share Content</h3>
-            <span class="export-meta" id="export-meta"></span>
+            <!-- Where this list came from, stated rather than whispered: the
+                 modal shows the active tab's current result set, and without
+                 that the item count is unattributable. -->
+            <div class="export-meta" id="export-meta"></div>
           </div>
           <div class="chat-spacer"></div>
           <button class="close-btn" id="closeExport">&#x2715;</button>
@@ -7334,12 +8110,30 @@
           <button class="export-view-tab active" data-export-view="list">
             List
           </button>
-          <button class="export-view-tab" data-export-view="table">
-            Table
-          </button>
           <button class="export-view-tab" data-export-view="grouped">
             Grouped
           </button>
+          <button class="export-view-tab" data-export-view="table">
+            Table
+          </button>
+        </div>
+        <!-- Each view produces a different copy format; saying so beats making
+             the user pick one and infer the difference from the result. -->
+        <div class="export-hint" id="exportViewHint"></div>
+        <div class="export-toolbar">
+          <input
+            type="text"
+            id="exportFilter"
+            placeholder="Filter these items…"
+            oninput="_onExportFilter(this.value)"
+          />
+          <span class="export-toolbar-count" id="exportCount"></span>
+          <button
+            class="btn-link export-restore"
+            id="exportRestoreBtn"
+            onclick="_exportRestoreAll()"
+            style="display: none"
+          ></button>
         </div>
         <div class="modal-body">
           <div class="export-list" id="exportList"></div>
@@ -7359,29 +8153,31 @@
 
     <!-- COLLECTIONS MODAL -->
     <div class="modal-overlay" id="collectionsModal">
-      <div class="modal-box export-modal-box">
+      <div class="modal-box collections-modal-box">
         <div class="modal-header">
-          <h3 style="flex: 1">Collections</h3>
+          <h3>Collections</h3>
+          <span class="hint" style="flex: 1"
+            >Curated Articles and Dialogs, exported as knowledge rows</span
+          >
           <button class="close-btn" id="closeCollections">&#x2715;</button>
         </div>
-        <div class="export-view-tabs" id="collectionsViewTabs">
-          <button
-            class="collections-view-tab active"
-            data-collections-view="list"
-          >
-            Collections
-          </button>
-          <button class="collections-view-tab" data-collections-view="filters">
-            Smart Filters
-          </button>
-          <button class="collections-view-tab" data-collections-view="excluded">
-            Filtered Out
-          </button>
-        </div>
-        <div class="modal-body">
-          <div id="collectionsListBody"></div>
-          <div id="collectionsFiltersBody" style="display: none"></div>
-          <div id="collectionsExcludedBody" style="display: none"></div>
+        <!-- Master/detail. The sidebar picks what you're looking at (a
+             collection, or the global Smart Filters); everything else happens
+             in the detail pane on the right. -->
+        <div class="col-layout">
+          <aside class="col-sidebar">
+            <div class="col-sidebar-top">
+              <button
+                class="col-new-btn"
+                onclick="createEmptyCollectionPrompt()"
+              >
+                + New collection
+              </button>
+            </div>
+            <div class="col-nav-list" id="collectionsNav"></div>
+            <div class="col-sidebar-bottom" id="collectionsNavFilters"></div>
+          </aside>
+          <section class="col-detail" id="collectionsDetail"></section>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" id="closeCollections2">Close</button>
@@ -7401,6 +8197,7 @@
           >
             &#8592; Back
           </button>
+          <span class="info-modal-kind article">Article</span>
           <div style="display: flex; flex-direction: column; gap: 3px">
             <h3 id="article-info-title">Article</h3>
             <span
@@ -7421,13 +8218,13 @@
               style="display: flex; gap: 6px"
             ></div>
             <button
-              class="sopt"
+              class="modal-match-toggle"
               id="article-modal-filter-btn"
               onclick="toggleModalMatchFilter()"
               title="Show search-matching content only"
               disabled
             >
-              &#x22B5;q
+              Matches only
             </button>
             <button
               class="close-btn"
@@ -7453,6 +8250,9 @@
           >
             &#8592; Back
           </button>
+          <span class="info-modal-kind dialog" id="dialog-info-kind"
+            >Dialog</span
+          >
           <div style="display: flex; flex-direction: column; gap: 3px">
             <h3 id="dialog-info-title">Dialog</h3>
             <span
@@ -7470,13 +8270,13 @@
           >
             <div id="dialog-info-actions" style="display: flex; gap: 6px"></div>
             <button
-              class="sopt"
+              class="modal-match-toggle"
               id="dialog-modal-filter-btn"
               onclick="toggleModalMatchFilter()"
               title="Show search-matching content only"
               disabled
             >
-              &#x22B5;q
+              Matches only
             </button>
             <button
               class="close-btn"
@@ -7733,6 +8533,9 @@
     <script>
       const PAGE_SIZE = 50
       const ENTITY_PREVIEW = 8
+      // Higher than the card's: the info modal is wider, so more chips fit in
+      // the same two rows before the Response gets pushed off screen.
+      const MODAL_ENTITY_PREVIEW = 12
 
       // ── Tauri / Electron API bridge ─────────────────────────────────
       // Wraps Tauri invoke() behind the same window.electronAPI surface
@@ -7763,8 +8566,17 @@
           selectCsvFiles: () => invoke("select_csv_files"),
           selectDbSavePath: () => invoke("select_db_save_path"),
           selectDbOpenPath: () => invoke("select_db_open_path"),
-          importInteractionsCsv: (filePath, maxAgeDays, delimiter) =>
-            invoke("import_interactions_csv", { filePath, maxAgeDays, delimiter }),
+          importInteractionsCsv: (filePath, maxAgeDays, delimiter, deferFinalize) =>
+            invoke("import_interactions_csv", {
+              filePath,
+              maxAgeDays,
+              delimiter,
+              deferFinalize: !!deferFinalize,
+            }),
+          beginImportRun: () => invoke("begin_import_run"),
+          finalizeImportRun: (maxAgeDays) =>
+            invoke("finalize_import_run", { maxAgeDays }),
+          compactDatabase: () => invoke("compact_database"),
           // Analytics API commands
           getAnalyticsConfig: () => invoke("get_analytics_config"),
           saveAnalyticsConfig: (args) =>
@@ -7783,7 +8595,16 @@
           getDateRange: () => invoke("get_date_range"),
           getContextOptions: () => invoke("get_context_options"),
           getDbDailyStats: () => invoke("get_db_daily_stats"),
-          getDbHourCoverage: () => invoke("get_db_hour_coverage"),
+          // sinceDate ("YYYY-MM-DD") bounds an otherwise full-table aggregate.
+          // Omit it to cover everything stored — the Manage Database calendar
+          // browses beyond the API's retention window and needs the lot.
+          getDbHourCoverage: (sinceDate) =>
+            invoke("get_db_hour_coverage", { sinceDate: sinceDate || null }),
+          // Records that a window was actually requested, so an hour the API
+          // answered with zero rows stops looking like an hour we never asked
+          // about. API path only — a manual CSV has no request window.
+          recordImportedWindow: (startUtc, endUtc) =>
+            invoke("record_imported_window", { startUtc, endUtc }),
           deleteInteractionsByDates: (dates) =>
             invoke("delete_interactions_by_dates", { args: { dates } }),
           // Flagged conversations commands
@@ -7851,6 +8672,14 @@
           Promise.resolve({ ok: false, canceled: true, path: null })
       if (!window.electronAPI.importInteractionsCsv)
         window.electronAPI.importInteractionsCsv = _convStub
+      // Run bracketing is an optimisation, so the stubs resolve rather than
+      // reject — an older backend still imports, just with the per-file tail.
+      if (!window.electronAPI.beginImportRun)
+        window.electronAPI.beginImportRun = () => Promise.resolve()
+      if (!window.electronAPI.finalizeImportRun)
+        window.electronAPI.finalizeImportRun = () => Promise.resolve({ purged: 0 })
+      if (!window.electronAPI.compactDatabase)
+        window.electronAPI.compactDatabase = _convStub
       if (!window.electronAPI.getAnalyticsConfig)
         window.electronAPI.getAnalyticsConfig = () =>
           Promise.resolve({
@@ -7902,7 +8731,11 @@
         window.electronAPI.getDbDailyStats = () =>
           Promise.resolve({ total: 0, days: [] })
       if (!window.electronAPI.getDbHourCoverage)
-        window.electronAPI.getDbHourCoverage = () => Promise.resolve([])
+        window.electronAPI.getDbHourCoverage = (_sinceDate) => Promise.resolve([])
+      // Resolves rather than rejects: an older backend still imports correctly,
+      // it just falls back to inferring coverage from row presence.
+      if (!window.electronAPI.recordImportedWindow)
+        window.electronAPI.recordImportedWindow = () => Promise.resolve()
       if (!window.electronAPI.deleteInteractionsByDates)
         window.electronAPI.deleteInteractionsByDates = _convStub
       if (!window.electronAPI.flagSession)
@@ -8022,7 +8855,13 @@
       let collectionSelection = new Set() // keys: "article:<Id>" | "dialog:<id>"
       let cmCollections = loadCollections()
       let cmExportFilters = loadExportFilters()
-      let _collectionsExcludedViewId = null // which collection the "Filtered Out" tab shows
+      // Collections modal (master/detail) view state. `_colView` is a collection
+      // id, or COL_FILTERS_VIEW for the global Smart Filters pane — one place a
+      // collection is chosen, so the detail tabs never ask again.
+      const COL_FILTERS_VIEW = "__filters__"
+      let _colView = null
+      let _colTab = "content" // "content" | "items" | "filtered"
+      let _colQuery = ""
 
       // ── Navigation history ──────────────────────────────────────────
       let navHistory = []
@@ -8522,11 +9361,12 @@
               "</span>",
           )
         }
+        // Only worth a tag when something is actually missing. "2/2 sources" is
+        // a permanent all-is-well readout that costs header space every session
+        // and tells you nothing you'd act on; the interesting case is the one
+        // that names what didn't load.
         const statuses = (data.dataSource && data.dataSource.statuses) || []
-        const loadedCount = statuses.filter((status) => status.found).length
-        const totalCount = statuses.length
-        const summaryClass =
-          loadedCount === totalCount ? "file-tag" : "file-tag is-warning"
+        const missing = statuses.filter((status) => !status.found)
         const summaryTitle = statuses
           .map((status) =>
             status.filename
@@ -8534,14 +9374,12 @@
               : status.label + ": missing",
           )
           .join("\n")
-        if (dataFolderPath && totalCount) {
+        if (dataFolderPath && missing.length) {
           parts.push(
-            '<span class="' +
-              summaryClass +
-              '" title="' +
+            '<span class="file-tag is-warning" title="' +
               esc(summaryTitle) +
-              '">' +
-              esc(loadedCount + "/" + totalCount + " sources") +
+              '">Missing: ' +
+              esc(missing.map((status) => status.label).join(", ")) +
               "</span>",
           )
         }
@@ -10177,8 +11015,15 @@
             if (!btn) return
             btn.classList.toggle("on", modalMatchFilter && hasQuery)
             btn.disabled = !hasQuery
+            // With no search running the toggle can do nothing at all, so it is
+            // hidden rather than shown permanently greyed out.
+            btn.style.display = hasQuery ? "" : "none"
             btn.title = hasQuery
-              ? "Show search-matching content only"
+              ? modalMatchFilter
+                ? 'Showing only content matching "' +
+                  gQuery +
+                  '" — click to show everything'
+                : 'Show only content matching "' + gQuery + '"'
               : "No active search query"
           },
         )
@@ -10911,19 +11756,38 @@
         if (menu) menu.classList.remove("open")
       }
       function renderAddToCollectionMenu() {
+        const sel = [...collectionSelection]
         const rows = cmCollections
-          .map(
-            (c) =>
-              '<div class="add-to-collection-row" onclick="addSelectionToCollection(\'' +
+          .map((c) => {
+            const have = new Set(c.itemKeys || [])
+            const added = sel.filter((k) => !have.has(k)).length
+            return (
+              '<div class="add-to-collection-row' +
+              (added ? "" : " all-added") +
+              '" onclick="addSelectionToCollection(\'' +
               esc(c.id) +
-              '\')"><span>' +
+              '\')" title="' +
               esc(c.name) +
-              '</span><span class="chat-meta">' +
-              c.itemKeys.length +
-              "</span></div>",
-          )
+              " · " +
+              (c.itemKeys || []).length +
+              ' items">' +
+              '<span class="atc-name">' +
+              esc(c.name) +
+              "</span>" +
+              '<span class="atc-delta' +
+              (added ? "" : " none") +
+              '">' +
+              (added ? "+" + added : "all added") +
+              "</span></div>"
+            )
+          })
           .join("")
         document.getElementById("addToCollectionMenu").innerHTML =
+          '<div class="atc-head">Add ' +
+          sel.length +
+          " item" +
+          (sel.length !== 1 ? "s" : "") +
+          " to</div>" +
           (rows ||
             '<div class="chat-meta" style="padding:6px 8px">No collections yet</div>') +
           '<div class="add-to-collection-row add-to-collection-new" onclick="createCollectionFromSelection()">+ New collection…</div>'
@@ -11213,8 +12077,20 @@
         }
       }
 
+      // Back is only shown when there is somewhere to go back to. It used to be
+      // permanent and silently fall through to "close", which reads as a
+      // navigation history that doesn't exist.
       function _navUpdateBackButtons() {
-        // Buttons are always visible; nothing to toggle.
+        const show = navHistory.length > 0
+        ;[
+          "article-back-btn",
+          "dialog-back-btn",
+          "flow-back-btn",
+          "entity-back-btn",
+        ].forEach((id) => {
+          const btn = document.getElementById(id)
+          if (btn) btn.style.display = show ? "" : "none"
+        })
       }
 
       function _navClear() {
@@ -11427,9 +12303,32 @@
           )
         }
 
-        const chipItems = art.Questions.map(makeChip)
-        const chips = chipItems.join("")
-        const visibleChipCount = chipItems.filter(Boolean).length
+        // Split on the *rendered* chips, not on art.Questions — with the match
+        // filter on, makeChip returns "" for the ones that don't match, and
+        // slicing the raw list would spend the preview budget on blanks.
+        const shownChips = art.Questions.map(makeChip).filter(Boolean)
+        const visibleChipCount = shownChips.length
+        // An Article can carry dozens of entity phrases; left uncollapsed they
+        // push the Response — the thing you opened the modal for — below the
+        // fold. Same idiom as the content cards, own id so the two can't clash
+        // while both are in the DOM.
+        const overflowId = "eo-modal-" + art.Id
+        const hiddenChips = shownChips.slice(MODAL_ENTITY_PREVIEW)
+        const chips = hiddenChips.length
+          ? shownChips.slice(0, MODAL_ENTITY_PREVIEW).join("") +
+            '<div class="chip-overflow" id="' +
+            overflowId +
+            '">' +
+            hiddenChips.join("") +
+            "</div>" +
+            '<button class="show-more-btn" onclick="toggleEntityOverflow(\'' +
+            overflowId +
+            "',this," +
+            hiddenChips.length +
+            ')">+' +
+            hiddenChips.length +
+            " more</button>"
+          : shownChips.join("")
         let html = chips
           ? '<div class="detail-section"><h4>Entities (' +
             (filterActive
@@ -11541,7 +12440,9 @@
             '<p style="color:var(--muted);font-size:0.82rem">No content matching the current search query.</p>'
         }
 
-        document.getElementById("article-info-body").innerHTML = html
+        const bodyEl = document.getElementById("article-info-body")
+        bodyEl.innerHTML = html
+        _applyResponseClamps(bodyEl)
       }
 
       function closeArticleInfoModal() {
@@ -11649,6 +12550,12 @@
         const titleEl = document.getElementById("dialog-info-title")
         const subtitleEl = document.getElementById("dialog-info-subtitle")
         const actionsEl = document.getElementById("dialog-info-actions")
+        const kindEl = document.getElementById("dialog-info-kind")
+        if (kindEl) {
+          kindEl.className =
+            "info-modal-kind " + (isTDialog ? "tdialog" : "dialog")
+          kindEl.textContent = isTDialog ? "Transactional" : "Dialog"
+        }
 
         if (isTDialog) {
           titleEl.textContent = item.name || "Transactional Dialog"
@@ -11694,11 +12601,52 @@
         _navUpdateBackButtons()
       }
 
+      // The reverse of an Article's "Linked Dialog": which Articles route a user
+      // *into* this Dialog. For a Transactional Dialog it is the only thing the
+      // export tells us about it, and it turns a dead-end modal into the answer
+      // to "how do people get here?".
+      function _articlesLinkingTo(kind, id) {
+        const out = []
+        for (const a of allArticles) {
+          const hit = (a.Outputs || []).some((o) =>
+            kind === "tdialog"
+              ? o.Type === "TDialogStart" && (o.TDialogId || o.DialogId) === id
+              : o.Type === "DialogStart" && o.DialogId === id,
+          )
+          if (hit) out.push({ id: a.Id, title: aFaqQ(a) || "Article #" + a.Id })
+        }
+        return out.sort((x, y) => x.id - y.id)
+      }
+      function _linkedFromSectionHtml(kind, id) {
+        const refs = _articlesLinkingTo(kind, id)
+        if (!refs.length) return ""
+        return (
+          '<div class="detail-section"><h4>Linked from Articles (' +
+          refs.length +
+          ')</h4><div class="dialog-link-row">' +
+          refs
+            .map(
+              (r) =>
+                '<span class="jump-link" onclick="openArticleInfoModal(' +
+                r.id +
+                ')" title="' +
+                esc(r.title) +
+                '">qa-' +
+                r.id +
+                "</span>",
+            )
+            .join("") +
+          "</div></div>"
+        )
+      }
+
       function _renderDialogModalBody(item, id, isTDialog) {
         const bodyEl = document.getElementById("dialog-info-body")
         if (isTDialog) {
+          const linked = _linkedFromSectionHtml("tdialog", id)
           bodyEl.innerHTML =
-            '<p style="color:var(--muted);font-size:0.82rem">No additional details available for Transactional Dialogs.</p>'
+            linked +
+            '<p style="color:var(--muted);font-size:0.82rem">The content export carries no nodes or responses for Transactional Dialogs — open it in CM.com to see how it is built.</p>'
           return
         }
 
@@ -11747,7 +12695,34 @@
             : '<p style="color:var(--muted);font-size:0.82rem">No details available.</p>'
         }
 
+        // Appended after the empty-state check so it can't make a
+        // "nothing matched" body look like a result.
+        if (!filterActive) html += _linkedFromSectionHtml("dialog", id)
+
         bodyEl.innerHTML = html
+        _applyResponseClamps(bodyEl)
+      }
+
+      // A response longer than the clamp gets an explicit "Show full response"
+      // rather than its own scrollbar — a scroll region nested inside the
+      // scrolling modal body hides text with nothing to say that it did.
+      function _applyResponseClamps(container) {
+        container.querySelectorAll(".response-box").forEach((box) => {
+          box.classList.remove("is-clamped", "expanded")
+          if (box.nextElementSibling?.classList.contains("response-expand"))
+            box.nextElementSibling.remove()
+          if (box.scrollHeight <= box.clientHeight + 2) return
+          box.classList.add("is-clamped")
+          const btn = document.createElement("button")
+          btn.className = "response-expand"
+          btn.textContent = "Show full response"
+          btn.onclick = () => {
+            const open = box.classList.toggle("expanded")
+            box.classList.toggle("is-clamped", !open)
+            btn.textContent = open ? "Show less" : "Show full response"
+          }
+          box.insertAdjacentElement("afterend", btn)
+        })
       }
 
       function closeDialogInfoModal() {
@@ -12136,6 +13111,38 @@
 
       // ── Share Content modal ─────────────────────────────────────────
       let _exportView = "list" // "list" | "table" | "grouped"
+      // Per-open refinements on top of the tab's result set. Both narrow what
+      // is *shared*, not what is searched — every copy action reads the same
+      // getExportItemsForCurrentView(), so the list on screen and the text on
+      // the clipboard can never disagree.
+      let _exportFilter = ""
+      let _exportDropped = new Set() // "<kind>:<id>"
+
+      // What each view actually produces, said out loud. "Grouped" in
+      // particular does three things at once — sections, id order, and Dialog →
+      // Article relations replacing the response column — which no user is
+      // going to infer from the word.
+      const EXPORT_VIEW_HINTS = {
+        list: "Every item in one flat list, in the order the search returned them.",
+        grouped:
+          "Split into Articles, Dialogs and Transactional Dialogs and sorted by ID. Dialog rows show the Articles that route into them instead of their response text.",
+        table:
+          "ID, title and matched responses as a table — pastes into a spreadsheet or a ticket with its columns intact.",
+      }
+
+      function _exportKey(item) {
+        return item.kind + ":" + item.id
+      }
+      // Matches the same text the row shows, so filtering never hides a row for
+      // a reason the user can't see.
+      function _exportItemMatches(item, q) {
+        if (!q) return true
+        return (
+          _itemIdToken(item).toLowerCase().includes(q) ||
+          (item.title || "").toLowerCase().includes(q) ||
+          item.responses.some((r) => (r || "").toLowerCase().includes(q))
+        )
+      }
 
       // Extract the answer/response texts that actually match the current search
       // query for a given item. Falls back to the default response if no query.
@@ -12264,8 +13271,14 @@
           )
       }
 
+      // The single source of truth for both rendering and every copy action.
       function getExportItemsForCurrentView() {
-        const items = getActiveExportItems()
+        const q = _exportFilter.trim().toLowerCase()
+        const items = getActiveExportItems().filter(
+          (item) =>
+            !_exportDropped.has(_exportKey(item)) &&
+            _exportItemMatches(item, q),
+        )
         return _exportView === "grouped" ? groupedExportItems(items) : items
       }
 
@@ -12340,72 +13353,114 @@
         }, 2500)
       }
 
+      function _exportKindLabel(kind) {
+        return kind === "article"
+          ? "Article"
+          : kind === "tdialog"
+          ? "T. Dialog"
+          : "Dialog"
+      }
+      function _exportIdSpanHtml(item) {
+        const idToken = _itemIdToken(item)
+        const url = buildItemUrl(item.kind, item.id)
+        return url
+          ? `<span class="export-row-id" onclick="openLink('${esc(
+              url,
+            )}')" title="Open in CM.com">${esc(idToken)}</span>`
+          : `<span class="export-row-no-url" title="Set CM.com Context URL in Settings to enable links">${esc(
+              idToken,
+            )}</span>`
+      }
+      function _exportResponsesHtml(item) {
+        return item.responses
+          .map(
+            (r) =>
+              `<span class="export-row-response" title="${esc(r)}">${esc(
+                r.length > 120 ? r.slice(0, 120) + "…" : r,
+              )}</span>`,
+          )
+          .join("")
+      }
+      // One row builder for both List and Grouped — they were near-identical
+      // copies, which is how Grouped's relation column drifted out of List.
+      function _exportRowHtml(item, opts) {
+        const idToken = _itemIdToken(item)
+        const url = buildItemUrl(item.kind, item.id)
+        const safeTitle = esc(JSON.stringify(item.title))
+        const safeIdText = esc(JSON.stringify(idToken))
+        const relationHtml =
+          opts && opts.relations ? _exportRelationHtml(item) : ""
+        const bodyHtml = relationHtml || _exportResponsesHtml(item)
+        return `<div class="export-row${relationHtml ? " has-relations" : ""}">
+              ${_exportIdSpanHtml(item)}
+              <span class="export-kind ${item.kind}">${esc(
+          _exportKindLabel(item.kind),
+        )}</span>
+              <span class="export-row-title" title="${esc(item.title)}">${esc(
+          item.title,
+        )}</span>
+              <span class="${
+                relationHtml ? "export-row-relations" : "export-row-responses"
+              }">${bodyHtml}</span>
+              <button class="export-row-copy" title="Copy as link"
+                onclick="copyJiraLink('${esc(
+                  url,
+                )}', ${safeIdText}, ${safeTitle}, this)">&#x1F517; Copy link</button>
+              <button class="export-row-drop" title="Remove from this share"
+                onclick="_exportDropItem('${esc(
+                  _exportKey(item),
+                )}')">&#x2715;</button>
+            </div>`
+      }
+
       function _renderExportList(items) {
         const list = document.getElementById("exportList")
         list.className = "export-list"
-        list.innerHTML = items
-          .map((item) => {
-            const idToken = _itemIdToken(item)
-            const url = buildItemUrl(item.kind, item.id)
-            const safeUrl = esc(url)
-            const safeTitle = esc(JSON.stringify(item.title))
-            const safeIdText = esc(JSON.stringify(idToken))
-            const idSpan = url
-              ? `<span class="export-row-id" onclick="openLink('${safeUrl}')" title="Open in CM.com">${esc(
-                  idToken,
-                )}</span>`
-              : `<span class="export-row-no-url" title="Set CM.com Context URL in Settings to enable links">${esc(
-                  idToken,
-                )}</span>`
-            const responseHtml = item.responses.length
-              ? item.responses
-                  .map(
-                    (r) =>
-                      `<span class="export-row-response" title="${esc(
-                        r,
-                      )}">${esc(
-                        r.length > 120 ? r.slice(0, 120) + "…" : r,
-                      )}</span>`,
-                  )
-                  .join("")
-              : ""
-            return `<div class="export-row">
-              ${idSpan}
-              <span class="export-row-title" title="${esc(item.title)}">${esc(
-              item.title,
-            )}</span>
-              <span class="export-row-responses">${responseHtml}</span>
-              <button class="export-row-copy" title="Copy as link"
-                onclick="copyJiraLink('${safeUrl}', ${safeIdText}, ${safeTitle}, this)">&#x1F517; Copy link</button>
-            </div>`
-          })
-          .join("")
+        if (!items.length) {
+          list.innerHTML = _exportEmptyHtml()
+          return
+        }
+        list.innerHTML = items.map((item) => _exportRowHtml(item)).join("")
       }
 
       function _renderExportTable(items) {
         const list = document.getElementById("exportList")
         list.className = "export-table-wrap"
+        if (!items.length) {
+          list.innerHTML = _exportEmptyHtml()
+          return
+        }
         const rows = items
           .map((item) => {
             const idToken = _itemIdToken(item)
             const url = buildItemUrl(item.kind, item.id)
+            // The type badge rides inside the ID cell rather than taking a
+            // fourth column, so the copied table keeps its original three
+            // columns while the screen still separates Dialog from T. Dialog.
+            const badge = `<span class="export-kind ${
+              item.kind
+            }">${esc(_exportKindLabel(item.kind))}</span>`
             const idCell = url
-              ? `<td class="td-id" onclick="openLink('${esc(
+              ? `<td class="td-id"><span class="td-id-link" onclick="openLink('${esc(
                   url,
-                )}')" title="Open in CM.com">${esc(idToken)}</td>`
-              : `<td class="td-id-plain">${esc(idToken)}</td>`
+                )}')" title="Open in CM.com">${esc(
+                  idToken,
+                )}</span>${badge}</td>`
+              : `<td class="td-id-plain">${esc(idToken)}${badge}</td>`
             const responseText = item.responses.join(" · ")
             const responseCell = responseText
               ? `<td class="td-response">${esc(responseText)}</td>`
               : `<td class="td-response" style="opacity:0.3">—</td>`
             return `<tr>${idCell}<td>${esc(
               item.title,
-            )}</td>${responseCell}</tr>`
+            )}</td>${responseCell}<td class="td-drop"><button class="export-row-drop" title="Remove from this share" onclick="_exportDropItem('${esc(
+              _exportKey(item),
+            )}')">&#x2715;</button></td></tr>`
           })
           .join("")
         list.innerHTML = `<table class="export-table">
           <thead><tr>
-            <th>ID</th><th>Title / Question</th><th>Matched Response(s)</th>
+            <th>ID</th><th>Title / Question</th><th>Matched Response(s)</th><th></th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>`
@@ -12454,56 +13509,17 @@
       function _renderExportGrouped(items) {
         const list = document.getElementById("exportList")
         list.className = "export-grouped"
+        if (!items.length) {
+          list.innerHTML = _exportEmptyHtml()
+          return
+        }
         const grouped = groupedExportItems(items)
         const sections = []
         for (const kind of ["article", "dialog", "tdialog"]) {
           const groupItems = grouped.filter((item) => item.kind === kind)
           if (!groupItems.length) continue
           const rows = groupItems
-            .map((item) => {
-              const idToken = _itemIdToken(item)
-              const url = buildItemUrl(item.kind, item.id)
-              const safeUrl = esc(url)
-              const safeTitle = esc(JSON.stringify(item.title))
-              const safeIdText = esc(JSON.stringify(idToken))
-              const idSpan = url
-                ? `<span class="export-row-id" onclick="openLink('${safeUrl}')" title="Open in CM.com">${esc(
-                    idToken,
-                  )}</span>`
-                : `<span class="export-row-no-url" title="Set CM.com Context URL in Settings to enable links">${esc(
-                    idToken,
-                  )}</span>`
-              const relationHtml = _exportRelationHtml(item)
-              const responseHtml = relationHtml
-                ? relationHtml
-                : item.responses.length
-                ? item.responses
-                    .map(
-                      (r) =>
-                        `<span class="export-row-response" title="${esc(
-                          r,
-                        )}">${esc(
-                          r.length > 120 ? r.slice(0, 120) + "…" : r,
-                        )}</span>`,
-                    )
-                    .join("")
-                : ""
-              return `<div class="export-row${
-                relationHtml ? " has-relations" : ""
-              }">
-                ${idSpan}
-                <span class="export-row-title" title="${esc(
-                  item.title,
-                )}">${esc(item.title)}</span>
-                <span class="${
-                  relationHtml
-                    ? "export-row-relations"
-                    : "export-row-responses"
-                }">${responseHtml}</span>
-                <button class="export-row-copy" title="Copy as link"
-                  onclick="copyJiraLink('${safeUrl}', ${safeIdText}, ${safeTitle}, this)">&#x1F517; Copy link</button>
-              </div>`
-            })
+            .map((item) => _exportRowHtml(item, { relations: true }))
             .join("")
           sections.push(
             '<div class="export-group"><div class="export-group-title">' +
@@ -12518,17 +13534,99 @@
         list.innerHTML = sections.join("")
       }
 
+      // Three reasons a share can be empty, three different fixes.
+      function _exportEmptyHtml() {
+        const total = getActiveExportItems().length
+        if (!total) {
+          return (
+            '<div class="export-empty"><div class="export-empty-title">Nothing to share</div>' +
+            '<div class="export-empty-text">The current tab has no results. Adjust your search or filters and reopen Share Content.</div></div>'
+          )
+        }
+        if (_exportFilter.trim()) {
+          return (
+            '<div class="export-empty"><div class="export-empty-title">No matches</div>' +
+            '<div class="export-empty-text">None of the ' +
+            total +
+            " items match “" +
+            esc(_exportFilter.trim()) +
+            '”.</div></div>'
+          )
+        }
+        return (
+          '<div class="export-empty"><div class="export-empty-title">Every item was removed</div>' +
+          '<div class="export-empty-text">You removed all ' +
+          total +
+          " items from this share. Use <b>Restore all</b> above to bring them back.</div></div>"
+        )
+      }
+
+      // The primary action names its own count, because the set being copied is
+      // no longer necessarily the set the tab returned — a filter or a removed
+      // row changes it, and "Copy all" would then be a lie.
       function _renderExportFooter() {
         const actions = document.getElementById("exportFooterActions")
+        const n = getExportItemsForCurrentView().length
+        const dis = n ? "" : " disabled"
+        const plain = `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}>&#x1F4CB; Copy as plain text</button>`
         if (_exportView === "table") {
-          actions.innerHTML = `
-            <button class="btn-primary" onclick="_copyExportTable(this)">&#x1F5C3; Copy table</button>
-            <button class="btn-secondary" onclick="_copyExportPlain(this)">&#x1F4CB; Copy as plain text</button>`
+          actions.innerHTML =
+            `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}>&#x1F5C3; Copy table (${n} row${
+              n !== 1 ? "s" : ""
+            })</button>` + plain
         } else {
-          actions.innerHTML = `
-            <button class="btn-primary" onclick="_copyExportLinks(this)">&#x1F517; Copy all as links</button>
-            <button class="btn-secondary" onclick="_copyExportPlain(this)">&#x1F4CB; Copy as plain text</button>`
+          actions.innerHTML =
+            `<button class="btn-primary" onclick="_copyExportLinks(this)"${dis}>&#x1F517; Copy ${n} link${
+              n !== 1 ? "s" : ""
+            }</button>` + plain
         }
+      }
+
+      // ── Share Content: refine what gets shared ──
+      function _onExportFilter(v) {
+        _exportFilter = v
+        _renderExportBody()
+      }
+      function _exportDropItem(key) {
+        _exportDropped.add(key)
+        _renderExportBody()
+      }
+      function _exportRestoreAll() {
+        _exportDropped.clear()
+        _renderExportBody()
+      }
+      function _renderExportToolbar() {
+        const total = getActiveExportItems().length
+        const shown = getExportItemsForCurrentView().length
+        const countEl = document.getElementById("exportCount")
+        if (countEl)
+          countEl.textContent =
+            shown === total
+              ? shown + " item" + (shown !== 1 ? "s" : "")
+              : shown + " of " + total
+        const restore = document.getElementById("exportRestoreBtn")
+        if (restore) {
+          const dropped = _exportDropped.size
+          restore.style.display = dropped ? "" : "none"
+          restore.textContent =
+            "Restore " + dropped + " removed item" + (dropped !== 1 ? "s" : "")
+        }
+        const filterEl = document.getElementById("exportFilter")
+        if (filterEl)
+          filterEl.placeholder =
+            "Filter these " + total + " item" + (total !== 1 ? "s" : "") + "…"
+      }
+      // Every path that changes what is shared goes through here, so the list,
+      // the counts and the footer button can't drift apart.
+      function _renderExportBody() {
+        const items = getExportItemsForCurrentView()
+        const hint = document.getElementById("exportViewHint")
+        if (hint) hint.textContent = EXPORT_VIEW_HINTS[_exportView] || ""
+        if (_exportView === "list") _renderExportList(items)
+        else if (_exportView === "table") _renderExportTable(items)
+        else _renderExportGrouped(items)
+        _renderExportToolbar()
+        _renderExportFooter()
       }
 
       function _setBtnCopied(btn, label) {
@@ -12536,9 +13634,11 @@
         const orig = btn.innerHTML
         btn.innerHTML = "✓ " + label
         btn.disabled = true
+        btn.classList.add("is-copied")
         setTimeout(() => {
           btn.innerHTML = orig
           btn.disabled = false
+          btn.classList.remove("is-copied")
         }, 2200)
       }
 
@@ -12665,6 +13765,13 @@
       }
 
       function openExportModal() {
+        // Refinements are per-open: the modal always starts as an honest
+        // mirror of the tab's current result set.
+        _exportFilter = ""
+        _exportDropped.clear()
+        const filterEl = document.getElementById("exportFilter")
+        if (filterEl) filterEl.value = ""
+
         const items = getActiveExportItems()
         const activeTab = document.querySelector(".tab.active").dataset.tab
         const tabLabel =
@@ -12673,18 +13780,24 @@
             : activeTab === "dialogs"
             ? "Dialogs"
             : "All Results"
-        document.getElementById("export-meta").textContent =
+        document.getElementById("export-meta").innerHTML =
+          "<span><b>" +
           items.length +
           " item" +
           (items.length !== 1 ? "s" : "") +
-          " — " +
-          tabLabel +
-          (gQuery ? ' · "' + gQuery + '"' : "")
+          "</b> from <b>" +
+          esc(tabLabel) +
+          "</b></span>" +
+          (gQuery
+            ? '<span class="export-meta-chip">matching “' +
+              esc(gQuery) +
+              "”</span>"
+            : "") +
+          (cmBaseUrl
+            ? ""
+            : '<button class="export-meta-warn" onclick="document.getElementById(\'settingsBtn\').click()" title="Open Settings">No CM.com Context URL — copies will be plain IDs</button>')
 
-        if (_exportView === "list") _renderExportList(items)
-        else if (_exportView === "table") _renderExportTable(items)
-        else _renderExportGrouped(items)
-        _renderExportFooter()
+        _renderExportBody()
 
         document.getElementById("copy-feedback").textContent = ""
         document.getElementById("exportModal").classList.add("open")
@@ -12702,11 +13815,7 @@
             .forEach((b) => b.classList.remove("active"))
           btn.classList.add("active")
           _exportView = btn.dataset.exportView
-          const items = getActiveExportItems()
-          if (_exportView === "list") _renderExportList(items)
-          else if (_exportView === "table") _renderExportTable(items)
-          else _renderExportGrouped(items)
-          _renderExportFooter()
+          _renderExportBody()
         })
       })
 
@@ -12725,31 +13834,21 @@
       })
 
       // ── Collections modal ────────────────────────────────────────────
+      // Master/detail: the sidebar (#collectionsNav) is the only place a
+      // collection is chosen; #collectionsDetail is the only place one is acted
+      // on. The previous three top-level tabs made you choose a collection
+      // twice — once in the list, then again in the "Filtered Out" dropdown —
+      // so "Filtered out" is now simply a tab on the collection already open,
+      // and the two "View …" toggle panels are tabs rather than buttons that
+      // pushed the list around.
       function openCollectionsModal() {
-        renderCollectionsListBody()
-        renderCollectionsFiltersBody()
-        renderCollectionsExcludedBody()
+        _colEnsureView()
+        renderCollectionsModal()
         document.getElementById("collectionsModal").classList.add("open")
       }
       function closeCollectionsModal() {
         document.getElementById("collectionsModal").classList.remove("open")
       }
-      document.querySelectorAll(".collections-view-tab").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          document
-            .querySelectorAll(".collections-view-tab")
-            .forEach((b) => b.classList.remove("active"))
-          btn.classList.add("active")
-          const view = btn.dataset.collectionsView
-          document.getElementById("collectionsListBody").style.display =
-            view === "list" ? "" : "none"
-          document.getElementById("collectionsFiltersBody").style.display =
-            view === "filters" ? "" : "none"
-          document.getElementById("collectionsExcludedBody").style.display =
-            view === "excluded" ? "" : "none"
-          if (view === "excluded") renderCollectionsExcludedBody()
-        })
-      })
       document
         .getElementById("collectionsBtn")
         .addEventListener("click", openCollectionsModal)
@@ -12766,242 +13865,413 @@
             closeCollectionsModal()
         })
 
-      function renderCollectionsListBody() {
-        const body = document.getElementById("collectionsListBody")
-        const header =
-          '<div class="manage-db-days-header"><span class="manage-db-days-title">' +
-          cmCollections.length +
-          " collection" +
-          (cmCollections.length !== 1 ? "s" : "") +
-          '</span><button class="btn-secondary" onclick="createEmptyCollectionPrompt()">+ New Collection</button></div>'
-        if (!cmCollections.length) {
-          body.innerHTML =
-            header +
-            '<div class="manage-db-empty">No collections yet. Select Articles/Dialogs in Content and use "Add to Collection".</div>'
-          return
-        }
-        body.innerHTML =
-          header +
-          '<div class="collection-list">' +
-          cmCollections
-            .map((c) => {
-              const { rows } = buildCollectionExportRows(c)
-              const zeroCount = (c.itemKeys || []).filter(
-                (k) => _itemExportRowCount(k) === 0,
-              ).length
-              return (
-                '<div class="collection-row">' +
-                '<div class="collection-row-main">' +
-                '<span class="collection-row-name">' +
-                esc(c.name) +
-                "</span>" +
-                '<span class="chat-meta">' +
-                c.itemKeys.length +
-                " item" +
-                (c.itemKeys.length !== 1 ? "s" : "") +
-                " · " +
-                rows.length +
-                " export row" +
-                (rows.length !== 1 ? "s" : "") +
-                "</span>" +
-                (zeroCount
-                  ? '<span class="chat-meta" style="color:var(--orange)">' +
-                    zeroCount +
-                    " item" +
-                    (zeroCount !== 1 ? "s" : "") +
-                    " contribute 0 rows</span>"
-                  : "") +
-                "</div>" +
-                '<div class="collection-row-actions">' +
-                '<button class="btn-sel-action" onclick="toggleCollectionItemsView(\'' +
-                esc(c.id) +
-                '\')">View items</button>' +
-                '<button class="btn-sel-action" onclick="toggleCollectionContentView(\'' +
-                esc(c.id) +
-                '\')">View content</button>' +
-                '<button class="btn-sel-action" onclick="renameCollectionPrompt(\'' +
-                esc(c.id) +
-                '\')">Rename</button>' +
-                '<button class="btn-sel-action" onclick="exportCollection(\'' +
-                esc(c.id) +
-                '\')">Export</button>' +
-                '<button class="btn-sel-action" style="color:var(--red)" onclick="deleteCollectionConfirm(\'' +
-                esc(c.id) +
-                '\')">Delete</button>' +
-                "</div>" +
-                '<div class="collection-items-panel" id="collection-items-' +
-                esc(c.id) +
-                '" style="display:none"></div>' +
-                '<div class="collection-content-panel" id="collection-content-' +
-                esc(c.id) +
-                '" style="display:none"></div>' +
-                "</div>"
-              )
-            })
-            .join("") +
-          "</div>"
+      // Keeps the selection pointing at something that still exists — a deleted
+      // collection, or a first open with none selected yet.
+      function _colEnsureView() {
+        if (_colView === COL_FILTERS_VIEW) return
+        if (_colView && cmCollections.some((c) => c.id === _colView)) return
+        _colView = cmCollections.length ? cmCollections[0].id : null
+        _colTab = "content"
+        _colQuery = ""
+      }
+      function renderCollectionsModal() {
+        _colEnsureView()
+        _colRenderNav()
+        _colRenderDetail()
+      }
+      function _colSelect(id) {
+        _colView = id
+        _colTab = "content"
+        _colQuery = ""
+        renderCollectionsModal()
+      }
+      function _colSetTab(tab) {
+        _colTab = tab
+        _colRenderDetail()
       }
 
-      function toggleCollectionItemsView(collectionId) {
-        const panel = document.getElementById(
-          "collection-items-" + collectionId,
-        )
-        if (!panel) return
-        if (panel.style.display !== "none") {
-          panel.style.display = "none"
-          return
+      function _colStats(c) {
+        const { rows, excludedRows } = buildCollectionExportRows(c)
+        const itemKeys = c.itemKeys || []
+        return {
+          rows,
+          excludedRows,
+          itemCount: itemKeys.length,
+          zero: itemKeys.filter((k) => _itemExportRowCount(k) === 0).length,
         }
-        const c = cmCollections.find((x) => x.id === collectionId)
-        if (!c) return
-        panel.innerHTML =
-          (c.itemKeys || [])
-            .map((key) => {
-              const parsed = _parseCollectionItemKey(key)
-              let label = "(missing)"
-              if (parsed) {
-                if (parsed.kind === "article") {
-                  const art = articleMap.get(parsed.id)
-                  label = art
-                    ? aFaqQ(art) || "Article #" + art.Id
-                    : "Article #" + parsed.id + " (missing)"
-                } else {
-                  const dialog = dialogMap.get(parsed.id)
-                  label = dialog
-                    ? dialog.name
-                    : "Dialog #" + parsed.id + " (missing)"
-                }
-              }
-              return (
-                '<span class="chip">' +
-                esc(label) +
-                ' <span style="cursor:pointer;opacity:.6" onclick="removeCollectionItem(\'' +
-                esc(collectionId) +
-                "','" +
-                esc(key) +
-                '\')" title="Remove">&#x2715;</span></span>'
-              )
-            })
-            .join("") || '<span class="chat-meta">No items</span>'
-        panel.style.display = "flex"
+      }
+      function _colPlural(n, word) {
+        return n + " " + word + (n !== 1 ? "s" : "")
+      }
+      function _colEnabledFilters() {
+        return cmExportFilters.filter((f) => f.enabled !== false && f.pattern)
       }
 
-      // Searchable preview of a collection's actual computed export rows (trigger +
-      // content), distinct from "View items" (the raw source Articles/Dialogs). The
-      // search <input> itself is only built once per open, so re-filtering on each
-      // keystroke only replaces the results list, not the input the user is typing in.
-      function toggleCollectionContentView(collectionId) {
-        const panel = document.getElementById("collection-content-" + collectionId)
-        if (!panel) return
-        if (panel.style.display !== "none") {
-          panel.style.display = "none"
+      // ── Sidebar ──
+      function _colRenderNav() {
+        const nav = document.getElementById("collectionsNav")
+        nav.innerHTML = cmCollections.length
+          ? cmCollections
+              .map((c) => {
+                const st = _colStats(c)
+                return (
+                  '<button class="col-nav-item' +
+                  (c.id === _colView ? " active" : "") +
+                  '" onclick="_colSelect(\'' +
+                  esc(c.id) +
+                  '\')" title="' +
+                  esc(c.name) +
+                  '">' +
+                  '<span class="col-nav-name">' +
+                  esc(c.name) +
+                  "</span>" +
+                  '<span class="col-nav-meta">' +
+                  _colPlural(st.itemCount, "item") +
+                  " · " +
+                  _colPlural(st.rows.length, "row") +
+                  "</span></button>"
+                )
+              })
+              .join("")
+          : '<div class="col-nav-empty">No collections yet.</div>'
+        const enabled = _colEnabledFilters().length
+        document.getElementById("collectionsNavFilters").innerHTML =
+          '<button class="col-nav-item col-nav-filters' +
+          (_colView === COL_FILTERS_VIEW ? " active" : "") +
+          '" onclick="_colSelect(\'' +
+          COL_FILTERS_VIEW +
+          '\')" title="Exclusion patterns applied to every collection">' +
+          '<span class="col-nav-name">Smart filters</span>' +
+          '<span class="col-count-badge' +
+          (enabled ? " on" : "") +
+          '">' +
+          enabled +
+          "</span></button>"
+      }
+
+      // ── Detail pane ──
+      function _colRenderDetail() {
+        const el = document.getElementById("collectionsDetail")
+        if (!el) return
+        if (_colView === COL_FILTERS_VIEW) {
+          el.innerHTML = _colFiltersPaneHtml()
           return
         }
-        panel.style.display = "block"
-        panel.innerHTML =
-          '<div class="collection-content-search-row">' +
-          '<input type="text" class="collection-content-search" placeholder="Search this collection’s content…" ' +
-          'oninput="_renderCollectionContentList(\'' +
-          esc(collectionId) +
-          '\', this.value)" />' +
-          '<span class="chat-meta" id="collection-content-count-' +
-          esc(collectionId) +
-          '"></span>' +
+        const c = cmCollections.find((x) => x.id === _colView)
+        if (!c) {
+          el.innerHTML = _colOnboardingHtml()
+          return
+        }
+        const st = _colStats(c)
+        const sub =
+          _colPlural(st.itemCount, "item") +
+          " · " +
+          _colPlural(st.rows.length, "export row") +
+          (st.excludedRows.length
+            ? ' · <span class="warn">' +
+              st.excludedRows.length +
+              " filtered out</span>"
+            : "")
+        el.innerHTML =
+          '<div class="col-detail-head">' +
+          '<div class="col-detail-titles">' +
+          '<div class="col-detail-name">' +
+          esc(c.name) +
           "</div>" +
-          '<div class="collection-content-list" id="collection-content-list-' +
-          esc(collectionId) +
-          '"></div>'
-        _renderCollectionContentList(collectionId, "")
+          '<div class="col-detail-sub">' +
+          sub +
+          "</div></div>" +
+          '<div class="col-detail-actions">' +
+          '<button class="col-icon-btn" onclick="renameCollectionPrompt(\'' +
+          esc(c.id) +
+          '\')">Rename</button>' +
+          '<button class="col-icon-btn danger" onclick="deleteCollectionConfirm(\'' +
+          esc(c.id) +
+          '\')">Delete</button>' +
+          '<button class="btn-primary" onclick="exportCollection(\'' +
+          esc(c.id) +
+          '\')">Export JSON</button>' +
+          "</div></div>" +
+          '<div class="col-detail-tabs">' +
+          _colTabBtn("content", "Export preview", st.rows.length) +
+          _colTabBtn("items", "Items", st.itemCount, st.zero > 0) +
+          _colTabBtn("filtered", "Filtered out", st.excludedRows.length) +
+          "</div>" +
+          '<div class="col-detail-body">' +
+          (_colTab === "items"
+            ? _colItemsPaneHtml(c, st)
+            : _colTab === "filtered"
+              ? _colFilteredPaneHtml(c, st)
+              : _colContentPaneHtml()) +
+          "</div>"
+        if (_colTab === "content") _colRenderRows()
       }
-      function _renderCollectionContentList(collectionId, query) {
-        const c = cmCollections.find((x) => x.id === collectionId)
-        const listEl = document.getElementById(
-          "collection-content-list-" + collectionId,
+      function _colTabBtn(tab, label, count, warn) {
+        return (
+          '<button class="col-tab' +
+          (_colTab === tab ? " active" : "") +
+          '" onclick="_colSetTab(\'' +
+          tab +
+          '\')">' +
+          esc(label) +
+          '<span class="col-count-badge' +
+          (warn ? " on" : "") +
+          '">' +
+          count +
+          "</span></button>"
         )
-        const countEl = document.getElementById(
-          "collection-content-count-" + collectionId,
+      }
+
+      // ── Export preview tab ──
+      // The rows that will actually land in the file: post-reachability,
+      // post-smart-filter, post-merge. The search input is built once here and
+      // only the list under it re-renders per keystroke, so the caret survives.
+      function _colContentPaneHtml() {
+        return (
+          '<div class="col-toolbar">' +
+          '<input type="text" id="colRowSearch" placeholder="Search triggers and content…" oninput="_colOnRowSearch(this.value)" />' +
+          '<span class="col-toolbar-count" id="colRowCount"></span>' +
+          "</div><div id=\"colRowsWrap\"></div>"
         )
-        if (!c || !listEl) return
+      }
+      function _colOnRowSearch(v) {
+        _colQuery = v
+        _colRenderRows()
+      }
+      function _colRenderRows() {
+        const c = cmCollections.find((x) => x.id === _colView)
+        const wrap = document.getElementById("colRowsWrap")
+        if (!c || !wrap) return
         const { rows } = buildCollectionExportRows(c)
-        const q = (query || "").trim()
-        const qLower = q.toLowerCase()
+        const q = (_colQuery || "").trim()
+        const ql = q.toLowerCase()
         const filtered = q
           ? rows.filter(
               (r) =>
-                r.trigger.toLowerCase().includes(qLower) ||
-                r.content.toLowerCase().includes(qLower),
+                r.trigger.toLowerCase().includes(ql) ||
+                r.content.toLowerCase().includes(ql),
             )
           : rows
+        const countEl = document.getElementById("colRowCount")
         if (countEl)
-          countEl.textContent =
-            filtered.length +
-            " / " +
-            rows.length +
-            " row" +
-            (rows.length !== 1 ? "s" : "")
-        listEl.innerHTML = filtered.length
-          ? filtered
-              .map(
-                (r) =>
-                  '<div class="collection-content-row">' +
-                  '<div class="collection-content-trigger">' +
-                  hl(r.trigger, q) +
-                  "</div>" +
-                  '<div class="collection-content-text">' +
-                  hl(r.content, q) +
-                  "</div>" +
-                  "</div>",
-              )
-              .join("")
-          : '<div class="manage-db-empty">' +
-            (rows.length
-              ? "No rows match your search."
-              : "This collection has 0 exportable rows.") +
+          countEl.textContent = q
+            ? filtered.length + " of " + _colPlural(rows.length, "row")
+            : _colPlural(rows.length, "row")
+        if (filtered.length) {
+          wrap.innerHTML =
+            '<div class="col-rows">' +
+            filtered.map((r) => _colRowHtml(r, q)).join("") +
             "</div>"
+          return
+        }
+        wrap.innerHTML = rows.length
+          ? '<div class="col-empty"><div class="col-empty-title">No matches</div>' +
+            '<div class="col-empty-text">Nothing in this collection’s triggers or content matches “' +
+            esc(q) +
+            '”.</div></div>'
+          : (c.itemKeys || []).length
+            ? '<div class="col-empty"><div class="col-empty-title">Nothing to export yet</div>' +
+              '<div class="col-empty-text">' +
+              ((c.itemKeys || []).every((k) => !_colItemExists(k))
+                ? "None of this collection’s items exist in the currently loaded content export. Load the folder they came from, or open the <b>Items</b> tab to clear them out."
+                : "This collection has items, but none of them answer directly — they only route into other Dialogs, or every row they produced is being removed by a smart filter. Check the <b>Items</b> and <b>Filtered out</b> tabs.") +
+              "</div></div>"
+            : '<div class="col-empty"><div class="col-empty-title">This collection is empty</div>' +
+              '<div class="col-empty-text">Add Articles or Dialogs from the Content tab and their responses will appear here as export rows.</div></div>'
       }
-      function removeCollectionItem(collectionId, key) {
-        const c = cmCollections.find((x) => x.id === collectionId)
-        if (!c) return
-        c.itemKeys = (c.itemKeys || []).filter((k) => k !== key)
-        c.updatedAt = Date.now()
-        saveCollections(cmCollections)
-        renderCollectionsListBody()
-        toggleCollectionItemsView(collectionId)
-      }
-      function renameCollectionPrompt(collectionId) {
-        const c = cmCollections.find((x) => x.id === collectionId)
-        if (!c) return
-        _showFolderPrompt("Rename collection", c.name, (name) => {
-          c.name = name
-          c.updatedAt = Date.now()
-          saveCollections(cmCollections)
-          renderCollectionsListBody()
-        })
-      }
-      function deleteCollectionConfirm(collectionId) {
-        _showConfirm("Delete this collection? This cannot be undone.", () => {
-          cmCollections = cmCollections.filter((x) => x.id !== collectionId)
-          saveCollections(cmCollections)
-          renderCollectionsListBody()
-        })
-      }
-      function createEmptyCollectionPrompt() {
-        _showFolderPrompt("New collection name", "", (name) => {
-          cmCollections.push({
-            id:
-              "col_" +
-              (crypto.randomUUID
-                ? crypto.randomUUID()
-                : Date.now() + Math.random().toString(36).slice(2)),
-            name,
-            itemKeys: [],
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          })
-          saveCollections(cmCollections)
-          renderCollectionsListBody()
-        })
+      function _colRowHtml(r, q) {
+        const chips = r.trigger
+          .split(" | ")
+          .filter((p) => p)
+          .map((p) => '<span class="col-trigger-chip">' + hl(p, q) + "</span>")
+          .join("")
+        return (
+          '<div class="col-row">' +
+          '<div class="col-row-triggers">' +
+          (chips ||
+            '<span class="col-trigger-chip" style="opacity:.6">(no trigger)</span>') +
+          "</div>" +
+          '<div class="col-row-content">' +
+          hl(r.content, q) +
+          "</div></div>"
+        )
       }
 
+      // ── Items tab ──
+      // The source Articles/Dialogs, each showing what it actually contributes.
+      // An item producing 0 rows is normal (routing-only content), so it is
+      // labelled and explained rather than reported as a bare orange count.
+      function _colItemsPaneHtml(c, st) {
+        const keys = c.itemKeys || []
+        if (!keys.length) {
+          return (
+            '<div class="col-empty"><div class="col-empty-title">No items in this collection</div>' +
+            '<div class="col-empty-text">' +
+            _colAddStepsHtml() +
+            "</div></div>"
+          )
+        }
+        // An item can be gone entirely (content reloaded since it was picked),
+        // which is a different problem from "it just has nothing to export".
+        const missing = keys.filter((k) => !_colItemExists(k)).length
+        const note = missing
+          ? '<div class="col-note warn">' +
+            _colPlural(missing, "item") +
+            " no longer exist" +
+            (missing === 1 ? "s" : "") +
+            " in the loaded content export — they were removed or renumbered since you added them, and are skipped on export. Remove them here to tidy the collection." +
+            "</div>"
+          : st.zero
+          ? '<div class="col-note warn">' +
+            _colPlural(st.zero, "item") +
+            " contribute" +
+            (st.zero === 1 ? "s" : "") +
+            " no export rows. That is usually fine: an Article that only opens a Dialog, or a Dialog whose nodes only route into other Dialogs, has no response text of its own to export." +
+            "</div>"
+          : '<div class="col-note">The Articles and Dialogs this collection is built from. Removing one here does not change your content — only what gets exported.</div>'
+        return (
+          note +
+          '<div class="col-items">' +
+          keys.map((key) => _colItemRowHtml(c.id, key)).join("") +
+          "</div>"
+        )
+      }
+      function _colItemExists(key) {
+        const parsed = _parseCollectionItemKey(key)
+        if (!parsed) return false
+        return parsed.kind === "article"
+          ? articleMap.has(parsed.id)
+          : dialogMap.has(parsed.id)
+      }
+      function _colItemRowHtml(collectionId, key) {
+        const parsed = _parseCollectionItemKey(key)
+        let kind = "missing"
+        let kindLabel = "Missing"
+        let label = "(unknown item)"
+        if (parsed && parsed.kind === "article") {
+          const art = articleMap.get(parsed.id)
+          kind = art ? "article" : "missing"
+          kindLabel = "Article"
+          label = art
+            ? aFaqQ(art) || "Article #" + art.Id
+            : "Article #" + parsed.id + " — no longer in the loaded data"
+        } else if (parsed) {
+          const dialog = dialogMap.get(parsed.id)
+          kind = dialog ? "dialog" : "missing"
+          kindLabel = "Dialog"
+          label = dialog
+            ? dialog.name
+            : "Dialog #" + parsed.id + " — no longer in the loaded data"
+        }
+        const n = _itemExportRowCount(key)
+        return (
+          '<div class="col-item-row">' +
+          '<span class="col-item-kind ' +
+          kind +
+          '">' +
+          esc(kindLabel) +
+          "</span>" +
+          '<span class="col-item-name" title="' +
+          esc(label) +
+          '">' +
+          esc(label) +
+          "</span>" +
+          '<span class="col-item-rows' +
+          (n === 0 ? " zero" : "") +
+          '">' +
+          _colPlural(n, "row") +
+          "</span>" +
+          '<button class="col-item-remove" title="Remove from this collection" onclick="removeCollectionItem(\'' +
+          esc(collectionId) +
+          "','" +
+          esc(key) +
+          '\')">&#x2715;</button></div>'
+        )
+      }
+      function _colAddStepsHtml() {
+        return (
+          "Open the <b>Content</b> tab, switch on <b>Select</b> in the toolbar, tick the Articles or Dialogs you want, then choose " +
+          "<b>+ Add to Collection</b>."
+        )
+      }
+
+      // ── Filtered out tab ──
+      // Audit view: what an enabled smart filter is removing from *this*
+      // collection, and which pattern did it — so a filter meant to catch one
+      // thing doesn't silently eat something else.
+      function _colFilteredPaneHtml(c, st) {
+        if (!_colEnabledFilters().length) {
+          return (
+            '<div class="col-empty"><div class="col-empty-title">No smart filters are enabled</div>' +
+            '<div class="col-empty-text">Smart filters drop unwanted rows from every collection at export time — test entries, internal notes, a context you never want to publish.</div>' +
+            '<button class="btn-secondary" style="margin-top:6px" onclick="_colSelect(\'' +
+            COL_FILTERS_VIEW +
+            '\')">Set up smart filters</button></div>'
+          )
+        }
+        if (!st.excludedRows.length) {
+          return (
+            '<div class="col-empty"><div class="col-empty-title">Nothing is being filtered out</div>' +
+            '<div class="col-empty-text">All ' +
+            _colPlural(st.rows.length, "row") +
+            " in this collection pass your smart filters.</div></div>"
+          )
+        }
+        return (
+          '<div class="col-note">These rows exist in the collection but are removed before export. ' +
+          '<button class="btn-link" onclick="_colSelect(\'' +
+          COL_FILTERS_VIEW +
+          '\')">Edit smart filters</button></div>' +
+          '<div class="col-rows">' +
+          st.excludedRows
+            .map(
+              (r) =>
+                '<div class="col-row">' +
+                '<div class="col-row-triggers">' +
+                (r.trigger
+                  .split(" | ")
+                  .filter((p) => p)
+                  .map(
+                    (p) =>
+                      '<span class="col-trigger-chip">' + esc(p) + "</span>",
+                  )
+                  .join("") ||
+                  '<span class="col-trigger-chip" style="opacity:.6">(no trigger)</span>') +
+                "</div>" +
+                '<div class="col-row-content">' +
+                esc(r.content) +
+                "</div>" +
+                '<div class="col-row-matched">Removed by' +
+                r.matchedFields
+                  .map(
+                    (m) =>
+                      '<span class="col-matched-chip">' + esc(m) + "</span>",
+                  )
+                  .join("") +
+                "</div></div>",
+            )
+            .join("") +
+          "</div>"
+        )
+      }
+
+      // ── Onboarding / empty detail ──
+      function _colOnboardingHtml() {
+        return (
+          '<div class="col-empty">' +
+          '<div class="col-empty-title">Collections turn your content into an export</div>' +
+          '<div class="col-empty-text">Pick the Articles and Dialogs you want to publish, and a collection works out the trigger phrases and response text for each one — ready to paste into HALO’s knowledge tool.</div>' +
+          '<div class="col-empty-steps">' +
+          '<div class="instructions-step"><span class="instructions-step-num">1</span><span class="instructions-step-text">' +
+          _colAddStepsHtml() +
+          "</span></div>" +
+          '<div class="instructions-step"><span class="instructions-step-num">2</span><span class="instructions-step-text">Review the generated rows here, and add <b>Smart filters</b> to drop anything you don’t want published.</span></div>' +
+          '<div class="instructions-step"><span class="instructions-step-num">3</span><span class="instructions-step-text">Hit <b>Export JSON</b>.</span></div>' +
+          "</div></div>"
+        )
+      }
+
+      // ── Smart filters pane ──
       const EXPORT_FILTER_FIELDS = [
         { value: "entity", label: "Entity" },
         { value: "content", label: "Content" },
@@ -13019,20 +14289,43 @@
             "</option>",
         ).join("")
       }
-      function renderCollectionsFiltersBody() {
-        const body = document.getElementById("collectionsFiltersBody")
+      function _colFiltersPaneHtml() {
+        // Live impact, so an exclusion pattern is never a guess about what it
+        // is doing to the collections you actually have.
+        let removed = 0
+        let touched = 0
+        for (const c of cmCollections) {
+          const n = buildCollectionExportRows(c).excludedCount
+          removed += n
+          if (n) touched++
+        }
+        const head =
+          '<div class="col-detail-head"><div class="col-detail-titles">' +
+          '<div class="col-detail-name">Smart filters</div>' +
+          '<div class="col-detail-sub">' +
+          (cmExportFilters.length
+            ? removed
+              ? '<span class="warn">Removing ' +
+                _colPlural(removed, "row") +
+                " across " +
+                _colPlural(touched, "collection") +
+                "</span>"
+              : "Not removing anything right now"
+            : "Applied to every collection at export time") +
+          "</div></div></div>"
+        const note =
+          '<div class="col-note">A row is dropped when any enabled pattern matches it. ' +
+          "<b>Entity</b> tests each trigger phrase, <b>Content</b> tests the response text, and <b>Context</b> tests a flattened " +
+          "<code>name:value</code> string per response, e.g. <code>escalationGroup:overnachten resort:R_EBR_BH12</code>. " +
+          "Matching is case-insensitive substring unless you tick Regex.</div>"
         const addRow =
-          '<div class="export-filter-add-row">' +
+          '<div class="col-filter-add">' +
           '<select id="newFilterFieldInput" class="sort-select">' +
           _exportFilterFieldOptions("entity") +
           "</select>" +
           '<input type="text" id="newFilterPatternInput" placeholder="Pattern to exclude, e.g. zzz" onkeydown="if(event.key===\'Enter\')addExportFilterFromInput()" />' +
           '<label class="export-filter-label"><input type="checkbox" id="newFilterRegexInput" /> Regex</label>' +
-          '<button class="btn-secondary" onclick="addExportFilterFromInput()">Add</button>' +
-          "</div>" +
-          '<div class="hint" style="padding:0 18px 10px">' +
-          "Entity matches trigger phrases, Content matches the answer text. Context matches a flattened " +
-          '<code>name:value</code> string per answer, e.g. <code>escalationGroup:overnachten resort:R_EBR_BH12</code>.' +
+          '<button class="btn-secondary" onclick="addExportFilterFromInput()">Add filter</button>' +
           "</div>"
         const rows = cmExportFilters
           .map(
@@ -13058,16 +14351,22 @@
               ' onchange="toggleExportFilterEnabled(\'' +
               esc(f.id) +
               "', this.checked)\" /> Enabled</label>" +
-              '<button class="btn-sel-action" style="color:var(--red)" onclick="removeExportFilter(\'' +
+              '<button class="col-icon-btn danger" onclick="removeExportFilter(\'' +
               esc(f.id) +
               '\')">Remove</button>' +
               "</div>",
           )
           .join("")
-        body.innerHTML =
+        return (
+          head +
+          '<div class="col-detail-body">' +
+          note +
           addRow +
           (rows ||
-            '<div class="manage-db-empty">No exclusion patterns yet.</div>')
+            '<div class="col-empty"><div class="col-empty-title">No filters yet</div>' +
+              '<div class="col-empty-text">Every row in every collection is exported as-is.</div></div>') +
+          "</div>"
+        )
       }
       function addExportFilterFromInput() {
         const inp = document.getElementById("newFilterPatternInput")
@@ -13087,98 +14386,89 @@
           enabled: true,
         })
         saveExportFilters(cmExportFilters)
-        renderCollectionsFiltersBody()
-        renderCollectionsListBody()
+        renderCollectionsModal()
       }
       function toggleExportFilterField(id, field) {
         const f = cmExportFilters.find((x) => x.id === id)
         if (!f) return
         f.field = field
         saveExportFilters(cmExportFilters)
-        renderCollectionsListBody()
+        renderCollectionsModal()
       }
       function toggleExportFilterRegex(id, checked) {
         const f = cmExportFilters.find((x) => x.id === id)
         if (!f) return
         f.isRegex = checked
         saveExportFilters(cmExportFilters)
-        renderCollectionsListBody()
+        renderCollectionsModal()
       }
       function toggleExportFilterEnabled(id, checked) {
         const f = cmExportFilters.find((x) => x.id === id)
         if (!f) return
         f.enabled = checked
         saveExportFilters(cmExportFilters)
-        renderCollectionsListBody()
+        renderCollectionsModal()
       }
       function removeExportFilter(id) {
         cmExportFilters = cmExportFilters.filter((x) => x.id !== id)
         saveExportFilters(cmExportFilters)
-        renderCollectionsFiltersBody()
-        renderCollectionsListBody()
+        renderCollectionsModal()
       }
 
-      // "Filtered Out" tab: shows exactly which rows an enabled smart filter is
-      // dropping from a chosen collection, and which pattern(s) matched each one —
-      // an audit view so a filter meant to catch "zzz" doesn't silently also eat
-      // something the user actually wanted.
-      function _setCollectionsExcludedView(collectionId) {
-        _collectionsExcludedViewId = collectionId
-        renderCollectionsExcludedBody()
+      // ── Collection mutations ──
+      function removeCollectionItem(collectionId, key) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.itemKeys = (c.itemKeys || []).filter((k) => k !== key)
+        c.updatedAt = Date.now()
+        saveCollections(cmCollections)
+        renderCollectionsModal()
       }
-      function renderCollectionsExcludedBody() {
-        const body = document.getElementById("collectionsExcludedBody")
-        if (!body) return
-        if (!cmCollections.length) {
-          body.innerHTML = '<div class="manage-db-empty">No collections yet.</div>'
-          return
-        }
-        if (
-          !_collectionsExcludedViewId ||
-          !cmCollections.some((c) => c.id === _collectionsExcludedViewId)
-        ) {
-          _collectionsExcludedViewId = cmCollections[0].id
-        }
-        const pickerHtml =
-          '<div class="export-filter-add-row">' +
-          '<select class="sort-select" onchange="_setCollectionsExcludedView(this.value)">' +
-          cmCollections
-            .map(
-              (c) =>
-                '<option value="' +
-                esc(c.id) +
-                '"' +
-                (c.id === _collectionsExcludedViewId ? " selected" : "") +
-                ">" +
-                esc(c.name) +
-                "</option>",
-            )
-            .join("") +
-          "</select>" +
-          "</div>"
-        const c = cmCollections.find((x) => x.id === _collectionsExcludedViewId)
-        const { excludedRows } = buildCollectionExportRows(c)
-        const listHtml = excludedRows.length
-          ? '<div class="collection-content-list">' +
-            excludedRows
-              .map(
-                (r) =>
-                  '<div class="collection-content-row">' +
-                  '<div class="collection-content-trigger">' +
-                  esc(r.trigger) +
-                  "</div>" +
-                  '<div class="collection-content-text">' +
-                  esc(r.content) +
-                  "</div>" +
-                  '<div class="chat-meta" style="color:var(--orange)">Matched: ' +
-                  esc(r.matchedFields.join(", ")) +
-                  "</div>" +
-                  "</div>",
-              )
-              .join("") +
-            "</div>"
-          : '<div class="manage-db-empty">Nothing is being filtered out for this collection.</div>'
-        body.innerHTML = pickerHtml + listHtml
+      function renameCollectionPrompt(collectionId) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        _showFolderPrompt("Rename collection", c.name, (name) => {
+          c.name = name
+          c.updatedAt = Date.now()
+          saveCollections(cmCollections)
+          renderCollectionsModal()
+        })
+      }
+      function deleteCollectionConfirm(collectionId) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        _showConfirm(
+          'Delete the collection "' +
+            (c ? c.name : "") +
+            '"? The Articles and Dialogs themselves are not affected.',
+          () => {
+            cmCollections = cmCollections.filter((x) => x.id !== collectionId)
+            saveCollections(cmCollections)
+            if (_colView === collectionId) _colView = null
+            renderCollectionsModal()
+          },
+        )
+      }
+      function createEmptyCollectionPrompt() {
+        _showFolderPrompt("New collection name", "", (name) => {
+          const id =
+            "col_" +
+            (crypto.randomUUID
+              ? crypto.randomUUID()
+              : Date.now() + Math.random().toString(36).slice(2))
+          cmCollections.push({
+            id,
+            name,
+            itemKeys: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+          saveCollections(cmCollections)
+          // Land on what you just made, rather than leaving it to be hunted for.
+          _colView = id
+          _colTab = "items"
+          _colQuery = ""
+          renderCollectionsModal()
+        })
       }
 
       async function exportCollection(collectionId) {
@@ -14818,9 +16108,9 @@
               )}</span></div></div>`
             }
             if (turn.userRow) {
-              inner += `<div class="user-group"><span class="user-label">User</span><div class="bubble user">${
-                chatHl(turn.userRow.interactionValue, false).body
-              }</div><span class="bubble-ts">${esc(
+              inner += `<div class="user-group"><span class="user-label">User</span><div class="bubble user">${userBubbleBody(
+                turn.userRow.interactionValue,
+              )}</div><span class="bubble-ts">${esc(
                 fmtChatTime(turn.userRow.timestampStart),
               )}</span></div>`
             }
@@ -15085,13 +16375,27 @@
           totalSkipped = 0,
           totalPurged = 0
         const allErrors = []
+        // Purge, summary rebuild and the FTS merge are per-run work, not
+        // per-file work — bracket the whole selection so they happen once.
+        let finalized = false
+        const finalizeOnce = async () => {
+          if (finalized) return
+          finalized = true
+          try {
+            const f = await window.electronAPI.finalizeImportRun(dataRetentionDays)
+            if (f) totalPurged += f.purged || 0
+          } catch (_) {}
+        }
         try {
+          await window.electronAPI.beginImportRun()
           for (const fp of filePaths) {
             const fileName = fp.replace(/\\/g, "/").split("/").pop()
             setImportOverlay(true, fileName)
             const res = await window.electronAPI.importInteractionsCsv(
               fp,
               dataRetentionDays,
+              null,
+              true,
             )
             if (res) {
               totalInserted += res.inserted || 0
@@ -15101,6 +16405,9 @@
                 allErrors.push(...res.errors.slice(0, 3))
             }
           }
+          // Before the toast is built, or it would report 0 purged.
+          setImportOverlay(true, "Finishing up…")
+          await finalizeOnce()
           let msg = `Imported ${totalInserted} interactions`
           if (totalSkipped > 0) msg += `, ${totalSkipped} duplicates skipped`
           if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
@@ -15116,6 +16423,9 @@
         } catch (e) {
           showImportToast("error", "Import failed: " + e)
         } finally {
+          // A throw mid-loop must not leave the run open — the rows already
+          // written still need their summary rebuilt.
+          await finalizeOnce()
           convImporting = false
           setImportOverlay(false)
           btn.innerHTML = _CONV_IMPORT_BTN_HTML
@@ -15145,6 +16455,14 @@
       /// window that times out at every size can't fan out into hundreds of
       /// requests against the API.
       const IMP_MAX_SPLIT_DEPTH = 4
+      /// How many times a rate-limited or 5xx window is retried unchanged
+      /// before the day is failed. Distinct from the split depth above: those
+      /// two failures want opposite responses.
+      const IMP_MAX_BACKOFF_ATTEMPTS = 4
+      /// Ceiling on a single backoff wait, including a server-sent Retry-After.
+      /// A longer pause should surface as a failure the user can act on rather
+      /// than a progress bar that appears stuck.
+      const IMP_MAX_BACKOFF_MS = 60 * 1000
 
       let _impSource = "api"
       let _impFromDate = ""
@@ -15180,19 +16498,13 @@
       function _impUtcKey(ms) {
         return new Date(ms).toISOString().slice(0, 10)
       }
-      function _impLocalKey(d) {
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-          2,
-          "0",
-        )}-${String(d.getDate()).padStart(2, "0")}`
-      }
       /**
        * True when every UTC hour this window touches already holds data.
        *
-       * Checked per hour rather than per day on purpose: a local-time range
-       * leaves a partial UTC day behind (e.g. only 22:00–23:59), and treating
-       * that day as "already imported" would silently skip its other 22 hours.
-       * Chunks never span two UTC days, so one day's mask is enough.
+       * Checked per hour rather than per day because a range can start or end
+       * mid-day: picking 12:00 → 18:00 leaves the rest of the day missing, and
+       * treating that day as "already imported" would silently skip it. Chunks
+       * never span two UTC days, so one day's mask is enough.
        */
       function _impWindowCovered(startUtc, endUtc) {
         const mask = _impDbHours.get(startUtc.slice(0, 10))
@@ -15219,25 +16531,31 @@
         return n
       }
 
-      /// Combine a local date string and a local HH:MM into a Date.
-      function _impLocalDate(dateStr, timeStr) {
+      /**
+       * Combine a UTC date string and a UTC HH:MM into a Date.
+       *
+       * The whole import picker is UTC — the database, the request windows and
+       * the coverage outlines all are, so a local-time picker only made the
+       * calendar describe a different day than the one a click would fetch.
+       */
+      function _impUtcDate(dateStr, timeStr) {
         const [y, m, d] = dateStr.split("-").map(Number)
         const [hh, mm] = (timeStr || "00:00").split(":").map(Number)
-        return new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0)
+        return new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, 0, 0))
       }
 
       /**
-       * Split a local date range into one request per UTC day.
+       * Split a UTC date range into one request per UTC day.
        *
        * Each chunk runs 00:00:00 → 23:59:59 of a UTC day (clipped to the
        * selected range at both ends), so every window is strictly under 24
        * hours — the API rejects a span of exactly 24h — and chunks are
        * consecutive with no overlap.
        */
-      function buildImportQueue(fromLocal, toLocal, opts) {
+      function buildImportQueue(fromUtc, toUtc, opts) {
         const skipExisting = !!(opts && opts.skipExisting)
-        const startMs = fromLocal.getTime()
-        const endMs = toLocal.getTime()
+        const startMs = fromUtc.getTime()
+        const endMs = toUtc.getTime()
         const chunks = []
         let cur = startMs
         // Guard against a pathological range producing an unbounded loop.
@@ -15288,9 +16606,22 @@
             kind: e.kind || "http",
             message: e.message,
             retryable: !!e.retryable,
+            retryAfterSecs: e.retryAfterSecs || null,
           }
         }
         return { kind: "http", message: String(e), retryable: false }
+      }
+
+      const _impSleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+      /// How long to wait before retrying a window the server pushed back on.
+      ///
+      /// Honours Retry-After when the server sent one, otherwise exponential
+      /// with jitter so a whole queue doesn't retry in lockstep.
+      function _impBackoffMs(attempt, retryAfterSecs) {
+        if (retryAfterSecs) return Math.min(retryAfterSecs * 1000, IMP_MAX_BACKOFF_MS)
+        const base = Math.min(2000 * 2 ** attempt, IMP_MAX_BACKOFF_MS)
+        return base + Math.floor(Math.random() * 500)
       }
 
       async function _impCleanup(paths) {
@@ -15304,12 +16635,20 @@
       /**
        * Fetch one window, halving it on timeout down to a one-hour floor.
        *
+       * Two different failures get two different responses, because the fix for
+       * one makes the other worse:
+       *   - a timeout means the window was too big, so halve it (the SOP
+       *     recommends querying in smaller slices);
+       *   - a 429 or a 5xx means the server wants fewer requests, so wait and
+       *     retry the window *unchanged*. Splitting here would send more.
+       *
        * Sub-windows are awaited in sequence, so this never has more than one
-       * API request in flight — the SOP's hard constraint. Every sub-window
-       * keeps the 00:00:00 → 11:59:59 / 12:00:00 → 23:59:59 shape, so none
-       * ever reaches 24 hours.
+       * API request in flight. That is a self-imposed cap, not an API rule —
+       * the SOP documents no rate or concurrency limit. Every sub-window keeps
+       * the 00:00:00 → 11:59:59 / 12:00:00 → 23:59:59 shape, so none ever
+       * reaches 24 hours.
        */
-      async function _impFetchWindow(item, startUtc, endUtc, depth) {
+      async function _impFetchWindow(item, startUtc, endUtc, depth, attempt = 0) {
         if (_impCancelled) throw { kind: "cancelled", message: "Cancelled" }
         const sMs = _impIsoMs(startUtc)
         const eMs = _impIsoMs(endUtc)
@@ -15335,9 +16674,28 @@
             `API request done ${startUtc} → ${endUtc}: ${res.rowCount} rows, ${res.bytes} bytes, ${res.durationMs}ms`,
           )
           _impSetOp(`Validating response…`, `${item.key} — ${res.rowCount} rows`)
-          return [res]
+          // Carry the window with the part: after the rows land, it is what
+          // gets recorded as covered — including when rowCount is 0, which is
+          // the case row presence alone can never distinguish from "not asked".
+          return [{ ...res, startUtc, endUtc }]
         } catch (raw) {
           const e = _impNormErr(raw)
+          // Backpressure: same window, later. Splitting would be the opposite
+          // of what the server just asked for.
+          if (e.kind === "rateLimited" || e.kind === "serverError") {
+            if (attempt >= IMP_MAX_BACKOFF_ATTEMPTS) throw e
+            const waitMs = _impBackoffMs(attempt, e.retryAfterSecs)
+            _impLogLine(
+              `${e.message} — waiting ${Math.round(waitMs / 1000)}s before retrying ${startUtc} → ${endUtc}`,
+            )
+            _impSetOp(
+              `Waiting on the API`,
+              `${item.key} — retrying in ${Math.round(waitMs / 1000)}s`,
+            )
+            await _impSleep(waitMs)
+            if (_impCancelled) throw { kind: "cancelled", message: "Cancelled" }
+            return _impFetchWindow(item, startUtc, endUtc, depth, attempt + 1)
+          }
           // Only halve while both halves stay at or above the one-hour floor,
           // and never beyond the depth cap.
           if (
@@ -15395,9 +16753,23 @@
               p.tempPath,
               dataRetentionDays,
               p.delimiter,
+              true, // deferFinalize — _impRunQueue finalizes once for the run
             )
             const idx = remaining.indexOf(p.tempPath)
             if (idx >= 0) remaining.splice(idx, 1)
+            // Only after the import returned: a window recorded ahead of the
+            // rows would mark hours as covered that a later failure never
+            // actually stored.
+            if (p.startUtc && p.endUtc) {
+              try {
+                await window.electronAPI.recordImportedWindow(
+                  p.startUtc,
+                  p.endUtc,
+                )
+              } catch (e) {
+                _impLogLine(`Could not record coverage for ${item.key}: ${e}`)
+              }
+            }
             // Free the disk as soon as the rows are safely in the database.
             await _impCleanup([p.tempPath])
             if (res) {
@@ -15407,10 +16779,11 @@
               if (res.errors && res.errors.length)
                 tally.errors.push(...res.errors.slice(0, 3))
             }
+            const rowsMs = res && res.timings ? res.timings.rowsMs : null
             _impLogLine(
               `Import done ${item.key}: ${res ? res.inserted : 0} new, ${
                 res ? res.skipped : 0
-              } duplicates`,
+              } duplicates${rowsMs != null ? ` in ${rowsMs}ms` : ""}`,
             )
           }
         } finally {
@@ -15479,6 +16852,10 @@
         let failure = null
         let failedIndex = -1
         try {
+          // Purge, summary rebuild and the FTS merge used to run once per
+          // downloaded window — 90 times for a 90-day import, each costing the
+          // size of the whole database. Bracket the run so they happen once.
+          await window.electronAPI.beginImportRun()
           // Guarded rather than an early return: the outcome block below must
           // still run so the modal leaves the "running" phase.
           for (let k = 0; k < todo.length; k++) {
@@ -15525,13 +16902,33 @@
             }
           }
         } finally {
-          // A download may still be in flight after a break — wait for it and
-          // delete its temp file so nothing is left on disk.
+          // A download may still be in flight after a break. Don't await it —
+          // a request that is going to hit its timeout would hold "Cancelling…"
+          // on screen for minutes. Clean up whenever it does land; the sweep on
+          // the next modal open is the backstop if the app dies first.
           if (nextFetch) {
-            const leftover = await nextFetch
-            if (leftover.ok)
-              await _impCleanup(leftover.parts.map((p) => p.tempPath))
+            nextFetch.then((leftover) => {
+              if (leftover && leftover.ok)
+                _impCleanup(leftover.parts.map((p) => p.tempPath))
+            })
+            nextFetch = null
           }
+          // Must run on every exit — cancel and failure included. Sessions
+          // imported before the stop still need their summary rebuilt, and
+          // _impAfterImport reloads the list as soon as this returns.
+          try {
+            _impSetOp("Finishing up…", "Updating summaries and search index")
+            const f = await window.electronAPI.finalizeImportRun(dataRetentionDays)
+            if (f) {
+              totals.purged += f.purged || 0
+              const t = f.timings
+              _impLogLine(
+                t
+                  ? `Finalize: ${f.purged || 0} purged — purge ${t.purgeMs}ms, summaries ${t.summaryMs}ms, search index ${t.ftsOptimizeMs}ms, stats ${t.pragmaOptimizeMs}ms, total ${t.totalMs}ms`
+                  : `Finalize: ${f.purged || 0} purged`,
+              )
+            }
+          } catch (_) {}
           convImporting = false
           setConvDbBusy(false)
         }
@@ -15604,16 +17001,24 @@
       async function _impLoadDbState() {
         const days = new Map()
         const hours = new Map()
-        try {
-          const stats = await window.electronAPI.getDbDailyStats()
-          for (const d of (stats && stats.days) || []) days.set(d.date, d.count)
-        } catch (_) {}
-        try {
-          for (const d of (await window.electronAPI.getDbHourCoverage()) || []) {
-            hours.set(d.date, d.hours)
-            if (!days.has(d.date)) days.set(d.date, d.count)
-          }
-        } catch (_) {}
+        // The importer never looks past the retention window, so bounding the
+        // hour-coverage aggregate there turns a full-table scan into a range
+        // seek. The two queries are independent — run them together.
+        // A couple of days of slack past the retention floor: the cutoff is a
+        // whole UTC day and a day missing from this map reads as "not
+        // imported", so rounding the wrong way re-downloads the oldest day.
+        const since = _impUtcKey(
+          Date.now() - (IMP_RETENTION_DAYS + 2) * IMP_DAY_MS,
+        )
+        const [stats, coverage] = await Promise.all([
+          window.electronAPI.getDbDailyStats().catch(() => null),
+          window.electronAPI.getDbHourCoverage(since).catch(() => null),
+        ])
+        for (const d of (stats && stats.days) || []) days.set(d.date, d.count)
+        for (const d of coverage || []) {
+          hours.set(d.date, d.hours)
+          if (!days.has(d.date)) days.set(d.date, d.count)
+        }
         _impDbDays = days
         _impDbHours = hours
       }
@@ -15624,14 +17029,14 @@
       /// "to 23:59" covers the whole day rather than stopping 59s short.
       function _impToInstant() {
         return new Date(
-          _impLocalDate(_impToDate, _impToTime).getTime() + 59 * 1000,
+          _impUtcDate(_impToDate, _impToTime).getTime() + 59 * 1000,
         )
       }
 
       function _impPreview() {
         if (!_impFromDate || !_impToDate)
           return { error: "Pick a start and end date." }
-        const from = _impLocalDate(_impFromDate, _impFromTime)
+        const from = _impUtcDate(_impFromDate, _impFromTime)
         const to = _impToInstant()
         if (to <= from) return { error: "The end must be after the start." }
         const all = buildImportQueue(from, to, { skipExisting: false })
@@ -15759,13 +17164,13 @@
                _impToDate ? esc(_impFmtDate(_impToDate)) : "Pick a date…"
              }</button>
              <input type="time" id="impToTime" value="${esc(_impToTime)}" />
-             <button class="import-now-btn" onclick="impSetNow()" title="Set the end to the current local time">Now</button>
+             <button class="import-now-btn" onclick="impSetNow()" title="Set the end to the current UTC time">Now</button>
            </div>
            <div class="day-cal" id="impCal">${_impCalHtml()}</div>
            <div class="day-cal-legend">
              <span><span class="swatch full"></span>Fully imported</span>
              <span><span class="swatch partial"></span>Partly imported</span>
-             <span>Times are local &middot; requests use UTC days</span>
+             <span>All dates and times are UTC, like the data</span>
            </div>
            <div>${summary}</div>
            <label class="radio-option" style="margin-top:10px;display:flex">
@@ -15799,17 +17204,30 @@
         return out.join("")
       }
 
+      /// Format a UTC day key for display. Forced to the UTC timezone so the
+      /// label can never name a different day than the key it came from.
       function _impFmtDate(key) {
-        const d = new Date(key + "T00:00:00")
+        const d = new Date(key + "T00:00:00Z")
         return d.toLocaleDateString("en-GB", {
+          timeZone: "UTC",
           day: "numeric",
           month: "short",
           year: "numeric",
         })
       }
 
+      /**
+       * The month the calendar is scrolled to, as a plain (year, month) pair
+       * carried in a Date. Seeded from the UTC month so that near midnight the
+       * grid shows the month the picker actually works in.
+       */
+      function _impDefaultCalMonth() {
+        const now = new Date()
+        return new Date(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)
+      }
+
       function _impCalHtml() {
-        if (!_impCalMonth) _impCalMonth = new Date()
+        if (!_impCalMonth) _impCalMonth = _impDefaultCalMonth()
         const base = new Date(
           _impCalMonth.getFullYear(),
           _impCalMonth.getMonth(),
@@ -15877,6 +17295,21 @@
         return nav + `<div class="cal-grid">${cells}</div>`
       }
 
+      /**
+       * A calendar cell's date key, built by plain string formatting.
+       *
+       * Both calendars mean a UTC day, and both get there without timezone
+       * maths: the grid coordinates already *are* the calendar date, so there
+       * is nothing to convert. Going via a Date would reintroduce the local
+       * offset this deliberately avoids.
+       */
+      function _calDayKey(y, m, day) {
+        return `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(
+          2,
+          "0",
+        )}`
+      }
+
       /// Range classes for a two-click picker, including the hover preview shown
       /// while the second end is still being chosen.
       function _calRangeCls(key, lo, hi) {
@@ -15887,10 +17320,8 @@
       }
 
       function _impMonthHtml(monthDate, isFirst) {
-        const today = _impLocalKey(new Date())
-        const oldest = _impLocalKey(
-          new Date(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS),
-        )
+        const today = _impUtcKey(Date.now())
+        const oldest = _impUtcKey(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS)
         const selStart = _impFromDate
         const selEnd =
           _impPickPhase === 1 && _impPickHover
@@ -15907,7 +17338,7 @@
           nextFn: "impCalNext",
           clickFn: "impPickDay",
           dataAttr: "data-imp-date",
-          keyFor: (y, m, day) => _impLocalKey(new Date(y, m, day)),
+          keyFor: _calDayKey,
           classify: (key) => {
             const disabled = key > today || key < oldest
             const coverage = _impDayCoverage(key)
@@ -16187,9 +17618,9 @@
       }
       function impSetNow() {
         const now = new Date()
-        _impToDate = _impLocalKey(now)
-        _impToTime = `${String(now.getHours()).padStart(2, "0")}:${String(
-          now.getMinutes(),
+        _impToDate = _impUtcKey(now.getTime())
+        _impToTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
+          now.getUTCMinutes(),
         ).padStart(2, "0")}`
         if (!_impFromDate) _impFromDate = _impToDate
         if (_impToDate < _impFromDate) _impFromDate = _impToDate
@@ -16280,21 +17711,22 @@
         const now = new Date()
         let start = new Date(now.getTime() - IMP_DAY_MS)
         if (_impDbDays.size > 0) {
+          // The day keys are UTC, so resume from the next UTC midnight.
           const newest = [..._impDbDays.keys()].sort().pop()
-          const next = new Date(newest + "T00:00:00")
-          next.setDate(next.getDate() + 1)
+          const newestStart = new Date(newest + "T00:00:00Z")
+          const next = new Date(newestStart.getTime() + IMP_DAY_MS)
           // If the DB is already current, re-check today rather than a future day.
-          start = next > now ? new Date(newest + "T00:00:00") : next
+          start = next > now ? newestStart : next
         }
         const oldest = new Date(now.getTime() - IMP_RETENTION_DAYS * IMP_DAY_MS)
         if (start < oldest) start = oldest
-        _impFromDate = _impLocalKey(start)
+        _impFromDate = _impUtcKey(start.getTime())
         _impFromTime = "00:00"
-        _impToDate = _impLocalKey(now)
-        _impToTime = `${String(now.getHours()).padStart(2, "0")}:${String(
-          now.getMinutes(),
+        _impToDate = _impUtcKey(now.getTime())
+        _impToTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
+          now.getUTCMinutes(),
         ).padStart(2, "0")}`
-        _impCalMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        _impCalMonth = _impDefaultCalMonth()
       }
 
       async function openImportModal() {
@@ -16309,7 +17741,7 @@
         _impLog = []
         _impPickPhase = 0
         _impPickHover = ""
-        if (!_impCalMonth) _impCalMonth = new Date()
+        if (!_impCalMonth) _impCalMonth = _impDefaultCalMonth()
         document.getElementById("convImportModal").classList.add("open")
         _impRenderModal()
         // Sweep anything a previous crash left behind, then load the day
@@ -16395,6 +17827,46 @@
           tab === "data" ? "" : "none"
       }
 
+      function _fmtBytes(n) {
+        if (!n) return "0 B"
+        const units = ["B", "KB", "MB", "GB"]
+        let i = 0
+        while (n >= 1024 && i < units.length - 1) {
+          n /= 1024
+          i++
+        }
+        return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${units[i]}`
+      }
+
+      /// VACUUM is the only thing that returns freed pages to the filesystem,
+      /// and it can take a while on a large database — so it is an explicit
+      /// action with an explicit result, not something that happens on open.
+      async function manageDbCompact() {
+        const btn = document.getElementById("manageDbCompactBtn")
+        const status = document.getElementById("manageDbCompactStatus")
+        if (!btn || btn.disabled) return
+        const label = btn.textContent
+        btn.disabled = true
+        btn.textContent = "Compacting…"
+        status.textContent = "This can take a while on a large database."
+        try {
+          const r = await window.electronAPI.compactDatabase()
+          const saved = (r.bytesBefore || 0) - (r.bytesAfter || 0)
+          status.textContent =
+            saved > 0
+              ? `Freed ${_fmtBytes(saved)} — now ${_fmtBytes(r.bytesAfter)}.`
+              : `Already compact — ${_fmtBytes(r.bytesAfter)}.`
+        } catch (e) {
+          status.textContent = "Could not compact: " + e
+        } finally {
+          btn.disabled = false
+          btn.textContent = label
+        }
+      }
+      document
+        .getElementById("manageDbCompactBtn")
+        .addEventListener("click", manageDbCompact)
+
       async function refreshManageDbModal() {
         const body = document.getElementById("manageDbBody")
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
@@ -16433,10 +17905,7 @@
 
       // ── Manage DB: date helpers (UTC keys, no timezone maths) ─────────
       function _mdbKey(y, m, day) {
-        return `${y}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(
-          2,
-          "0",
-        )}`
+        return _calDayKey(y, m, day)
       }
       function _mdbParseKey(key) {
         const [y, m, d] = key.split("-").map(Number)
@@ -18678,9 +20147,34 @@
         const t = v.trim()
         if (!t) return true
         if (t.toLowerCase() === "continue") return true
-        if (/^#[^#]+#$/.test(t)) return true // #VariableName#
         if (/^\d+:\d+$/.test(t)) return true // dialogId:nodeId (dialog link navigation)
         return false
+      }
+
+      // `#Voornaam#`, `#E-mailadres#`, `#Toelichting klacht#` … — a real user
+      // message whose value CM redacted to the variable name it was stored in.
+      // These are NOT internal: treating them as such dropped the user turn AND
+      // merged every following bot row into the previous turn, which is what
+      // made transactional dialogs (facility card, complaints) read out of order.
+      function redactedUserLabel(v) {
+        const m = /^#([^#]+)#$/.exec((v || "").trim())
+        return m ? m[1] : null
+      }
+
+      // `Hoi {{name}}!`, `{{attraction\_name}}` — the bot personalised this for
+      // the user, but the log keeps the template variable rather than the value.
+      // Rendered inline as a small chip so the sentence still reads as a
+      // sentence. `\_` is the export's escaped underscore, not a line break.
+      function templateVarChip(rawName) {
+        const name = String(rawName || "")
+          .replace(/\\_/g, "_")
+          .trim()
+        // `rawName` arrives already HTML-escaped (it comes out of `safe`), so
+        // the fallback must not escape it again. The sanitised branch only ever
+        // holds `[\w .-]`, which esc() leaves untouched either way.
+        if (!name || !/^[\w .-]+$/.test(name))
+          return `<span class="tpl-var" title="Value not logged">{{${rawName}}}</span>`
+        return `<span class="tpl-var" title="${name} — personalised value, not logged">${name}</span>`
       }
 
       // ── CM.com output text formatter ───────────────────────────────────
@@ -18733,10 +20227,12 @@
           },
         )
 
-        // Extract all %{DialogOption(label)} tokens (collect before any escaping)
+        // Extract all %{DialogOption(label)} tokens (collect before any escaping).
+        // The leading list marker is consumed with the token, so it can't be
+        // mistaken for a content bullet further down.
         const options = []
         const withoutOptions = withoutCtas.replace(
-          /%\{DialogOption\(([^)]+)\)\}/g,
+          /\*?[ \t]*%\{DialogOption\(([^)]+)\)\}/g,
           (_, label) => {
             options.push(label.trim())
             return ""
@@ -18744,12 +20240,17 @@
         )
 
         // Strip unsupported %{...} tokens (e.g. %{Image(1)}, %{Video(2)})
-        const withoutTokens = withoutOptions.replace(/%\{[^}]+\}/g, "")
+        const withoutTokens = withoutOptions.replace(
+          /\*?[ \t]*%\{[^}]+\}/g,
+          "",
+        )
 
-        // Remove list markers (* ) that prefixed each option
+        // Turn real content list markers into bullets, and drop markers that
+        // have nothing left after them. `**` is bold, never a list marker.
         const withoutBullets = withoutTokens
-          .replace(/\*\s*$/gm, "")
-          .replace(/\*\s+/g, "")
+          .replace(/(?<!\*)\*(?!\*)[ \t]*$/gm, "")
+          .replace(/(?<!\*)\*(?!\*)[ \t]+(?=[^\s_])/g, "• ")
+          .replace(/(?<!\*)\*(?!\*)[ \t]+/g, "")
 
         // Convert Markdown-style links [text](url) → <a href="url">text</a>
         const withMdLinks = withoutBullets.replace(
@@ -18785,26 +20286,37 @@
         let safe = parts.join("")
 
         if (botMode) {
-          // __text__ → <strong> (only when there is actual content between the underscores)
-          // bare __ → <br><br>; single standalone _ → <br>
-          // Protect {{...}} blocks from underscore conversion first
-          const curlyPlaceholders = []
-          safe = safe.replace(/\{\{[^}]*\}\}/g, (match) => {
-            curlyPlaceholders.push(match)
-            return `\x00CURLY${curlyPlaceholders.length - 1}\x00`
-          })
+          // In CM.com output `_` is a line break, never emphasis — `__` is a
+          // paragraph break and `**text**` is the only bold marker. Treating
+          // `__text__` as <strong> both bolded whole paragraphs and swallowed
+          // the two breaks around them, which is why answers came out bold and
+          // run together. Don't reintroduce it.
+          //
+          // Protect the anchors built above and the {{variable}} chips from
+          // underscore conversion (a `_` in a href or in `{{opening_hours_to}}`
+          // would otherwise become a <br>).
+          const protectedBlocks = []
+          const protect = (match) => {
+            protectedBlocks.push(match)
+            return `\x00KEEP${protectedBlocks.length - 1}\x00`
+          }
+          safe = safe.replace(/\{\{([^}]*)\}\}/g, (_, name) =>
+            protect(templateVarChip(name)),
+          )
+          safe = safe.replace(/<a class="chat-link"[\s\S]*?<\/a>/g, protect)
 
-          safe = safe.replace(/__([^_]+)__/g, "<strong>$1</strong>")
+          // **text** → <strong>
+          safe = safe.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
 
           // Line breaks: two or more underscores (bare) → double line break
           safe = safe.replace(/(_\s*){2,}/g, "<br><br>")
           // Single underscore not adjacent to another underscore → single line break
           safe = safe.replace(/(?<!_)_(?!_)/g, "<br>")
 
-          // Restore {{...}} blocks
+          // Restore protected blocks
           safe = safe.replace(
-            /\x00CURLY(\d+)\x00/g,
-            (_, i) => curlyPlaceholders[+i],
+            /\x00KEEP(\d+)\x00/g,
+            (_, i) => protectedBlocks[+i],
           )
 
           // Trim leading/trailing <br>
@@ -18928,14 +20440,21 @@
         if (!plan.query || !plan.valid) return { body, options, ctas, asks }
         const reGs = plan.highlightRegexes
         if (!reGs.length) return { body, options, ctas, asks }
+        // Highlight text only, never inside a tag. `body` carries anchors with
+        // hrefs and {{variable}} chips with title text; matching across the raw
+        // HTML would inject <mark> into an attribute and break the element.
         let highlighted = body
-        for (const reG of reGs) {
-          reG.lastIndex = 0
-          highlighted = highlighted.replace(
-            reG,
-            (m) => `\x00MARK\x00${m}\x00/MARK\x00`,
-          )
-        }
+          .split(/(<[^>]+>)/)
+          .map((seg) => {
+            if (seg.startsWith("<")) return seg
+            let out = seg
+            for (const reG of reGs) {
+              reG.lastIndex = 0
+              out = out.replace(reG, (m) => `\x00MARK\x00${m}\x00/MARK\x00`)
+            }
+            return out
+          })
+          .join("")
         highlighted = highlighted
           .replace(/\x00MARK\x00/g, "<mark>")
           .replace(/\x00\/MARK\x00/g, "</mark>")
@@ -18968,8 +20487,17 @@
         const recognitionDetails = parseJsonSafe(
           interaction.recognitionDetails || "",
         )
+        // A GenAI answer was not produced by Conversational AI Cloud recognition,
+        // so recognition quality, entity matches and the dialog path are about
+        // something else entirely (typically the dialog the user dropped out of)
+        // and read as if they explained the answer. Never show them here.
+        const isGenAi =
+          chatRowIsGenAi(interaction) ||
+          interaction.recognitionType === "GenerativeAI"
         const entityMatches =
-          recognitionDetails && Array.isArray(recognitionDetails.entityMatches)
+          !isGenAi &&
+          recognitionDetails &&
+          Array.isArray(recognitionDetails.entityMatches)
             ? recognitionDetails.entityMatches
             : []
         const quality = interaction.recognitionQuality
@@ -19002,6 +20530,8 @@
           })
           html += `</div></div>`
         }
+
+        if (isGenAi) dialogIds.clear()
 
         if (dialogIds.size) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Dialogs</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
@@ -19047,7 +20577,10 @@
           html += `</div></div>`
         }
 
-        if (quality > 0 || (quality === 0 && interaction.recognitionType)) {
+        if (
+          !isGenAi &&
+          (quality > 0 || (quality === 0 && interaction.recognitionType))
+        ) {
           const qualColor =
             quality === 0
               ? "var(--red)"
@@ -19075,7 +20608,11 @@
         }
 
         if (!html)
-          html = `<span style="color:var(--muted);font-size:0.72rem">No linked articles or dialogs</span>`
+          html = `<span style="color:var(--muted);font-size:0.72rem">${
+            isGenAi
+              ? "Generated by AI — no Conversational AI Cloud recognition"
+              : "No linked articles or dialogs"
+          }</span>`
         return html
       }
 
@@ -19096,6 +20633,17 @@
 
       function chatRowHasBotOutput(r) {
         return Boolean(r.outputText)
+      }
+
+      // Body HTML for a user bubble. Redacted values keep their turn visible —
+      // the label says which field was answered, the value simply wasn't logged.
+      function userBubbleBody(value, plan) {
+        const label = redactedUserLabel(value)
+        if (label)
+          return `<span class="redacted-value"><span class="redacted-icon">&#128274;</span>${esc(
+            label,
+          )}<span class="redacted-note">not logged</span></span>`
+        return chatHl(value, false, plan).body
       }
 
       function parseChatFeedbackInfo(row) {
@@ -19421,9 +20969,10 @@
           if (turn.userRow) {
             html += `<div class="user-group">
               <span class="user-label">User</span>
-              <div class="bubble user${userHighlightClass}${feedbackOriginClass}">${
-              chatHl(turn.userRow.interactionValue, false, searchPlan).body
-            }</div>
+              <div class="bubble user${userHighlightClass}${feedbackOriginClass}">${userBubbleBody(
+              turn.userRow.interactionValue,
+              searchPlan,
+            )}</div>
               <span class="bubble-ts">${esc(
                 fmtChatTime(turn.userRow.timestampStart),
               )}</span>

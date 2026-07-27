@@ -68,11 +68,15 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `test_analytics_connection`| `testAnalyticsConnection()`       | Requests an OAuth2 token only, returns `{ ok, message }` |
 | `fetch_analytics_window`   | `fetchAnalyticsWindow(startUtc, endUtc)` | Downloads one window to a temp CSV, returns `{ tempPath, delimiter, rowCount, bytes, durationMs }`; rejects with `{ kind, message, retryable }` |
 | `cleanup_analytics_temp`   | `cleanupAnalyticsTemp(paths?)`    | Deletes the given temp CSVs, or sweeps the whole temp dir when called with no argument |
-| `get_db_hour_coverage`     | `getDbHourCoverage()`             | Per UTC day, a bitmask of which of the 24 hours hold interactions — distinguishes a partially imported day from a complete one |
+| `get_db_hour_coverage`     | `getDbHourCoverage(sinceDate?)`   | Per UTC day, a bitmask of the 24 hours the day is **covered** for — the union of hours holding interactions and hours an API window explicitly requested. Distinguishes a partially imported day from a complete one. `sinceDate` bounds an otherwise full-table aggregate against `idx_timestamp`; the Import modal passes the retention floor, Manage Database omits it because its calendar browses everything stored |
+| `record_imported_window`   | `recordImportedWindow(startUtc, endUtc)` | Marks every UTC hour a successfully imported API window covered. Called once per downloaded window, *after* its rows are in. See `## Coverage: asked-for vs present` |
+| `begin_import_run`         | `beginImportRun()`                | Opens an import run: resets the touched-session set, sets the `pending_finalize` crash marker, raises `wal_autocheckpoint` |
+| `finalize_import_run`      | `finalizeImportRun(maxAgeDays)`   | Closes a run: purge, scoped summary rebuild, FTS merge, planner stats, WAL restore — once, instead of once per file. Safe no-op when no run is open |
+| `compact_database`         | `compactDatabase()`               | `VACUUM`s the database, returning pages freed by deletions and schema migrations to the filesystem. Returns `{ bytesBefore, bytesAfter, durationMs }` |
 
 There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context options, daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
-`import_interactions_csv(filePath, maxAgeDays, delimiter?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it.
+`import_interactions_csv(filePath, maxAgeDays, delimiter?, deferFinalize?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it. `deferFinalize` defaults to false; both real callers pass `true` and bracket their loop with `begin_import_run` / `finalize_import_run` — see `## Why import stays fast as the database grows`.
 
 ### Export for AI (`export_conversations_for_ai`)
 
@@ -251,6 +255,8 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 | `articleDialogLinkBadges(links)`  | Renders clickable Dialog Link/Transactional Dialog chips for article cards |
 | `dialogLinkedArticles(item)`      | Finds Articles that link to a Dialog for card/export relationship displays |
 | `renderArticleCard(art, q)`       | Full article card HTML with badges, expandable questions, output section |
+| `_applyResponseClamps(container)` | Adds the fade + "Show full response" toggle to any overflowing `.response-box` in an info modal |
+| `_linkedFromSectionHtml(kind, id)`| "Linked from Articles" — which Articles route into this Dialog / Transactional Dialog |
 | `renderDialogCard(item, q)`       | Full dialog/tDialog card HTML with expandable node list |
 | `renderNodeHtml(node, dialog, q)` | Individual node HTML: Recognition/Output badge, answer, user options, routing |
 | `applyAllFilters()`               | Lightweight wrapper that triggers worker search for All Results |
@@ -258,12 +264,14 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 | `applyDialogFilters()`            | Lightweight wrapper that triggers worker search for Dialogs |
 | `applyEntityFilters()`            | Lightweight wrapper that triggers worker search for Entities |
 | `jumpToDialog(id, isTDialog)`     | Switches to Dialogs tab, sets search to the ID, scrolls to and opens the matching card |
-| `openExportModal()`               | Opens Share Content using the current active tab's filtered items |
+| `openExportModal()`               | Opens Share Content using the current active tab's filtered items; resets the per-open filter/removals |
+| `getExportItemsForCurrentView()`  | The set that is rendered **and** copied — tab results minus removals, minus the modal's filter |
+| `_renderExportBody()`             | Single entry point for re-rendering Share Content: list/table/grouped + counts + footer |
 | `_renderExportGrouped(items)`     | Groups Share Content by Articles, Dialogs, Transactional Dialogs, sorted by id, with dialog → article refs |
 | `buildItemUrl(kind, id)`          | Returns full CM.com URL for an item |
 | `toggleContentSelectMode()`       | Toggles Collections multi-select on the Content tab, re-rendering the active panel with/without checkboxes |
 | `buildCollectionExportRows(collection)` | Walks a collection's items, applies reachability + smart-filter exclusion, returns `{ rows, excludedCount, totalCandidates }` |
-| `openCollectionsModal()`          | Opens the Collections modal (Collections list + Smart Filters tabs) |
+| `openCollectionsModal()`          | Opens the Collections modal (sidebar of collections + Smart filters, detail pane per collection) |
 | `exportCollection(collectionId)`  | Builds export rows for a collection and saves them to a JSON file via `saveCollectionExport` |
 
 ### Rendering pipeline
@@ -301,7 +309,52 @@ Three distinct search types:
 - `ND` means **Exclude non-default responses from search**. It only affects matching when a text query is active and must not hide items for an empty query.
 - A response is user-facing unreachable only when it is not the default response and it has no context condition. Non-default responses with context are reachable for users in that context and should not be labeled "non-default" or "unreachable" in result cards.
 - Contextual/non-default query hits should show a compact snippet or reason on result cards so users can see why an item matched without opening the modal.
-- Modal "Show search-matching content only" should use the same answer/node sections that caused worker result inclusion.
+- The info modals' **Matches only** toggle (`modalMatchFilter`, `toggleModalMatchFilter`) must use the same answer/node sections that caused worker result inclusion. It is hidden entirely when no query is active — it can do nothing then, and a permanently greyed-out control reads as broken rather than inapplicable.
+
+---
+
+## Chat rendering
+
+The chat view turns raw `interactions` rows into turns (`buildChatTurns`) and renders each row's `output_text` through `parseCmOutput`. Both have had bugs that read as "the chat is broken" rather than "the renderer is wrong", so the rules below are load-bearing.
+
+### CM.com output formatting (`parseCmOutput`)
+
+- **`_` is a line break, never emphasis.** A single `_` is `<br>`, a run of two or more (`__`, or `_  _`) is `<br><br>`. **`**text**` is the only bold marker.**
+- **Do not reintroduce `__text__` → `<strong>`.** That rule existed, ran *before* the line-break rules, and therefore bolded whole paragraphs *and* swallowed the two breaks on either side — so answers rendered bold and run together with no spaces. It fired on **93 of 400** distinct sampled answers. `_` marking a break and `__` marking bold cannot both be true; the break wins.
+- **List markers.** `*` followed by whitespace becomes `• `; `**` is never a list marker (both the leading and trailing star are guarded with a lookaround). The `*` that prefixes each `%{DialogOption(...)}` / `%{Image(n)}` token is consumed *with* the token, so what survives to the bullet step is a real content bullet. Deleting all markers outright — the old behaviour — flattened genuine lists into unmarked lines.
+- **Anchors and `{{variable}}` chips are placeholder-protected** before the underscore pass, or a `_` inside a href or inside `{{opening_hours_to}}` becomes a `<br>` and breaks the element.
+- Order inside the function matters and is: card.ask → CTA → DialogOption → other `%{}` tokens → bullets → markdown links → `<a>` links + HTML escaping → (botMode) protect → bold → line breaks → restore.
+
+### `{{variable}}` is a redacted bot value
+
+The bot side of the same story as `#Variable#` below: the answer was personalised for the user, but the log keeps the template (`Hoi {{name}}!`, `{{attraction\_name}}`, `{{emailAddress}}`, `{{opening_hours_from}}`). `templateVarChip(name)` renders each one as an inline `.tpl-var` chip instead of raw braces, and normalises the export's escaped `\_` back to `_`.
+
+- **`.tpl-var` is deliberately near-padding-free** (2px, no margin, dotted underline rather than a bordered pill). A wider chip pushes the following punctuation away from it — `Hoi {{name}} !` — which reads as a typo. Verified visually before settling on it.
+- `rawName` arrives already HTML-escaped, so the fallback branch (an unparseable token) must not escape it a second time. The sanitised branch is restricted to `[\w .-]`, where `esc()` is a no-op.
+- `.tpl-var` and `.redacted-value` share one visual language on purpose — both mean "the log never stored this value" — but differ in weight, because one sits mid-sentence and the other is a whole message.
+
+### Search highlighting never enters a tag
+
+`chatHl` splits `body` on `/(<[^>]+>)/` and highlights only the text segments. `body` carries anchors (`href`, `onclick="previewUrl('…')"`) and `.tpl-var` chips with title text, so matching across the raw HTML injects `<mark>` into an attribute and breaks the element — searching `efteling` used to corrupt every link in the answer.
+
+### `#Variable#` is a redacted user turn, not an internal value
+
+CM logs a user's typed value as the variable name it was stored in (`#Voornaam#`, `#E-mailadres#`, `#Toelichting klacht#`, `#Vraag#`) whenever the field is PII. `isInternalValue` used to classify these as internal, which did two things:
+
+1. dropped the user turn entirely, and
+2. — the damaging one — stopped the `botRows` loop from breaking, so **every following bot row was absorbed into the previous turn**.
+
+On the facility-card transactional dialog that produced a turn reading `User: "Ja"` followed by six consecutive bot bubbles, with the bot appearing to ask for a first name and then immediately a last name and no user input between them. It looked like message ordering was broken. 2,953 of 18,295 sessions in a real database were affected.
+
+- `isInternalValue` covers only `continue`, `dialogId:nodeId`, and empty — genuine system values.
+- `redactedUserLabel(v)` extracts the field name; `userBubbleBody(value, plan)` renders it as a lock chip (`.redacted-value`) instead of a text bubble, and is used by **both** chat render paths (`renderChatThread` and `renderFlaggedThread`) so they cannot drift.
+- The **User** chat filter pill now includes these turns, which is correct — a user turn did happen.
+
+### GenAI bubbles show no recognition data
+
+`renderBubbleDetail` suppresses **recognition quality**, **entity matches**, and **dialogs** when the row is GenAI (`chatRowIsGenAi(row) || recognitionType === "GenerativeAI"`). A GenAI answer did not come from Conversational AI Cloud recognition, so those fields describe something else — rows with `all_interaction_types = ["QA","GenerativeAI"]` carry a populated `entityMatches`, `recognition_quality: 0.0`, and a `dialog_paths` of `{"DropOut": "…"}` (the dialog the user dropped *out of*), all of which read as an explanation of the answer. **GenAI source articles** (`faqs_found`) and **Recognition type** stay — those are genuinely about the GenAI answer. When nothing remains the empty state says so explicitly.
+
+The low/zero-recognition bubble highlighting already excluded GenAI rows the same way; keep the two checks in agreement.
 
 ---
 
@@ -322,31 +375,50 @@ Responsibilities are split deliberately — keep them separate when extending th
 - **Duplicate detection is `INSERT OR IGNORE` on the `log_id` primary key**, so re-importing a day is always safe and idempotent. Skipping already-imported days is therefore an optimisation, not a correctness requirement — never build a separate dedupe mechanism.
 - **Do not replace this with unconditional overwrite (`INSERT OR REPLACE`) to save time.** It was measured as a fix for slow imports and found ~3.5× *slower* than `INSERT OR IGNORE`, not faster: `log_id` is already `INTEGER PRIMARY KEY`, so the "check" is the same rowid seek the insert must do regardless, and on a duplicate it skips the secondary indexes and FTS insert entirely — `OR REPLACE` instead deletes and re-inserts, re-maintaining every index, and would also break the `recognition_details` backfill and leave stale FTS rows. Import slowness has a real cause; see below.
 - **The database stores raw UTC** (the portal CSV's `03/25/2026 09:30:22` is the same instant as the API's `2026-03-25T09:30:22.605Z`), so `get_db_daily_stats` groups by UTC date. `parse_ts` normalizes both formats to `YYYY-MM-DDTHH:MM:SS` so rows from either source are byte-identical — every `DATE(timestamp_start)` and range comparison depends on that.
-- **Windowing:** the picker is local time (**Now** = local now), but `buildImportQueue` snaps chunks to UTC days so each request maps 1:1 to a DB day. A full day is `00:00:00Z` → `23:59:59Z` — **strictly under 24h**, because a span of exactly 24 hours is rejected. `validate_window` in `analytics_api.rs` enforces this, along with the SOP's 90-day retention limit. A local range straddles UTC-day boundaries, so picking one local day legitimately produces two chunks.
-- **Pipeline:** while day *N* imports, day *N+1* downloads. Only ever one API request is in flight — the JS scheduler serialises downloads and a `tokio::sync::Semaphore(1)` in `AnalyticsState` enforces it at the client layer regardless. `_impStartFetch` returns a promise that never rejects (`{ ok, parts | error }`) because a download is started one iteration before it is awaited.
-- **Timeout subdivision:** the SOP warns full-day requests often time out. On a retryable error the window is halved (12h → 6h → …), sequentially, bounded by `IMP_MAX_SPLIT_DEPTH` and a one-hour floor — a window is only split while *both* halves would stay at or above an hour. Worst case is ~6 requests per day, not an exponential fan-out.
+- **Windowing:** the picker is **UTC end to end** — the date fields, the time fields, **Now** (`getUTCHours`), the calendar cells, and the default range all are, matching the database and the request windows. `_impUtcDate(dateStr, timeStr)` is the only place a picked date becomes an instant, and it goes through `Date.UTC`. `buildImportQueue` then cuts the range at UTC midnights so each request maps 1:1 to a DB day; one picked day is exactly one request, in any host timezone. A full day is `00:00:00Z` → `23:59:59Z` — **strictly under 24h**. That is *our* invariant, not an API rule: the SOP says a full-day request frequently *times out*, not that it is rejected, and the rule exists so a window maps onto one UTC day the calendar and skip logic can reason about. `validate_window` in `analytics_api.rs` enforces it, along with the SOP's 90-day retention limit (which is real).
+- **Pipeline:** while day *N* imports, day *N+1* downloads. Only ever one API request is in flight — the JS scheduler serialises downloads and a `tokio::sync::Semaphore(1)` in `AnalyticsState` enforces it at the client layer regardless. **This cap is self-imposed politeness, not an API constraint** — the SOP documents no rate limit and no concurrency limit, despite earlier comments here and in `analytics_api.rs` claiming it did. Raising it is a legitimate option if downloads ever become the bottleneck; as of the run-scoped-finalize work they were not. `_impStartFetch` returns a promise that never rejects (`{ ok, parts | error }`) because a download is started one iteration before it is awaited.
+- **Timeout subdivision vs backoff — two failures, two opposite responses.** The SOP warns full-day requests often time out, so a `Timeout` (408/504) halves the window (12h → 6h → …), sequentially, bounded by `IMP_MAX_SPLIT_DEPTH` and a one-hour floor — split only while *both* halves stay at or above an hour. Worst case ~6 requests per day, not an exponential fan-out. A `RateLimited` (429) or `ServerError` (5xx) instead **waits and retries the same window unchanged**, honouring `Retry-After` and otherwise backing off exponentially with jitter (`IMP_MAX_BACKOFF_ATTEMPTS`, `IMP_MAX_BACKOFF_MS`). All three used to be one `Timeout` kind, which meant the app responded to "you are sending too many requests" by splitting the window and sending *more*. `rate_limiting_is_not_mistaken_for_a_timeout` pins the distinction.
+- **Cancel does not wait for the in-flight download.** With a 300 s request timeout, awaiting it held "Cancelling…" on screen for minutes; the leftover fetch is cleaned up fire-and-forget when it lands, with the temp-dir sweep on modal open as the backstop.
 - **`paginateData` is deliberately not sent.** The SOP requires confirming the pagination mechanism first, so instead the client fails loudly on anything paginated-looking rather than importing a partial day. Confirm the mechanism against the official spec before implementing it.
 - **Temp files** live in `app_cache_dir()/analytics-tmp` and are deleted the moment each part's import returns, in a `finally` so failure and cancellation clean up too. The dir is swept on app start and on modal open (crash recovery). `cleanup_analytics_temp` is path-confined to that directory.
 - **Credentials** live in `app_data_dir()/analytics-api.json` (`0600` on unix). The client secret never crosses the IPC bridge — `getAnalyticsConfig` returns `hasSecret` only, and saving with a blank secret keeps the stored one.
-- **Skipping is decided per hour, not per day** (`get_db_hour_coverage` → `_impWindowCovered`). Because a local-time range leaves a *partial* UTC day behind (e.g. only the 22:00–23:59 tail), a day-level "has rows?" check would silently skip that day's other 22 hours. A chunk is skipped only when every UTC hour it touches already holds data. The calendar shows this in three states: green outline = every hour imported, orange outline = partly imported (will be fetched again), no outline = nothing yet. Never regress this to a day-level check.
+- **Skipping is decided per hour, not per day** (`get_db_hour_coverage` → `_impWindowCovered`). A range can start or end mid-day — picking 12:00 → 18:00 leaves the rest of that day missing — so a day-level "has rows?" check would silently skip the other 18 hours. A chunk is skipped only when every UTC hour it touches is already covered. (This mattered far more when the picker was local time and *every* multi-day import left two partial days behind; it is still the correct rule.) The calendar shows this in three states: green outline = every hour imported, orange outline = partly imported (will be fetched again), no outline = nothing yet. Never regress this to a day-level check.
 - Skipped days stay in the queue marked `skipped` rather than being dropped, so the user can see what was left alone; they count toward overall progress.
-- Caveat worth knowing: an hour with genuinely zero interactions reads as "missing", so a quiet night can make a complete day look partial and be re-fetched. That errs toward re-downloading, which `INSERT OR IGNORE` makes harmless — the opposite error would lose data.
+
+### Coverage: asked-for vs present
+
+Coverage used to be inferred purely from row presence, which cannot tell **"we asked and the API had nothing"** apart from **"we never asked"**. An hour with genuinely zero interactions — a quiet night, a maintenance window — therefore read as a permanent gap: the day never reached 24/24, stayed orange, and was re-downloaded on every run forever. Observed in the wild on 24 July 2026, where two full-day fetches both returned exactly 19,470 rows and neither contained anything in 02:00–02:59Z.
+
+The `imported_windows` table (`day` PRIMARY KEY, `hours` bitmask) records which UTC hours were actually **requested**. `record_imported_window` ORs a window's hours in, and `hour_coverage` returns the **union** of hours-with-rows and hours-requested.
+
+- **The union is what makes this backward compatible.** Row presence still counts on its own, so manually imported portal CSVs — which have no request window — keep marking their hours exactly as before, and existing databases need no backfill migration. A day imported before this existed simply behaves as it always did until it is fetched again once.
+- **Record after the import returns, never before.** A window marked covered ahead of its rows would claim hours a later failure never actually stored. `_impImportParts` records per part, inside the same loop that already deleted the temp file.
+- **`_impFetchWindow` attaches `startUtc`/`endUtc` to each part** it returns, so the window survives timeout subdivision — three sub-windows record three hour ranges, which is exactly right.
+- **Deletion must forget the window, or a deleted day reads as fully imported and can never be re-downloaded.** `delete_interactions_by_dates` drops the rows for the days it deletes. `purge_old` is finer-grained because the retention cutoff falls mid-day: it deletes whole days before the cutoff day, then clears only the below-cutoff bits on the cutoff day itself (`hours = hours & ~((1 << cutoff_hour) - 1)`).
+- A window is always inside one UTC day by construction, so `window_day_hours` rejects a cross-day span rather than recording it against the wrong day.
+- Tests: `an_hour_the_api_answered_with_nothing_still_counts_as_covered` is the load-bearing one. `a_fetched_window_with_zero_rows_still_reports_coverage`, `a_partial_window_covers_only_the_hours_it_requested`, `purging_clears_coverage_only_for_the_hours_it_removed`, and `deleting_a_day_forgets_that_it_was_ever_fetched` cover the edges.
+
+The Manage Database calendar still gates its outline on row count, so a fetched-but-empty day shows nothing there — correct, since that modal is about what is stored and deletable, not about what was requested.
 
 ### The shared day calendar
 
-`calMonthHtml(monthDate, isFirst, cfg)` renders one month grid and is the **only** place a calendar month is built. The Import modal (`_impMonthHtml`) and the Manage Database modal (`_mdbMonthHtml`) are both thin wrappers over it, so the two calendars cannot drift apart visually. Everything modal-specific arrives through `cfg`: `keyFor(y, m, day)` (which date a cell means), `classify(key)` (its classes and tooltip), `clickFn`/`dataAttr`, and `prevFn`/`nextFn`. `_calRangeCls(key, lo, hi)` is the shared two-click range/hover-preview classifier.
+`calMonthHtml(monthDate, isFirst, cfg)` renders one month grid and is the **only** place a calendar month is built. The Import modal (`_impMonthHtml`) and the Manage Database modal (`_mdbMonthHtml`) are both thin wrappers over it, so the two calendars cannot drift apart visually. Everything modal-specific arrives through `cfg`: `keyFor(y, m, day)` (which date a cell means — both modals pass the shared `_calDayKey`), `classify(key)` (its classes and tooltip), `clickFn`/`dataAttr`, and `prevFn`/`nextFn`. `_calRangeCls(key, lo, hi)` is the shared two-click range/hover-preview classifier.
 
 The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Manage DB modal adopted it) — including the green/orange coverage outlines, which are inset shadows rather than borders so marking a day never shifts the grid by a pixel. Both calendars also share the class-only hover update (`_impUpdateCalClasses` / `_mdbUpdateCalClasses`): a full re-render on every `mousemove` fights the pointer.
 
-Each wrapper keeps its own date semantics on purpose:
+**Both calendars mean a UTC day**, via the shared `_calDayKey(y, m, day)` — plain string formatting, no `Date`, no timezone maths. The grid coordinates already *are* the calendar date, so there is nothing to convert; routing through a `Date` is what reintroduces the local offset. `_mdbKey` is a thin alias kept for readability at the Manage DB call sites. What still differs between the wrappers:
 
 | | Import | Manage Database |
 | --- | --- | --- |
-| Cell means | a **local** day (`_impLocalKey`) — the picker is local time | a **UTC** day (`_mdbKey`, plain string building, no timezone maths) |
 | Disabled | future, or older than the API's 90-day retention | future only — the DB may hold anything |
 | Range colour | accent | red (`.day-cal.danger`) |
 
-Manage DB is UTC because `DATE(timestamp_start)` is UTC and `delete_interactions_by_dates` matches on it: the day you click is exactly the set of rows that disappears. Don't "unify" that to local — it would make a destructive action off-by-one against the data it deletes.
+Both are UTC for the same reason: the data is. `DATE(timestamp_start)` is UTC, `delete_interactions_by_dates` matches on it, and the request windows the importer builds are UTC days — so in both modals the day you click is exactly the set of rows that appears or disappears. Don't "unify" either one to local time.
+
+The Import picker used to be local time. The mismatch showed up in two ways worth remembering, because each looks like its own separate bug:
+
+- **One picked day became two requests.** A local day spans two UTC days (at UTC+2, local 25 Mar is `24T22:00Z → 25T21:59Z`), so a contiguous selection always left two ragged UTC edges — the first day fetched only its tail, the last only its head. Both then rendered orange (partly imported) indefinitely and were re-fetched on the next run. Harmless thanks to `INSERT OR IGNORE`, but it read as the importer failing to finish.
+- **The outlines described a day you hadn't selected.** `keyFor` was local while `_impDbHours`/`_impDbDays` are keyed by the UTC date straight out of `get_db_hour_coverage`, so a cell's coverage colour and tooltip answered "is UTC day N complete?" while clicking it queued local day N. At UTC+2 the two overlap 22 of 24 hours, which is why it looked *almost* right rather than obviously wrong.
 
 ### Manage Database modal
 
@@ -363,30 +435,88 @@ Two tabs: **Stored data** (calendar-driven cleanup) and **Database & retention**
 
 Import cost must be proportional to the size of the import, never to the size of the database. Everything below exists to keep it that way — measured at ~7× on a 107k-interaction / 11.9k-session database, and the gap widens as the DB grows.
 
+**An import is a *run*, not a file.** `begin_import_run` → N × `import_interactions_csv(deferFinalize: true)` → `finalize_import_run`. The tail work (purge, scoped summary rebuild, FTS `'optimize'`, `PRAGMA optimize`) costs the size of the *database*, so paying it per downloaded window meant a 90-day API import paid it 90 times. Measured on a 120k-row database with 90 windows: **21.4 s → 5.0 s**, with the tail itself dropping from 17.3 s to 0.5 s. `perf::import_cost` reproduces the comparison.
+
+- `import_csv_into(..., finalize)` — `true` keeps the original self-contained behaviour (and is the default for any caller that doesn't opt in); `false` skips the tail and lets the touched-session set accumulate via `ensure_touched_sessions` instead of resetting it. Both JS paths bracket their loop: `_impRunQueue` for the API, `doImport` for manual CSVs.
+- **Cancel and failure must still finalize.** `_impRunQueue`'s `finally` calls it, because `_impAfterImport` reloads the conversation list immediately afterwards and sessions imported before the stop would otherwise be missing from `session_summary`.
+- **`ensure_session_summary` alone cannot repair an abandoned run.** Its two invariants (session count, `MAX(last_log_id)`) both hold when a run added rows only to already-known sessions below the recorded high-water mark — which is what re-importing a partial older day does. So `begin_import_run` writes `app_meta.pending_finalize` and `open_db` does a *full* rebuild if it finds it still set. `an_abandoned_run_is_repaired_on_open` is built in exactly that blind spot and fails without the flag.
+- `a_deferred_import_run_finalized_once_matches_a_full_rebuild` is the load-bearing test: N files deferred + one finalize must equal a full `rebuild_session_summary`, byte for byte.
+- `begin_import_run` also raises `wal_autocheckpoint` to 20000 pages for the run (restored plus `wal_checkpoint(TRUNCATE)` on finalize), so a large import isn't interrupted by checkpoints every ~4 MiB.
+
 - **`session_summary` is rebuilt incrementally.** `import_csv_into` records the `session_uuid` of every row it actually inserts into `TOUCHED_TABLE` (a per-connection temp table), then calls `rebuild_session_summary_touched`, which recomputes only those sessions. This is exact, not an approximation: a session's summary is derived entirely from that session's own rows, so an untouched summary was already correct. **Do not** call the full `rebuild_session_summary` from the import path — it re-aggregates every session in the database and its two correlated subqueries dominate everything else (~10.5 s vs ~1.6 s on the DB above, and it grows without bound).
 - `rebuild_session_summary` (full) is still correct and still used where the touched set isn't known: on database open via `ensure_session_summary`, and after `delete_imported_dates`.
 - Both share `session_summary_insert_sql(scope)` so the scoped and full variants can never drift apart. `scoped_summary_rebuild_matches_a_full_rebuild` and `a_real_import_leaves_the_same_summary_as_a_full_rebuild` assert the equivalence — the second drives a real portal CSV through the real import. Point `CAI_TEST_DB` at a copy of a real database to run the same check across every session in it.
 - A scoped rebuild must leave `ensure_session_summary`'s two invariants intact (session count, and `MAX(last_log_id)` matching `MAX(log_id)`), or the app would do a full rebuild on every launch.
 - **The import path does not sweep orphaned contexts.** An import only ever adds sessions, so it cannot orphan a `context_index` row. Only deletion can — `purge_old` handles it via `cleanup_orphan_contexts_touched`, scoped to the sessions it stripped.
 - **`purge_old` does not rebuild the summary itself.** It adds the sessions it purged to the same `TOUCHED_TABLE` and lets the caller do one scoped rebuild covering both the import and the purge. It previously ran a full rebuild *and* the caller ran another.
-- **The FTS `'optimize'` call after an import is deliberately kept.** It costs ~1.1 s per import and grows, but measurement showed dropping it made the real `get_sessions` search query slower by an amount smaller than run-to-run noise, while it was only ~8% of the import tail. Not worth destabilising a search path that had real performance problems. If it ever grows to dominate, move it to an occasional/manual "compact database" action rather than deleting it — `purge_old` deletes FTS rows, and those tombstones only go away on merge.
+- **The FTS `'optimize'` call is deliberately kept** — but it now runs once per *run*, not per file. It costs ~1.1 s and grows with the index, and measurement showed dropping it made the real `get_sessions` search query slower by an amount smaller than run-to-run noise. Don't delete it: `purge_old` and the Manage DB deletions leave tombstones that only go away on merge.
+- **The FTS index is contentless (`content = ''`, `contentless_delete = 1`).** The old standalone table kept a full second copy of `interaction_value`/`output_text`/`article_ids`/`dialog_paths` in `interactions_fts_content` — written on every imported row and *never read back*, because every use in this crate is a `MATCH` plus a rowid join and there is no `snippet()`/`highlight()`/`bm25()` anywhere. Measured on 200k rows: **23% faster to insert, 37% smaller on disk, and search equal or slightly faster** — including immediately after deleting 20% of rows, the tombstone case that was the reason to check. `perf::contentless_vs_standalone` is that gate; re-run it before changing the FTS shape again.
+  - **A duplicate rowid no longer raises — it silently double-indexes.** That makes the `Ok(1)` gate in the import loop load-bearing for index correctness, not just for speed, and the FTS insert is wrapped in `let _ =` which would swallow the error anyway. `a_duplicate_row_is_never_indexed_twice` pins it.
+  - `content = 'interactions'` (external content) was rejected: `COUNT(*)` would then scan the content table and always equal `COUNT(*) FROM interactions`, making `repair_fts_index`'s staleness check structurally incapable of firing, and a `DELETE … WHERE rowid IN (…)` after the content row is gone becomes a silent no-op. `fts_semantics::contentless_supports_count_delete_and_column_filters` verifies the four behaviours we depend on against the bundled SQLite.
+  - `repair_fts_index` detects a pre-migration table via `sqlite_master.sql NOT LIKE '%contentless_delete%'`, drops it, and lets the existing count mismatch reindex. One-time cost measured at 0.3 s / 100k rows and 2.2 s / 500k — brief enough not to need its own progress UI.
+  - **Dropping the old table frees pages but does not shrink the file.** Only `VACUUM` does, which is what the **Compact database** button in Manage Database → Database & retention (`compact_database`) is for. It needs ~2× the file size in temp space, so it stays a deliberate user action.
+- **Three indexes on `interactions` were removed** (`idx_feedback`, `idx_session_uuid`, `idx_type`), each of which cost a b-tree write per imported row and bought nothing. Verified with `EXPLAIN QUERY PLAN` against the real queries first: every feedback filter is a leading-wildcard `LIKE` (unindexable, and its key was the whole JSON blob); `idx_session_uuid` is a strict prefix of `idx_session_ts`/`idx_session_log`; the only `main_interaction_type` equality is ORed with a `LIKE '%…%'`. `DROP_DEAD_INDEXES` runs in `open_db` because `CREATE INDEX IF NOT EXISTS` means removing the schema lines alone would never help an existing database. `dropping_the_dead_indexes_leaves_session_lookups_indexed` asserts a bare `session_uuid = ?` is still not a `SCAN`.
+- **`PRAGMA analysis_limit = 400` is set for the whole connection** in `apply_perf_pragmas`. It defaults to 0 (unlimited), so every post-import `PRAGMA optimize` on a database that already had `sqlite_stat1` was fully scanning every index on `interactions`.
+- **The `recognition_details` backfill is probed once per import, not per row.** `SELECT EXISTS(… recognition_details IS NULL OR = '')` decides whether the duplicate-row `UPDATE` can do anything at all; on a mature database it can't, and every duplicate row was paying an indexed seek to rediscover that. Sound because the probe reads pre-import state: a row inserted by this import carries its value in the INSERT. Don't fold this into `ON CONFLICT DO UPDATE` — `changes()` returns 1 for both branches, destroying the `Ok(1)`/`Ok(_)` distinction that gates the FTS insert, the touched-session insert, the context index and both counters.
+- **Timings are reported, not guessed at.** `ImportResult.timings` / `FinalizeResult.timings` break the work into rows / purge / summary / FTS optimize / PRAGMA optimize, logged under `target: "import"` and shown in the import modal's Details log. Use them before optimising anything here again — the `read_record`/allocation work that looked obvious measured as pure noise, because the cost is SQLite b-tree writes, not Rust.
 
 ## Collections
 
 Lets users multi-select Articles/Dialogs on the Content tab and export them as `[{ trigger, content }]` JSON for CM.com HALO's knowledge tool.
 
 - **Selection**: a toggleable "Select" mode (`collectionSelectMode`, `#contentSelectModeBtn`) reveals a checkbox on Article/Dialog cards (not Transactional Dialogs — they have no `nodes`/content of their own). Selection state is `collectionSelection`, a `Set` of stable keys (`"article:<Id>"` / `"dialog:<id>"`), read back via `.has(key)` at HTML-string-build time inside `renderArticleCard`/`renderDialogCard` — required because every card list is fully rebuilt via `innerHTML =` on every search/filter/sort/pagination change, so DOM-attached state would not survive. "Select page" (`selectAllVisibleContent`) only adds the checkboxes currently rendered in the DOM; "Select all" (`selectAllFilteredContent`) instead walks the active tab's full `filteredArticles`/`filteredDialogs`/`filteredAll` index buffer — the same current search/filter result set `getActiveExportItems()` uses for Share Content — so it selects every matching item across all pages, not just the visible one.
-- **Collections** (`cmCollections`, `localStorage["cm-collections"]`) are named groups of item keys, created/extended via the "+ Add to Collection" popover in the select bar. Managed (rename/delete/view items/export) via the Collections modal (`#collectionsBtn`).
+- **Collections** (`cmCollections`, `localStorage["cm-collections"]`) are named groups of item keys, created/extended via the "+ Add to Collection" popover in the select bar. Managed (rename/delete/inspect/export) via the Collections modal (`#collectionsBtn`) — see `### Article and Dialog info modals
+
+`#articleInfoModal` and `#dialogInfoModal` share `.dialog-info-modal-box` and the `navHistory` back-stack with the flow and entity modals.
+
+- **They are sized to their content, not to the screen.** They were `calc(100vw - 32px)` × `calc(100vh - 32px)`; a typical Article is a dozen entity chips and one response, so that was ~90% empty space with the answer stretched across the full display. Now `min(1040px, 94vw)` wide, `height: auto` up to `min(880px, 92vh)`, so a short Article is a short modal and a long Dialog still scrolls. **The flow modal keeps its own full-screen `.flow-modal-box`** — a graph genuinely wants the space.
+- **`.response-box` and `.desc-text` cap at `78ch`.** Answers are prose; past ~78 characters a line stops being readable regardless of how wide the window is.
+- **Inside these modals the response box is clamped, not independently scrollable.** A scroll region nested in a scrolling body hides text with no outward sign there is more. `_applyResponseClamps` measures after render and, only when it actually overflows, adds a fade and a **Show full response** toggle. Call it after any `innerHTML =` on either body.
+- **The entity chip grid collapses past `MODAL_ENTITY_PREVIEW` (12)**, reusing the cards' `.chip-overflow` / `.show-more-btn` / `toggleEntityOverflow` idiom with its own `eo-modal-<Id>` id so the card and the modal can't clash while both are in the DOM. An Article can carry dozens of entity phrases, which pushed the Response — the thing the modal was opened for — below the fold. The slice is taken over the **rendered** chips, not `art.Questions`: with the match filter on, `makeChip` returns `""` for non-matching phrases, and slicing the raw list would spend the preview budget on blanks.
+- **Section `h4`s are sticky** within the scrolling body, so a long node list doesn't scroll past its own heading.
+- **Back is only rendered when `navHistory` is non-empty** (`_navUpdateBackButtons`, which also covers the flow and entity modals). It used to be permanent and silently fall through to "close", implying a history that didn't exist.
+- **A type badge sits before the title** (Article / Dialog / Transactional) — the same visual language as the Share Content rows.
+- **Header actions carry one weight.** `cmOpenButton`'s `.btn-open-url` is globally a solid accent button (it is used elsewhere, e.g. the Halo Studio link, so it isn't restyled globally); inside these headers it is scoped down to match `.btn-show-dialog`, so no secondary action outshouts the item's own title. Actions never wrap mid-label — the title truncates first.
+- **`_linkedFromSectionHtml` answers "how do people get here?"** — the reverse of an Article's "Linked Dialog", listing the Articles whose `DialogStart`/`TDialogStart` outputs route into this Dialog. For a **Transactional Dialog it is the only thing the export knows**, and it replaced a modal whose entire body was "No additional details available". It is appended only when the match filter is off, so it can never make a "nothing matched" body look like a result.
+
+### Collections modal layout`. The popover states what the click will do (`Add N items to`) and shows per collection how many of the current selection it doesn't have yet (`+3` vs a dimmed `all added`) — adding is idempotent, so without that the difference between a useful click and a no-op was invisible.
 - **Export algorithm** (`buildCollectionExportRows(collection)`, and its per-kind helpers `_articleExportRows`/`_dialogExportRows`): for each selected item, emits one row per *reachable* Answer — the default answer, plus every non-default answer that has real context (reusing `articleAnswerHasContext`/`dialogAnswerHasContext` — the same reachability rule as `## Content search semantics`). An item can legitimately contribute 0 rows: Articles that route into a Dialog/TDialog instead of answering directly, or dialog nodes whose Recognition links only lead to other routing-only nodes (common in real data — e.g. a dialog can be entirely a router into other dialogs). The Collections modal surfaces this rather than failing silently.
 - For dialogs, a trigger comes from either of two sources, both resolved to reachable Answer item(s) on a **target** node via the shared `emitReachableAnswers` step in `_dialogExportRows`:
   - a non-fallback Recognition link's `condition.data.questions[]`, targeting `link.childNodeId` (mid-conversation, internal to the dialog); or
   - a referencing **Article**'s `Questions[]`, via `_articlesRoutingIntoDialog(dialogId)` — any Article with a reachable `DialogStart` Output (`DialogId` matching, `IsDefault` or has real context, same reachability rule as Answer outputs) targeting `DialogStartNodeId` (the dialog's entry point). This runs against the full loaded dataset regardless of whether that article is itself in the collection, since it only supplies the human-readable trigger phrase for content the dialog otherwise has no entity attached to. A dialog that is purely an internal router (every Recognition link only leads to further `DialogStart` hand-offs, never a direct Answer) can still produce real export rows this way — confirmed against production data.
 - Multiple trigger phrases on one row are joined with `" | "` (e.g. `"Entity | Other Entity"`) — an Article's full `Questions[]` list can be large (dozens of phrases) since every entity that reaches that Article funnels into the same dialog entry.
-- **Smart filters** (`cmExportFilters`, `localStorage["cm-export-filters"]`) are global, user-managed exclusion patterns (plain case-insensitive substring by default, or regex per-pattern) applied at export time via `_rowMatchesExclusion(row, patterns)`. Matching is whole-row: if any tested value on a row matches an enabled pattern, the entire row is dropped. Each pattern has a `field` (`"entity"` default | `"content"` | `"context"`, chosen via a `<select class="sort-select">` in the Smart Filters tab) selecting what gets tested: Entity checks each trigger phrase (`row.phrases`, original behavior); Content checks the answer text (`row.content`); Context checks a flattened, sorted `"name:val1,val2 ..."` string built by `_rowContextText(contextVars, escGroup, isArticle)` from the same `ContextVariables`/`contextVariables` + escalation-group fields `articleAnswerHasContext`/`dialogAnswerHasContext` already read for reachability (resolved to readable names via `ctxVarMap`, mirroring — without touching — the `ctxSet` normalization inside `answerPassesContextFilters`). Filters saved before `field` existed have no `field` key and default to `"entity"` for backward compatibility.
+- **Smart filters** (`cmExportFilters`, `localStorage["cm-export-filters"]`) are global, user-managed exclusion patterns (plain case-insensitive substring by default, or regex per-pattern) applied at export time via `_rowMatchesExclusion(row, patterns)`. Matching is whole-row: if any tested value on a row matches an enabled pattern, the entire row is dropped. Each pattern has a `field` (`"entity"` default | `"content"` | `"context"`, chosen via a `<select class="sort-select">` in the Smart filters pane) selecting what gets tested: Entity checks each trigger phrase (`row.phrases`, original behavior); Content checks the answer text (`row.content`); Context checks a flattened, sorted `"name:val1,val2 ..."` string built by `_rowContextText(contextVars, escGroup, isArticle)` from the same `ContextVariables`/`contextVariables` + escalation-group fields `articleAnswerHasContext`/`dialogAnswerHasContext` already read for reachability (resolved to readable names via `ctxVarMap`, mirroring — without touching — the `ctxSet` normalization inside `answerPassesContextFilters`). Filters saved before `field` existed have no `field` key and default to `"entity"` for backward compatibility.
 - **Merging** (`_mergeRowsByContent`, called inside `buildCollectionExportRows` after exclusion filtering, before the final `trigger`/`content` rows are built): rows with byte-identical `content` — regardless of source (two Articles, an Article and a dialog node, two dialog nodes, etc.) — are combined into one row, unioning their trigger phrases (deduped, first-seen order). Runs *after* exclusion so a smart-filter-dropped row's phrases never leak into a surviving row just because they happened to share content.
 - `esc()` must **not** be applied to `trigger`/`content` values — that's for `innerHTML` rendering; `JSON.stringify` handles export escaping.
-- `buildCollectionExportRows(collection, opts)` returns `{ rows, excludedRows, excludedCount, totalCandidates }`. `excludedRows` (unmerged — one entry per raw exclusion event, not deduped) is `{ trigger, content, matchedFields }[]`, where `matchedFields` is `["<field>: <pattern>", ...]` from `_rowMatchingPatterns(row, patterns)` (the patterns that matched, which `_rowMatchesExclusion` just checks the length of). This powers the Collections modal's **Filtered Out** tab (`renderCollectionsExcludedBody`, `#collectionsExcludedBody`) — a per-collection picker (`_collectionsExcludedViewId`) over what a currently-enabled smart filter is dropping and why, so a filter meant to catch one thing doesn't silently eat something else too.
-- **"View content"** (`toggleCollectionContentView`/`_renderCollectionContentList`) is a per-collection, live-searchable preview of the collection's actual computed export rows (post-reachability, post-exclusion, post-merge) — distinct from **"View items"**, which shows/manages the raw source Articles/Dialogs. The search `<input>` is only built once per panel-open; typing re-renders just the results list underneath it (`#collection-content-list-<id>`), not the input itself, so the cursor position isn't lost mid-edit the way a full-panel `innerHTML` rebuild on every keystroke would. Matches highlight via the existing `hl()` helper, searching both `trigger` and `content`.
+- `buildCollectionExportRows(collection, opts)` returns `{ rows, excludedRows, excludedCount, totalCandidates }`. `excludedRows` (unmerged — one entry per raw exclusion event, not deduped) is `{ trigger, content, matchedFields }[]`, where `matchedFields` is `["<field>: <pattern>", ...]` from `_rowMatchingPatterns(row, patterns)` (the patterns that matched, which `_rowMatchesExclusion` just checks the length of). This powers the **Filtered out** tab (`_colFilteredPaneHtml`) of whichever collection is open — what a currently-enabled smart filter is dropping and why, so a filter meant to catch one thing doesn't silently eat something else too. Each row lists its matching patterns as chips.
+### Article and Dialog info modals
+
+`#articleInfoModal` and `#dialogInfoModal` share `.dialog-info-modal-box` and the `navHistory` back-stack with the flow and entity modals.
+
+- **They are sized to their content, not to the screen.** They were `calc(100vw - 32px)` × `calc(100vh - 32px)`; a typical Article is a dozen entity chips and one response, so that was ~90% empty space with the answer stretched across the full display. Now `min(1040px, 94vw)` wide, `height: auto` up to `min(880px, 92vh)`, so a short Article is a short modal and a long Dialog still scrolls. **The flow modal keeps its own full-screen `.flow-modal-box`** — a graph genuinely wants the space.
+- **`.response-box` and `.desc-text` cap at `78ch`.** Answers are prose; past ~78 characters a line stops being readable regardless of how wide the window is.
+- **Inside these modals the response box is clamped, not independently scrollable.** A scroll region nested in a scrolling body hides text with no outward sign there is more. `_applyResponseClamps` measures after render and, only when it actually overflows, adds a fade and a **Show full response** toggle. Call it after any `innerHTML =` on either body.
+- **The entity chip grid collapses past `MODAL_ENTITY_PREVIEW` (12)**, reusing the cards' `.chip-overflow` / `.show-more-btn` / `toggleEntityOverflow` idiom with its own `eo-modal-<Id>` id so the card and the modal can't clash while both are in the DOM. An Article can carry dozens of entity phrases, which pushed the Response — the thing the modal was opened for — below the fold. The slice is taken over the **rendered** chips, not `art.Questions`: with the match filter on, `makeChip` returns `""` for non-matching phrases, and slicing the raw list would spend the preview budget on blanks.
+- **Section `h4`s are sticky** within the scrolling body, so a long node list doesn't scroll past its own heading.
+- **Back is only rendered when `navHistory` is non-empty** (`_navUpdateBackButtons`, which also covers the flow and entity modals). It used to be permanent and silently fall through to "close", implying a history that didn't exist.
+- **A type badge sits before the title** (Article / Dialog / Transactional) — the same visual language as the Share Content rows.
+- **Header actions carry one weight.** `cmOpenButton`'s `.btn-open-url` is globally a solid accent button (it is used elsewhere, e.g. the Halo Studio link, so it isn't restyled globally); inside these headers it is scoped down to match `.btn-show-dialog`, so no secondary action outshouts the item's own title. Actions never wrap mid-label — the title truncates first.
+- **`_linkedFromSectionHtml` answers "how do people get here?"** — the reverse of an Article's "Linked Dialog", listing the Articles whose `DialogStart`/`TDialogStart` outputs route into this Dialog. For a **Transactional Dialog it is the only thing the export knows**, and it replaced a modal whose entire body was "No additional details available". It is appended only when the match filter is off, so it can never make a "nothing matched" body look like a result.
+
+### Collections modal layout
+
+The modal is **master/detail**: the sidebar (`#collectionsNav`) is the only place a collection is chosen and `#collectionsDetail` the only place one is acted on. `_colView` holds the selected collection id, or `COL_FILTERS_VIEW` for the global Smart filters pane; `_colTab` selects the detail tab and `_colQuery` the export-preview search.
+
+It replaced three top-level tabs (Collections / Smart Filters / Filtered Out) whose list rows carried five identically-weighted text buttons. Two problems that shape the current design and shouldn't be reintroduced:
+
+- **A collection was chosen twice** — once in the list, then again from a `<select>` in "Filtered Out". "Filtered out" is now a tab on the collection already open, so there is one selection and it persists across tabs.
+- **"View items" and "View content" were toggle panels *inside* a list row**, so opening one pushed every other collection down the page, and both could be open at once. They are tabs now: **Export preview** (the rows that will be written), **Items** (the source Articles/Dialogs), **Filtered out**.
+
+The detail header states the collection in one line (`N items · N export rows · N filtered out`) and weights its actions: **Export JSON** is a `btn-primary`, Rename/Delete are quiet ghost buttons.
+
+- **Export preview** (`_colContentPaneHtml`/`_colRenderRows`) is live-searchable over the actual computed rows (post-reachability, post-exclusion, post-merge). The search `<input>` is built once and only `#colRowsWrap` re-renders per keystroke, so the caret isn't lost mid-edit the way a full-pane `innerHTML` rebuild would. Matches highlight via `hl()`, over both `trigger` and `content`. Trigger phrases render as individual chips rather than one `a | b | c` string — an Article's `Questions[]` can run to dozens of phrases.
+- **Items** (`_colItemsPaneHtml`) shows each source item with a kind badge and its own row count. Three distinct states get three distinct messages, because they need different fixes: items that produce **0 rows** (normal — routing-only content), items that no longer exist in the loaded export (`_colItemExists` — stale keys after a data reload), and an empty collection (told how to add). The old UI collapsed the first into a bare orange "N items contribute 0 rows" count and never surfaced the second at all.
+- The empty states are load-bearing, not decoration: a collection can legitimately produce zero rows, and without an explanation that is indistinguishable from a bug.
 
 ---
 
@@ -433,7 +563,7 @@ Lets users multi-select Articles/Dialogs on the Content tab and export them as `
 <div#convImportModal>
   Source tabs (Analytics API / CSV file)
   Setup:   From + To date fields (click to choose which end you're picking) and
-           time inputs | Now shortcut
+           time inputs | Now shortcut — all UTC, as the legend states
            always-visible two-month calendar — green outline = fully imported,
            orange outline = partly imported
            summary (N days · M fully imported · K to download, UTC request window)
@@ -450,16 +580,28 @@ Lets users multi-select Articles/Dialogs on the Content tab and export them as `
                               Clear / Jump to latest data)
                readout of exactly what Delete removes
                scrolling list of the affected days | confirm zone
-  Database & retention: Create new / Open existing | retention days | import help
+  Database & retention: Create new / Open existing | retention days |
+                        Compact database (VACUUM) | import help
 
 <div#exportModal>
-  List / Table / Grouped tabs | copy as links / table / plain text
+  header: "N items from <tab>" | query chip | amber chip when no CM.com URL set
+  List / Grouped / Table tabs | one-line description of what the view produces
+  toolbar: filter input | "N of M" | Restore N removed items
+  rows: id · type badge · title · matched responses (or dialog → article chips)
+        · Copy link · remove (✕ on hover)
+  footer: Copy N links / Copy table (N rows) | Copy as plain text | feedback
 
 <div#collectionsModal>
-  Collections / Smart Filters / Filtered Out tabs
-  Collections: name, item/row counts, View items / View content (searchable) / Rename / Export / Delete
-  Smart Filters: field selector (Entity/Content/Context) + pattern + regex-flag add row, list with Field/Regex/Enabled toggles
-  Filtered Out: collection picker, list of excluded rows with which pattern(s) matched each
+  sidebar: + New collection | one row per collection (name · N items · N rows)
+           | pinned "Smart filters" entry with enabled-pattern count
+  detail (per collection): name · counts | Rename / Delete / Export JSON
+    Export preview — search + trigger chips and response text per row
+    Items         — kind badge, name, N rows, remove; notes for 0-row/stale items
+    Filtered out  — excluded rows with the pattern chips that removed them
+  detail (Smart filters): live "removing N rows across M collections" summary,
+    field selector (Entity/Content/Context) + pattern + regex add row,
+    list with Field/Regex/Enabled toggles
+  empty state: what a collection is, and the three steps to make one
 ```
 
 Content result relationship displays:
@@ -467,6 +609,18 @@ Content result relationship displays:
 - Article cards show clickable Dialog Link / Transactional Dialog chips inline; avoid separate "Directs to ..." text when the target can be part of the chip.
 - Dialog cards can show "Uses articles" relationship rows with clickable `qa-...` chips.
 - Share Content `Grouped` view always groups by Articles, Dialogs, Transactional Dialogs, then sorts by id. Dialog rows that reference articles should visibly read as dialog → article relationships, e.g. `dn-123 -> qa-456`, with clickable chips in the UI.
+
+### Share Content modal
+
+Mirrors the active tab's current result set, then lets you refine *what gets shared* without touching the search behind it.
+
+- **`getExportItemsForCurrentView()` is the only set that matters.** Rendering and all three copy actions read it, so the list on screen and the text on the clipboard cannot disagree. It applies `_exportDropped` (per-row ✕) and `_exportFilter` (the modal's own filter box) on top of `getActiveExportItems()`. Both reset on every open — the modal always *starts* as an honest mirror of the tab.
+- **The primary button names its own count** (`Copy 5 links`, `Copy table (5 rows)`). Once a filter or a removal can shrink the set, "Copy all as links" is a claim the button can't back up.
+- **Each view gets a one-line description** (`EXPORT_VIEW_HINTS`). "Grouped" does three things at once — sections, ID order, and Dialog → Article relations *replacing* the response column — and none of that is inferable from the word.
+- **A type badge sits on every row** because `dn-` prefixes both Dialogs and Transactional Dialogs: in the flat List view the ID alone could not tell them apart. In the Table view the badge rides inside the ID cell rather than taking a fourth column, so `_copyExportTable`'s clipboard output keeps its original three columns.
+- **An unset `cmBaseUrl` is stated, not implied.** Without it every "link" copy silently degrades to plain IDs; the header shows an amber chip that opens Settings.
+- `_exportRowHtml` is shared by List and Grouped. They were near-identical copies before, which is how Grouped's relation column drifted out of List.
+- The copy formats themselves are untouched: rich-HTML links (with grouped `<strong>` section headers), TSV plain text (with `dn-9 -> qa-101, qa-102` relation text in grouped view), and the HTML+TSV table.
 
 ---
 
