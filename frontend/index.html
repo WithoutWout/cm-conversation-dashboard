@@ -3612,6 +3612,12 @@
       .col-rows {
         padding: 4px 0 10px;
       }
+      .col-rows-more {
+        padding: 8px 18px 16px;
+        font-size: 0.75rem;
+        color: var(--muted);
+        border-top: 1px solid var(--border);
+      }
       .col-row {
         padding: 10px 18px;
         border-bottom: 1px solid var(--border);
@@ -3655,6 +3661,119 @@
         padding: 1px 7px;
         font-family: monospace;
       }
+      /* A rule removal is not a pattern match — muted and proportional, so the
+         orange chips still mean "one of your filters caught this". */
+      .col-matched-chip.rule {
+        background: var(--surface2);
+        border-color: var(--border);
+        color: var(--muted);
+        font-family: inherit;
+      }
+      /* A hand-removal is the user's own decision, not a rule firing — accent
+         rather than the orange used for "a pattern caught this". */
+      .col-matched-chip.manual {
+        background: rgba(139, 129, 246, 0.12);
+        border-color: rgba(139, 129, 246, 0.32);
+        color: #9a90f0;
+        font-family: inherit;
+      }
+      /* ── Per-row curation ── */
+      .col-row.has-action {
+        position: relative;
+        padding-right: 92px;
+      }
+      .col-row-action {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        opacity: 0;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 5px;
+        padding: 2px 8px;
+        font-size: 0.72rem;
+        cursor: pointer;
+        transition: opacity 0.12s;
+      }
+      .col-row:hover .col-row-action,
+      .col-row-action:focus {
+        opacity: 1;
+      }
+      .col-row-action:hover {
+        color: var(--red);
+        border-color: var(--red);
+      }
+      .col-row-action.restore {
+        opacity: 1; /* the only way back — never hide it behind a hover */
+      }
+      .col-row-action.restore:hover {
+        color: var(--green);
+        border-color: var(--green);
+      }
+      .col-item-hold {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 5px;
+        padding: 2px 9px;
+        font-size: 0.72rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .col-item-hold:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      /* A held-out item is still listed — it is in the collection, just not in
+         the file — so it is dimmed rather than removed or coloured as an error. */
+      .col-item-row.held .col-item-name,
+      .col-item-row.held .col-item-kind {
+        opacity: 0.45;
+      }
+      .col-item-row.held .col-item-rows {
+        color: #9a90f0;
+      }
+      .export-filter-row.global-off {
+        opacity: 0.5;
+      }
+      /* ── The reachability rule, above the pattern list ── */
+      .col-rule-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .col-rule-main {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        font-size: 0.8rem;
+        cursor: pointer;
+      }
+      .col-rule-main input {
+        margin-top: 2px;
+        flex-shrink: 0;
+      }
+      .col-rule-desc {
+        display: block;
+        margin-top: 3px;
+        font-size: 0.75rem;
+        color: var(--muted);
+        max-width: 72ch;
+      }
+      .col-rule-impact {
+        flex-shrink: 0;
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+        padding-top: 2px;
+      }
+      .col-rule-impact.warn {
+        color: var(--orange);
+      }
       /* ── Items pane ── */
       .col-items {
         padding: 4px 0 10px;
@@ -3692,6 +3811,20 @@
       .col-item-kind.missing {
         background: rgba(248, 113, 113, 0.12);
         color: var(--red);
+      }
+      /* The same badge shape reused for a smart filter's field in the
+         per-collection Filters tab. */
+      .col-item-kind.entity {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--blue);
+      }
+      .col-item-kind.content {
+        background: rgba(45, 212, 191, 0.12);
+        color: var(--teal);
+      }
+      .col-item-kind.context {
+        background: rgba(139, 129, 246, 0.14);
+        color: #9a90f0;
       }
       .col-item-name {
         flex: 1;
@@ -8851,10 +8984,20 @@
       function saveExportFilters(list) {
         localStorage.setItem("cm-export-filters", JSON.stringify(list))
       }
+      // The reachability rule as a user-visible setting. It has always been on and
+      // hard-coded; storing the *opt-out* keeps the default (and every existing
+      // install) exactly as it was.
+      function loadKeepUnreachable() {
+        return localStorage.getItem("cm-export-keep-unreachable") === "1"
+      }
+      function saveKeepUnreachable(on) {
+        localStorage.setItem("cm-export-keep-unreachable", on ? "1" : "0")
+      }
       let collectionSelectMode = false
       let collectionSelection = new Set() // keys: "article:<Id>" | "dialog:<id>"
       let cmCollections = loadCollections()
       let cmExportFilters = loadExportFilters()
+      let cmExportKeepUnreachable = loadKeepUnreachable()
       // Collections modal (master/detail) view state. `_colView` is a collection
       // id, or COL_FILTERS_VIEW for the global Smart Filters pane — one place a
       // collection is chosen, so the detail tabs never ask again.
@@ -9437,10 +9580,23 @@
         return hasContextVar || hasEscGroup
       }
 
+      // The dialog-side mirror of articleAnswerHasContext. A context variable set
+      // to "any" is not a condition — it matches everyone — so it must not make a
+      // non-default response look reachable. This used to count *any* non-empty
+      // `contextVariables` entry, so the two sides disagreed: an Article answer
+      // with context "any" was correctly treated as unreachable while the
+      // equivalent Dialog answer was not, and so was labelled reachable in the UI
+      // and exported by Collections. The dialog shape stores values as one
+      // comma-separated `cv.value` string where the Article shape has a `Values`
+      // array; flattening it is the only difference between the two checks.
       function dialogAnswerHasContext(item) {
-        const hasContextVar = !!(
-          item.contextVariables && item.contextVariables.length > 0
-        )
+        const hasContextVar = (item.contextVariables || []).some((cv) => {
+          const vals = (cv.value || "")
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean)
+          return vals.length > 0 && !vals.includes("any")
+        })
         const hasEscGroup = !!(item.metadata && item.metadata.escalationGroup)
         return hasContextVar || hasEscGroup
       }
@@ -11145,6 +11301,60 @@
       }
 
       // ── Collections: export algorithm ───────────────────────────────
+      //
+      // A collection stores nothing but references ("article:12" / "dialog:34");
+      // every export row is derived from the loaded content export at read time.
+      // That keeps collections tiny and always in step with the data, but it also
+      // means the same derivation was being redone on every single render — the
+      // sidebar recomputed every collection, the detail header recomputed the open
+      // one, the Items tab recomputed each item *again*, and the preview search
+      // recomputed the lot on every keystroke. The caches below make the
+      // derivation happen once and be reused everywhere.
+      //
+      // All of them are pure functions of the loaded export, so the only thing
+      // that can invalidate them is a data reload — see invalidateCollectionCaches().
+      let _colRouteIndexCache = null // dialogId -> [{ article, nodeId }]
+      const _colItemRowsCache = new Map() // item key -> raw (pre-filter) rows
+      const _colBuildCache = new Map() // collection id -> { sig, result }
+
+      function invalidateCollectionCaches() {
+        _colRouteIndexCache = null
+        _colItemRowsCache.clear()
+        _colBuildCache.clear()
+      }
+
+      // Beside `itemKeys`, a collection carries three curation lists. All are
+      // optional and default to empty, so collections saved before they existed
+      // load unchanged.
+      //
+      //   excludedItemKeys  — items kept in the collection but held out of the
+      //                       export. Deliberately NOT the same as removing the
+      //                       item: the exclusion is what survives, so re-adding
+      //                       the item from the Content tab does not quietly put
+      //                       its content back in the file.
+      //   excludedContent   — individual responses held out, keyed by their exact
+      //                       content string. Content is already the merge key in
+      //                       _mergeRowsByContent, so it is the row's identity.
+      //   disabledFilterIds — global smart filters switched off for this
+      //                       collection only.
+      function _colExcludedItems(c) {
+        return new Set(c.excludedItemKeys || [])
+      }
+      function _colExcludedContent(c) {
+        return new Set(c.excludedContent || [])
+      }
+      function _colDisabledFilters(c) {
+        return new Set(c.disabledFilterIds || [])
+      }
+      // The patterns that actually apply to one collection: globally enabled,
+      // minus the ones this collection has switched off.
+      function _colEffectivePatterns(c) {
+        const off = _colDisabledFilters(c)
+        return cmExportFilters.filter(
+          (p) => p.enabled !== false && p.pattern && !off.has(p.id),
+        )
+      }
+
       function _parseCollectionItemKey(key) {
         const i = key.indexOf(":")
         if (i === -1) return null
@@ -11192,38 +11402,69 @@
         return parts.join(" ")
       }
 
-      // Matches one export row against the Collections smart-filter list. Each
-      // pattern's `field` ("entity" | "content" | "context", default "entity")
-      // selects what gets tested against the pattern text/regex.
-      // Returns the subset of patterns that match this row (empty if none) — used both
-      // to decide exclusion and, for the "Filtered Out" tab, to explain *why*.
-      function _rowMatchingPatterns(row, patterns) {
-        return patterns.filter((p) => {
-          if (!p.pattern) return false
-          const field = p.field || "entity"
-          const haystacks =
-            field === "content"
-              ? [row.content]
-              : field === "context"
-              ? [row.ctxText || ""]
-              : row.phrases
-          return haystacks.some((h) => {
-            if (p.isRegex) {
-              try {
-                return new RegExp(p.pattern, "i").test(h)
-              } catch (e) {
-                return false
-              }
+      // Compiles the smart-filter list once per export build. A regex used to be
+      // constructed — and a pattern lowercased — inside the per-row test, so a
+      // collection of N rows paid N × patterns compilations to answer the same
+      // question every time. Prepared entries are what _rowMatchingPatterns takes.
+      function _prepareExclusionPatterns(patterns) {
+        const out = []
+        for (const p of patterns || []) {
+          if (!p.pattern) continue
+          const entry = { p, field: p.field || "entity", re: null, needle: null }
+          if (p.isRegex) {
+            try {
+              entry.re = new RegExp(p.pattern, "i")
+            } catch (e) {
+              continue // an unparseable regex matches nothing, as before
             }
-            return h.toLowerCase().includes(p.pattern.toLowerCase())
-          })
-        })
-      }
-      function _rowMatchesExclusion(row, patterns) {
-        return _rowMatchingPatterns(row, patterns).length > 0
+          } else {
+            entry.needle = p.pattern.toLowerCase()
+          }
+          out.push(entry)
+        }
+        return out
       }
 
-      // Reachability-filtered rows for one article, NOT yet exclusion-filtered.
+      // Matches one export row against prepared smart filters. Each pattern's
+      // `field` ("entity" | "content" | "context", default "entity") selects what
+      // gets tested against the pattern text/regex.
+      // Returns the subset of patterns that match this row (empty if none) — used both
+      // to decide exclusion and, for the "Filtered Out" tab, to explain *why*.
+      // Haystacks are lowercased once per row rather than once per row × pattern.
+      function _rowMatchingPatterns(row, prepared) {
+        if (!prepared.length) return []
+        const matched = []
+        const lower = new Map()
+        const lc = (h) => {
+          let v = lower.get(h)
+          if (v === undefined) {
+            v = h.toLowerCase()
+            lower.set(h, v)
+          }
+          return v
+        }
+        for (const e of prepared) {
+          const haystacks =
+            e.field === "content"
+              ? [row.content]
+              : e.field === "context"
+                ? [row.ctxText || ""]
+                : row.phrases
+          const hit = e.re
+            ? haystacks.some((h) => e.re.test(h))
+            : haystacks.some((h) => lc(h).includes(e.needle))
+          if (hit) matched.push(e.p)
+        }
+        return matched
+      }
+      function _rowMatchesExclusion(row, prepared) {
+        return _rowMatchingPatterns(row, prepared).length > 0
+      }
+
+      // Every candidate row for one article, NOT yet filtered. Unreachable rows
+      // (non-default with no real context) are *tagged*, not dropped, so the
+      // reachability rule can be reported and switched off downstream instead of
+      // silently swallowing content — see _buildCollectionExportRows.
       function _articleExportRows(art) {
         const out = []
         const entityPhrases = (art.Questions || [])
@@ -11234,7 +11475,6 @@
         if (!answers.length) return out // routing article — no direct content
         const def = defaultArticleAnswer(art)
         for (const o of answers) {
-          if (o !== def && !articleAnswerHasContext(o)) continue // unreachable
           const content = stripDisplay(o.Text, o.Links)
           if (content) {
             const ctxText = _rowContextText(
@@ -11242,51 +11482,89 @@
               (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
               true,
             )
-            out.push({ phrases: entityPhrases, content, ctxText })
+            out.push({
+              phrases: entityPhrases,
+              content,
+              ctxText,
+              unreachable: o !== def && !articleAnswerHasContext(o),
+            })
           }
         }
         return out
       }
 
-      // Articles whose Questions route directly into this dialog via a reachable
+      // Articles whose Questions route directly into a dialog via a reachable
       // DialogStart output (Article -> DialogStartNodeId), independent of whether that
       // article itself is in the collection. This is the dialog's "entry" trigger
       // source, distinct from dialogLinkedArticles() (kbaIdReference content-sourcing).
-      function _articlesRoutingIntoDialog(dialogId) {
-        const result = []
+      //
+      // Built once per loaded export and inverted (dialogId -> entries). It used to be
+      // a full scan of articleMap *per dialog*, so a collection holding a few hundred
+      // Dialogs re-walked every Article and every one of its Outputs a few hundred
+      // times — per render, and the Collections modal renders it several times over.
+      // Insertion order still follows articleMap, so the emitted rows are unchanged.
+      function _colRouteIndex() {
+        if (_colRouteIndexCache) return _colRouteIndexCache
+        const idx = new Map()
+        const byDialog = new Map() // reused per article
         for (const art of articleMap.values()) {
-          const toThisDialog = (art.Outputs || []).filter(
-            (o) =>
-              o.Type === "DialogStart" &&
-              o.DialogId === dialogId &&
-              o.DialogStartNodeId != null,
-          )
-          if (!toThisDialog.length) continue
-          const def = toThisDialog.find((o) => o.IsDefault) || toThisDialog[0]
-          for (const o of toThisDialog) {
-            if (o !== def && !articleAnswerHasContext(o)) continue // unreachable route
-            result.push({ article: art, nodeId: o.DialogStartNodeId })
+          byDialog.clear()
+          for (const o of art.Outputs || []) {
+            // No `DialogId == null` guard: the old scan compared with `===`, so a
+            // null DialogId matched a null lookup. Keeping null as a key preserves
+            // that exactly rather than quietly changing which rows can be emitted.
+            if (o.Type !== "DialogStart" || o.DialogStartNodeId == null) continue
+            let list = byDialog.get(o.DialogId)
+            if (!list) {
+              list = []
+              byDialog.set(o.DialogId, list)
+            }
+            list.push(o)
+          }
+          for (const [dialogId, list] of byDialog) {
+            const def = list.find((o) => o.IsDefault) || list[0]
+            for (const o of list) {
+              let arr = idx.get(dialogId)
+              if (!arr) {
+                arr = []
+                idx.set(dialogId, arr)
+              }
+              // An unreachable route is tagged, not skipped: the rows it leads to
+              // are only as reachable as the route into them, and the flag has to
+              // survive so the rule stays reportable and switchable.
+              arr.push({
+                article: art,
+                nodeId: o.DialogStartNodeId,
+                unreachable: o !== def && !articleAnswerHasContext(o),
+              })
+            }
           }
         }
-        return result
+        _colRouteIndexCache = idx
+        return idx
+      }
+      function _articlesRoutingIntoDialog(dialogId) {
+        return _colRouteIndex().get(dialogId) || []
       }
 
-      // Reachability-filtered rows for one dialog: triggers come from (a) every
+      // Every candidate row for one dialog: triggers come from (a) every
       // non-fallback Recognition link within the dialog, and (b) every referencing
       // Article's Questions routing directly into a node via DialogStart.
+      // Unreachable rows are tagged rather than dropped — see _articleExportRows.
       function _dialogExportRows(dialog) {
         const out = []
         const nodes = dialog.nodes || []
         const nodeMap = new Map(nodes.map((n) => [n.id, n])) // local per-dialog map
 
-        const emitReachableAnswers = (phrases, targetNode) => {
+        // `routeUnreachable` propagates: a reachable response behind an
+        // unreachable route is still not something a user can get to.
+        const emitAnswers = (phrases, targetNode, routeUnreachable) => {
           if (!phrases.length || !targetNode) return
           const items = (targetNode.output && targetNode.output.items) || []
           const answerItems = items.filter((i) => i.type === "Answer")
           if (!answerItems.length) return
           const def = defaultDialogAnswerItem(items)
           for (const item of answerItems) {
-            if (item !== def && !dialogAnswerHasContext(item)) continue
             const content = stripDisplay(
               (item.data && item.data.text) || "",
               (item.data && item.data.hyperlinks) || [],
@@ -11297,7 +11575,14 @@
                 (item.metadata && item.metadata.escalationGroup) || null,
                 false,
               )
-              out.push({ phrases, content, ctxText })
+              out.push({
+                phrases,
+                content,
+                ctxText,
+                unreachable:
+                  !!routeUnreachable ||
+                  (item !== def && !dialogAnswerHasContext(item)),
+              })
             }
           }
         }
@@ -11311,15 +11596,15 @@
             const phrases = (data.questions || [])
               .map((q) => (q.text || "").trim())
               .filter(Boolean)
-            emitReachableAnswers(phrases, nodeMap.get(link.childNodeId))
+            emitAnswers(phrases, nodeMap.get(link.childNodeId), false)
           }
         }
 
-        for (const { article, nodeId } of _articlesRoutingIntoDialog(dialog.id)) {
-          const phrases = (article.Questions || [])
+        for (const route of _articlesRoutingIntoDialog(dialog.id)) {
+          const phrases = (route.article.Questions || [])
             .map((q) => (q.Text || "").trim())
             .filter(Boolean)
-          emitReachableAnswers(phrases, nodeMap.get(nodeId))
+          emitAnswers(phrases, nodeMap.get(route.nodeId), route.unreachable)
         }
 
         return out
@@ -11347,37 +11632,140 @@
         }))
       }
 
+      // Raw (reachability-filtered, pre-exclusion) rows for one collection item.
+      // Memoized per key: a key resolves to the same Article/Dialog for as long as
+      // the export stays loaded, so its rows cannot change underneath us.
+      // A missing id (stale collection after a data reload) yields [] — silently
+      // skipped on export, and surfaced in the Items tab by _colItemExists().
+      function _itemExportRows(key) {
+        let rows = _colItemRowsCache.get(key)
+        if (rows) return rows
+        const parsed = _parseCollectionItemKey(key)
+        rows = []
+        if (parsed && parsed.kind === "article") {
+          const art = articleMap.get(parsed.id)
+          if (art) rows = _articleExportRows(art)
+        } else if (parsed) {
+          const dialog = dialogMap.get(parsed.id)
+          if (dialog) rows = _dialogExportRows(dialog)
+        }
+        _colItemRowsCache.set(key, rows)
+        return rows
+      }
+
+      // Rows an item would actually contribute right now — the reachability rule
+      // is a setting, so this has to be asked with it applied, not just counted.
+      function _itemExportRowCount(key, collection) {
+        const rows = _itemExportRows(key)
+        if (collection && _colExcludedItems(collection).has(key)) return 0
+        const muted = collection ? _colExcludedContent(collection) : null
+        let n = 0
+        for (const r of rows) {
+          if (!cmExportKeepUnreachable && r.unreachable) continue
+          if (muted && muted.has(r.content)) continue
+          n++
+        }
+        return n
+      }
+
+      // Identifies the inputs a build depends on: the enabled patterns and the
+      // item list. Comparing it is what lets the cache stay correct without every
+      // mutation site having to remember to invalidate — edit a filter, add an
+      // item, and the signature simply stops matching.
+      function _colBuildSignature(collection) {
+        return JSON.stringify([
+          _colEffectivePatterns(collection).map((p) => [
+            p.field || "entity",
+            !!p.isRegex,
+            p.pattern,
+          ]),
+          cmExportKeepUnreachable,
+          collection.itemKeys || [],
+          collection.excludedItemKeys || [],
+          collection.excludedContent || [],
+        ])
+      }
+
       // Public entry point used by both the modal's live row-count display and export.
       function buildCollectionExportRows(collection, opts) {
-        const patterns =
-          (opts && opts.patterns) ||
-          cmExportFilters.filter((p) => p.enabled !== false && p.pattern)
-        const raw = []
-        for (const key of collection.itemKeys || []) {
-          const parsed = _parseCollectionItemKey(key)
-          if (!parsed) continue
-          if (parsed.kind === "article") {
-            const art = articleMap.get(parsed.id)
-            if (art) raw.push(..._articleExportRows(art))
-          } else {
-            const dialog = dialogMap.get(parsed.id)
-            if (dialog) raw.push(..._dialogExportRows(dialog))
-          }
-          // missing id (stale collection after a data reload) — silently skipped
-        }
+        if (opts && opts.patterns)
+          return _buildCollectionExportRows(collection, opts.patterns)
+        const sig = _colBuildSignature(collection)
+        const hit = _colBuildCache.get(collection.id)
+        if (hit && hit.sig === sig) return hit.result
+        const result = _buildCollectionExportRows(
+          collection,
+          _colEffectivePatterns(collection),
+        )
+        _colBuildCache.set(collection.id, { sig, result })
+        return result
+      }
+
+      // Two things remove a row, and they are reported separately because they
+      // mean different things: the reachability rule says "a user can never see
+      // this", a smart filter says "you asked me not to publish this". Both land
+      // in `excludedRows` so the Filtered out tab can show either.
+      const UNREACHABLE_REASON =
+        "Not reachable: non-default response with no context"
+      const MANUAL_ROW_REASON = "Removed by hand"
+      const MANUAL_ITEM_REASON = "Removed by hand: whole item"
+      function _buildCollectionExportRows(collection, patterns) {
+        const prepared = _prepareExclusionPatterns(patterns)
+        const mutedItems = _colExcludedItems(collection)
+        const mutedContent = _colExcludedContent(collection)
         const survivors = []
         const excludedRows = []
-        for (const r of raw) {
-          const matched = _rowMatchingPatterns(r, patterns)
-          if (matched.length) {
-            excludedRows.push({
-              trigger: r.phrases.join(" | "),
-              content: r.content,
-              matchedFields: matched.map((p) => (p.field || "entity") + ": " + p.pattern),
-            })
-            continue
+        let totalCandidates = 0
+        let unreachableCount = 0
+        let manualCount = 0
+        for (const key of collection.itemKeys || []) {
+          const itemMuted = mutedItems.has(key)
+          for (const r of _itemExportRows(key)) {
+            totalCandidates++
+            // Hand-removed is checked first, before any rule. An explicit choice
+            // outranks a rule, and — more importantly — it must always be listed
+            // with a Restore button rather than attributed to something the user
+            // cannot undo from that row.
+            if (itemMuted || mutedContent.has(r.content)) {
+              manualCount++
+              excludedRows.push({
+                trigger: r.phrases.join(" | "),
+                content: r.content,
+                matchedFields: [
+                  itemMuted ? MANUAL_ITEM_REASON : MANUAL_ROW_REASON,
+                ],
+                manual: true,
+                itemKey: itemMuted ? key : null,
+              })
+              continue
+            }
+            if (r.unreachable) {
+              unreachableCount++
+              if (!cmExportKeepUnreachable) {
+                excludedRows.push({
+                  trigger: r.phrases.join(" | "),
+                  content: r.content,
+                  matchedFields: [UNREACHABLE_REASON],
+                  unreachable: true,
+                })
+                continue
+              }
+            }
+            const matched = prepared.length
+              ? _rowMatchingPatterns(r, prepared)
+              : []
+            if (matched.length) {
+              excludedRows.push({
+                trigger: r.phrases.join(" | "),
+                content: r.content,
+                matchedFields: matched.map(
+                  (p) => (p.field || "entity") + ": " + p.pattern,
+                ),
+              })
+              continue
+            }
+            survivors.push(r)
           }
-          survivors.push(r)
         }
         const rows = _mergeRowsByContent(survivors).map((r) => ({
           trigger: r.phrases.join(" | "),
@@ -11387,19 +11775,12 @@
           rows,
           excludedRows,
           excludedCount: excludedRows.length,
-          totalCandidates: raw.length,
+          // Candidates the rule *considers* unreachable, whether or not it is
+          // currently switched on — so the setting can state its own impact.
+          unreachableCount,
+          manualCount,
+          totalCandidates,
         }
-      }
-
-      function _itemExportRowCount(key) {
-        const parsed = _parseCollectionItemKey(key)
-        if (!parsed) return 0
-        if (parsed.kind === "article") {
-          const art = articleMap.get(parsed.id)
-          return art ? _articleExportRows(art).length : 0
-        }
-        const dialog = dialogMap.get(parsed.id)
-        return dialog ? _dialogExportRows(dialog).length : 0
       }
 
       // ── Collections: selection UX ───────────────────────────────────
@@ -11578,7 +11959,8 @@
           if (!art) return ""
           idLabel = "qa-" + art.Id
           title = ((art.Questions || [])[0] || {}).Text || "no question"
-          rows = _articleExportRows(art)
+          // Memoized — this runs on every card hover in select mode.
+          rows = _itemExportRows(key)
           const k = aKind(art)
           emptyReason =
             k === "dialog"
@@ -11593,10 +11975,13 @@
           title = d.name || "Dialog"
           // Carried over from the tooltip this preview replaced.
           desc = strip(d.description || "")
-          rows = _dialogExportRows(d)
+          rows = _itemExportRows(key)
           emptyReason =
             "No reachable responses — this dialog only routes to others."
         }
+        // The preview promises what selecting this item adds to an export, so it
+        // must answer with the reachability rule applied, exactly like the export.
+        if (!cmExportKeepUnreachable) rows = rows.filter((r) => !r.unreachable)
 
         const head =
           '<div class="chp-head"><span class="chp-id">' +
@@ -13873,6 +14258,7 @@
         _colView = cmCollections.length ? cmCollections[0].id : null
         _colTab = "content"
         _colQuery = ""
+        _colRowsShown = COL_ROWS_PAGE
       }
       function renderCollectionsModal() {
         _colEnsureView()
@@ -13883,21 +14269,33 @@
         _colView = id
         _colTab = "content"
         _colQuery = ""
+        _colRowsShown = COL_ROWS_PAGE
         renderCollectionsModal()
       }
       function _colSetTab(tab) {
         _colTab = tab
+        _colRowsShown = COL_ROWS_PAGE
         _colRenderDetail()
       }
 
       function _colStats(c) {
-        const { rows, excludedRows } = buildCollectionExportRows(c)
+        const { rows, excludedRows, unreachableCount, manualCount } =
+          buildCollectionExportRows(c)
         const itemKeys = c.itemKeys || []
+        const held = _colExcludedItems(c)
         return {
           rows,
           excludedRows,
+          unreachableCount,
+          manualCount,
           itemCount: itemKeys.length,
-          zero: itemKeys.filter((k) => _itemExportRowCount(k) === 0).length,
+          heldCount: held.size,
+          // A held-out item contributes nothing *by choice*, which is not the
+          // same problem as an item that has nothing to contribute — the note it
+          // drives explains routing-only content, so don't count it here.
+          zero: itemKeys.filter(
+            (k) => !held.has(k) && _itemExportRowCount(k, c) === 0,
+          ).length,
         }
       }
       function _colPlural(n, word) {
@@ -13995,6 +14393,7 @@
           '<div class="col-detail-tabs">' +
           _colTabBtn("content", "Export preview", st.rows.length) +
           _colTabBtn("items", "Items", st.itemCount, st.zero > 0) +
+          _colTabBtn("filters", "Filters", _colEffectivePatterns(c).length) +
           _colTabBtn("filtered", "Filtered out", st.excludedRows.length) +
           "</div>" +
           '<div class="col-detail-body">' +
@@ -14002,9 +14401,14 @@
             ? _colItemsPaneHtml(c, st)
             : _colTab === "filtered"
               ? _colFilteredPaneHtml(c, st)
-              : _colContentPaneHtml()) +
+              : _colTab === "filters"
+                ? _colCollectionFiltersPaneHtml(c)
+                : _colContentPaneHtml()) +
           "</div>"
+        // Each list tab renders into a wrap the pane HTML just created.
         if (_colTab === "content") _colRenderRows()
+        else if (_colTab === "filtered") _colRenderFiltered()
+        else if (_colTab === "items") _colRenderItems()
       }
       function _colTabBtn(tab, label, count, warn) {
         return (
@@ -14022,20 +14426,75 @@
         )
       }
 
+      // ── Row search, shared by Export preview and Filtered out ───────────
+      //
+      // Both tabs search the same collection, so they share `_colQuery`. That is
+      // the point rather than an economy: "it is not in the export — was it
+      // filtered out?" is the question the Filtered out tab exists to answer, and
+      // carrying the term across the tab switch turns it into one click. The
+      // input is rendered with its current value for the same reason — the pane
+      // is rebuilt on every tab change, and an empty box over a filtered list
+      // reads as a bug.
+      function _colSearchToolbar(inputId, countId, placeholder) {
+        return (
+          '<div class="col-toolbar">' +
+          '<input type="text" id="' +
+          inputId +
+          '" value="' +
+          esc(_colQuery || "") +
+          '" placeholder="' +
+          esc(placeholder) +
+          '" oninput="_colOnRowSearch(this.value)" />' +
+          '<span class="col-toolbar-count" id="' +
+          countId +
+          '"></span></div>'
+        )
+      }
+      // Case-insensitive substring over everything the row shows. `extra` carries
+      // the Filtered out tab's reason chips, so typing a pattern name lists
+      // exactly what that pattern removed.
+      function _colRowMatches(r, ql, extra) {
+        if (!ql) return true
+        if (r.trigger.toLowerCase().includes(ql)) return true
+        if (r.content.toLowerCase().includes(ql)) return true
+        return !!extra && extra.some((m) => m.toLowerCase().includes(ql))
+      }
+
       // ── Export preview tab ──
       // The rows that will actually land in the file: post-reachability,
       // post-smart-filter, post-merge. The search input is built once here and
       // only the list under it re-renders per keystroke, so the caret survives.
       function _colContentPaneHtml() {
         return (
-          '<div class="col-toolbar">' +
-          '<input type="text" id="colRowSearch" placeholder="Search triggers and content…" oninput="_colOnRowSearch(this.value)" />' +
-          '<span class="col-toolbar-count" id="colRowCount"></span>' +
-          "</div><div id=\"colRowsWrap\"></div>"
+          _colSearchToolbar(
+            "colRowSearch",
+            "colRowCount",
+            "Search triggers and content…",
+          ) + '<div id="colRowsWrap"></div>'
         )
       }
+      // Typing re-filters and re-renders the whole row list; on a large collection
+      // that is far more work than one keystroke's worth, so it trails the caret
+      // instead of blocking it. The input itself is never re-rendered, so the
+      // caret is safe across the delay.
+      let _colRowSearchTimer = 0
       function _colOnRowSearch(v) {
         _colQuery = v
+        clearTimeout(_colRowSearchTimer)
+        _colRowSearchTimer = setTimeout(() => {
+          _colRowsShown = COL_ROWS_PAGE
+          if (_colTab === "filtered") _colRenderFiltered()
+          else if (_colTab === "items") _colRenderItems()
+          else _colRenderRows()
+        }, 120)
+      }
+      // Rendering thousands of rows into innerHTML at once is a visible freeze,
+      // and nobody reads past the first screenful without searching. The rest is
+      // one click away and the count above always states the real total.
+      const COL_ROWS_PAGE = 200
+      let _colRowsShown = COL_ROWS_PAGE
+      function _colShowMoreRows() {
+        _colRowsShown += COL_ROWS_PAGE
         _colRenderRows()
       }
       function _colRenderRows() {
@@ -14045,23 +14504,40 @@
         const { rows } = buildCollectionExportRows(c)
         const q = (_colQuery || "").trim()
         const ql = q.toLowerCase()
-        const filtered = q
-          ? rows.filter(
-              (r) =>
-                r.trigger.toLowerCase().includes(ql) ||
-                r.content.toLowerCase().includes(ql),
-            )
-          : rows
+        const filtered = q ? rows.filter((r) => _colRowMatches(r, ql)) : rows
         const countEl = document.getElementById("colRowCount")
         if (countEl)
           countEl.textContent = q
             ? filtered.length + " of " + _colPlural(rows.length, "row")
             : _colPlural(rows.length, "row")
         if (filtered.length) {
+          const shown = Math.min(filtered.length, _colRowsShown)
+          _colVisibleRows = filtered
           wrap.innerHTML =
             '<div class="col-rows">' +
-            filtered.map((r) => _colRowHtml(r, q)).join("") +
-            "</div>"
+            filtered
+              .slice(0, shown)
+              .map((r, i) =>
+                _colRowHtml(
+                  r,
+                  q,
+                  "",
+                  '<button class="col-row-action" title="Remove this response from the export" onclick="excludeVisibleRow(' +
+                    i +
+                    ')">&#x2715;</button>',
+                ),
+              )
+              .join("") +
+            "</div>" +
+            (shown < filtered.length
+              ? '<div class="col-rows-more">Showing ' +
+                shown +
+                " of " +
+                _colPlural(filtered.length, "row") +
+                '. <button class="btn-link" onclick="_colShowMoreRows()">Show ' +
+                Math.min(COL_ROWS_PAGE, filtered.length - shown) +
+                " more</button></div>"
+              : "")
           return
         }
         wrap.innerHTML = rows.length
@@ -14074,26 +14550,34 @@
               '<div class="col-empty-text">' +
               ((c.itemKeys || []).every((k) => !_colItemExists(k))
                 ? "None of this collection’s items exist in the currently loaded content export. Load the folder they came from, or open the <b>Items</b> tab to clear them out."
-                : "This collection has items, but none of them answer directly — they only route into other Dialogs, or every row they produced is being removed by a smart filter. Check the <b>Items</b> and <b>Filtered out</b> tabs.") +
+                : "This collection has items, but none of them answer directly — they only route into other Dialogs, or every row they produced is unreachable or removed by a smart filter. Check the <b>Items</b> and <b>Filtered out</b> tabs.") +
               "</div></div>"
             : '<div class="col-empty"><div class="col-empty-title">This collection is empty</div>' +
               '<div class="col-empty-text">Add Articles or Dialogs from the Content tab and their responses will appear here as export rows.</div></div>'
       }
-      function _colRowHtml(r, q) {
+      // One row renderer for both tabs. They were separate copies, and had already
+      // drifted — Filtered out escaped its text where the preview highlighted it,
+      // so a search there could never show you what it had matched.
+      function _colRowHtml(r, q, footer, action) {
         const chips = r.trigger
           .split(" | ")
           .filter((p) => p)
           .map((p) => '<span class="col-trigger-chip">' + hl(p, q) + "</span>")
           .join("")
         return (
-          '<div class="col-row">' +
+          '<div class="col-row' +
+          (action ? " has-action" : "") +
+          '">' +
+          (action || "") +
           '<div class="col-row-triggers">' +
           (chips ||
             '<span class="col-trigger-chip" style="opacity:.6">(no trigger)</span>') +
           "</div>" +
           '<div class="col-row-content">' +
           hl(r.content, q) +
-          "</div></div>"
+          "</div>" +
+          (footer || "") +
+          "</div>"
         )
       }
 
@@ -14101,6 +14585,8 @@
       // The source Articles/Dialogs, each showing what it actually contributes.
       // An item producing 0 rows is normal (routing-only content), so it is
       // labelled and explained rather than reported as a bare orange count.
+      // Searchable over the item name *and* the responses it produces, so you can
+      // find the item responsible for a line you don't want and hold it out.
       function _colItemsPaneHtml(c, st) {
         const keys = c.itemKeys || []
         if (!keys.length) {
@@ -14114,6 +14600,7 @@
         // An item can be gone entirely (content reloaded since it was picked),
         // which is a different problem from "it just has nothing to export".
         const missing = keys.filter((k) => !_colItemExists(k)).length
+        const excluded = _colExcludedItems(c).size
         const note = missing
           ? '<div class="col-note warn">' +
             _colPlural(missing, "item") +
@@ -14122,19 +14609,70 @@
             " in the loaded content export — they were removed or renumbered since you added them, and are skipped on export. Remove them here to tidy the collection." +
             "</div>"
           : st.zero
-          ? '<div class="col-note warn">' +
-            _colPlural(st.zero, "item") +
-            " contribute" +
-            (st.zero === 1 ? "s" : "") +
-            " no export rows. That is usually fine: an Article that only opens a Dialog, or a Dialog whose nodes only route into other Dialogs, has no response text of its own to export." +
-            "</div>"
-          : '<div class="col-note">The Articles and Dialogs this collection is built from. Removing one here does not change your content — only what gets exported.</div>'
+            ? '<div class="col-note warn">' +
+              _colPlural(st.zero, "item") +
+              " contribute" +
+              (st.zero === 1 ? "s" : "") +
+              " no export rows. That is usually fine: an Article that only opens a Dialog, or a Dialog whose nodes only route into other Dialogs, has no response text of its own to export." +
+              (st.unreachableCount && !cmExportKeepUnreachable
+                ? " " +
+                  _colPlural(st.unreachableCount, "response") +
+                  " in this collection " +
+                  (st.unreachableCount === 1 ? "is" : "are") +
+                  " also left out as unreachable — see the <b>Filtered out</b> tab."
+                : "") +
+              "</div>"
+            : '<div class="col-note">The Articles and Dialogs this collection is built from. <b>Hold out</b> keeps an item in the collection but out of the export — and keeps it out if you add it again from the Content tab. <b>✕</b> removes it from the collection entirely.' +
+              (excluded
+                ? ' <span class="warn">' +
+                  _colPlural(excluded, "item") +
+                  " currently held out.</span>"
+                : "") +
+              "</div>"
         return (
           note +
-          '<div class="col-items">' +
-          keys.map((key) => _colItemRowHtml(c.id, key)).join("") +
-          "</div>"
+          _colSearchToolbar(
+            "colItemSearch",
+            "colItemCount",
+            "Search items and their responses…",
+          ) +
+          '<div id="colItemsWrap"></div>'
         )
+      }
+      function _colRenderItems() {
+        const c = cmCollections.find((x) => x.id === _colView)
+        const wrap = document.getElementById("colItemsWrap")
+        if (!c || !wrap) return
+        const keys = c.itemKeys || []
+        const q = (_colQuery || "").trim()
+        const ql = q.toLowerCase()
+        // Matching an item on the text of the responses it produces is the point
+        // of searching here: you find a line you don't want in the export, and
+        // this tells you which Article or Dialog is putting it there.
+        const matches = q
+          ? keys.filter((k) => {
+              if (_colItemLabel(k).label.toLowerCase().includes(ql)) return true
+              if (k.toLowerCase().includes(ql)) return true
+              return _itemExportRows(k).some(
+                (r) =>
+                  r.content.toLowerCase().includes(ql) ||
+                  r.phrases.some((ph) => ph.toLowerCase().includes(ql)),
+              )
+            })
+          : keys
+        const countEl = document.getElementById("colItemCount")
+        if (countEl)
+          countEl.textContent = q
+            ? matches.length + " of " + _colPlural(keys.length, "item")
+            : _colPlural(keys.length, "item")
+        wrap.innerHTML = matches.length
+          ? '<div class="col-items">' +
+            matches.map((key) => _colItemRowHtml(c, key, q)).join("") +
+            "</div>"
+          : '<div class="col-empty"><div class="col-empty-title">No matches</div>' +
+            '<div class="col-empty-text">No item in this collection, and none of the responses they produce, matches “' +
+            esc(q) +
+            '”.</div></div>'
       }
       function _colItemExists(key) {
         const parsed = _parseCollectionItemKey(key)
@@ -14143,29 +14681,40 @@
           ? articleMap.has(parsed.id)
           : dialogMap.has(parsed.id)
       }
-      function _colItemRowHtml(collectionId, key) {
+      // Resolves an item key to what it should be called on screen. Split out of
+      // _colItemRowHtml so the search can match the same label the row shows.
+      function _colItemLabel(key) {
         const parsed = _parseCollectionItemKey(key)
-        let kind = "missing"
-        let kindLabel = "Missing"
-        let label = "(unknown item)"
         if (parsed && parsed.kind === "article") {
           const art = articleMap.get(parsed.id)
-          kind = art ? "article" : "missing"
-          kindLabel = "Article"
-          label = art
-            ? aFaqQ(art) || "Article #" + art.Id
-            : "Article #" + parsed.id + " — no longer in the loaded data"
-        } else if (parsed) {
-          const dialog = dialogMap.get(parsed.id)
-          kind = dialog ? "dialog" : "missing"
-          kindLabel = "Dialog"
-          label = dialog
-            ? dialog.name
-            : "Dialog #" + parsed.id + " — no longer in the loaded data"
+          return {
+            kind: art ? "article" : "missing",
+            kindLabel: "Article",
+            label: art
+              ? aFaqQ(art) || "Article #" + art.Id
+              : "Article #" + parsed.id + " — no longer in the loaded data",
+          }
         }
-        const n = _itemExportRowCount(key)
+        if (parsed) {
+          const dialog = dialogMap.get(parsed.id)
+          return {
+            kind: dialog ? "dialog" : "missing",
+            kindLabel: "Dialog",
+            label: dialog
+              ? dialog.name
+              : "Dialog #" + parsed.id + " — no longer in the loaded data",
+          }
+        }
+        return { kind: "missing", kindLabel: "Missing", label: "(unknown item)" }
+      }
+      function _colItemRowHtml(c, key, q) {
+        const { kind, kindLabel, label } = _colItemLabel(key)
+        const held = _colExcludedItems(c).has(key)
+        const n = _itemExportRowCount(key, c)
         return (
-          '<div class="col-item-row">' +
+          '<div class="col-item-row' +
+          (held ? " held" : "") +
+          '">' +
           '<span class="col-item-kind ' +
           kind +
           '">' +
@@ -14174,15 +14723,28 @@
           '<span class="col-item-name" title="' +
           esc(label) +
           '">' +
-          esc(label) +
+          hl(label, q) +
           "</span>" +
           '<span class="col-item-rows' +
           (n === 0 ? " zero" : "") +
           '">' +
-          _colPlural(n, "row") +
+          (held ? "held out" : _colPlural(n, "row")) +
           "</span>" +
+          '<button class="col-item-hold" title="' +
+          (held
+            ? "Put this item back in the export"
+            : "Keep this item in the collection but out of the export") +
+          '" onclick="' +
+          (held ? "restoreCollectionItem" : "excludeCollectionItem") +
+          "('" +
+          esc(c.id) +
+          "','" +
+          esc(key) +
+          '\')">' +
+          (held ? "Restore" : "Hold out") +
+          "</button>" +
           '<button class="col-item-remove" title="Remove from this collection" onclick="removeCollectionItem(\'' +
-          esc(collectionId) +
+          esc(c.id) +
           "','" +
           esc(key) +
           '\')">&#x2715;</button></div>'
@@ -14196,20 +14758,25 @@
       }
 
       // ── Filtered out tab ──
-      // Audit view: what an enabled smart filter is removing from *this*
-      // collection, and which pattern did it — so a filter meant to catch one
-      // thing doesn't silently eat something else.
+      // Audit view: everything removed from *this* collection before export, and
+      // what removed it — a smart filter (named) or the reachability rule — so a
+      // filter meant to catch one thing doesn't silently eat something else.
+      // Searchable on the same terms as the export preview, because the question
+      // asked here is usually "the row I wanted is missing, who took it?".
       function _colFilteredPaneHtml(c, st) {
-        if (!_colEnabledFilters().length) {
-          return (
-            '<div class="col-empty"><div class="col-empty-title">No smart filters are enabled</div>' +
-            '<div class="col-empty-text">Smart filters drop unwanted rows from every collection at export time — test entries, internal notes, a context you never want to publish.</div>' +
-            '<button class="btn-secondary" style="margin-top:6px" onclick="_colSelect(\'' +
-            COL_FILTERS_VIEW +
-            '\')">Set up smart filters</button></div>'
-          )
-        }
+        // Rows can be excluded with no smart filter enabled at all — the
+        // reachability rule removes them too. Checking the rows first is what
+        // makes those visible; gating on the filter list hid them entirely.
         if (!st.excludedRows.length) {
+          if (!_colEnabledFilters().length) {
+            return (
+              '<div class="col-empty"><div class="col-empty-title">No smart filters are enabled</div>' +
+              '<div class="col-empty-text">Smart filters drop unwanted rows from every collection at export time — test entries, internal notes, a context you never want to publish.</div>' +
+              '<button class="btn-secondary" style="margin-top:6px" onclick="_colSelect(\'' +
+              COL_FILTERS_VIEW +
+              '\')">Set up smart filters</button></div>'
+            )
+          }
           return (
             '<div class="col-empty"><div class="col-empty-title">Nothing is being filtered out</div>' +
             '<div class="col-empty-text">All ' +
@@ -14217,42 +14784,205 @@
             " in this collection pass your smart filters.</div></div>"
           )
         }
+        // Name the two causes separately — "12 rows removed" is not actionable
+        // when half of them are unreachable content and half are your patterns.
+        const byRule = st.excludedRows.filter((r) => r.unreachable).length
+        const byHand = st.excludedRows.filter((r) => r.manual).length
+        const byPattern = st.excludedRows.length - byRule - byHand
+        const parts = []
+        if (byHand)
+          parts.push(_colPlural(byHand, "row") + " you removed by hand")
+        if (byRule) parts.push(_colPlural(byRule, "row") + " unreachable")
+        if (byPattern)
+          parts.push(_colPlural(byPattern, "row") + " matched a smart filter")
+        const breakdown = parts.join(", ") + "."
         return (
           '<div class="col-note">These rows exist in the collection but are removed before export. ' +
-          '<button class="btn-link" onclick="_colSelect(\'' +
+          breakdown +
+          ' <button class="btn-link" onclick="_colSelect(\'' +
           COL_FILTERS_VIEW +
           '\')">Edit smart filters</button></div>' +
+          _colSearchToolbar(
+            "colFilteredSearch",
+            "colFilteredCount",
+            "Search triggers, content and reason…",
+          ) +
+          '<div id="colFilteredWrap"></div>'
+        )
+      }
+      function _colShowMoreFiltered() {
+        _colRowsShown += COL_ROWS_PAGE
+        _colRenderFiltered()
+      }
+      function _colRenderFiltered() {
+        const c = cmCollections.find((x) => x.id === _colView)
+        const wrap = document.getElementById("colFilteredWrap")
+        if (!c || !wrap) return
+        const { excludedRows } = buildCollectionExportRows(c)
+        const q = (_colQuery || "").trim()
+        const ql = q.toLowerCase()
+        const filtered = q
+          ? excludedRows.filter((r) => _colRowMatches(r, ql, r.matchedFields))
+          : excludedRows
+        const countEl = document.getElementById("colFilteredCount")
+        if (countEl)
+          countEl.textContent = q
+            ? filtered.length + " of " + _colPlural(excludedRows.length, "row")
+            : _colPlural(excludedRows.length, "row")
+        if (!filtered.length) {
+          wrap.innerHTML =
+            '<div class="col-empty"><div class="col-empty-title">No matches</div>' +
+            '<div class="col-empty-text">Nothing that was filtered out of this collection matches “' +
+            esc(q) +
+            '”. If you are looking for a row that is missing from the export, it may simply never have been produced — check the <b>Items</b> tab.</div></div>'
+          return
+        }
+        // Same cap as the export preview — a broad pattern can exclude thousands
+        // of rows, and this pane is for spot-checking what a filter caught, not
+        // for reading all of it. The count above always states the true total.
+        const shown = Math.min(filtered.length, _colRowsShown)
+        _colVisibleExcluded = filtered
+        wrap.innerHTML =
           '<div class="col-rows">' +
-          st.excludedRows
-            .map(
-              (r) =>
-                '<div class="col-row">' +
-                '<div class="col-row-triggers">' +
-                (r.trigger
-                  .split(" | ")
-                  .filter((p) => p)
-                  .map(
-                    (p) =>
-                      '<span class="col-trigger-chip">' + esc(p) + "</span>",
-                  )
-                  .join("") ||
-                  '<span class="col-trigger-chip" style="opacity:.6">(no trigger)</span>') +
-                "</div>" +
-                '<div class="col-row-content">' +
-                esc(r.content) +
-                "</div>" +
+          filtered
+            .slice(0, shown)
+            .map((r, i) =>
+              _colRowHtml(
+                r,
+                q,
                 '<div class="col-row-matched">Removed by' +
-                r.matchedFields
-                  .map(
-                    (m) =>
-                      '<span class="col-matched-chip">' + esc(m) + "</span>",
-                  )
-                  .join("") +
-                "</div></div>",
+                  r.matchedFields
+                    .map(
+                      (m) =>
+                        '<span class="col-matched-chip' +
+                        (r.unreachable ? " rule" : "") +
+                        (r.manual ? " manual" : "") +
+                        '">' +
+                        hl(m, q) +
+                        "</span>",
+                    )
+                    .join("") +
+                  "</div>",
+                // Only a hand-removal is undoable from here. A rule or a pattern
+                // is undone where it is configured, and a Restore button that
+                // silently did nothing would be worse than none.
+                r.manual
+                  ? '<button class="col-row-action restore" title="' +
+                    (r.itemKey
+                      ? "Put this item back in the export"
+                      : "Put this response back in the export") +
+                    '" onclick="restoreVisibleExclusion(' +
+                    i +
+                    ')">Restore</button>'
+                  : "",
+              ),
             )
             .join("") +
-          "</div>"
-        )
+          "</div>" +
+          (shown < filtered.length
+            ? '<div class="col-rows-more">Showing ' +
+              shown +
+              " of " +
+              _colPlural(filtered.length, "filtered-out row") +
+              '. <button class="btn-link" onclick="_colShowMoreFiltered()">Show ' +
+              Math.min(COL_ROWS_PAGE, filtered.length - shown) +
+              " more</button></div>"
+            : "")
+      }
+
+      // ── Filters tab (per collection) ──
+      // Smart filters are global patterns, but not every collection wants every
+      // one of them. This switches a global filter off for *this* collection only
+      // — the pattern itself is untouched and every other collection keeps it.
+      // The per-filter row counts are what make it usable: "removes 14 rows here"
+      // is the number you need before deciding to switch something off.
+      function _colCollectionFiltersPaneHtml(c) {
+        const globalOn = _colEnabledFilters()
+        const off = _colDisabledFilters(c)
+        if (!cmExportFilters.length) {
+          return (
+            '<div class="col-empty"><div class="col-empty-title">No smart filters exist yet</div>' +
+            '<div class="col-empty-text">Smart filters are global exclusion patterns. Once you have some, this tab is where you switch individual ones off for this collection only.</div>' +
+            '<button class="btn-secondary" style="margin-top:6px" onclick="_colSelect(\'' +
+            COL_FILTERS_VIEW +
+            '\')">Set up smart filters</button></div>'
+          )
+        }
+        const disabledHere = cmExportFilters.filter((f) => off.has(f.id)).length
+        const note =
+          '<div class="col-note">Which global smart filters apply to <b>' +
+          esc(c.name) +
+          "</b>. Switching one off here leaves the pattern in place for every other collection. " +
+          (disabledHere
+            ? '<span class="warn">' +
+              _colPlural(disabledHere, "filter") +
+              " switched off for this collection.</span> "
+            : "") +
+          '<button class="btn-link" onclick="_colSelect(\'' +
+          COL_FILTERS_VIEW +
+          '\')">Edit the patterns</button></div>'
+        const rows = cmExportFilters
+          .map((f) => {
+            const globallyOff = f.enabled === false || !f.pattern
+            const appliedHere = !globallyOff && !off.has(f.id)
+            // Counted with only this one filter active, so the number answers
+            // "what does *this* pattern remove here" rather than being confounded
+            // by whatever else is switched on.
+            const hits = appliedHere
+              ? buildCollectionExportRows(c, { patterns: [f] }).excludedRows
+                  .filter((r) => !r.unreachable && !r.manual)
+                  .length
+              : 0
+            return (
+              '<div class="export-filter-row' +
+              (globallyOff ? " global-off" : "") +
+              '">' +
+              '<span class="col-item-kind ' +
+              (f.field || "entity") +
+              '">' +
+              esc(
+                (EXPORT_FILTER_FIELDS.find(
+                  (x) => x.value === (f.field || "entity"),
+                ) || {}).label || "Entity",
+              ) +
+              "</span>" +
+              '<span class="export-filter-pattern" title="' +
+              esc(f.pattern) +
+              '">' +
+              esc(f.pattern) +
+              (f.isRegex ? '<span class="col-rule-desc">regex</span>' : "") +
+              "</span>" +
+              '<span class="col-item-rows' +
+              (hits ? "" : " zero") +
+              '">' +
+              (globallyOff
+                ? "off globally"
+                : appliedHere
+                  ? _colPlural(hits, "row") + " removed here"
+                  : "not applied here") +
+              "</span>" +
+              '<label class="export-filter-label"><input type="checkbox" ' +
+              (appliedHere ? "checked" : "") +
+              (globallyOff ? " disabled" : "") +
+              ' onchange="toggleCollectionFilter(\'' +
+              esc(c.id) +
+              "','" +
+              esc(f.id) +
+              '\', this.checked)" /> Applied</label>' +
+              "</div>"
+            )
+          })
+          .join("")
+        return note + rows
+      }
+      function toggleCollectionFilter(collectionId, filterId, applied) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        const off = new Set(c.disabledFilterIds || [])
+        if (applied) off.delete(filterId)
+        else off.add(filterId)
+        c.disabledFilterIds = [...off]
+        _colAfterCurationChange(c, null)
       }
 
       // ── Onboarding / empty detail ──
@@ -14294,10 +15024,12 @@
         // is doing to the collections you actually have.
         let removed = 0
         let touched = 0
+        let unreachable = 0
         for (const c of cmCollections) {
-          const n = buildCollectionExportRows(c).excludedCount
-          removed += n
-          if (n) touched++
+          const st = buildCollectionExportRows(c)
+          removed += st.excludedCount
+          unreachable += st.unreachableCount
+          if (st.excludedCount) touched++
         }
         const head =
           '<div class="col-detail-head"><div class="col-detail-titles">' +
@@ -14313,8 +15045,29 @@
               : "Not removing anything right now"
             : "Applied to every collection at export time") +
           "</div></div></div>"
+        // The reachability rule sits above the pattern list, not in it: it is not a
+        // pattern, it applies to every collection, and it was invisible until now —
+        // rows it drops were simply absent, with nothing to say why.
+        const reachRule =
+          '<div class="col-rule-row">' +
+          '<label class="col-rule-main"><input type="checkbox" ' +
+          (cmExportKeepUnreachable ? "" : "checked") +
+          ' onchange="toggleExportKeepUnreachable(!this.checked)" />' +
+          "<span><b>Drop responses a user can never reach</b>" +
+          '<span class="col-rule-desc">A response that is not the default and has no context — or whose context is set to ' +
+          "<code>any</code> — is not reachable, so it is left out of the export. " +
+          "Turn this off to export every response regardless.</span></span></label>" +
+          '<span class="col-rule-impact' +
+          (unreachable && !cmExportKeepUnreachable ? " warn" : "") +
+          '">' +
+          (unreachable
+            ? cmExportKeepUnreachable
+              ? _colPlural(unreachable, "row") + " kept by this being off"
+              : _colPlural(unreachable, "row") + " dropped"
+            : "No rows affected") +
+          "</span></div>"
         const note =
-          '<div class="col-note">A row is dropped when any enabled pattern matches it. ' +
+          '<div class="col-note">Below that, a row is dropped when any enabled pattern matches it. ' +
           "<b>Entity</b> tests each trigger phrase, <b>Content</b> tests the response text, and <b>Context</b> tests a flattened " +
           "<code>name:value</code> string per response, e.g. <code>escalationGroup:overnachten resort:R_EBR_BH12</code>. " +
           "Matching is case-insensitive substring unless you tick Regex.</div>"
@@ -14360,6 +15113,7 @@
         return (
           head +
           '<div class="col-detail-body">' +
+          reachRule +
           note +
           addRow +
           (rows ||
@@ -14388,6 +15142,16 @@
         saveExportFilters(cmExportFilters)
         renderCollectionsModal()
       }
+      function toggleExportKeepUnreachable(keep) {
+        cmExportKeepUnreachable = keep
+        saveKeepUnreachable(keep)
+        // Item-level rows are cached with the rule already applied to their
+        // counts, and the build signature covers the rest — but the rule changes
+        // what every collection produces, so drop the lot rather than reason
+        // about which caches happen to survive.
+        invalidateCollectionCaches()
+        renderCollectionsModal()
+      }
       function toggleExportFilterField(id, field) {
         const f = cmExportFilters.find((x) => x.id === id)
         if (!f) return
@@ -14413,6 +15177,71 @@
         cmExportFilters = cmExportFilters.filter((x) => x.id !== id)
         saveExportFilters(cmExportFilters)
         renderCollectionsModal()
+      }
+
+      // ── Curation: hand-removing content from an export ──
+      //
+      // These lists live beside `itemKeys` rather than editing it, which is the
+      // whole point: removing an item drops it from the collection and a later
+      // re-add from the Content tab brings its content straight back, whereas an
+      // exclusion is remembered and keeps applying. Everything excluded here
+      // shows in the Filtered out tab with a Restore button, so nothing can be
+      // hand-removed and then be impossible to find again.
+      function _colPushUnique(list, value) {
+        if (!list.includes(value)) list.push(value)
+      }
+      function _colAfterCurationChange(c, message) {
+        c.updatedAt = Date.now()
+        saveCollections(cmCollections)
+        if (message) showImportToast("success", message)
+        renderCollectionsModal()
+      }
+      function excludeCollectionContent(collectionId, content) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c || !content) return
+        c.excludedContent = c.excludedContent || []
+        _colPushUnique(c.excludedContent, content)
+        _colAfterCurationChange(
+          c,
+          "Response removed from the export — restore it from Filtered out",
+        )
+      }
+      function excludeCollectionItem(collectionId, key) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.excludedItemKeys = c.excludedItemKeys || []
+        _colPushUnique(c.excludedItemKeys, key)
+        _colAfterCurationChange(c, "Item held out of the export")
+      }
+      function restoreCollectionItem(collectionId, key) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.excludedItemKeys = (c.excludedItemKeys || []).filter((k) => k !== key)
+        _colAfterCurationChange(c, null)
+      }
+      function restoreCollectionContent(collectionId, content) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.excludedContent = (c.excludedContent || []).filter(
+          (t) => t !== content,
+        )
+        _colAfterCurationChange(c, null)
+      }
+      // Content strings are arbitrary text — too long and too quote-laden to put
+      // in an inline onclick attribute — so the rendered lists keep the rows they
+      // drew and the buttons address them by index. Any curation click re-renders,
+      // so an index is never read against a stale list.
+      let _colVisibleRows = []
+      let _colVisibleExcluded = []
+      function excludeVisibleRow(i) {
+        const r = _colVisibleRows[i]
+        if (r) excludeCollectionContent(_colView, r.content)
+      }
+      function restoreVisibleExclusion(i) {
+        const r = _colVisibleExcluded[i]
+        if (!r) return
+        if (r.itemKey) restoreCollectionItem(_colView, r.itemKey)
+        else restoreCollectionContent(_colView, r.content)
       }
 
       // ── Collection mutations ──
@@ -14872,6 +15701,9 @@
           dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
           tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
           articleMap = new Map((data.articles || []).map((a) => [a.Id, a]))
+          // Collection export rows are derived from these maps — drop everything
+          // derived from the previous export before anything can read it back.
+          invalidateCollectionCaches()
 
           const hasArticles = !!(data.files && data.files.articles)
           const hasDialogs = !!(data.files && data.files.dialogs)

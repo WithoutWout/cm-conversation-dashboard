@@ -30,7 +30,10 @@ src-tauri/
 frontend/
   index.html        — Entire renderer: HTML + embedded <style> + embedded <script>
   search-worker.js  — Worker-side content/entity filtering, sorting, and search matching
-package.json        — scripts: tauri dev / tauri build
+  tests/
+    extract.js      — pulls named functions out of index.html so tests run the real source
+    collections.test.js, export-integrity.test.js  — `npm run test:frontend`
+package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
 Data files (read-only, never committed, placed in a user-selected folder):
@@ -484,11 +487,49 @@ Lets users multi-select Articles/Dialogs on the Content tab and export them as `
 - For dialogs, a trigger comes from either of two sources, both resolved to reachable Answer item(s) on a **target** node via the shared `emitReachableAnswers` step in `_dialogExportRows`:
   - a non-fallback Recognition link's `condition.data.questions[]`, targeting `link.childNodeId` (mid-conversation, internal to the dialog); or
   - a referencing **Article**'s `Questions[]`, via `_articlesRoutingIntoDialog(dialogId)` — any Article with a reachable `DialogStart` Output (`DialogId` matching, `IsDefault` or has real context, same reachability rule as Answer outputs) targeting `DialogStartNodeId` (the dialog's entry point). This runs against the full loaded dataset regardless of whether that article is itself in the collection, since it only supplies the human-readable trigger phrase for content the dialog otherwise has no entity attached to. A dialog that is purely an internal router (every Recognition link only leads to further `DialogStart` hand-offs, never a direct Answer) can still produce real export rows this way — confirmed against production data.
+- **The reachability rule is a setting, and it reports itself.** Non-default responses with no real context are dropped from the export — but that is now `cmExportKeepUnreachable` (`localStorage["cm-export-keep-unreachable"]`, storing the *opt-out* so the default and every existing install behave exactly as before), shown as a checkbox above the pattern list in the Smart filters pane with a live count of what it removes.
+  - **`_articleExportRows`/`_dialogExportRows` tag rows `unreachable`, they do not drop them.** Dropping happened inside the row builders, which made the rule un-reportable and un-switchable: the rows were simply absent with nothing to say why. `_buildCollectionExportRows` is now the only place the decision is made, and it routes rejected rows into `excludedRows` with `matchedFields: [UNREACHABLE_REASON]` and `unreachable: true` so the **Filtered out** tab shows them alongside smart-filter drops (muted `.col-matched-chip.rule` vs orange, plus a one-line breakdown naming both causes). `unreachableCount` is returned whether or not the rule is on, so the setting can state its own impact.
+  - **`_colFilteredPaneHtml` checks `excludedRows` before the enabled-filter list.** Rows can now be excluded with no smart filter enabled at all; gating on the filter list first hid exactly the rows this was meant to surface.
+  - **An unreachable *route* taints the rows behind it.** `_colRouteIndex` tags entries rather than skipping them and `_dialogExportRows` ORs that into each row — a reachable response reached only through an unreachable `DialogStart` is still not reachable. Note the default route is chosen among the `DialogStart` outputs *to that dialog*, so a lone route is always the default.
+  - **`dialogAnswerHasContext` now discounts `"any"`, matching the Article side.** It used to count any non-empty `contextVariables` entry, so the two disagreed: an Article answer with context `"any"` was correctly unreachable while the equivalent Dialog answer was treated as reachable — labelled as such in the UI and exported by Collections. The dialog shape stores values as one comma-separated `cv.value` string where the Article shape has a `Values` array; flattening it is the only difference between the two checks. This is shared with live content search (the `isUnreachable` badge), which is the point — they describe the same thing.
+
 - Multiple trigger phrases on one row are joined with `" | "` (e.g. `"Entity | Other Entity"`) — an Article's full `Questions[]` list can be large (dozens of phrases) since every entity that reaches that Article funnels into the same dialog entry.
-- **Smart filters** (`cmExportFilters`, `localStorage["cm-export-filters"]`) are global, user-managed exclusion patterns (plain case-insensitive substring by default, or regex per-pattern) applied at export time via `_rowMatchesExclusion(row, patterns)`. Matching is whole-row: if any tested value on a row matches an enabled pattern, the entire row is dropped. Each pattern has a `field` (`"entity"` default | `"content"` | `"context"`, chosen via a `<select class="sort-select">` in the Smart filters pane) selecting what gets tested: Entity checks each trigger phrase (`row.phrases`, original behavior); Content checks the answer text (`row.content`); Context checks a flattened, sorted `"name:val1,val2 ..."` string built by `_rowContextText(contextVars, escGroup, isArticle)` from the same `ContextVariables`/`contextVariables` + escalation-group fields `articleAnswerHasContext`/`dialogAnswerHasContext` already read for reachability (resolved to readable names via `ctxVarMap`, mirroring — without touching — the `ctxSet` normalization inside `answerPassesContextFilters`). Filters saved before `field` existed have no `field` key and default to `"entity"` for backward compatibility.
+- **Smart filters** (`cmExportFilters`, `localStorage["cm-export-filters"]`) are global, user-managed exclusion patterns (plain case-insensitive substring by default, or regex per-pattern) applied at export time via `_rowMatchesExclusion(row, prepared)` — `prepared` being `_prepareExclusionPatterns(patterns)`, compiled once per build rather than per row. Matching is whole-row: if any tested value on a row matches an enabled pattern, the entire row is dropped. Each pattern has a `field` (`"entity"` default | `"content"` | `"context"`, chosen via a `<select class="sort-select">` in the Smart filters pane) selecting what gets tested: Entity checks each trigger phrase (`row.phrases`, original behavior); Content checks the answer text (`row.content`); Context checks a flattened, sorted `"name:val1,val2 ..."` string built by `_rowContextText(contextVars, escGroup, isArticle)` from the same `ContextVariables`/`contextVariables` + escalation-group fields `articleAnswerHasContext`/`dialogAnswerHasContext` already read for reachability (resolved to readable names via `ctxVarMap`, mirroring — without touching — the `ctxSet` normalization inside `answerPassesContextFilters`). Filters saved before `field` existed have no `field` key and default to `"entity"` for backward compatibility.
 - **Merging** (`_mergeRowsByContent`, called inside `buildCollectionExportRows` after exclusion filtering, before the final `trigger`/`content` rows are built): rows with byte-identical `content` — regardless of source (two Articles, an Article and a dialog node, two dialog nodes, etc.) — are combined into one row, unioning their trigger phrases (deduped, first-seen order). Runs *after* exclusion so a smart-filter-dropped row's phrases never leak into a surviving row just because they happened to share content.
 - `esc()` must **not** be applied to `trigger`/`content` values — that's for `innerHTML` rendering; `JSON.stringify` handles export escaping.
 - `buildCollectionExportRows(collection, opts)` returns `{ rows, excludedRows, excludedCount, totalCandidates }`. `excludedRows` (unmerged — one entry per raw exclusion event, not deduped) is `{ trigger, content, matchedFields }[]`, where `matchedFields` is `["<field>: <pattern>", ...]` from `_rowMatchingPatterns(row, patterns)` (the patterns that matched, which `_rowMatchesExclusion` just checks the length of). This powers the **Filtered out** tab (`_colFilteredPaneHtml`) of whichever collection is open — what a currently-enabled smart filter is dropping and why, so a filter meant to catch one thing doesn't silently eat something else too. Each row lists its matching patterns as chips.
+
+### Curating what actually gets exported
+
+Four things can keep a response out of the file, and the Filtered out tab is the single place that lists all of them with the reason attached. In evaluation order:
+
+1. **Hand-removed** — `excludedContent` (a response, keyed by its exact content string) and `excludedItemKeys` (a whole item). Checked **first, before any rule**: an explicit choice outranks a rule, and more importantly a hand-removal must always carry a working Restore button rather than being attributed to something the user cannot undo from that row.
+2. **The reachability rule** — `cmExportKeepUnreachable`, above.
+3. **Smart filters** — global patterns, minus the ones this collection has switched off.
+
+- **Exclusions live beside `itemKeys`, never inside it, and that is the whole point.** Removing an item drops it from the collection and a later re-add from the Content tab brings its content straight back; an exclusion is remembered and keeps applying. `re-adding a held-out item keeps it held out` and `re-adding an item keeps its hand-removed response out` pin this.
+- **Content is the row's identity** because `_mergeRowsByContent` already merges on it. A consequence worth knowing: holding out item A does not remove content that item B also produces — the row survives, attributed to B. That is correct (B legitimately produces it) but it is the one case where "I removed that" and "it is gone" differ.
+- **`disabledFilterIds`** switches a *global* pattern off for one collection. `_colEffectivePatterns(c)` is the only place the effective set is computed, and `_colBuildSignature` includes it, so toggling one busts just that collection's cache. The per-filter row counts in the Filters tab are computed with `{patterns: [f]}` — one filter at a time — so the number answers "what does *this* pattern remove here" rather than being confounded by whatever else is on.
+- **`_itemExportRowCount(key, collection)` takes the collection** so the Items tab reports what an item contributes *given this collection's curation*. Called without one it still answers for the raw item, which is what the select-mode hover preview wants.
+- **`_colStats.zero` skips held-out items.** An item contributing nothing by choice is not the same problem as an item with nothing to contribute, and the note it drives explains the latter.
+- **The rendered lists keep what they drew** (`_colVisibleRows` / `_colVisibleExcluded`) and the buttons address rows by index. Content strings are arbitrary text — too long and too quote-laden to put in an inline `onclick`. Any curation click re-renders, so an index is never read against a stale list.
+
+**The export is exactly the preview.** `exportCollection` serializes `buildCollectionExportRows(c).rows` and nothing else, so there is one code path and the file cannot disagree with the screen. `frontend/tests/export-integrity.test.js` (`npm run test:frontend`) drives a fixture where every excluded string is uniquely tagged and scans the produced JSON *bytes* for all of them — content and trigger sides of every mechanism, plus the merge case where a held-out item shares content with a kept one. It also asserts the shape: rows carry exactly `{trigger, content}`, so no internal field (`unreachable`, `manual`, `ctxText`, `phrases`) can reach a customer-facing file. Re-run it before changing anything in this section.
+
+**Search covers all three list tabs** through one `_colQuery`, one `_colSearchToolbar`, and one `_colRowMatches`. Sharing the query across tabs is deliberate: "it is not in the export — was it filtered out?" is the question the Filtered out tab exists to answer, and carrying the term across the tab switch makes it one click. The toolbar renders `value=_colQuery` because the pane is rebuilt on every tab change and an empty box over a filtered list reads as a bug. The Items tab matches an item on **the text of the responses it produces**, not just its name — that is what turns "I don't want this line in the export" into "here is the Article putting it there".
+
+### Why Collections stay fast as they grow
+
+A collection stores **nothing but references** — `itemKeys` is `["article:12", "dialog:34"]` and every export row is derived from the loaded export at read time. That is the right model (collections stay tiny and never go stale against the data), but the derivation was being redone on every render, and the Collections modal renders a lot: the sidebar computes stats for *every* collection, the detail header recomputes the open one, the Items tab recomputed each item **again** via `_itemExportRowCount`, and the export-preview search recomputed the lot on **every keystroke**. Three caches fix that, all invalidated only by `invalidateCollectionCaches()` from `loadData` — they are pure functions of the loaded export, so nothing else *can* invalidate them.
+
+- **`_colRouteIndexCache` — `dialogId -> [{ article, nodeId }]`, built once.** `_articlesRoutingIntoDialog` used to scan all of `articleMap` **per dialog**, so a collection of a few hundred Dialogs re-walked every Article and every Output a few hundred times, per render. The index is built by one pass over the articles and inverted. Insertion order still follows `articleMap`, so emitted rows are byte-identical.
+  - **There is deliberately no `DialogId == null` guard** when indexing. The old scan compared `o.DialogId === dialogId`, so a null `DialogId` matched a null lookup; keeping `null` as a valid key preserves that exactly instead of quietly changing which rows can be emitted.
+- **`_colItemRowsCache` — item key → raw pre-exclusion rows.** `_itemExportRows(key)` is now the single door to `_articleExportRows`/`_dialogExportRows`; `_itemExportRowCount` and the select-mode hover preview (`_contentPreviewHtml`, which ran the full derivation **on every card hover**) both go through it.
+- **`_colBuildCache` — collection id → `{ sig, result }`.** `_colBuildSignature` is a `JSON.stringify` of the enabled patterns plus `itemKeys`, so editing a filter or adding an item simply stops matching and no mutation site has to remember to invalidate. `buildCollectionExportRows(collection, {patterns})` bypasses the cache — an explicit pattern set is a one-off question.
+- **Smart-filter patterns are compiled once per build** (`_prepareExclusionPatterns`), not per row. A `new RegExp(...)` and a `pattern.toLowerCase()` used to happen inside the per-row test; `_rowMatchingPatterns` now takes prepared entries and lowercases each haystack once per row rather than once per row × pattern. Measured on 5k rows × 6 patterns: **1645 ms → 29 ms**, with identical matches.
+- **Both row lists render in pages of `COL_ROWS_PAGE` (200)** with a "Show N more" control, and the preview search is debounced 120 ms. Thousands of `.col-row` nodes in one `innerHTML` is a visible freeze; the count above the list always states the real total, so nothing is hidden silently. `_colRowsShown` resets whenever the selected collection or tab changes.
+- The preview search `<input>` is still built once by `_colContentPaneHtml` and only `#colRowsWrap` re-renders, so the debounce cannot cost the caret.
+
 ### Article and Dialog info modals
 
 `#articleInfoModal` and `#dialogInfoModal` share `.dialog-info-modal-box` and the `navHistory` back-stack with the flow and entity modals.
@@ -595,10 +636,17 @@ The detail header states the collection in one line (`N items · N export rows �
   sidebar: + New collection | one row per collection (name · N items · N rows)
            | pinned "Smart filters" entry with enabled-pattern count
   detail (per collection): name · counts | Rename / Delete / Export JSON
-    Export preview — search + trigger chips and response text per row
-    Items         — kind badge, name, N rows, remove; notes for 0-row/stale items
-    Filtered out  — excluded rows with the pattern chips that removed them
+    Export preview — search + trigger chips and response text per row, ✕ to
+                     hand-remove a response from the export
+    Items          — search (name *and* response text), kind badge, name, N rows,
+                     Hold out / Restore, ✕ remove; notes for 0-row/stale items
+    Filtered out   — search (incl. reason), excluded rows with the chip that
+                     removed them — pattern (orange) / rule (muted) / by hand
+                     (accent, with Restore)
+    Filters        — which global smart filters apply to this collection, each
+                     with the rows it removes here and an Applied toggle
   detail (Smart filters): live "removing N rows across M collections" summary,
+    reachability rule checkbox + its own live impact count,
     field selector (Entity/Content/Context) + pattern + regex add row,
     list with Field/Regex/Enabled toggles
   empty state: what a collection is, and the three steps to make one
@@ -661,7 +709,8 @@ Always use these terms in the UI:
 | `conv-low-recog-threshold` | Low recognition threshold |
 | `conv-data-retention-days` | CSV import retention window |
 | `chat-copy-format`         | Chat copy format preference |
-| `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }` |
+| `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
+| `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 
 Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer.

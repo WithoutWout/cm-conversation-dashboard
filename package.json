@@ -7,6 +7,7 @@
   "scripts": {
     "start": "electron .",
     "tauri": "tauri",
+    "test:frontend": "node frontend/tests/collections.test.js && node frontend/tests/export-integrity.test.js",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "build:mac": "electron-builder --mac",

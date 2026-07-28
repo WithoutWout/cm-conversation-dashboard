@@ -4,6 +4,9 @@ dist/
 # macOS metadata
 .DS_Store
 
+# Local Claude Code state (settings + worktree checkouts)
+.claude/
+
 # Build artefacts
 *.dmg
 *.exe
