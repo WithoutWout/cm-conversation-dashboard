@@ -11,7 +11,8 @@ const NAMES = [
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature",
   "_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
-  "articleAnswerHasContext","dialogAnswerHasContext","defaultArticleAnswer","defaultDialogAnswerItem",
+  "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
+  "defaultArticleAnswer","defaultDialogAnswerItem",
 ]
 const ctx = vm.createContext({ console })
 vm.runInContext(`

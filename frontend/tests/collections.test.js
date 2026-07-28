@@ -6,7 +6,8 @@ const NAMES = [
   "_articleExportRows","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature","_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
-  "articleAnswerHasContext","dialogAnswerHasContext","defaultArticleAnswer","defaultDialogAnswerItem",
+  "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
+  "defaultArticleAnswer","defaultDialogAnswerItem",
 ]
 const ctx = vm.createContext({ console })
 vm.runInContext(`
@@ -26,6 +27,7 @@ vm.runInContext(`
   function setFilters(f) { cmExportFilters = f }
   function setKeep(k) { cmExportKeepUnreachable = k; invalidateCollectionCaches() }
   function getFilterCount() { return cmExportFilters.length }
+  function articleById(id) { return articleMap.get(id) }
 `, ctx)
 
 const cmExportFiltersLength = () => ctx.getFilterCount()
@@ -209,6 +211,53 @@ ok("switching it off busts the cache", oneOff !== bothOn)
 ok("the global filter list is untouched", cmExportFiltersLength() === 2)
 cur.disabledFilterIds = []
 ok("switching it back on restores the old result", ctx.buildCollectionExportRows(cur).rows.length === bothOn.rows.length)
+
+
+out.push("")
+out.push("Reachability: an Article that routes into a Dialog (real shape of Article 4937):")
+// Its default Output is a DialogStart, so NONE of its Answers is the default.
+// All three carry OutputMetaData.escalationGroup and no ContextVariables, which
+// is exactly the combination that used to make them look reachable twice over.
+ctx.setData(
+  new Map([[4937, { Id: 4937, Questions: [{ Text: "foutmelding reserveren" }], Outputs: [
+    { Type: "DialogStart", DialogId: 4066, DialogStartNodeId: 1339, IsDefault: true, ContextVariables: [] },
+    { Type: "Answer", Text: "Spiegeltje spiegeltje", IsDefault: false, ContextVariables: [],
+      OutputMetaData: { escalationGroup: "attractiepark", hideFeedback: "true" } },
+    { Type: "Answer", Text: "Reserveringssysteem vervangen", IsDefault: false, ContextVariables: [],
+      OutputMetaData: { escalationGroup: "attractiepark", hideFeedback: "true" } },
+    { Type: "Answer", Text: "Geen verblijf reserveren", IsDefault: false, ContextVariables: [],
+      OutputMetaData: { escalationGroup: "attractiepark", hideFeedback: "true" } },
+  ] }]]),
+  new Map(), new Map(),
+)
+ctx.setFilters([]); ctx.setKeep(false)
+const routing = { id: "r", name: "R", itemKeys: ["article:4937"] }
+const rr = ctx.buildCollectionExportRows(routing)
+ok("no Answer is promoted to default when the default Output is a DialogStart",
+   ctx.defaultArticleAnswer(ctx.articleById(4937)) === null)
+ok("escalationGroup metadata alone is NOT a context condition",
+   ctx.articleAnswerHasContext({ ContextVariables: [], OutputMetaData: { escalationGroup: "attractiepark" } }) === false)
+ok("a real escalationGroup condition still counts",
+   ctx.articleAnswerHasContext({ ContextVariables: [{ Id: 5, Values: ["attractiepark"] }] }) === true)
+ok("...but not when its value is 'any'",
+   ctx.articleAnswerHasContext({ ContextVariables: [{ Id: 5, Values: ["any"] }] }) === false)
+ok("all three responses are unreachable", rr.unreachableCount === 3)
+ok("nothing from this article reaches the export", rr.rows.length === 0)
+
+// The fallback survives only where nothing at all is flagged.
+ok("first Answer is still the default when NO output is flagged",
+   ctx._defaultAnswerAmong([{ a: 1 }, { a: 2 }], [{ a: 1 }, { a: 2 }], () => false).a === 1)
+
+// Dialog side: same two rules.
+ok("dialog metadata.escalationGroup alone is not a condition",
+   ctx.dialogAnswerHasContext({ contextVariables: [], metadata: { escalationGroup: "attractiepark" } }) === false)
+ok("dialog contextVariables condition still counts",
+   ctx.dialogAnswerHasContext({ contextVariables: [{ id: 5, value: "attractiepark" }] }) === true)
+ok("no dialog Answer is default when the default item is not an Answer",
+   ctx.defaultDialogAnswerItem([
+     { type: "DialogStart", isDefault: true },
+     { type: "Answer", data: { text: "x" } },
+   ]) === null)
 
 console.log(out.join("\n"))
 console.log(failed ? "\n" + failed + " FAILED" : "\nAll checks passed")

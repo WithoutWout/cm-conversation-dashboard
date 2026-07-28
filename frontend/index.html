@@ -3677,6 +3677,31 @@
         color: #9a90f0;
         font-family: inherit;
       }
+      .col-item-pills {
+        display: flex;
+        gap: 6px;
+        padding: 10px 18px 0;
+      }
+      .col-item-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 0.74rem;
+        cursor: pointer;
+      }
+      .col-item-pill:hover {
+        color: var(--text);
+      }
+      .col-item-pill.active {
+        background: var(--surface2);
+        border-color: var(--accent);
+        color: var(--text);
+      }
       /* ── Per-row curation ── */
       .col-row.has-action {
         position: relative;
@@ -9005,6 +9030,7 @@
       let _colView = null
       let _colTab = "content" // "content" | "items" | "filtered"
       let _colQuery = ""
+      let _colItemFilter = "all" // Items tab: "all" | "held"
 
       // ── Navigation history ──────────────────────────────────────────
       let navHistory = []
@@ -9569,15 +9595,28 @@
       }
 
       // ── Contextual answer helpers ────────────────────────────────────
+      // Does this output carry a real condition — something that can select it
+      // over the default?
+      //
+      // `OutputMetaData.escalationGroup` is deliberately NOT one, even though it
+      // looks like context and used to be counted here. It is the escalation
+      // group the answer *belongs to* — an effect, not a condition — and the
+      // export proves the difference: it sits on 2088 of 2138 default answers
+      // (a condition on the default answer would be meaningless), and where an
+      // answer carries both the metadata tag and a genuine `escalationGroup`
+      // condition, the two values disagree more often than they agree.
+      //
+      // The real condition, escalationGroup included, always arrives through
+      // `ContextVariables` — escalationGroup is a declared context variable like
+      // any other, and shows up there with its own Id when it is actually used
+      // to pick an answer. Counting the metadata tag made every non-default
+      // answer with an escalation group look reachable; Article 4937 is the
+      // canonical example, where CM.com CAIC shows three unreachable responses
+      // and this tool exported all three.
       function articleAnswerHasContext(o) {
-        const cvs = o.ContextVariables || []
-        const hasContextVar = cvs.some(
+        return (o.ContextVariables || []).some(
           (cv) => cv.Values && !cv.Values.includes("any"),
         )
-        const hasEscGroup = !!(
-          o.OutputMetaData && o.OutputMetaData.escalationGroup
-        )
-        return hasContextVar || hasEscGroup
       }
 
       // The dialog-side mirror of articleAnswerHasContext. A context variable set
@@ -9590,15 +9629,13 @@
       // comma-separated `cv.value` string where the Article shape has a `Values`
       // array; flattening it is the only difference between the two checks.
       function dialogAnswerHasContext(item) {
-        const hasContextVar = (item.contextVariables || []).some((cv) => {
+        return (item.contextVariables || []).some((cv) => {
           const vals = (cv.value || "")
             .split(",")
             .map((v) => v.trim())
             .filter(Boolean)
           return vals.length > 0 && !vals.includes("any")
         })
-        const hasEscGroup = !!(item.metadata && item.metadata.escalationGroup)
-        return hasContextVar || hasEscGroup
       }
 
       // Returns true if the contextVars satisfy ALL active content context filters.
@@ -11021,14 +11058,43 @@
         })
       }
 
+      // Which Answer is the default one — the response given when no condition
+      // matches. Answer accordingly: **there may not be one.**
+      //
+      // The default flag belongs to the *output*, and outputs of different types
+      // share it. An Article whose default output is a `DialogStart` routes into
+      // a Dialog instead of answering, so none of its Answers is the default and
+      // every one of them needs a condition to ever fire. Falling back to the
+      // first Answer invented a default that CM.com CAIC does not have, which
+      // made an unreachable response look like the article's main answer — 149
+      // Articles and 29 Dialog output nodes in a real export.
+      //
+      // The `[0]` fallback survives only for the genuinely undecidable case
+      // where *nothing* carries the flag. That does not occur in any export seen
+      // so far, and guessing there is no worse than it was before.
+      function _defaultAnswerAmong(allOutputs, answers, isDefault) {
+        const flagged = answers.find(isDefault)
+        if (flagged) return flagged
+        if (allOutputs.some(isDefault)) return null // something else is the default
+        return answers[0] || null
+      }
+
       function defaultArticleAnswer(art) {
-        const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
-        return answers.find((o) => o.IsDefault) || answers[0] || null
+        const outputs = art.Outputs || []
+        return _defaultAnswerAmong(
+          outputs,
+          outputs.filter((o) => o.Type === "Answer"),
+          (o) => !!o.IsDefault,
+        )
       }
 
       function defaultDialogAnswerItem(items) {
-        const answers = (items || []).filter((i) => i.type === "Answer")
-        return answers.find((i) => i.isDefault) || answers[0] || null
+        const all = items || []
+        return _defaultAnswerAmong(
+          all,
+          all.filter((i) => i.type === "Answer"),
+          (i) => !!i.isDefault,
+        )
       }
 
       function answerTextMatchesTermRes(termRes, displayText, rawText) {
@@ -11522,7 +11588,13 @@
             list.push(o)
           }
           for (const [dialogId, list] of byDialog) {
-            const def = list.find((o) => o.IsDefault) || list[0]
+            // Same rule as _defaultAnswerAmong: if the article's default output
+            // is something other than these routes, none of them is the default.
+            const def = _defaultAnswerAmong(
+              art.Outputs || [],
+              list,
+              (o) => !!o.IsDefault,
+            )
             for (const o of list) {
               let arr = idx.get(dialogId)
               if (!arr) {
@@ -14258,6 +14330,7 @@
         _colView = cmCollections.length ? cmCollections[0].id : null
         _colTab = "content"
         _colQuery = ""
+        _colItemFilter = "all"
         _colRowsShown = COL_ROWS_PAGE
       }
       function renderCollectionsModal() {
@@ -14269,6 +14342,7 @@
         _colView = id
         _colTab = "content"
         _colQuery = ""
+        _colItemFilter = "all"
         _colRowsShown = COL_ROWS_PAGE
         renderCollectionsModal()
       }
@@ -14631,6 +14705,7 @@
               "</div>"
         return (
           note +
+          _colItemFilterPills(c) +
           _colSearchToolbar(
             "colItemSearch",
             "colItemCount",
@@ -14639,11 +14714,49 @@
           '<div id="colItemsWrap"></div>'
         )
       }
+      // "Which items am I holding out again?" is a question you ask while
+      // curating, and scanning a few hundred rows for the dimmed ones is not an
+      // answer. The counts sit on the pills so the collection states its own
+      // shape before you click anything.
+      function _colItemFilterPills(c) {
+        const total = (c.itemKeys || []).length
+        const held = (c.itemKeys || []).filter((k) =>
+          _colExcludedItems(c).has(k),
+        ).length
+        const pill = (id, label, n) =>
+          '<button class="col-item-pill' +
+          (_colItemFilter === id ? " active" : "") +
+          '" data-item-filter="' +
+          id +
+          '" onclick="setColItemFilter(\'' +
+          id +
+          '\')">' +
+          label +
+          '<span class="col-count-badge">' +
+          n +
+          "</span></button>"
+        return (
+          '<div class="col-item-pills">' +
+          pill("all", "All items", total) +
+          pill("held", "Held out", held) +
+          "</div>"
+        )
+      }
+      function setColItemFilter(f) {
+        _colItemFilter = f
+        document.querySelectorAll(".col-item-pill").forEach((b) => {
+          b.classList.toggle("active", b.dataset.itemFilter === f)
+        })
+        _colRenderItems()
+      }
       function _colRenderItems() {
         const c = cmCollections.find((x) => x.id === _colView)
         const wrap = document.getElementById("colItemsWrap")
         if (!c || !wrap) return
-        const keys = c.itemKeys || []
+        const held = _colExcludedItems(c)
+        const all = c.itemKeys || []
+        const keys =
+          _colItemFilter === "held" ? all.filter((k) => held.has(k)) : all
         const q = (_colQuery || "").trim()
         const ql = q.toLowerCase()
         // Matching an item on the text of the responses it produces is the point
@@ -14660,19 +14773,32 @@
               )
             })
           : keys
+        const scope = _colItemFilter === "held" ? "held-out item" : "item"
         const countEl = document.getElementById("colItemCount")
         if (countEl)
           countEl.textContent = q
-            ? matches.length + " of " + _colPlural(keys.length, "item")
-            : _colPlural(keys.length, "item")
-        wrap.innerHTML = matches.length
-          ? '<div class="col-items">' +
+            ? matches.length + " of " + _colPlural(keys.length, scope)
+            : _colPlural(keys.length, scope)
+        if (matches.length) {
+          wrap.innerHTML =
+            '<div class="col-items">' +
             matches.map((key) => _colItemRowHtml(c, key, q)).join("") +
             "</div>"
-          : '<div class="col-empty"><div class="col-empty-title">No matches</div>' +
-            '<div class="col-empty-text">No item in this collection, and none of the responses they produce, matches “' +
-            esc(q) +
-            '”.</div></div>'
+          return
+        }
+        // Three different nothings, and they need different words: nothing is
+        // held out, the search found nothing among the held-out ones, or the
+        // search found nothing at all.
+        wrap.innerHTML =
+          _colItemFilter === "held" && !keys.length
+            ? '<div class="col-empty"><div class="col-empty-title">Nothing is held out</div>' +
+              '<div class="col-empty-text">Every item in this collection is contributing to the export. Use <b>Hold out</b> on an item to keep it in the collection but out of the file.</div></div>'
+            : '<div class="col-empty"><div class="col-empty-title">No matches</div>' +
+              '<div class="col-empty-text">No ' +
+              (_colItemFilter === "held" ? "held-out item" : "item") +
+              " in this collection, and none of the responses they produce, matches “" +
+              esc(q) +
+              "”.</div></div>"
       }
       function _colItemExists(key) {
         const parsed = _parseCollectionItemKey(key)
