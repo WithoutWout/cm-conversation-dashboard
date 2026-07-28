@@ -62,35 +62,23 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.10.3
+            ## What's new in v0.10.4
 
-            ### Large collections are fast again
-            - A collection with hundreds of items no longer bogs the window down. The work of turning your Articles and Dialogs into export rows now happens once and is reused, instead of being redone every time the window redraws — which was several times per click, and again on every keystroke while searching.
-            - Typing in a collection's search box no longer stutters, and hovering cards while selecting content is instant again.
-            - Very long lists load in pages of 200 with a **Show more** button. The count above the list always tells you the real total.
+            ### Fixed: responses nobody can reach were being exported
+            A response that isn't the default and has no context set can never be shown to a user — CM.com CAIC marks these as unreachable. This tool was including them anyway. Two separate mistakes caused it, and on some Articles both applied at once:
 
-            ### You can now remove individual content from an export
-            - **✕** on any row in **Export preview** takes that response out of the export.
-            - **Hold out** in the **Items** tab takes a whole Article or Dialog out, while leaving it in the collection.
-            - Both are remembered: if you add the same item again from the Content tab, it stays out. Removing an item from the collection and re-adding it does *not* quietly bring its content back.
-            - Nothing disappears without a trace — everything you remove is listed under **Filtered out** with a **Restore** button.
+            - **An escalation group was being read as a condition.** Nearly every response carries an escalation group, including the default one, so it says which group a response belongs to — not when it should be used. A real condition on the escalation group is set up like any other context variable, and those still work exactly as before.
+            - **An Article that opens a Dialog was treated as if it also had a main answer.** When an Article's default action is to start a Dialog, none of its responses is the default, so each one needs its own context to ever appear. The tool was promoting the first one to "main answer" and exporting it.
 
-            ### Search across the whole collection
-            - **Filtered out** and **Items** are now searchable, alongside **Export preview**.
-            - The **Items** search matches the text of the responses an item produces, not just its name. Find a line you don't want in the export, and it tells you which Article or Dialog is putting it there.
-            - Your search term carries across the tabs, so "it's not in the export — was it filtered out?" is one click.
-            - In **Filtered out** you can also search on the reason, so typing a pattern's name lists exactly what that pattern removed.
+            Measured on a real export: **659 responses** that were ending up in exported files are now correctly left out. If you have exported a collection recently, it is worth exporting it again and comparing.
 
-            ### Smart filters, per collection
-            - A new **Filters** tab on each collection shows which of your global patterns apply to it, and how many rows each one removes *there*.
-            - Switch one off for a single collection without touching it for any other.
+            This also corrects the **unreachable** marker in the Article and Dialog windows, which was wrong in the same way — some responses shown as usable were never reachable.
 
-            ### Unreachable responses are no longer removed silently
-            - Responses a user can never reach — not the default, and no context set — have always been left out of exports. Now it's a setting you can see, with a count of what it's removing, and the rows it drops show up under **Filtered out** with the reason.
-            - **Fixed:** a Dialog response whose context was set to `any` was treated as reachable and exported, while the same thing on an Article was not. `any` matches everyone, so it isn't a condition — both now agree, and such responses are correctly marked unreachable throughout the app.
+            > Filtering **by** escalation group is unchanged and still works as it did.
 
-            ### Under the hood
-            - New automated checks (`npm run test:frontend`) build an export from content designed to be excluded in every possible way, then scan the produced JSON for anything that shouldn't be there — including the tricky case where a held-out item shares its wording with one you kept.
+            ### Collections: show only what you're holding out
+            - The **Items** tab has **All items / Held out** buttons, each with a count, so you can see at a glance what you're keeping out of an export.
+            - Works together with the search, so you can search within the held-out items rather than starting over.
 
             ---
 
