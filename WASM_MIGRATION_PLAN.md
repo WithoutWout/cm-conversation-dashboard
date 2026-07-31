@@ -232,20 +232,53 @@ Rules to hold to:
 
 ## Target architecture
 
+One crate, two targets — **not** a workspace split. Done and building:
+
 ```
-crates/
-  core/                  pure logic + SQL + rusqlite — no tauri, no notify   [dual-target]
-  host-wasm/             wasm-bindgen exports, OPFS, worker RPC              [wasm only]
+src-tauri/
+  Cargo.toml             deps split into cfg(not(wasm32)) / cfg(wasm32) tables
+  build.rs               returns early for wasm32 (no Tauri context to generate)
+  src/
+    lib.rs               the core: SQLite, search, import, AI export + all tests  [dual-target]
+    tauri_host.rs        42 commands, dialogs, notify watcher, run()               [native only]
+    analytics_api.rs     reqwest + native TLS                                      [native only]
+    wasm.rs              wasm-bindgen exports, OPFS, worker RPC — still to write   [wasm only]
 vendor/
-  libsqlite3-sys-wasm/   one-line shim, applied via [patch.crates-io]
-src-tauri/               existing desktop host, depends on crates/core       [native only]
+  libsqlite3-sys-wasm/   one-line shim, applied per-invocation (see below)
 frontend/                existing UI + db-worker.js + manifest + service worker
 dist/                    static build output — this is what gets uploaded
 ```
 
-`rusqlite` compiling on **both** targets is what makes the split cheap: the bulk
-of `lib.rs` is target-agnostic SQL and moves into `crates/core` unchanged. Only
-the host seam needs adapting.
+### Why one crate rather than `crates/core` + `crates/host-wasm`
+
+Two concrete findings pushed this, both discovered while implementing:
+
+1. **Child modules see their parent's private items.** Moving the *host* code
+   down into `src/tauri_host.rs` needed **zero** visibility changes — one
+   `use super::*` reaches the whole core. Moving the *pure* code out to a
+   separate crate would instead have required `pub` on ~100 items and, worse,
+   carving up the four monolithic test modules (2400 lines) so each test
+   travelled with the code it covers. The cheap direction is to move the host.
+2. **`[patch.crates-io]` is not target-conditional.** The `libsqlite3-sys` shim
+   is required for wasm and *breaks* native (it would replace the real bundled
+   SQLite the 57 native tests run against). A manifest `[patch]` applies to every
+   target, so it cannot live in `Cargo.toml`. **It works as a command-line
+   override instead** — `--config 'patch.crates-io.libsqlite3-sys.path="…"'` —
+   which is per-invocation and therefore exactly target-conditional. Verified.
+   This is what removed the need for two build roots, and it is why the wasm
+   build must always go through the build script rather than a bare `cargo build`.
+
+`rusqlite` compiling on **both** targets is what makes any of this work: the bulk
+of `lib.rs` is target-agnostic SQL and needed no changes at all.
+
+**Result:** 2092 lines moved into `tauri_host.rs`, `lib.rs` down to 6219. Native
+`cargo test` 57 passed / 0 failed / 4 ignored; `cargo check --bins` clean;
+`cargo build --lib --target wasm32-unknown-unknown` **succeeds**.
+
+The wasm build currently emits ~113 `never used` warnings. That is expected and
+deliberately not silenced: nothing calls the core on wasm until `wasm.rs` exposes
+the command surface. A blanket `allow(dead_code)` would mask genuinely dead code
+later, so these stay until step 4 resolves them.
 
 ### Why dual-target rather than replacing Tauri
 
@@ -277,15 +310,20 @@ The native desktop app is then a free by-product, not extra work.
 no bundler and no npm runtime, matching the existing "no bundler, no framework"
 constraint. Module workers cover Chrome/Edge/Safari 15+/Firefox 114+.
 
-### 3. Crate split
+### 3. Target split — done
 
-1. Create the workspace; move `lib.rs`'s SQL/logic into `crates/core` with no
-   behaviour change. Land this with the 51 tests passing natively — that is the
-   proof the move was mechanical.
-2. Define a host trait for the seam: file read/write, folder pick, save dialog,
-   HTTP, progress events, clock.
-3. `src-tauri` implements it with what it does today; `host-wasm` implements it
-   with OPFS + File System Access API + `fetch` + `postMessage`.
+Host code moved to `src/tauri_host.rs` behind `#[cfg(not(target_arch = "wasm32"))]`,
+deps split into target tables, `build.rs` gated. No behaviour change: the move was
+mechanical and the native suite proves it (57 passed / 0 failed).
+
+Still to do in this step:
+
+1. Define the host seam as a trait — file read/write, folder pick, save dialog,
+   HTTP, progress events, clock — so `wasm.rs` and `tauri_host.rs` implement the
+   same contract instead of diverging.
+2. Split `analytics_api.rs`: the OAuth + fetch logic is portable once `reqwest`
+   drops `rustls-tls` for its fetch backend; `validate_csv_header` is already
+   pure. Only the `AppHandle` paths are native.
 
 Feature-gate the parts that cannot cross:
 

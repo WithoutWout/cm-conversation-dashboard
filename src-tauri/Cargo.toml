@@ -6,7 +6,8 @@ authors = ["Wout van Os"]
 license = ""
 repository = "https://github.com/WithoutWout/cm-conversation-dashboard"
 edition = "2021"
-rust-version = "1.77.2"
+# Raised from 1.77.2: sqlite-wasm-rs requires 1.81.
+rust-version = "1.81.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,13 +15,22 @@ rust-version = "1.77.2"
 name = "cai_dashboard_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Only the desktop build has a Tauri context to generate; build.rs returns early
+# for wasm32 targets.
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
+# Dependencies that work on both the desktop host and wasm32.
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+csv = "1.3"
+regex = "1"
+semver = "1"
+
+# ── Desktop host ────────────────────────────────────────────────────────────
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
@@ -28,7 +38,22 @@ tauri-plugin-dialog = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["sync"] }
 notify = "6.1"
+# `bundled` compiles SQLite from source with the host C compiler.
 rusqlite = { version = "0.31", features = ["bundled", "functions"] }
-csv = "1.3"
-regex = "1"
-semver = "1"
+
+# ── Browser (wasm32) ────────────────────────────────────────────────────────
+#
+# No `bundled` here: the SQLite object code comes from `sqlite-wasm-rs`, which
+# `rusqlite` reaches through the `libsqlite3-sys` shim in `vendor/`. That shim is
+# applied as a patch on the build *command line* rather than in this manifest,
+# because `[patch]` is not target-conditional and would otherwise replace
+# `libsqlite3-sys` for the native build too — breaking every native test. See
+# `build-wasm.sh`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rusqlite = { version = "0.31", features = ["functions"] }
+sqlite-wasm-rs = "0.5"
+sqlite-wasm-vfs = "0.2"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
