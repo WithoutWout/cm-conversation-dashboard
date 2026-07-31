@@ -657,13 +657,7 @@ async fn begin_import_run(db_state: State<'_, SharedDbState>) -> Result<(), Stri
             .conn
             .as_mut()
             .ok_or("No database open. Set a database path first.")?;
-        reset_touched_sessions(conn)?;
-        set_meta_flag(conn, META_PENDING_FINALIZE);
-        // A run pushes far more than the default 1000-page (~4 MiB) WAL
-        // threshold, so SQLite would otherwise checkpoint — fsync plus
-        // copy-back — repeatedly *during* the import. finalize restores it.
-        let _ = conn.query_row("PRAGMA wal_autocheckpoint = 20000", [], |_| Ok(()));
-        Ok(())
+        begin_import_run_into(conn)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -734,17 +728,7 @@ async fn get_date_range(db_state: State<'_, SharedDbState>) -> Result<DateRange,
     tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
-        let result: (Option<String>, Option<String>) = conn
-            .query_row(
-                "SELECT MIN(DATE(timestamp_start)), MAX(DATE(timestamp_start)) FROM interactions",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(DateRange {
-            min: result.0.unwrap_or_default(),
-            max: result.1.unwrap_or_default(),
-        })
+        get_date_range_into(conn)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -983,70 +967,9 @@ async fn get_context_options(
 ) -> Result<Vec<ContextOption>, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-    let state = db.lock().map_err(|e| e.to_string())?;
-    let conn = state.conn.as_ref().ok_or("No database open.")?;
-
-    // Regular options: name × value with per-value session counts
-    let mut stmt = conn
-        .prepare(
-            "SELECT name, value, COUNT(DISTINCT session_uuid) as session_count \
-             FROM context_index \
-             GROUP BY name, value \
-             ORDER BY name ASC, value ASC \
-             LIMIT 500",
-        )
-        .map_err(|e| format!("Prepare error: {e}"))?;
-
-    let mut opts: Vec<ContextOption> = stmt
-        .query_map([], |row| {
-            Ok(ContextOption {
-                name:  row.get(0)?,
-                value: row.get(1)?,
-                count: row.get(2)?,
-            })
-        })
-        .map_err(|e| format!("Query error: {e}"))?
-        .filter_map(|r| r.ok())
-        .filter(|o| !o.name.is_empty())
-        .collect();
-
-    // "Not set" options: for each known name, count sessions that have NO entry for that name.
-    // not_set_count = total_sessions - sessions_with_that_name
-    // Total computed once here instead of as a scalar subquery in both the
-    // SELECT and the HAVING clause.
-    let total_sessions: i64 = conn
-        .query_row(
-            "SELECT COUNT(DISTINCT session_uuid) FROM interactions",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    let mut stmt2 = conn
-        .prepare(
-            "SELECT ci.name, \
-              ?1 - COUNT(DISTINCT ci.session_uuid) \
-             FROM context_index ci \
-             GROUP BY ci.name \
-             HAVING ?1 - COUNT(DISTINCT ci.session_uuid) > 0 \
-             ORDER BY ci.name ASC",
-        )
-        .map_err(|e| format!("Prepare error: {e}"))?;
-
-    let not_set_opts: Vec<ContextOption> = stmt2
-        .query_map(params![total_sessions], |row| {
-            Ok(ContextOption {
-                name:  row.get(0)?,
-                value: "__not_set__".to_string(),
-                count: row.get(1)?,
-            })
-        })
-        .map_err(|e| format!("Query error: {e}"))?
-        .filter_map(|r| r.ok())
-        .filter(|o| !o.name.is_empty())
-        .collect();
-
-    opts.extend(not_set_opts);
-    Ok(opts)
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        get_context_options_into(conn)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1061,59 +984,7 @@ async fn get_session_interactions(
     tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
-
-        let mut stmt = conn
-            .prepare_cached(
-                r#"SELECT
-                log_id, interaction_uuid, session_uuid,
-                timestamp_start, timestamp_end, culture,
-                main_interaction_type, all_interaction_types,
-                interaction_value, output_text,
-                article_ids, dialog_paths, tdialog_status,
-                recognition_type, recognition_quality,
-                generative_ai_sources, articles, faqs_found,
-                contexts, pages, link_click_info, feedback_info,
-                output_metadata, recognition_details
-            FROM interactions
-            WHERE session_uuid = ?1
-            ORDER BY log_id ASC"#,
-            )
-            .map_err(|e| format!("Prepare error: {e}"))?;
-
-        let rows = stmt
-            .query_map(params![session_uuid], |row| {
-                Ok(InteractionRow {
-                    log_id: row.get(0)?,
-                    interaction_uuid: row.get::<_, String>(1).unwrap_or_default(),
-                    session_uuid: row.get::<_, String>(2).unwrap_or_default(),
-                    timestamp_start: row.get::<_, String>(3).unwrap_or_default(),
-                    timestamp_end: row.get::<_, String>(4).unwrap_or_default(),
-                    culture: row.get::<_, String>(5).unwrap_or_default(),
-                    main_interaction_type: row.get::<_, String>(6).unwrap_or_default(),
-                    all_interaction_types: row.get::<_, String>(7).unwrap_or_default(),
-                    interaction_value: row.get::<_, String>(8).unwrap_or_default(),
-                    output_text: row.get::<_, String>(9).unwrap_or_default(),
-                    article_ids: row.get::<_, String>(10).unwrap_or_default(),
-                    dialog_paths: row.get::<_, String>(11).unwrap_or_default(),
-                    tdialog_status: row.get::<_, String>(12).unwrap_or_default(),
-                    recognition_type: row.get::<_, String>(13).unwrap_or_default(),
-                    recognition_quality: row.get::<_, f64>(14).unwrap_or(0.0),
-                    generative_ai_sources: row.get::<_, String>(15).unwrap_or_default(),
-                    articles: row.get::<_, String>(16).unwrap_or_default(),
-                    faqs_found: row.get::<_, String>(17).unwrap_or_default(),
-                    contexts: row.get::<_, String>(18).unwrap_or_default(),
-                    pages: row.get::<_, String>(19).unwrap_or_default(),
-                    link_click_info: row.get::<_, String>(20).unwrap_or_default(),
-                    feedback_info: row.get::<_, String>(21).unwrap_or_default(),
-                    output_metadata: row.get::<_, String>(22).unwrap_or_default(),
-                    recognition_details: row.get::<_, String>(23).unwrap_or_default(),
-                })
-            })
-            .map_err(|e| format!("Query error: {e}"))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(rows)
+        get_session_interactions_into(conn, session_uuid)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1125,36 +996,7 @@ async fn get_db_daily_stats(db_state: State<'_, SharedDbState>) -> Result<DbDail
     tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
-
-        let total: i64 = conn
-            .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
-            .unwrap_or(0);
-
-        // substr rather than DATE(): timestamp_start is always stored as
-        // "YYYY-MM-DDTHH:MM:SS", so this is exact and skips a function call per
-        // row. get_db_hour_coverage already slices it the same way.
-        let mut stmt = conn
-            .prepare(
-                "SELECT substr(timestamp_start, 1, 10) AS day, COUNT(*) AS cnt \
-                 FROM interactions \
-                 GROUP BY day \
-                 ORDER BY day DESC",
-            )
-            .map_err(|e| format!("Prepare error: {e}"))?;
-
-        let days = stmt
-            .query_map([], |row| {
-                Ok(DayStats {
-                    date: row.get::<_, String>(0).unwrap_or_default(),
-                    count: row.get::<_, i64>(1).unwrap_or(0),
-                })
-            })
-            .map_err(|e| format!("Query error: {e}"))?
-            .filter_map(|r| r.ok())
-            .filter(|d| !d.date.is_empty())
-            .collect();
-
-        Ok(DbDailyStats { total, days })
+        get_db_daily_stats_into(conn)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1185,22 +1027,11 @@ async fn record_imported_window(
     start_utc: String,
     end_utc: String,
 ) -> Result<(), String> {
-    let (day, h0, h1) = window_day_hours(&start_utc, &end_utc)?;
-    let mut mask: i64 = 0;
-    for h in h0..=h1 {
-        mask |= 1 << h;
-    }
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
-        conn.execute(
-            "INSERT INTO imported_windows(day, hours) VALUES (?1, ?2) \
-             ON CONFLICT(day) DO UPDATE SET hours = hours | excluded.hours",
-            params![day, mask],
-        )
-        .map_err(|e| format!("Cannot record the imported window: {e}"))?;
-        Ok(())
+        record_imported_window_into(conn, &start_utc, &end_utc)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -417,14 +417,64 @@ Host code moved to `src/tauri_host.rs` behind `#[cfg(not(target_arch = "wasm32")
 deps split into target tables, `build.rs` gated. No behaviour change: the move was
 mechanical and the native suite proves it (57 passed / 0 failed).
 
-Still to do in this step:
+### The host trait is not needed — don't add one
 
-1. Define the host seam as a trait — file read/write, folder pick, save dialog,
-   HTTP, progress events, clock — so `wasm.rs` and `tauri_host.rs` implement the
-   same contract instead of diverging.
-2. Split `analytics_api.rs`: the OAuth + fetch logic is portable once `reqwest`
-   drops `rustls-tls` for its fetch backend; `validate_csv_header` is already
-   pure. Only the `AppHandle` paths are native.
+The plan called for a `Host` trait so both hosts implemented one contract. On
+inspection every seam it would have carried is **already** solved by something
+simpler, and a trait would be the "unnecessary abstraction" `CLAUDE.md` warns
+against:
+
+| Seam | Already handled by |
+| --- | --- |
+| Clock | `clock.rs` — a target-gated module |
+| File **read** | `import_csv_from_reader(conn, reader: impl Read, …)` |
+| File **write** | `write_ai_export(…, out: &mut impl Write)` |
+| Progress events | Emitted by the *host*, around phases — never from the core |
+| HTTP | Confined to `analytics_api`; a module port, not a core seam |
+| DB handle | `thread_local` vs `Arc<Mutex<DbState>>` — entirely host-side |
+
+Generic `impl Read` / `impl Write` parameters already give the core host-agnostic
+I/O without dynamic dispatch, and the progress emits were never in the core to
+begin with. So the trait would have had **no members that aren't already covered**.
+The three patterns to reuse when porting the rest are: target-gated module for
+ambient capabilities, generic reader/writer for I/O, and `<name>_into(conn, …)`
+extraction for command bodies.
+
+### Ported so far
+
+`get_sessions`, `import_interactions_csv`, `get_date_range`,
+`get_db_daily_stats`, `get_db_hour_coverage`, `get_context_options`,
+`get_session_interactions`, `begin_import_run`, `finalize_import_run`,
+`record_imported_window` — each extracted to a `*_into` core function called by
+both hosts, and each verified in the browser against the real CSV:
+
+| Command | Runtime result |
+| --- | --- |
+| `get_date_range` | `{"min":"2026-03-25","max":"2026-03-25"}` |
+| `get_db_daily_stats` | total 2445, 1 day |
+| `get_db_hour_coverage` | `hours=3584` — bits 9/10/11, i.e. 09–11 UTC |
+| `get_context_options` | 150 options (Channel/web 379, DeviceOS/Android 255) |
+| `get_session_interactions` | 2 rows in 1 ms |
+| `begin_import_run` + `finalize_import_run` | both run, `FinalizeResult` returned |
+
+Wasm dead-code warnings: 113 → 71 → **59** as the surface grows.
+
+### Still to do in this step
+
+1. **The remaining ~30 commands.** Mechanical now: `flag_session` (145 lines) and
+   the ten flagged-* commands, `export_conversations_for_ai` (209 — needs a
+   `Vec<u8>` sink instead of a `File`), `delete_interactions_by_dates` (75),
+   `get_data` (120 — the content-export path, needs bytes from JS).
+2. **`compact_database` needs a real seam.** It reads the database file size with
+   `fs::metadata`, which has no wasm equivalent — the OPFS pool reports size
+   instead. This is the one command that genuinely differs rather than just
+   needing extraction.
+3. **`analytics_api.rs`**: the OAuth + fetch logic is portable once `reqwest` drops
+   `rustls-tls` for its fetch backend; `validate_csv_header` is already pure. Only
+   the `AppHandle` paths are native.
+4. **`cancel_session_search`** has no meaning on wasm — there is no second thread
+   to interrupt. Decide whether the renderer hides the control or the export
+   becomes chunked.
 
 Feature-gate the parts that cannot cross:
 

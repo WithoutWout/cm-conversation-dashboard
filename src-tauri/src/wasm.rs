@@ -24,7 +24,11 @@ use wasm_bindgen::prelude::*;
 use sqlite_wasm_rs::WasmOsCallback;
 use sqlite_wasm_vfs::sahpool::{install, OpfsSAHPoolCfgBuilder, OpfsSAHPoolUtil};
 
-use crate::{get_sessions_into, import_csv_from_reader, open_db, GetSessionsArgs};
+use crate::{
+    begin_import_run_into, finalize_import_run_into, get_context_options_into, get_date_range_into,
+    get_db_daily_stats_into, get_session_interactions_into, get_sessions_into, hour_coverage,
+    import_csv_from_reader, open_db, record_imported_window_into, GetSessionsArgs,
+};
 
 /// Where the OPFS pool keeps its files, and the VFS name SQLite registers.
 const OPFS_DIR: &str = "/cai-dashboard";
@@ -133,6 +137,63 @@ pub fn search_sessions(args_json: &str) -> Result<String, JsValue> {
         serde_json::from_str(args_json).map_err(|e| js_err("bad GetSessionsArgs", e))?;
     let page = with_conn(|conn| get_sessions_into(conn, &args))?;
     serde_json::to_string(&page).map_err(|e| js_err("serialize SessionsPage", e))
+}
+
+/// Opens an import run. Pair with [`finalize_import_run`] around a loop of
+/// [`import_csv`] calls, or the tail work costs the size of the database once per
+/// file rather than once per run.
+#[wasm_bindgen]
+pub fn begin_import_run() -> Result<(), JsValue> {
+    with_conn(begin_import_run_into)
+}
+
+/// Closes an import run: purge, scoped summary rebuild, FTS merge, planner stats.
+#[wasm_bindgen]
+pub fn finalize_import_run(max_age_days: Option<i64>) -> Result<String, JsValue> {
+    let res = with_conn(|conn| finalize_import_run_into(conn, max_age_days))?;
+    serde_json::to_string(&res).map_err(|e| js_err("serialize FinalizeResult", e))
+}
+
+/// The stored date range.
+#[wasm_bindgen]
+pub fn get_date_range() -> Result<String, JsValue> {
+    let r = with_conn(|conn| get_date_range_into(conn))?;
+    serde_json::to_string(&r).map_err(|e| js_err("serialize DateRange", e))
+}
+
+/// Per-UTC-day interaction counts plus totals — drives the Manage Database calendar.
+#[wasm_bindgen]
+pub fn get_db_daily_stats() -> Result<String, JsValue> {
+    let r = with_conn(|conn| get_db_daily_stats_into(conn))?;
+    serde_json::to_string(&r).map_err(|e| js_err("serialize DbDailyStats", e))
+}
+
+/// Per-day bitmask of the UTC hours a day is covered for — the union of hours
+/// holding interactions and hours an API window explicitly requested.
+#[wasm_bindgen]
+pub fn get_db_hour_coverage(since_date: Option<String>) -> Result<String, JsValue> {
+    let r = with_conn(|conn| hour_coverage(conn, since_date))?;
+    serde_json::to_string(&r).map_err(|e| js_err("serialize coverage", e))
+}
+
+/// Marks the UTC hours an imported window covered. Call *after* its rows are in.
+#[wasm_bindgen]
+pub fn record_imported_window(start_utc: &str, end_utc: &str) -> Result<(), JsValue> {
+    with_conn(|conn| record_imported_window_into(conn, start_utc, end_utc))
+}
+
+/// Every context name/value pair with its session count.
+#[wasm_bindgen]
+pub fn get_context_options() -> Result<String, JsValue> {
+    let r = with_conn(|conn| get_context_options_into(conn))?;
+    serde_json::to_string(&r).map_err(|e| js_err("serialize ContextOptions", e))
+}
+
+/// Every interaction row of one session, in `log_id` order — opens a chat.
+#[wasm_bindgen]
+pub fn get_session_interactions(session_uuid: String) -> Result<String, JsValue> {
+    let r = with_conn(|conn| get_session_interactions_into(conn, session_uuid))?;
+    serde_json::to_string(&r).map_err(|e| js_err("serialize interactions", e))
 }
 
 /// Runs arbitrary read-only SQL. Diagnostics for the port — not a renderer API.

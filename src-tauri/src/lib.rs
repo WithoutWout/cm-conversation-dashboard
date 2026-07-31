@@ -1502,6 +1502,23 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
 
 /// The finalize step, against an open connection, so tests can drive a whole
 /// deferred run without a Tauri `State`.
+/// Opens an import run: clears the touched-session set, sets the crash marker,
+/// and raises the WAL checkpoint threshold.
+///
+/// Extracted from the `begin_import_run` command so both hosts open a run
+/// identically. Note the `wal_autocheckpoint` pragma is a no-op under the
+/// browser's OPFS VFS, which cannot do WAL at all (`journal_mode` reports
+/// `delete`) — harmless, and left in one place rather than duplicated.
+fn begin_import_run_into(conn: &mut Connection) -> Result<(), String> {
+    reset_touched_sessions(conn)?;
+    set_meta_flag(conn, META_PENDING_FINALIZE);
+    // A run pushes far more than the default 1000-page (~4 MiB) WAL
+    // threshold, so SQLite would otherwise checkpoint — fsync plus
+    // copy-back — repeatedly *during* the import. finalize restores it.
+    let _ = conn.query_row("PRAGMA wal_autocheckpoint = 20000", [], |_| Ok(()));
+    Ok(())
+}
+
 fn finalize_import_run_into(
     conn: &mut Connection,
     max_age_days: Option<i64>,
@@ -2929,6 +2946,190 @@ ORDER BY p.first_ts DESC"#,
     })
 }
 
+/// The stored date range.
+///
+/// Extracted from the `get_date_range` command so the wasm host runs the same
+/// code. The desktop wrapper adds `spawn_blocking` and the state lock.
+fn get_date_range_into(conn: &Connection) -> Result<DateRange, String> {
+    let result: (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT MIN(DATE(timestamp_start)), MAX(DATE(timestamp_start)) FROM interactions",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(DateRange {
+        min: result.0.unwrap_or_default(),
+        max: result.1.unwrap_or_default(),
+    })
+}
+
+/// Per-UTC-day interaction counts, plus totals.
+///
+/// Extracted from the `get_db_daily_stats` command so the wasm host runs the same
+/// code. The desktop wrapper adds `spawn_blocking` and the state lock.
+fn get_db_daily_stats_into(conn: &Connection) -> Result<DbDailyStats, String> {
+
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
+        .unwrap_or(0);
+
+    // substr rather than DATE(): timestamp_start is always stored as
+    // "YYYY-MM-DDTHH:MM:SS", so this is exact and skips a function call per
+    // row. get_db_hour_coverage already slices it the same way.
+    let mut stmt = conn
+        .prepare(
+            "SELECT substr(timestamp_start, 1, 10) AS day, COUNT(*) AS cnt \
+             FROM interactions \
+             GROUP BY day \
+             ORDER BY day DESC",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let days = stmt
+        .query_map([], |row| {
+            Ok(DayStats {
+                date: row.get::<_, String>(0).unwrap_or_default(),
+                count: row.get::<_, i64>(1).unwrap_or(0),
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .filter(|d| !d.date.is_empty())
+        .collect();
+
+    Ok(DbDailyStats { total, days })
+}
+
+/// Every context name/value pair with its session count.
+///
+/// Extracted from the `get_context_options` command so the wasm host runs the same
+/// code. The desktop wrapper adds `spawn_blocking` and the state lock.
+fn get_context_options_into(conn: &Connection) -> Result<Vec<ContextOption>, String> {
+
+    // Regular options: name × value with per-value session counts
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, value, COUNT(DISTINCT session_uuid) as session_count \
+             FROM context_index \
+             GROUP BY name, value \
+             ORDER BY name ASC, value ASC \
+             LIMIT 500",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let mut opts: Vec<ContextOption> = stmt
+        .query_map([], |row| {
+            Ok(ContextOption {
+                name:  row.get(0)?,
+                value: row.get(1)?,
+                count: row.get(2)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .filter(|o| !o.name.is_empty())
+        .collect();
+
+    // "Not set" options: for each known name, count sessions that have NO entry for that name.
+    // not_set_count = total_sessions - sessions_with_that_name
+    // Total computed once here instead of as a scalar subquery in both the
+    // SELECT and the HAVING clause.
+    let total_sessions: i64 = conn
+        .query_row(
+            "SELECT COUNT(DISTINCT session_uuid) FROM interactions",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let mut stmt2 = conn
+        .prepare(
+            "SELECT ci.name, \
+              ?1 - COUNT(DISTINCT ci.session_uuid) \
+             FROM context_index ci \
+             GROUP BY ci.name \
+             HAVING ?1 - COUNT(DISTINCT ci.session_uuid) > 0 \
+             ORDER BY ci.name ASC",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let not_set_opts: Vec<ContextOption> = stmt2
+        .query_map(params![total_sessions], |row| {
+            Ok(ContextOption {
+                name:  row.get(0)?,
+                value: "__not_set__".to_string(),
+                count: row.get(1)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .filter(|o| !o.name.is_empty())
+        .collect();
+
+    opts.extend(not_set_opts);
+    Ok(opts)
+}
+
+/// Every interaction row of one session, in log order.
+///
+/// Extracted from the `get_session_interactions` command so the wasm host runs the same
+/// code. The desktop wrapper adds `spawn_blocking` and the state lock.
+fn get_session_interactions_into(conn: &Connection, session_uuid: String) -> Result<Vec<InteractionRow>, String> {
+
+    let mut stmt = conn
+        .prepare_cached(
+            r#"SELECT
+            log_id, interaction_uuid, session_uuid,
+            timestamp_start, timestamp_end, culture,
+            main_interaction_type, all_interaction_types,
+            interaction_value, output_text,
+            article_ids, dialog_paths, tdialog_status,
+            recognition_type, recognition_quality,
+            generative_ai_sources, articles, faqs_found,
+            contexts, pages, link_click_info, feedback_info,
+            output_metadata, recognition_details
+        FROM interactions
+        WHERE session_uuid = ?1
+        ORDER BY log_id ASC"#,
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![session_uuid], |row| {
+            Ok(InteractionRow {
+                log_id: row.get(0)?,
+                interaction_uuid: row.get::<_, String>(1).unwrap_or_default(),
+                session_uuid: row.get::<_, String>(2).unwrap_or_default(),
+                timestamp_start: row.get::<_, String>(3).unwrap_or_default(),
+                timestamp_end: row.get::<_, String>(4).unwrap_or_default(),
+                culture: row.get::<_, String>(5).unwrap_or_default(),
+                main_interaction_type: row.get::<_, String>(6).unwrap_or_default(),
+                all_interaction_types: row.get::<_, String>(7).unwrap_or_default(),
+                interaction_value: row.get::<_, String>(8).unwrap_or_default(),
+                output_text: row.get::<_, String>(9).unwrap_or_default(),
+                article_ids: row.get::<_, String>(10).unwrap_or_default(),
+                dialog_paths: row.get::<_, String>(11).unwrap_or_default(),
+                tdialog_status: row.get::<_, String>(12).unwrap_or_default(),
+                recognition_type: row.get::<_, String>(13).unwrap_or_default(),
+                recognition_quality: row.get::<_, f64>(14).unwrap_or(0.0),
+                generative_ai_sources: row.get::<_, String>(15).unwrap_or_default(),
+                articles: row.get::<_, String>(16).unwrap_or_default(),
+                faqs_found: row.get::<_, String>(17).unwrap_or_default(),
+                contexts: row.get::<_, String>(18).unwrap_or_default(),
+                pages: row.get::<_, String>(19).unwrap_or_default(),
+                link_click_info: row.get::<_, String>(20).unwrap_or_default(),
+                feedback_info: row.get::<_, String>(21).unwrap_or_default(),
+                output_metadata: row.get::<_, String>(22).unwrap_or_default(),
+                recognition_details: row.get::<_, String>(23).unwrap_or_default(),
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(rows)
+}
+
 fn json_or_text(text: &str) -> serde_json::Value {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -3848,6 +4049,30 @@ fn window_day_hours(start_utc: &str, end_utc: &str) -> Result<(String, u32, u32)
         return Err(format!("Window ends before it starts ({start_utc} → {end_utc})"));
     }
     Ok((start_day, h0, h1))
+}
+
+/// Marks every UTC hour an imported API window covered.
+///
+/// Extracted from the `record_imported_window` command. Must run *after* the
+/// window's rows are in: a window marked covered ahead of its rows would claim
+/// hours a later failure never stored.
+fn record_imported_window_into(
+    conn: &Connection,
+    start_utc: &str,
+    end_utc: &str,
+) -> Result<(), String> {
+    let (day, h0, h1) = window_day_hours(start_utc, end_utc)?;
+    let mut mask: i64 = 0;
+    for h in h0..=h1 {
+        mask |= 1 << h;
+    }
+    conn.execute(
+        "INSERT INTO imported_windows(day, hours) VALUES (?1, ?2) \
+         ON CONFLICT(day) DO UPDATE SET hours = hours | excluded.hours",
+        params![day, mask],
+    )
+    .map_err(|e| format!("Cannot record the imported window: {e}"))?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
