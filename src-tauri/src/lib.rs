@@ -20,6 +20,10 @@ mod analytics_api;
 #[cfg(not(target_arch = "wasm32"))]
 mod tauri_host;
 
+/// Browser host — the wasm entry point, counterpart to `tauri_host`.
+#[cfg(target_arch = "wasm32")]
+mod wasm;
+
 /// The single seam the core reads a clock through — `std::time::Instant::now()`
 /// and `SystemTime::now()` *trap* on wasm rather than failing gracefully.
 mod clock;
@@ -1631,17 +1635,36 @@ fn import_csv_into(
     delim: u8,
     finalize: bool,
 ) -> Result<ImportResult, String> {
-    let started = Instant::now();
-    let mut timings = ImportTimings::default();
     let file = fs::File::open(file_path).map_err(|e| format!("Cannot open CSV: {e}"))?;
     let buf = std::io::BufReader::with_capacity(4 * 1024 * 1024, file);
+    import_csv_from_reader(conn, buf, file_path, max_age_days, delim, finalize)
+}
 
+/// The import itself, over any reader.
+///
+/// Split from [`import_csv_into`] so the browser can feed it bytes: there is no
+/// filesystem to open a path from, and `fs::File::open` on wasm compiles but
+/// always fails at runtime. `source` is only a label for the log line.
+///
+/// Everything that makes an import correct — the `INSERT OR IGNORE` dedupe, the
+/// `Ok(1)` gate that keeps the FTS index from double-indexing, the touched-session
+/// set, the entity index — is in here, so both hosts get it identically.
+fn import_csv_from_reader<R: std::io::Read>(
+    conn: &mut Connection,
+    reader: R,
+    source: &str,
+    max_age_days: Option<i64>,
+    delim: u8,
+    finalize: bool,
+) -> Result<ImportResult, String> {
+    let started = Instant::now();
+    let mut timings = ImportTimings::default();
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(delim)
         .quoting(true)
         .double_quote(true)
         .flexible(true)
-        .from_reader(buf);
+        .from_reader(reader);
 
     // Build column index map from header
     let headers = rdr.headers().map_err(|e| format!("Header error: {e}"))?.clone();
@@ -1948,7 +1971,7 @@ fn import_csv_into(
         timings.total_ms = timings.rows_ms;
         log::info!(
             target: "import",
-            "{file_path}: {inserted} new, {skipped} duplicate, rows {}ms (finalize deferred)",
+            "{source}: {inserted} new, {skipped} duplicate, rows {}ms (finalize deferred)",
             timings.rows_ms
         );
         return Ok(ImportResult { inserted, skipped, purged: 0, errors, timings });
@@ -1986,13 +2009,12 @@ fn import_csv_into(
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "{file_path}: {inserted} new, {skipped} duplicate, {purged} purged — rows {}ms, purge {}ms, summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
+        "{source}: {inserted} new, {skipped} duplicate, {purged} purged — rows {}ms, purge {}ms, summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
         timings.rows_ms, timings.purge_ms, timings.summary_ms,
         timings.fts_optimize_ms, timings.pragma_optimize_ms, timings.total_ms
     );
     Ok(ImportResult { inserted, skipped, purged, errors, timings })
 }
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DateRange {
@@ -2762,6 +2784,148 @@ fn build_session_filter_query(
         filtered_from,
         param_values,
         search_mode,
+    })
+}
+
+/// Runs a session search: query assembly, execution, and row mapping.
+///
+/// Extracted from the Tauri command so both hosts execute the same code. The
+/// desktop wrapper adds `spawn_blocking` and the state lock; the wasm entry adds
+/// nothing, because its worker is already the serialization point.
+///
+/// Keeping this in the core rather than in a command body is what stops the two
+/// from drifting apart. `build_session_filter_query` is only the query *builder*
+/// — every bug the `conv_search` tests pin showed up in the rows that come back
+/// from here, not in the SQL text.
+fn get_sessions_into(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+) -> Result<SessionsPage, String> {
+    let started = Instant::now();
+
+    let page = args.page.unwrap_or(1).max(1);
+    let limit = 50i64;
+    let offset = (page - 1) * limit;
+
+    let mut filter_query = build_session_filter_query(conn, args)?;
+
+    filter_query.param_values.push(Box::new(limit));
+    filter_query.param_values.push(Box::new(offset));
+    let p_limit = format!("?{}", filter_query.param_values.len() - 1);
+    let p_offset = format!("?{}", filter_query.param_values.len());
+    let params_ref: Vec<&dyn ToSql> = filter_query
+        .param_values
+        .iter()
+        .map(|b| b.as_ref())
+        .collect();
+
+    let sql = format!(
+        r#"WITH
+base_sessions AS (
+SELECT s.*
+FROM session_summary s
+	    {base_where}
+	)
+	{search_cte},
+filtered_sessions AS (
+{filtered_from}
+),
+total AS (
+SELECT COUNT(*) AS total_count FROM filtered_sessions
+),
+page_rows AS (
+SELECT *
+FROM filtered_sessions
+ORDER BY first_ts DESC
+LIMIT {p_limit} OFFSET {p_offset}
+)
+SELECT
+p.session_uuid,
+p.first_ts,
+p.last_ts,
+p.interaction_count,
+p.has_gen_ai,
+p.culture,
+COALESCE(NULLIF((
+    SELECT i_match.interaction_value
+    FROM interactions i_match
+    WHERE i_match.session_uuid = p.session_uuid
+      AND i_match.log_id <= p.match_log_id
+      AND i_match.interaction_value != ''
+      AND i_match.interaction_value NOT LIKE '#%#'
+      AND LOWER(i_match.interaction_value) != 'continue'
+      AND COALESCE(i_match.main_interaction_type, '') NOT IN ('Event', 'LinkClick')
+    ORDER BY i_match.log_id DESC
+    LIMIT 1
+), ''), p.first_user_message) AS user_message_preview,
+p.has_neg_feedback,
+p.has_pos_feedback,
+p.contexts_snapshot,
+t.total_count
+FROM total t
+LEFT JOIN page_rows p ON 1 = 1
+ORDER BY p.first_ts DESC"#,
+        base_where = filter_query.base_where.as_str(),
+        search_cte = filter_query.search_cte.as_str(),
+        filtered_from = filter_query.filtered_from.as_str(),
+        p_limit = p_limit,
+        p_offset = p_offset
+    );
+
+    // Cached: pagination and repeated searches with the same filter shape
+    // reuse the already-compiled statement.
+    let mut stmt = conn
+        .prepare_cached(&sql)
+        .map_err(|e| format!("Query error: {e}"))?;
+    let mut rows = stmt
+        .query(params_ref.as_slice())
+        .map_err(|e| format!("Query error: {e}"))?;
+    let mut sessions = Vec::new();
+    let mut total = 0i64;
+    while let Some(row) = rows.next().map_err(|e| format!("Query error: {e}"))? {
+        total = row.get::<_, i64>(10).unwrap_or(0);
+        let session_uuid = row
+            .get::<_, Option<String>>(0)
+            .unwrap_or(None)
+            .unwrap_or_default();
+        if session_uuid.is_empty() {
+            continue;
+        }
+        sessions.push(SessionSummary {
+            session_uuid,
+            first_ts: row
+                .get::<_, Option<String>>(1)
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            last_ts: row
+                .get::<_, Option<String>>(2)
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            interaction_count: row.get::<_, Option<i64>>(3).unwrap_or(None).unwrap_or(0),
+            has_gen_ai: row.get::<_, Option<i64>>(4).unwrap_or(None).unwrap_or(0) == 1,
+            culture: row
+                .get::<_, Option<String>>(5)
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            user_message_preview: row
+                .get::<_, Option<String>>(6)
+                .unwrap_or(None)
+                .unwrap_or_default(),
+            has_neg_feedback: row.get::<_, Option<i64>>(7).unwrap_or(None).unwrap_or(0) == 1,
+            has_pos_feedback: row.get::<_, Option<i64>>(8).unwrap_or(None).unwrap_or(0) == 1,
+            contexts: row
+                .get::<_, Option<String>>(9)
+                .unwrap_or(None)
+                .unwrap_or_default(),
+        });
+    }
+
+    Ok(SessionsPage {
+        sessions,
+        total,
+        page,
+        timing_ms: started.elapsed().as_millis() as i64,
+        search_mode: filter_query.search_mode.clone(),
     })
 }
 

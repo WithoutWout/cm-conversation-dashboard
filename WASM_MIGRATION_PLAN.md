@@ -168,6 +168,66 @@ paper-designed trait would most likely have missed — the 42 commands make file
 I/O, dialogs and HTTP obvious, and say nothing about the clock. It is the
 evidence for doing the vertical slice before designing the abstraction.
 
+### The real core runs in the browser, against real data
+
+Vertical slice, release build, dedicated module worker, OPFS. Not a
+reimplementation — this drives the actual `open_db`, `import_csv_from_reader` and
+`get_sessions_into`, fed the real 8.4 MB portal `InteractionLog` CSV.
+
+| | |
+| --- | --- |
+| `open_db` (real schema, migrations, index drops, FTS repair) | ✓ `journal_mode=delete` |
+| Import, real CSV, pipe-delimited | **2445 rows in 403 ms** (rows 334, summary 25, FTS optimize 37) |
+| `interactions` / `interactions_fts` | 2445 / 2445 |
+| `entity_index` (lifted out of `recognition_details` JSON) | 2328 |
+| `session_summary` (scoped rebuild) | 537 |
+| Re-import the same file | **inserted 0, skipped 2445**, FTS still 2445 |
+| Persistence across a full page reload | ✓ reopened with 2445 rows |
+| Release `.wasm` size | 2.7 MB |
+
+Searches, all through `build_session_filter_query` + `get_sessions_into`:
+
+| Query | Result | Mode |
+| --- | --- | --- |
+| `openingstijden`, scope user + entities | 23 sessions, 5 ms | `fts` |
+| `filter: genai` | 20 | `none` |
+| `filter: low_recog`, threshold 60 | 4 | `none` |
+| empty query | 287 (page of 50) | `none` |
+| `belgie` → **België** | **4** | `fts` |
+| `oke` → **Oké** | **117** | `fts` |
+| `www.efteling.nl` | 0 | **`fts_exact`** |
+
+- **Diacritic folding is confirmed by positive control, not by absence.** `cafe`
+  and `WIJN` both returned 0, which proves nothing on its own — this dataset is
+  shuttle/ticketing traffic. `belgie` matching all 4 occurrences of `België` and
+  `oke` matching `Oké` is the actual evidence.
+- **The punctuation term selected `fts_exact`**, so the per-OR-group exact
+  re-check path activates correctly even where it finds nothing.
+- **The re-import is the `Ok(1)` gate working.** `skipped: 2445` with the FTS
+  count unchanged is exactly the invariant `a_duplicate_row_is_never_indexed_twice`
+  pins natively.
+- **287 vs 537 is not a discrepancy.** `base_conditions` always starts with
+  `s.has_real_user_input = 1`; `SELECT COUNT(*) … WHERE has_real_user_input = 1`
+  returns 287 too.
+- **One scare that was not a bug:** the first run reported `purged: 2445`. That is
+  `purge_old(conn, max_age_days.unwrap_or(90))` behaving correctly — the export is
+  ~128 days old, so the default 90-day retention removed everything it had just
+  inserted. Identical on desktop. It incidentally confirms `purge_old`, one of the
+  seven formerly-trapping clock users, now works.
+
+Two refactors made this possible, both behaviour-preserving (57 native tests
+green after each):
+
+- `get_sessions_into(conn, args)` extracted from the Tauri command, which was
+  ~130 lines of real logic wrapped in ~10 lines of plumbing. Both hosts now call
+  the same function; the command adds `spawn_blocking` and the state lock.
+- `import_csv_from_reader(conn, reader, source, …)` split out of
+  `import_csv_into`, which opened a path with `fs::File::open` — fine natively,
+  never going to work in a browser. The path version still exists and delegates.
+
+Dead-code warnings on the wasm target dropped 113 → 71 as the core became
+reachable; the remainder are the commands not yet ported.
+
 ### Capability probes must run in the worker
 
 The spike's main-thread probe reported `syncAccessHandle=false` while the worker
