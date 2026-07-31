@@ -68,6 +68,14 @@ cp "$ROOT/frontend/vendor/vis-network.min.js" "$DIST/vendor/"
 # tools/make-icons.py if the source icon changes.
 cp "$ROOT"/frontend/icons/*.png "$DIST/icons/"
 
+# Drop what should never reach a web host: Finder metadata, and wasm-pack's
+# npm-publishing files (package.json, .gitignore, the .d.ts type definitions).
+# None are fetched by the app; they are only there because wasm-pack's default
+# output is an npm package.
+find "$DIST" -name '.DS_Store' -delete
+rm -f "$DIST"/pkg/package.json "$DIST"/pkg/.gitignore "$DIST"/pkg/README.md
+rm -f "$DIST"/pkg/*.d.ts
+
 # Stamp the build id into the service worker. This is the whole cache strategy:
 # a new id means a new cache name, so the previous build is dropped wholesale.
 BUILD_ID="$(date -u +%Y%m%d-%H%M%S)-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
