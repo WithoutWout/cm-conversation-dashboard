@@ -63,7 +63,7 @@ here, because several of its findings are load-bearing and counter-intuitive.
 | `src-tauri/src/wasm.rs` | browser entry points `#[cfg(wasm32)]` |
 | `src-tauri/src/clock.rs` | the only place the core reads a clock |
 | `vendor/libsqlite3-sys-wasm/` | shim letting `rusqlite` reach wasm |
-| `frontend/wasm-bridge.js` | `window.electronAPI` for the browser |
+| `frontend/wasm-bridge.js` | `window.electronAPI` for the browser, incl. the file/folder pickers |
 | `frontend/db-worker.js` | owns the OPFS SQLite database |
 | `frontend/sw.js`, `manifest.json` | installable + offline |
 
@@ -88,8 +88,9 @@ Rules that are easy to break:
   and the `.wasm` a consistent pair. The cost is that the first load after a
   deploy can serve the previous build; the next load is current.
 
-Ported so far: session search, CSV import, date range, daily stats, hour
-coverage, context options, session interactions, begin/finalize import run.
+Ported so far: content export loading (Articles/Dialogs/Entities), session
+search, CSV import, date range, daily stats, hour coverage, context options,
+session interactions, begin/finalize import run.
 Everything else rejects with a "not available in the web app yet" message from
 `wasm-bridge.js` rather than failing silently.
 

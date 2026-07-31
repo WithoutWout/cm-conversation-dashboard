@@ -22,6 +22,16 @@ const handlers = {
   probeCapabilities: () => wasm.probe_capabilities(),
 
   getData: () => json(wasm.get_content_data()),
+  loadContent: (a) =>
+    json(
+      wasm.load_content(
+        a.articles ?? undefined,
+        a.dialogs ?? undefined,
+        a.entities ?? undefined,
+        JSON.stringify(a.meta ?? {})
+      )
+    ),
+  clearContent: () => wasm.clear_content(),
   getSessions: (a) => json(wasm.search_sessions(JSON.stringify(a ?? {}))),
   getSessionInteractions: (a) => json(wasm.get_session_interactions(a.sessionUuid)),
   getContextOptions: () => json(wasm.get_context_options()),

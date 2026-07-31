@@ -95,6 +95,114 @@
     })
   }
 
+  // ── content export (Articles / Dialogs / Entities) ──────────────────────
+  //
+  // The desktop host scans a folder and picks the newest file matching each
+  // pattern. Two things differ here: `showDirectoryPicker` is Chromium-only, so
+  // there is a multi-file fallback; and a browser has no mtime-ordered directory
+  // listing, so "newest" comes from File.lastModified.
+  const SOURCE_PATTERNS = [
+    { key: "articles", pattern: "ArticlesExport", ext: ".json" },
+    { key: "dialogs", pattern: "DialogsExport", ext: ".json" },
+    { key: "entities", pattern: "EntitiesExport", ext: ".csv" },
+  ]
+
+  // Newest wins, mirroring newest_matching_file() on the desktop.
+  function pickNewest(files, { pattern, ext }) {
+    return files
+      .filter(
+        (f) =>
+          f.name.includes(pattern) && f.name.toLowerCase().endsWith(ext)
+      )
+      .sort((a, b) => b.lastModified - a.lastModified)[0]
+  }
+
+  async function readDirectory() {
+    const dir = await window.showDirectoryPicker({ id: "cai-content", mode: "read" })
+    const files = []
+    for await (const entry of dir.values()) {
+      if (entry.kind === "file") files.push(await entry.getFile())
+    }
+    return { files, label: dir.name }
+  }
+
+  function readFileList() {
+    return new Promise((resolve) => {
+      const input = document.createElement("input")
+      input.type = "file"
+      // webkitdirectory would let a whole folder be chosen, but it is not
+      // universally supported either; accepting the export files directly works
+      // everywhere and is a clearer ask than "pick a folder, but only in Chrome".
+      input.accept = ".json,.csv,application/json,text/csv"
+      input.multiple = true
+      input.style.display = "none"
+      document.body.appendChild(input)
+
+      let settled = false
+      const done = (v) => {
+        if (settled) return
+        settled = true
+        input.remove()
+        resolve(v)
+      }
+      input.addEventListener("change", () => {
+        const files = Array.from(input.files || [])
+        done(files.length ? { files, label: "Selected files" } : null)
+      })
+      input.addEventListener("cancel", () => done(null))
+      window.addEventListener("focus", () => setTimeout(() => done(null), 500), {
+        once: true,
+      })
+      input.click()
+    })
+  }
+
+  async function chooseContentSource() {
+    let picked = null
+    if (typeof window.showDirectoryPicker === "function") {
+      try {
+        picked = await readDirectory()
+      } catch (e) {
+        // AbortError is the user dismissing the dialog — not a failure.
+        if (e && e.name === "AbortError") return { ok: false, canceled: true }
+        // Anything else (a permission policy, an unsupported context) should not
+        // dead-end the user when the input fallback still works.
+        console.warn("directory picker unavailable, falling back:", e.message)
+      }
+    }
+    if (!picked) picked = await readFileList()
+    if (!picked) return { ok: false, canceled: true }
+
+    const chosen = {}
+    for (const spec of SOURCE_PATTERNS) {
+      const file = pickNewest(picked.files, spec)
+      if (file) chosen[spec.key] = file
+    }
+    if (!chosen.articles && !chosen.dialogs) {
+      throw new Error(
+        "No export files found. Expected file names containing " +
+          "ArticlesExport or DialogsExport."
+      )
+    }
+
+    const bytes = async (f) => (f ? new Uint8Array(await f.arrayBuffer()) : undefined)
+    const data = await call("loadContent", {
+      articles: await bytes(chosen.articles),
+      dialogs: await bytes(chosen.dialogs),
+      entities: await bytes(chosen.entities),
+      meta: {
+        folder: picked.label,
+        articles: chosen.articles?.name,
+        dialogs: chosen.dialogs?.name,
+        entities: chosen.entities?.name,
+      },
+    })
+    // The renderer calls getData() straight after this, which returns the parsed
+    // content the worker is now holding.
+    void data
+    return { ok: true, canceled: false, path: picked.label }
+  }
+
   // Commands with no browser equivalent yet. Rejecting with a specific message
   // beats a silent undefined: the renderer's catch blocks surface it, and the
   // text says which feature is missing rather than "something went wrong".
@@ -155,7 +263,7 @@
     onDataFolderUpdated: () => Promise.resolve(() => {}),
 
     // ── not ported yet ────────────────────────────────────────────────────
-    selectDataFolder: notYet("Choosing a content folder"),
+    selectDataFolder: () => chooseContentSource(),
     selectDbSavePath: notYet("Choosing a database location"),
     selectDbOpenPath: notYet("Opening a database file"),
     saveCollectionExport: notYet("Saving a collection export"),

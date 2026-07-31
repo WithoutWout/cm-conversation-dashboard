@@ -196,19 +196,31 @@ pub fn get_session_interactions(session_uuid: String) -> Result<String, JsValue>
     serde_json::to_string(&r).map_err(|e| js_err("serialize interactions", e))
 }
 
-/// Content-export data (Articles / Dialogs / Entities).
+thread_local! {
+    /// Parsed content export, held across `get_content_data` calls. The desktop
+    /// host re-reads the folder each time; here the bytes arrive once from the
+    /// picker, so re-parsing 19 MB of JSON on every call would be pure waste.
+    static CONTENT: RefCell<Option<crate::AppData>> = const { RefCell::new(None) };
+}
+
+/// Filenames for the bytes passed to [`load_content`], plus the folder they came
+/// from. Separate from the bytes because a `Vec<u8>` cannot travel in JSON.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ContentMeta {
+    folder: Option<String>,
+    articles: Option<String>,
+    dialogs: Option<String>,
+    entities: Option<String>,
+}
+
+/// The "no data folder selected" state — every source `found: false`.
 ///
-/// The browser has no folder to scan, so this reports the app's **existing**
-/// "no data folder selected" state — every source `found: false` — rather than
-/// inventing a new one. That is a state the renderer already knows how to draw,
-/// which is what lets the app boot before the content-file picker exists.
-///
-/// Wiring the picker up means parsing bytes handed in from JS; `extract_articles`
-/// / `extract_dialogs` / `extract_entities` are already pure and take `&str`.
-#[wasm_bindgen]
-pub fn get_content_data() -> Result<String, JsValue> {
+/// This is a state the renderer already knows how to draw, which is what makes it
+/// the right answer before anything is loaded, rather than an error.
+fn empty_app_data() -> crate::AppData {
     let empty = || serde_json::Value::Array(vec![]);
-    let data = crate::AppData {
+    crate::AppData {
         articles: empty(),
         dialogs: empty(),
         t_dialogs: empty(),
@@ -244,8 +256,114 @@ pub fn get_content_data() -> Result<String, JsValue> {
                 })
                 .collect(),
         },
+    }
+}
+
+/// Parses a content export from bytes the picker read, through the same
+/// `extract_articles` / `extract_dialogs` / `extract_entities` the desktop host
+/// uses — so the browser gets identical Articles, Dialogs, Transactional Dialogs,
+/// entity enrichment and context variables.
+///
+/// Any of the three may be absent; the returned `dataSource.statuses` reports
+/// which, exactly as scanning a folder would.
+#[wasm_bindgen]
+pub fn load_content(
+    articles: Option<Vec<u8>>,
+    dialogs: Option<Vec<u8>>,
+    entities: Option<Vec<u8>>,
+    meta_json: &str,
+) -> Result<String, JsValue> {
+    let meta: ContentMeta =
+        serde_json::from_str(meta_json).map_err(|e| js_err("bad content meta", e))?;
+
+    let as_text = |bytes: &[u8], what: &str| -> Result<String, JsValue> {
+        std::str::from_utf8(bytes)
+            .map(|s| s.to_owned())
+            .map_err(|e| js_err(&format!("{what} is not valid UTF-8"), e))
     };
-    serde_json::to_string(&data).map_err(|e| js_err("serialize AppData", e))
+
+    let mut data = empty_app_data();
+
+    if let Some(bytes) = articles.as_deref() {
+        data.articles = crate::extract_articles(&as_text(bytes, "The Articles export")?);
+    }
+    if let Some(bytes) = dialogs.as_deref() {
+        let (d, t, conv_vars, ctx_vars) =
+            crate::extract_dialogs(&as_text(bytes, "The Dialogs export")?);
+        data.dialogs = d;
+        data.t_dialogs = t;
+        data.conv_vars = conv_vars;
+        data.ctx_vars = ctx_vars;
+    }
+    if let Some(bytes) = entities.as_deref() {
+        data.entities = crate::extract_entities(&as_text(bytes, "The Entities export")?);
+    }
+
+    data.files = crate::DataFiles {
+        articles: meta.articles.clone(),
+        dialogs: meta.dialogs.clone(),
+        entities: meta.entities.clone(),
+    };
+    data.source_files = crate::SourceFiles {
+        articles: meta.articles.clone(),
+        dialogs: meta.dialogs.clone(),
+        entities: meta.entities.clone(),
+    };
+
+    let statuses: Vec<crate::SourceStatus> = crate::source_definitions()
+        .iter()
+        .map(|d| {
+            let filename = match d.key {
+                "articles" => meta.articles.clone(),
+                "dialogs" => meta.dialogs.clone(),
+                _ => None,
+            };
+            crate::SourceStatus {
+                key: d.key.to_string(),
+                label: d.label.to_string(),
+                found: filename.is_some(),
+                filename,
+            }
+        })
+        .collect();
+    data.data_source = crate::DataSourceInfo {
+        selected_folder: meta.folder.clone(),
+        active_folder: meta.folder.clone(),
+        using_selected_folder: meta.folder.is_some(),
+        // Nothing watches a folder in a browser; there is no notify equivalent.
+        watched_folder: None,
+        missing_sources: statuses
+            .iter()
+            .filter(|s| !s.found)
+            .map(|s| s.key.clone())
+            .collect(),
+        statuses,
+    };
+
+    let json = serde_json::to_string(&data).map_err(|e| js_err("serialize AppData", e))?;
+    CONTENT.with(|c| *c.borrow_mut() = Some(data));
+    Ok(json)
+}
+
+/// Forgets the loaded content export, returning to the "no data folder" state.
+#[wasm_bindgen]
+pub fn clear_content() {
+    CONTENT.with(|c| *c.borrow_mut() = None);
+}
+
+/// Content-export data — whatever [`load_content`] last parsed, or the app's
+/// existing "no data folder selected" state.
+#[wasm_bindgen]
+pub fn get_content_data() -> Result<String, JsValue> {
+    CONTENT.with(|c| {
+        let borrowed = c.borrow();
+        let data = borrowed.as_ref();
+        match data {
+            Some(d) => serde_json::to_string(d),
+            None => serde_json::to_string(&empty_app_data()),
+        }
+        .map_err(|e| js_err("serialize AppData", e))
+    })
 }
 
 /// Runs arbitrary read-only SQL. Diagnostics for the port — not a renderer API.
