@@ -62,23 +62,82 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.10.4
+            ## What's new in v0.11.0
 
-            ### Fixed: responses nobody can reach were being exported
-            A response that isn't the default and has no context set can never be shown to a user — CM.com CAIC marks these as unreachable. This tool was including them anyway. Two separate mistakes caused it, and on some Articles both applied at once:
+            Conversations search has been rebuilt. Two of the changes below mean it was
+            returning the **wrong conversations**, not just slow ones — if you have relied
+            on a search recently, it is worth running it again.
 
-            - **An escalation group was being read as a condition.** Nearly every response carries an escalation group, including the default one, so it says which group a response belongs to — not when it should be used. A real condition on the escalation group is set up like any other context variable, and those still work exactly as before.
-            - **An Article that opens a Dialog was treated as if it also had a main answer.** When an Article's default action is to start a Dialog, none of its responses is the default, so each one needs its own context to ever appear. The tool was promoting the first one to "main answer" and exporting it.
+            ### Fixed: searching user messages also matched the bot
 
-            Measured on a real export: **659 responses** that were ending up in exported files are now correctly left out. If you have exported a collection recently, it is worth exporting it again and comparing.
+            With only **U** selected, a search still returned conversations where only the
+            bot had said the word. The scope was being applied to the first search term
+            only, so everything after an `|` searched everywhere.
 
-            This also corrects the **unreachable** marker in the Article and Dialog windows, which was wrong in the same way — some responses shown as usable were never reachable.
+            The same fix stops an unscoped search from quietly matching Article and Dialog
+            IDs — a plain number used to find conversations by their dialog path rather
+            than by anything anyone said.
 
-            > Filtering **by** escalation group is unchanged and still works as it did.
+            ### Fixed: terms with dots, dashes or symbols returned nothing
 
-            ### Collections: show only what you're holding out
-            - The **Items** tab has **All items / Held out** buttons, each with a count, so you can see at a glance what you're keeping out of an export.
-            - Works together with the search, so you can search within the held-out items rather than starting over.
+            `www.efteling.nl`, `qa-1234` and `€10,-` failed outright rather than searching.
+            They work now, and match exactly — `www.efteling.nl` no longer also matches
+            "www efteling nl". A term made only of symbols now falls back to a plain text
+            search instead of silently returning **every** conversation.
+
+            ### Searching by ID is roughly 1000x faster, and now exact
+
+            Searching by Article or Dialog ID went from about **5 seconds to a few
+            milliseconds** on a database of 110,000 interactions.
+
+            It is also correct now: `qa-123` no longer also matches `qa-1234`, and
+            `6391-4` no longer matches node `42`.
+
+            ### Dialog ID and Node ID are one filter
+
+            Instead of picking between **Dialog ID** and **Node ID**, type either into the
+            same box. A `-` is what says you gave a node: `6391` finds every conversation
+            that touched the dialog, `6391-4` narrows it to that one node — whether the bot
+            answered from it or only passed through it.
+
+            ### New: search by triggered Entity
+
+            A new **E** button next to **U** and **B** searches the entities the bot
+            recognised, rather than the words that were typed. Searching `WIJN` finds
+            "mag ik een fles rood meenemen" — a conversation where the word never appears.
+
+            - Matches the entity name, the text that triggered it, or the Entity ID.
+            - **U + E is now the default**: what someone asked for, and what the bot
+              understood it as. Switch **U** off for entities only.
+            - Opening a result filters the conversation to the turns that matched, and
+              marks the entity that put it there.
+
+            ### Fixed: searching in a conversation missed accented words
+
+            Searching `cafe` in the conversation list found messages containing `café`, but
+            opening one of those results said *no messages match*. Both searches now treat
+            accents the same way.
+
+            ### Entities tab
+
+            - **New Conversations button** on every entity — opens the conversation search
+              showing every conversation that entity was triggered in.
+            - **Fixed: attached Articles were missing.** An Article could show
+              *Entity: WIJN* on its chip while WIJN's own view did not list that Article.
+              On a real export this affected **almost half of all entities** — 2013
+              entities now show their Articles, up from 1167. The **Used in Articles** and
+              **Used in Dialogs** filters were wrong in the same way and are fixed with it.
+
+            ### Export for AI tells you it is working
+
+            A large export runs for several seconds with nothing on screen moving. It now
+            shows a progress message — *Collecting search results…*, then *Writing 4,182
+            conversations · 31,940 interactions…* — that stays up until the export
+            finishes.
+
+            > **First launch after updating** takes a few seconds longer than usual: the
+            > app indexes the entities already in your database, and rebuilds its search
+            > index once. This happens only once.
 
             ---
 
