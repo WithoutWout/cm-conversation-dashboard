@@ -22,3 +22,7 @@ src-tauri/target/
 *imitate*.png
 to-do.md
 CM_Analytics_API_SOP.md
+
+
+# Static web build output
+dist-web/

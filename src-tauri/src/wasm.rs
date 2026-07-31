@@ -196,6 +196,58 @@ pub fn get_session_interactions(session_uuid: String) -> Result<String, JsValue>
     serde_json::to_string(&r).map_err(|e| js_err("serialize interactions", e))
 }
 
+/// Content-export data (Articles / Dialogs / Entities).
+///
+/// The browser has no folder to scan, so this reports the app's **existing**
+/// "no data folder selected" state — every source `found: false` — rather than
+/// inventing a new one. That is a state the renderer already knows how to draw,
+/// which is what lets the app boot before the content-file picker exists.
+///
+/// Wiring the picker up means parsing bytes handed in from JS; `extract_articles`
+/// / `extract_dialogs` / `extract_entities` are already pure and take `&str`.
+#[wasm_bindgen]
+pub fn get_content_data() -> Result<String, JsValue> {
+    let empty = || serde_json::Value::Array(vec![]);
+    let data = crate::AppData {
+        articles: empty(),
+        dialogs: empty(),
+        t_dialogs: empty(),
+        entities: empty(),
+        conv_vars: empty(),
+        ctx_vars: empty(),
+        files: crate::DataFiles {
+            articles: None,
+            dialogs: None,
+            entities: None,
+        },
+        source_files: crate::SourceFiles {
+            articles: None,
+            dialogs: None,
+            entities: None,
+        },
+        data_source: crate::DataSourceInfo {
+            selected_folder: None,
+            active_folder: None,
+            using_selected_folder: false,
+            watched_folder: None,
+            missing_sources: crate::source_definitions()
+                .iter()
+                .map(|d| d.key.to_string())
+                .collect(),
+            statuses: crate::source_definitions()
+                .iter()
+                .map(|d| crate::SourceStatus {
+                    key: d.key.to_string(),
+                    label: d.label.to_string(),
+                    filename: None,
+                    found: false,
+                })
+                .collect(),
+        },
+    };
+    serde_json::to_string(&data).map_err(|e| js_err("serialize AppData", e))
+}
+
 /// Runs arbitrary read-only SQL. Diagnostics for the port — not a renderer API.
 #[wasm_bindgen]
 pub fn scalar_query(sql: &str) -> Result<String, JsValue> {

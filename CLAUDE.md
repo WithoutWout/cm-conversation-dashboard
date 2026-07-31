@@ -45,6 +45,56 @@ Data files (read-only, never committed, placed in a user-selected folder):
 
 ---
 
+## The web build (client-side PWA)
+
+The same crate targets both the Tauri desktop host and `wasm32-unknown-unknown`.
+`WASM_MIGRATION_PLAN.md` is the working record — read it before changing anything
+here, because several of its findings are load-bearing and counter-intuitive.
+
+```
+./build-web.sh              # -> dist-web/, upload its *contents* to any host
+./build-web.sh --serve      # build, then serve it on :8777 to try
+```
+
+| File | Role |
+| --- | --- |
+| `src-tauri/src/lib.rs` | the core — builds for **both** targets, holds all tests |
+| `src-tauri/src/tauri_host.rs` | desktop commands, dialogs, watcher `#[cfg(not(wasm32))]` |
+| `src-tauri/src/wasm.rs` | browser entry points `#[cfg(wasm32)]` |
+| `src-tauri/src/clock.rs` | the only place the core reads a clock |
+| `vendor/libsqlite3-sys-wasm/` | shim letting `rusqlite` reach wasm |
+| `frontend/wasm-bridge.js` | `window.electronAPI` for the browser |
+| `frontend/db-worker.js` | owns the OPFS SQLite database |
+| `frontend/sw.js`, `manifest.json` | installable + offline |
+
+Rules that are easy to break:
+
+- **`[patch.crates-io]` must never go in `Cargo.toml`.** It is not
+  target-conditional, so it would replace the real bundled SQLite for the native
+  build and break every native test. `build-web.sh` passes it per-invocation with
+  `--config`. Never run a bare `cargo build --target wasm32`.
+- **`std::time::Instant::now()` and `SystemTime::now()` *trap* on wasm** — an
+  `unreachable`, not a catchable panic, which poisons the module. Always go
+  through `clock.rs`.
+- **WAL does not exist under OPFS** (`journal_mode` reports `delete`), so
+  WAL-specific tuning is a native-only concern.
+- **Cross large payloads as JSON strings, not `serde-wasm-bindgen`.** Measured
+  2–3.5× faster and ~20× cheaper to structured-clone out of the worker.
+- **The database must live in a dedicated worker** — OPFS `createSyncAccessHandle`
+  exists nowhere else. Capability probes must therefore also run in the worker.
+- **No COOP/COEP headers are required**, which is what makes plain static hosting
+  work. Don't add a header requirement.
+- The service worker's cache is **build-scoped** (`BUILD_ID`), which keeps the JS
+  and the `.wasm` a consistent pair. The cost is that the first load after a
+  deploy can serve the previous build; the next load is current.
+
+Ported so far: session search, CSV import, date range, daily stats, hour
+coverage, context options, session interactions, begin/finalize import run.
+Everything else rejects with a "not available in the web app yet" message from
+`wasm-bridge.js` rather than failing silently.
+
+---
+
 ## Tauri security rules
 
 - The renderer has no direct Node or filesystem access — all backend calls go through Tauri commands via `window.__TAURI__.core.invoke()`.
