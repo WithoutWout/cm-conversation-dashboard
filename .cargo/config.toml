@@ -1,0 +1,20 @@
+# Cargo configuration for the wasm32 build.
+#
+# Why this file exists: `sqlite-wasm-rs` compiles `sqlite3.c` from source via the
+# `cc` crate, and Apple's clang cannot emit wasm32 ("No available targets are
+# compatible with triple wasm32-unknown-unknown"). These point `cc` at Homebrew
+# LLVM, which can.
+#
+# Prerequisite:  brew install llvm
+#
+# Cargo's `[env]` does not override variables already present in the real
+# environment, so exporting your own CC_wasm32_unknown_unknown still wins — which
+# is how CI or a non-Homebrew machine (wasi-sdk, a different LLVM prefix) opts
+# out without editing this file.
+#
+# These are only read when the target is wasm32, so native `cargo build` and
+# `cargo test` are unaffected.
+
+[env]
+CC_wasm32_unknown_unknown = "/opt/homebrew/opt/llvm/bin/clang"
+AR_wasm32_unknown_unknown = "/opt/homebrew/opt/llvm/bin/llvm-ar"

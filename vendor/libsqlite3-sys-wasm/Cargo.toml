@@ -1,0 +1,27 @@
+# Shim that satisfies rusqlite's `libsqlite3-sys` dependency on wasm32 by
+# re-exporting sqlite-wasm-rs's bindings. No build script: the sqlite3 C
+# symbols come from sqlite-wasm-rs (links = "wsqlite3").
+[package]
+name = "libsqlite3-sys"
+version = "0.28.0"
+edition = "2021"
+
+[dependencies]
+sqlite-wasm-rs = "0.5"
+
+# Mirrored so cargo accepts feature requests from rusqlite; all are no-ops here.
+[features]
+default = ["min_sqlite_version_3_14_0"]
+min_sqlite_version_3_14_0 = []
+bundled = []
+bundled_bindings = []
+bundled-windows = []
+bundled-sqlcipher = []
+bundled-sqlcipher-vendored-openssl = []
+buildtime_bindgen = []
+loadable_extension = []
+in_gecko = []
+preupdate_hook = []
+session = []
+unlock_notify = []
+with-asan = []
