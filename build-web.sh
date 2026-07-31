@@ -62,16 +62,11 @@ done
 mkdir -p "$DIST/vendor" "$DIST/icons"
 cp "$ROOT/frontend/vendor/vis-network.min.js" "$DIST/vendor/"
 
-# Icons for the manifest, derived from the existing app icon.
-if command -v sips >/dev/null; then
-  for size in 128 256 512; do
-    sips -z "$size" "$size" "$ROOT/build/icon.png" \
-      --out "$DIST/icons/icon-$size.png" >/dev/null
-  done
-else
-  echo "    sips unavailable — copying icon.png unscaled; install-prompt icons may look soft"
-  for size in 128 256 512; do cp "$ROOT/build/icon.png" "$DIST/icons/icon-$size.png"; done
-fi
+# Icons are committed under frontend/icons/ rather than generated here: they are
+# static brand assets, so generating them per build would make the output depend
+# on whichever image tool happens to be installed. Regenerate them with
+# tools/make-icons.py if the source icon changes.
+cp "$ROOT"/frontend/icons/*.png "$DIST/icons/"
 
 # Stamp the build id into the service worker. This is the whole cache strategy:
 # a new id means a new cache name, so the previous build is dropped wholesale.

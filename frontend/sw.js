@@ -21,8 +21,10 @@ const SHELL = [
   "vendor/vis-network.min.js",
   "cmwhitelogo.svg",
   "icons/icon-128.png",
+  "icons/icon-192.png",
   "icons/icon-256.png",
   "icons/icon-512.png",
+  "icons/icon-maskable-512.png",
 ]
 
 self.addEventListener("install", (event) => {

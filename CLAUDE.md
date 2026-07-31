@@ -66,6 +66,7 @@ here, because several of its findings are load-bearing and counter-intuitive.
 | `frontend/wasm-bridge.js` | `window.electronAPI` for the browser, incl. the file/folder pickers |
 | `frontend/db-worker.js` | owns the OPFS SQLite database |
 | `frontend/sw.js`, `manifest.json` | installable + offline |
+| `frontend/icons/` | PWA icons, committed; regenerate with `tools/make-icons.py` |
 
 Rules that are easy to break:
 
@@ -84,6 +85,10 @@ Rules that are easy to break:
   exists nowhere else. Capability probes must therefore also run in the worker.
 - **No COOP/COEP headers are required**, which is what makes plain static hosting
   work. Don't add a header requirement.
+- **`build/iconComp.png` is the current icon**, not `build/icon.png` — that one is
+  an old blue globe and is still what `package.json`'s electron-builder config
+  points at. `build/CAIDashboard.icon/` is the Icon Composer source (a glyph plus
+  a fill colour), so its `Assets/Image.png` is a mask, not a finished icon.
 - The service worker's cache is **build-scoped** (`BUILD_ID`), which keeps the JS
   and the `.wasm` a consistent pair. The cost is that the first load after a
   deploy can serve the previous build; the next load is current.
