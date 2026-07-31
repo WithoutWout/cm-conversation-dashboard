@@ -420,35 +420,16 @@ function precomputeEntity(entity) {
   entity._nameUpper = entity.name.toUpperCase()
 }
 
-function buildEntityXrefSets() {
-  entityHasArticleXref = new Set()
-  entityHasDialogXref = new Set()
-
-  // Build a set of all question texts from articles (uppercased)
-  const articleQuestionTexts = new Set()
-  for (const a of workerArticles) {
-    for (const qs of a.Questions) {
-      articleQuestionTexts.add(qs.Text.toUpperCase())
-    }
-  }
-
-  // Build a set of all entity question texts from dialogs (uppercased)
-  const dialogEntityTexts = new Set()
-  for (const item of workerDialogs) {
-    for (const t of item._entityQuestionTexts || []) {
-      dialogEntityTexts.add(t)
-    }
-  }
-
-  for (const entity of workerEntities) {
-    const nameUpper = entity._nameUpper
-    if (articleQuestionTexts.has(nameUpper)) {
-      entityHasArticleXref.add(nameUpper)
-    }
-    if (dialogEntityTexts.has(nameUpper)) {
-      entityHasDialogXref.add(nameUpper)
-    }
-  }
+// Which entities are used in Articles / Dialogs, for the Entities tab pills.
+//
+// Resolved on the main thread by `getEntityForChip` and handed over as two name
+// lists, because that function is the single source of truth for "which entity
+// is this phrase?" — and it matches by word and by token, not only by the
+// entity's literal name. The worker used to decide this itself with a
+// name-equality check, so the pills disagreed with the cards they filtered.
+function buildEntityXrefSets(articleNames, dialogNames) {
+  entityHasArticleXref = new Set(articleNames || [])
+  entityHasDialogXref = new Set(dialogNames || [])
 }
 
 // ── Match functions (receive pre-compiled regex) ──────────────────────────────
@@ -683,7 +664,7 @@ self.onmessage = function (e) {
     for (let i = 0; i < allItems.length; i++) allItems[i]._gidx = i
 
     // Pre-build entity cross-reference sets
-    buildEntityXrefSets()
+    buildEntityXrefSets(parsed.entityArticleNames, parsed.entityDialogNames)
     entityByNameUpper = new Map()
     for (const ent of workerEntities) entityByNameUpper.set(ent._nameUpper, ent)
     return

@@ -32,7 +32,8 @@ frontend/
   search-worker.js  — Worker-side content/entity filtering, sorting, and search matching
   tests/
     extract.js      — pulls named functions out of index.html so tests run the real source
-    collections.test.js, export-integrity.test.js  — `npm run test:frontend`
+    collections.test.js, export-integrity.test.js,
+    conv-search.test.js                            — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
@@ -94,6 +95,8 @@ The Conversations toolbar's **Export for AI** button writes the *entire current 
 - `is_feedback_target` is written **only when true**. It used to be the one field exempt from pruning, so `false` appeared on every turn to convey nothing — and `feedback_targets` already enumerates them.
 - **`turn_kind`, not `role`.** A CAI row usually holds a question *and* its answer, so the old `role: "user" | "assistant" | "turn"` looked like the chat-message convention while mostly meaning "both". Values are self-describing: `user_and_bot` (the common case) / `user_only` / `bot_only` / `feedback` / `system`.
 - **Exported timestamps carry an explicit `Z`** via `utc_iso`. The DB stores naive UTC by design (see the import notes above), but an unmarked `2026-03-25T09:30:22` reads as local time to anything consuming the file. `now_iso` already marks itself.
+- **The wait is reported, not just disabled.** The whole export is one long `invoke`, and on a few thousand conversations it runs for seconds with nothing on screen moving — a greyed-out button does not distinguish "working" from "stuck". `AI_EXPORT_PROGRESS_EVENT` marks the two phase boundaries and the renderer turns them into a `.import-toast.progress` — a **non-dismissing** toast with a spinner, since a toast that disappears after six seconds while the work continues is exactly the "did it stop?" question it exists to answer. `clearProgressToast()` removes only that class, so it is safe in a `finally` that runs after a result toast was already shown.
+  - The toast is raised **by the events, not by the click**, so nothing appears while the save dialog is still waiting on the user — at that point no work has started. The button's own spinner covers that stretch.
 - **Order is: save dialog → query → size warning → write.** The save dialog must stay first so it opens instantly. `suggested_ai_export_name` is the search-term slug alone (`openingstijden.jsonl`, falling back to `conversation-analysis-export.jsonl` for an empty or punctuation-only query) — deliberately derived from nothing but `args`. An earlier version appended the most common `first_user_message`, which forced the full result query to run *before* the dialog and left the user staring at a spinner where they expected an immediate dialog; don't reintroduce a name that depends on the result set.
 - Above `AI_EXPORT_LARGE_TOKENS` (from the summed `interaction_count` × `AI_EXPORT_EST_BYTES_PER_TURN`) the user gets a confirm dialog after the query but before the write, because a search can easily match more than any model can read. That pre-estimate is deliberately crude and labelled "very roughly"; the toast afterwards reports **actual** bytes and `estimatedTokens` from the real file size. Query and write are separate `spawn_blocking` phases so the warning can sit between them — the write phase re-locks the DB.
 - `search_context` is built once outside the write loop — it is identical for the whole export, so don't rebuild (and re-clone every arg) per session.
@@ -105,6 +108,7 @@ The Conversations toolbar's **Export for AI** button writes the *entire current 
 | Event                 | Payload              | Description |
 | --------------------- | -------------------- | ----------- |
 | `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher when export files change |
+| `ai-export-progress`  | `{ phase, sessionCount?, interactionCount? }` | Phase boundaries inside `export_conversations_for_ai` — `"querying"` once the save dialog is answered, `"writing"` once the result set is known |
 
 ---
 
@@ -313,6 +317,52 @@ Three distinct search types:
 - A response is user-facing unreachable only when it is not the default response and it has no context condition. Non-default responses with context are reachable for users in that context and should not be labeled "non-default" or "unreachable" in result cards.
 - Contextual/non-default query hits should show a compact snippet or reason on result cards so users can see why an item matched without opening the modal.
 - The info modals' **Matches only** toggle (`modalMatchFilter`, `toggleModalMatchFilter`) must use the same answer/node sections that caused worker result inclusion. It is hidden entirely when no query is active — it can do nothing then, and a permanently greyed-out control reads as broken rather than inapplicable.
+
+### Conversations search semantics
+
+`build_session_filter_query` in `lib.rs` is the single source of truth. Every text, ID and entity search resolves to a list of SELECTs producing `(session_uuid, match_log_id)`, UNIONed into one `search_sessions` CTE — that list is what lets one query look in more than one place at once (message text *and* the entities that text triggered) and lets a single OR group carry its own extra WHERE clause. `conv_search` in `lib.rs` is the test module; every test there is a bug that was invisible in the SQL and only showed up in the rows that came back.
+
+**A column filter always applies to a parenthesized expression.** In FTS5 `interaction_value : a OR b` binds the filter to `a` alone and lets `b` match any column — which is why a **U**-scoped (user) search kept returning conversations where only the bot had said the word. `fts_columns()` is the only place a colspec is built and it always emits `{cols} : (expr)`. "Both" is a column filter too: with none at all, a plain query also matched `article_ids`/`dialog_paths` and a number found conversations by their dialog path. Those two columns are only in scope when `queryIds` is on.
+
+**Search terms are never emitted as FTS5 barewords.** `www.efteling.nl` or `qa-1234` unquoted is an FTS5 **syntax error**, so the whole search failed rather than the one term. Terms are tokenized (`fts_tokens`) and re-emitted as a quoted phrase, with the trailing `*` kept for single-word prefix matching.
+
+- **A query FTS cannot express falls back to `LIKE`, never to nothing.** When a term produced no tokens at all (a lone `€`, `?`) the old code left the search CTE unbuilt, so the query silently returned *every* session — indistinguishable from a search that matched everything on purpose. A group with an inexpressible term now goes down the LIKE path as a whole.
+
+**Punctuation gets an exact re-check on top of the index.** The tokenizer drops it, so `www.efteling.nl` and `www efteling nl` are the same FTS query. `term_needs_exact_check` flags terms carrying punctuation and the search adds a `LIKE '%term%'` on the stored text. Whitespace deliberately does not count: a quoted phrase already matches as adjacent tokens, and requiring byte equality there would throw away the diacritic-insensitive matching the tokenizer gives for free (`cafe` finding `café`).
+
+- **The exact re-check is per OR group, which is why groups get their own SELECT.** Folded into one MATCH it would either be skipped for rows that matched a different group or wrongly applied to them. The single-MATCH fast path is still taken when no group needs a re-check, which is the common case.
+
+**`#ID` search is FTS-narrowed and then decided exactly.** The FTS lookup is a *filter*, not the answer: `IdTarget::matches` compares whole ids, so `qa-123` no longer also matches `qa-1234` and `dn-6391-4` no longer matches `dn-6391-42`. Measured on a real 110k-interaction database: **5.0 s → 3 ms** for an Article id and **1.4 s → 1 ms** for a Dialog id. `an_id_search_on_a_real_database_matches_an_exhaustive_scan` (needs `CAI_TEST_DB`) pins the narrow+decide pair against a boundary-exact full scan; `search_perf::search_cost` is the timing harness.
+
+- **Dialog and Node are one filter, and the `-` is what tells them apart.** `IdTarget::parse` reads `6391` as a Dialog and `6391-4` as one of its nodes; an Article has no nodes, so a `-` there is a typo rather than a node search. The old UI made the user pick between three pills to say something the query text already said.
+- A Dialog matches an interaction that answered from one of its nodes (`article_ids`, `dn-<dialog>-<node>`) **or** merely walked through it (`dialog_paths`, `<dialog>:<node>/<node>/…`). `path_has_node` checks the dialog and the node together, so a second path in the same cell cannot contribute the dialog while another contributes the node.
+
+**Entities are a search field, not a subset of the text.** The recognizer stores the entity it matched, not the wording that triggered it, so "mag ik een fles rood meenemen" is found by searching the entity `WIJN`. The **E** toggle sits with **U**/**B** and is independent of them; turning both message toggles off sends `queryScope: "none"`, which means entity-only. Nothing at all selected falls back to searching the text — an empty result set would read as "no matches" rather than "you switched it off".
+
+- **The default is U + E** — what someone asked for, and what the bot understood it as. Both the markup (`class="conv-scope-btn active"`) and the initial state say so, and they must agree: `_syncConvScopeFromButtons` reads the buttons, so a disagreement at startup silently wins for whichever the first click resolves to. `setConvSearchScope(user, bot, entity)` is the only programmatic way in, and it goes through the same read-back.
+- **The Entities tab has a 💬 Conversations button** (`entityConvButton` → `searchConvsForEntity`) on every entity card and in the entity modal, which is the only way to answer "which conversations actually fired this entity?". It switches to entity-only deliberately: the entity's *name* is a label the recognizer assigned, so searching the message text for it returns a different — usually much smaller — set.
+- **The opened chat filters to the turns that matched.** `chatMatchEntities` mirrors the E toggle when a session is opened (the way `chatSearchRegex` already mirrors `.*`), and `turnMatches` then also tests `rowEntityFields(row)` — display name, internal name, matched text, entity id, cached on the row because `recognition_details` is a sizeable blob and a long chat re-renders on every filter change. Without it an entity-only search opens every result on "no messages match".
+- **The entity chip that caused the match is marked** (`.is-hit`, accent-coloured like `<mark>`). And a GenAI row — which normally hides its recognition data because that data explains something other than the answer, see `## Chat rendering` — shows the entity anyway *when it is the hit*. Suppressing it there would leave the turn in the results with no visible reason at all.
+
+- `entity_index` (`log_id`, `session_uuid`, `entity_id`, `name`, `matched`) lifts `recognition_details.entityMatches` out of the JSON at import time; searching it is a scan of a small narrow table instead of a JSON parse of every interaction. `name` is the `displayName` (falling back to the internal `name`), lowercased on the way in so the search side never has to. A bare number also matches `entity_id`.
+- **It carries no secondary index on purpose.** The search is a substring `LIKE`, which no index can serve, and every extra b-tree is a per-row tax on import; `WITHOUT ROWID` keeps it to one write per entity match. On a real database it holds ~103k rows for 110k interactions and an entity-only search costs ~8 ms.
+- **Deletion must remove entity rows too** — `purge_old` and `delete_interactions_by_dates` both do, alongside the FTS cleanup.
+- The one-time backfill in `open_db` is gated on `META_ENTITY_INDEX_BUILT`, not on "is the table empty?": a database whose interactions genuinely triggered no entities would otherwise re-run the whole-table `json_each` scan on every launch. `the_entity_backfill_matches_what_an_import_would_have_indexed` asserts the SQL backfill and `entity_index_rows` agree, so an older database searches the same as a freshly imported one.
+
+**Chat search matches what the session list matched.** The FTS index is built with `remove_diacritics`, so searching `cafe` returns conversations containing `café`; the in-chat search was plain JS `includes` and found nothing in them, which reads as the chat being broken rather than as two searches with different rules. `foldDiacritics` folds both sides.
+
+- **It folds one character at a time, and that is the whole trick.** The folded string is exactly as long as the input, so an index into it is an index into the original — which is what lets `_chatMarkSegment` find matches in the folded copy and write `<mark>` into the real text. A whole-string `normalize("NFD").replace(/\p{M}/gu, "")` would be shorter than its input and misplace every mark after the first accent. Anything that is not a base-plus-marks decomposition (a lone surrogate half included) passes through untouched, which is what preserves the length.
+- Ranges are merged before insertion, longest-first at a given start: two terms can cover the same span, and `<mark>` nested in `<mark>` renders wrong. `opening | openingstijden` produces one mark, not `[opening][stijden]`.
+- Regex mode is deliberately **not** folded — the user wrote a pattern, and the backend's regex path does not fold either.
+
+### Entity → Article / Dialog cross-references
+
+`getEntityForChip(phrase)` is the single source of truth for "which entity is this phrase?", and it resolves by entity name, then by an entity *word*, then by the longest token in the phrase. `entityRefIndex()` is the **exact inverse** of it, built in one pass over the export and cached until `loadData`.
+
+- The two directions used to disagree, and that is what "the entity view doesn't show all its Articles" was: a chip resolved a phrase by word or token and labelled itself `Entity: WIJN`, while `entityArticleXrefs` listed only Articles whose phrase was *verbatim* the entity name. On the real export that is **2013 entities with Article links instead of 1167**. `every chip's entity lists the Article it labels` in `frontend/tests/conv-search.test.js` pins the inverse property.
+- **The worker's "Used in Articles" / "Used in Dialogs" pills are fed from the same index.** `buildEntityXrefSets` used to recompute the relationship itself with a name-equality check, so the pills filtered on a different rule than the cards they were filtering. It now just receives two name lists over the init message; the resolution stays on the main thread, where `getEntityForChip` lives.
+- One entity per phrase (the first that resolves), matching what the chip displays, and an item is listed once however many of its phrases resolve to it.
+- `_chipEntityCache` memoizes phrase → entity because the same phrases recur constantly and the index build asks for every phrase in the export; `null` is a real answer and is cached too. Building the index costs ~48 ms on the real export (3295 Articles, 808 Dialogs, 2233 entities), once per data load.
 
 ---
 
@@ -598,7 +648,13 @@ The detail header states the collection in one line (`N items · N export rows �
 
 <div#panel-entities>
   filter pills (All / Used in Articles / Used in Dialogs)
-  entity list | pagination
+  entity list (words · Used by Articles/Dialogs · 💬 Conversations) | pagination
+
+<div.conv-sidebar-header>
+  [#ID] | search input | search submit | [.*] | [U] [B] [E]
+  "Search by:" pills, only in #ID mode: Article ID | Dialog / Node ID
+  date range button | context filter button
+  filter pills (GenAI / feedback / Low % / Zero %)
 
 <div#settingsModal>
   Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)

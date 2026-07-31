@@ -4470,7 +4470,10 @@
         color: var(--muted);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
       }
-      .conv-search-loading-box .mini-spinner {
+      /* Deliberately unscoped: the Export for AI button and the progress toast
+         both use it, and while it was scoped to the search box those two
+         rendered an empty span where the spinner should be. */
+      .mini-spinner {
         width: 16px;
         height: 16px;
         border: 2px solid var(--border);
@@ -4478,6 +4481,11 @@
         border-radius: 50%;
         animation: spin 0.7s linear infinite;
         flex-shrink: 0;
+      }
+      /* Scaled to the toolbar button's own type size. */
+      .conv-manage-btn .mini-spinner {
+        width: 12px;
+        height: 12px;
       }
       .conv-search-cancel-btn {
         margin-left: 8px;
@@ -5678,6 +5686,17 @@
         font-size: 0.65rem;
         font-style: italic;
       }
+      /* The entity that put this conversation in the results. Uses the same
+         accent as <mark> so "this is your match" reads as one idea whether the
+         hit is in the text or in the recognizer's entities. */
+      .entity-match-chip.is-hit,
+      .entity-match-chip-static.is-hit {
+        background: rgba(124, 106, 247, 0.22);
+        border-color: var(--accent);
+        color: var(--text);
+        opacity: 1;
+        font-weight: 600;
+      }
       /* Quality meter bar in bubble detail */
       .recog-quality-meter {
         display: flex;
@@ -6235,6 +6254,14 @@
       }
       .import-toast.error {
         border-color: var(--red);
+      }
+      /* Not a result — a "still working" signal, so it gets a spinner and no
+         auto-dismiss. It stays until the work that raised it finishes. */
+      .import-toast.progress {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border-color: var(--accent);
       }
       @keyframes toast-in {
         from {
@@ -7071,7 +7098,7 @@
                 class="sopt"
                 id="convOptIds"
                 title="Search by ID"
-                data-tooltip="Search by Article ID, Dialog ID or Node ID"
+                data-tooltip="Search by Article ID, or Dialog ID (add -NodeID for one node)"
               >
                 #ID
               </button>
@@ -7135,6 +7162,13 @@
                 >
                   B
                 </button>
+                <button
+                  class="conv-scope-btn active"
+                  data-conv-scope="entity"
+                  title="Search triggered Entities (name, matched text or Entity ID)"
+                >
+                  E
+                </button>
               </div>
             </div>
             <div class="conv-id-warning" id="convIdWarning">
@@ -7153,15 +7187,9 @@
                 class="conv-id-type-pill"
                 data-id-type="dialog"
                 onclick="setConvIdType('dialog')"
+                title="A Dialog ID on its own, or DialogID-NodeID for one node"
               >
-                Dialog ID
-              </button>
-              <button
-                class="conv-id-type-pill"
-                data-id-type="node"
-                onclick="setConvIdType('node')"
-              >
-                Node ID
+                Dialog / Node ID
               </button>
             </div>
             <div
@@ -8747,6 +8775,12 @@
           getSessions: (args) => invoke("get_sessions", { args }),
           exportConversationsForAi: (args) =>
             invoke("export_conversations_for_ai", { args }),
+          // The export is one long invoke with a save dialog, a full-result
+          // query and a file write in it; these are the phase boundaries.
+          onAiExportProgress: (handler) =>
+            listen
+              ? listen("ai-export-progress", handler)
+              : Promise.resolve(() => {}),
           cancelSessionSearch: () => invoke("cancel_session_search"),
           getSessionInteractions: (sessionUuid) =>
             invoke("get_session_interactions", { sessionUuid }),
@@ -8879,6 +8913,8 @@
             bytes: 0,
             estimatedTokens: 0,
           })
+      if (!window.electronAPI.onAiExportProgress)
+        window.electronAPI.onAiExportProgress = () => Promise.resolve(() => {})
       if (!window.electronAPI.cancelSessionSearch)
         window.electronAPI.cancelSessionSearch = _convStub
       if (!window.electronAPI.getSessionInteractions)
@@ -9054,7 +9090,11 @@
       let convSessionFilter = "all"
       let convQuery = ""
       let convSearchRegex = false
-      let convSearchScope = "user" // "both" | "user" | "bot"
+      // Defaults are U + E: what someone asked for, and what the bot understood
+      // it as. Both markup and state say so — `_syncConvScopeFromButtons` reads
+      // the buttons, so the two must start in agreement.
+      let convSearchScope = "user" // "both" | "user" | "bot" | "none"
+      let convSearchEntities = true // E toggle — also search the entities a turn triggered
       let convDateFrom = ""
       let convDateTo = ""
       let convDateMin = "" // YYYY-MM-DD — earliest date in DB
@@ -9074,8 +9114,11 @@
       let chatQuery = ""
       let chatShowAll = false // when true, show full conversation even while searching
       let convSearchIds = false // when true, also search article/dialog IDs
-      let convIdType = "article" // "article" | "dialog" | "node" — active ID search type
+      // "article" | "dialog" — Dialog and Node are one type; a "-" in the query
+      // is what says the user gave a node number as well.
+      let convIdType = "article"
       let chatSearchRegex = false // when true, treat chatQuery as a regex
+      let chatMatchEntities = false // mirrors the E toggle for the opened chat
       let convImporting = false
       let convAiExporting = false
       let convSearchSeq = 0 // incremented on each search; used to discard stale results
@@ -10898,7 +10941,7 @@
           dialog.id +
           "-" +
           node.id +
-          "','node')\" title=\"Search Node " +
+          "','dialog')\" title=\"Search Node " +
           dialog.id +
           "-" +
           node.id +
@@ -12290,7 +12333,20 @@
       }
 
       // ── Entity chip resolution ────────────────────────────────────────
+      // Phrase → entity is asked for every chip on every card render and again
+      // for every phrase in the whole export when the reverse index is built,
+      // and the same phrase recurs constantly. Cached by phrase; `null` is a
+      // real answer and is cached too.
+      let _chipEntityCache = new Map()
+
       function getEntityForChip(text) {
+        if (_chipEntityCache.has(text)) return _chipEntityCache.get(text)
+        const found = _resolveEntityForChip(text)
+        _chipEntityCache.set(text, found)
+        return found
+      }
+
+      function _resolveEntityForChip(text) {
         // 1. Exact entity name match
         const byName = entityMap.get(text.toUpperCase())
         if (byName) return byName
@@ -12311,6 +12367,61 @@
         return null
       }
 
+      // UPPERCASE entity name → { articles: [], dialogs: [] }.
+      //
+      // The reverse of `getEntityForChip`, and it has to be *exactly* that.
+      // The two directions used to disagree: a chip resolved a phrase to an
+      // entity by word or token match and said so ("Entity: WIJN"), while the
+      // entity's own view listed only Articles whose phrase was *verbatim* the
+      // entity name — so most of the Articles the chips attributed to an entity
+      // were missing from it. On the real export that is 2013 entities with
+      // Article links instead of 1167.
+      let _entityRefIndex = null
+
+      function entityRefIndex() {
+        if (_entityRefIndex) return _entityRefIndex
+        const idx = new Map()
+        const bucket = (entity) => {
+          const key = entity.name.toUpperCase()
+          let b = idx.get(key)
+          if (!b) {
+            b = { articles: [], dialogs: [] }
+            idx.set(key, b)
+          }
+          return b
+        }
+        // One entity per phrase, matching what the chip shows; `seen` keeps an
+        // item from being listed twice when several of its phrases resolve to
+        // the same entity.
+        for (const a of allArticles) {
+          const seen = new Set()
+          for (const qs of a.Questions || []) {
+            const e = getEntityForChip(qs.Text)
+            if (!e || seen.has(e.name)) continue
+            seen.add(e.name)
+            bucket(e).articles.push(a)
+          }
+        }
+        for (const item of allDialogsCombined) {
+          const seen = new Set()
+          for (const n of item.nodes || []) {
+            for (const link of n.links || []) {
+              const condData = (link.condition && link.condition.data) || {}
+              if (condData.isFallback) continue
+              for (const qo of condData.questions || []) {
+                if (!qo.text) continue
+                const e = getEntityForChip(qo.text)
+                if (!e || seen.has(e.name)) continue
+                seen.add(e.name)
+                bucket(e).dialogs.push(item)
+              }
+            }
+          }
+        }
+        _entityRefIndex = idx
+        return idx
+      }
+
       // ── Apply & render: Entities ────────────────────────────────────────
       function matchEntity(entity, q) {
         if (!q) return true
@@ -12322,27 +12433,13 @@
       }
 
       function entityArticleXrefs(entity) {
-        const nameUpper = entity.name.toUpperCase()
-        return allArticles.filter((a) =>
-          a.Questions.some((qs) => qs.Text.toUpperCase() === nameUpper),
-        )
+        const b = entityRefIndex().get(entity.name.toUpperCase())
+        return b ? b.articles : []
       }
 
       function entityDialogXrefs(entity) {
-        const nameUpper = entity.name.toUpperCase()
-        return allDialogsCombined.filter((item) =>
-          (item.nodes || []).some((n) =>
-            (n.links || []).some((link) => {
-              const condData = (link.condition && link.condition.data) || {}
-              return (
-                !condData.isFallback &&
-                (condData.questions || []).some(
-                  (qo) => qo.text && qo.text.toUpperCase() === nameUpper,
-                )
-              )
-            }),
-          ),
-        )
+        const b = entityRefIndex().get(entity.name.toUpperCase())
+        return b ? b.dialogs : []
       }
 
       function renderEntityCard(entity, q) {
@@ -12473,8 +12570,28 @@
           wordHtml +
           "</div></div>" +
           xrefHtml +
+          '<div class="card-actions">' +
+          entityConvButton(entity.name) +
+          "</div>" +
           "</div>" +
           "</div>"
+        )
+      }
+
+      /// A name inside a single-quoted inline `onclick`.
+      function _jsq(s) {
+        return esc(String(s)).replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+      }
+
+      // "Which conversations actually triggered this entity?" — the one
+      // question the content export cannot answer on its own.
+      function entityConvButton(name) {
+        return (
+          '<button class="btn-show-dialog" onclick="event.stopPropagation();searchConvsForEntity(\'' +
+          _jsq(name) +
+          '\')" title="Search conversations where the ' +
+          esc(name) +
+          ' entity was triggered">&#128172; Conversations</button>'
         )
       }
 
@@ -12640,6 +12757,33 @@
           if (idType) setConvIdType(idType)
           syncIdMode()
         }
+        convPage = 1
+        convHasSearched = true
+        loadSessions()
+      }
+
+      // Entities tab → Conversations, showing every conversation the recognizer
+      // fired this entity in. Entity-only on purpose: the entity's *name* is a
+      // label the recognizer assigned, and searching the message text for it
+      // would return a different — usually much smaller — set.
+      function searchConvsForEntity(name) {
+        // Called from the entity card *and* from the entity modal; closing
+        // unconditionally saves the caller from knowing which.
+        _closeAllModals()
+        _navClear()
+        switchView("conversations")
+        convQuery = String(name)
+        const input = document.getElementById("convSearch")
+        if (input) input.value = convQuery
+        const clearBtn = document.getElementById("convClearSearch")
+        if (clearBtn) clearBtn.classList.add("visible")
+        if (convSearchIds) {
+          convSearchIds = false
+          syncIdMode()
+        }
+        convSearchRegex = false
+        document.getElementById("convOptRegex").classList.remove("on")
+        setConvSearchScope(false, false, true)
         convPage = 1
         convHasSearched = true
         loadSessions()
@@ -12921,10 +13065,8 @@
           entity.words.length +
           " word" +
           (entity.words.length !== 1 ? "s" : "")
-        document.getElementById("entity-info-actions").innerHTML = cmOpenButton(
-          "entity",
-          null,
-        )
+        document.getElementById("entity-info-actions").innerHTML =
+          cmOpenButton("entity", null) + entityConvButton(entity.name)
 
         const artRefs = entityArticleXrefs(entity)
         const dlgRefs = entityDialogXrefs(entity)
@@ -15993,6 +16135,20 @@
               if (!entityWordMap.has(key)) entityWordMap.set(key, e)
             })
           })
+          _chipEntityCache = new Map()
+          _entityRefIndex = null
+
+          // The worker's "Used in Articles" / "Used in Dialogs" pills must
+          // filter on the same relationship the Entities cards and modal show,
+          // so the resolution stays here — where `getEntityForChip` lives — and
+          // only the resulting name sets cross to the worker.
+          const xref = entityRefIndex()
+          const entityArticleNames = []
+          const entityDialogNames = []
+          for (const [name, b] of xref) {
+            if (b.articles.length) entityArticleNames.push(name)
+            if (b.dialogs.length) entityDialogNames.push(name)
+          }
 
           searchWorker.postMessage({
             type: "init",
@@ -16002,6 +16158,8 @@
               entities: allEntities,
               convVars: data.convVars || [],
               ctxVars: data.ctxVars || [],
+              entityArticleNames,
+              entityDialogNames,
             }),
           })
           triggerSearch()
@@ -17291,11 +17449,28 @@
         const old = document.querySelector(".import-toast")
         if (old) old.remove()
         if (_toastTimer) clearTimeout(_toastTimer)
+        _toastTimer = null
         const el = document.createElement("div")
         el.className = "import-toast " + type
-        el.textContent = msg
+        if (type === "progress") {
+          // Never auto-dismissed: it reports work that is still running, and a
+          // toast that vanishes after six seconds while the work continues is
+          // exactly the "did it stop?" question it exists to answer.
+          el.appendChild(document.createElement("span")).className =
+            "mini-spinner"
+          el.appendChild(document.createElement("span")).textContent = msg
+        } else {
+          el.textContent = msg
+          _toastTimer = setTimeout(() => el.remove(), 6000)
+        }
         document.body.appendChild(el)
-        _toastTimer = setTimeout(() => el.remove(), 6000)
+      }
+
+      // Clears a progress toast and nothing else, so it is safe to call from a
+      // `finally` that runs after the result toast has already been shown.
+      function clearProgressToast() {
+        const el = document.querySelector(".import-toast.progress")
+        if (el) el.remove()
       }
 
       // ── DB busy state (disables Import + Manage DB during search/import) ──
@@ -19327,6 +19502,7 @@
           query: convQuery || null,
           queryRegex: convSearchIds ? false : convSearchRegex,
           queryScope: convSearchIds ? "both" : convSearchScope,
+          queryEntities: convSearchIds ? false : convSearchEntities,
           queryIds: convSearchIds,
           queryIdsOnly: convSearchIds,
           queryIdType: convIdType,
@@ -19342,22 +19518,20 @@
         const convSearchEl = document.getElementById("convSearch")
         const idWarning = document.getElementById("convIdWarning")
 
-        // In #ID mode: validate format based on the active id type
+        // In #ID mode: validate format based on the active id type. A Dialog
+        // accepts a node after a "-"; an Article has no nodes to name.
         if (convSearchIds && convQuery) {
-          const nodePattern = /^\d+-\d+$/
-          const numericPattern = /^\d+$/
-          const valid =
-            convIdType === "node"
-              ? nodePattern.test(convQuery)
-              : numericPattern.test(convQuery)
+          const valid = (
+            convIdType === "dialog" ? /^\d+(-\d+)?$/ : /^\d+$/
+          ).test(convQuery)
           if (valid) {
             idWarning.classList.remove("visible")
             convSearchEl.classList.remove("regex-error")
           } else {
             idWarning.textContent =
-              convIdType === "node"
-                ? "\u26A0 Node search expects DialogID-NodeID format (e.g. 6391-6)."
-                : "\u26A0 ID search expects a numeric value."
+              convIdType === "dialog"
+                ? "\u26A0 Expects a Dialog ID (e.g. 6391), optionally with a node (e.g. 6391-6)."
+                : "\u26A0 Article ID search expects a numeric value."
             idWarning.classList.add("visible")
             convSearchEl.classList.add("regex-error")
             return
@@ -19435,6 +19609,33 @@
         if (btn) {
           btn.innerHTML = '<span class="mini-spinner"></span> Exporting…'
         }
+        // A disabled button is not enough: an export of a few thousand
+        // conversations runs for seconds with nothing else on screen moving.
+        // Driven by the backend's phase events rather than started here, so no
+        // toast appears while the save dialog is still waiting on the user —
+        // at that point nothing is being processed yet.
+        let unlistenProgress = null
+        try {
+          unlistenProgress = await window.electronAPI.onAiExportProgress(
+            (ev) => {
+              const p = (ev && ev.payload) || {}
+              if (p.phase === "querying") {
+                showImportToast("progress", "Collecting search results…")
+              } else if (p.phase === "writing") {
+                const n = p.sessionCount || 0
+                const turns = p.interactionCount || 0
+                showImportToast(
+                  "progress",
+                  `Writing ${n.toLocaleString()} conversation${
+                    n !== 1 ? "s" : ""
+                  } · ${turns.toLocaleString()} interactions…`,
+                )
+              }
+            },
+          )
+        } catch {
+          unlistenProgress = null
+        }
         try {
           const res = await window.electronAPI.exportConversationsForAi(args)
           if (!res || res.canceled) return
@@ -19468,6 +19669,10 @@
         } catch (e) {
           showImportToast("error", "AI export failed: " + e)
         } finally {
+          if (typeof unlistenProgress === "function") unlistenProgress()
+          // Only the progress toast — a result toast was just shown by one of
+          // the branches above and has to survive this.
+          clearProgressToast()
           convAiExporting = false
           if (btn) btn.innerHTML = oldHtml
           setConvDbBusy(false)
@@ -20562,20 +20767,23 @@
             .classList.remove("visible")
         })
 
+      // Dialog and Node share one pill: a node is always written as part of the
+      // dialog it belongs to, so "6391" and "6391-4" are the same field.
+      const CONV_ID_PLACEHOLDERS = {
+        article: "Article ID…",
+        dialog: "Dialog ID or DialogID-NodeID…",
+      }
+
       function setConvIdType(type) {
-        convIdType = type
+        // "node" is what the old three-pill UI called a dialog id with a node.
+        convIdType = type === "node" ? "dialog" : type
         document.querySelectorAll(".conv-id-type-pill").forEach((p) => {
-          p.classList.toggle("on", p.dataset.idType === type)
+          p.classList.toggle("on", p.dataset.idType === convIdType)
         })
-        const placeholders = {
-          article: "Article ID…",
-          dialog: "Dialog ID…",
-          node: "DialogID-NodeID…",
-        }
         const inp = document.getElementById("convSearch")
         if (inp)
           inp.placeholder = convSearchIds
-            ? placeholders[type] || "ID…"
+            ? CONV_ID_PLACEHOLDERS[convIdType] || "ID…"
             : "Search…"
         // Hide warning when switching type
         document.getElementById("convIdWarning").classList.remove("visible")
@@ -20594,12 +20802,8 @@
           regexBtn.classList.add("conv-opt-disabled")
           scopeBtns.forEach((b) => b.classList.add("conv-opt-disabled"))
           if (typeRow) typeRow.classList.add("visible")
-          const placeholders = {
-            article: "Article ID…",
-            dialog: "Dialog ID…",
-            node: "DialogID-NodeID…",
-          }
-          if (searchEl) searchEl.placeholder = placeholders[convIdType] || "ID…"
+          if (searchEl)
+            searchEl.placeholder = CONV_ID_PLACEHOLDERS[convIdType] || "ID…"
         } else {
           regexBtn.classList.remove("conv-opt-disabled")
           scopeBtns.forEach((b) => b.classList.remove("conv-opt-disabled"))
@@ -20633,20 +20837,46 @@
         syncIdMode()
       })
 
-      // Conv search scope — U and B are independent toggles; no-op in #ID mode
+      // The buttons are the state; this reads them back. Keeping one direction
+      // means a programmatic change (searchConvsForEntity) and a click cannot
+      // leave the pills and the query disagreeing.
+      function _convScopeOn(scope) {
+        const el = document.querySelector(`[data-conv-scope='${scope}']`)
+        return !!el && el.classList.contains("active")
+      }
+
+      function _syncConvScopeFromButtons() {
+        const uActive = _convScopeOn("user")
+        const bActive = _convScopeOn("bot")
+        convSearchEntities = _convScopeOn("entity")
+        if (uActive && !bActive) convSearchScope = "user"
+        else if (bActive && !uActive) convSearchScope = "bot"
+        else if (uActive && bActive) convSearchScope = "both"
+        // Both message toggles off is only meaningful next to E; with nothing
+        // selected the backend falls back to searching the text.
+        else convSearchScope = convSearchEntities ? "none" : "both"
+      }
+
+      function setConvSearchScope(user, bot, entity) {
+        const set = (scope, val) => {
+          const el = document.querySelector(`[data-conv-scope='${scope}']`)
+          if (el) el.classList.toggle("active", val)
+        }
+        set("user", user)
+        set("bot", bot)
+        set("entity", entity)
+        _syncConvScopeFromButtons()
+      }
+
+      // Conv search scope — U, B and E are independent toggles; no-op in #ID
+      // mode. E searches the entities the recognizer matched in a turn, which
+      // is a different field from the message text, not a subset of it: an
+      // entity fires on wording that need not contain the entity's own name.
       document.querySelectorAll("[data-conv-scope]").forEach((btn) => {
         btn.addEventListener("click", () => {
           if (convSearchIds) return
           btn.classList.toggle("active")
-          const uActive = document
-            .querySelector("[data-conv-scope='user']")
-            .classList.contains("active")
-          const bActive = document
-            .querySelector("[data-conv-scope='bot']")
-            .classList.contains("active")
-          if (uActive && !bActive) convSearchScope = "user"
-          else if (bActive && !uActive) convSearchScope = "bot"
-          else convSearchScope = "both"
+          _syncConvScopeFromButtons()
           convPage = 1
         })
       })
@@ -21034,6 +21264,9 @@
         }
         // Sync regex mode from session-list search into chat search
         chatSearchRegex = !!convSearchRegex
+        // …and the entity scope with it, so the turns the chat shows as matched
+        // are the same turns that put this conversation in the result list.
+        chatMatchEntities = !convSearchIds && !!convSearchEntities
         document
           .getElementById("chatOptRegex")
           .classList.toggle("on", chatSearchRegex)
@@ -21309,6 +21542,34 @@
           })
           .filter(Boolean)
       }
+      // Strip diacritics **one character at a time**, so the result is exactly
+      // as long as the input and an index into the folded string is an index
+      // into the original. Highlighting depends on that: matches are found in
+      // the folded text and the marks are then placed in the real text, which a
+      // whole-string `normalize("NFD").replace(...)` would misalign.
+      const _foldCache = new Map()
+
+      function foldDiacritics(s) {
+        // Fast path: the overwhelming majority of segments carry nothing
+        // foldable, and this runs on every text run of every rendered bubble.
+        if (!s || !/[À-ɏḀ-ỿ̀-ͯ]/.test(s)) return s
+        let out = ""
+        for (let i = 0; i < s.length; i++) {
+          const ch = s[i]
+          let base = _foldCache.get(ch)
+          if (base === undefined) {
+            const d = ch.normalize("NFD")
+            // Only a base-plus-marks decomposition folds. Anything else —
+            // including a lone surrogate half — passes through untouched, which
+            // is what keeps the length equal.
+            base = d.length > 1 ? d[0] : ch
+            _foldCache.set(ch, base)
+          }
+          out += base
+        }
+        return out
+      }
+
       function createChatSearchPlan(q, regexMode = chatSearchRegex) {
         q = (q || "").trim()
         if (!q) {
@@ -21347,12 +21608,16 @@
           .split("|")
           .map((g) => _tokenizeSegment(g.trim()))
           .filter((g) => g.length)
+        // Folded, so the chat matches what the session list matched: the FTS
+        // index is built with `remove_diacritics`, so searching "cafe" finds
+        // "café" in the result list. Opening one of those results and seeing
+        // "no messages match" reads as the chat being broken.
         const terms = [...new Set(orGroups.flat())]
         const highlightRegexes = terms
           .map((t) => {
             try {
               return new RegExp(
-                t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                foldDiacritics(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
                 "ig",
               )
             } catch (e) {
@@ -21361,7 +21626,7 @@
           })
           .filter(Boolean)
         const lowerGroups = orGroups.map((andTerms) =>
-          andTerms.map((term) => term.toLowerCase()),
+          andTerms.map((term) => foldDiacritics(term).toLowerCase()),
         )
         return {
           query: q,
@@ -21372,6 +21637,18 @@
           regex: null,
         }
       }
+      // The plan for the box's current contents. Rebuilding it per call made
+      // every bubble re-tokenize the query and recompile its regexes.
+      let _chatPlanCache = { key: null, plan: null }
+
+      function currentChatSearchPlan() {
+        const key = (chatSearchRegex ? "1\u0000" : "0\u0000") + chatQuery
+        if (_chatPlanCache.key !== key) {
+          _chatPlanCache = { key, plan: createChatSearchPlan(chatQuery) }
+        }
+        return _chatPlanCache.plan
+      }
+
       // For backwards compat (used by turnMatches for single-regex check path).
       function buildChatSearchRegex(q) {
         const plan = createChatSearchPlan(q)
@@ -21380,20 +21657,56 @@
         return plan.regex || plan.highlightRegexes[0] || null
       }
       // Check if a string matches ALL AND-terms of ANY OR-group using chat query.
-      function chatQueryMatchesText(text, plan = createChatSearchPlan(chatQuery)) {
+      function chatQueryMatchesText(text, plan = currentChatSearchPlan()) {
         if (!text || !plan.query || !plan.valid) return false
         if (plan.regexMode) {
           plan.regex.lastIndex = 0
           return plan.regex.test(text)
         }
-        const lower = text.toLowerCase()
+        const lower = foldDiacritics(text).toLowerCase()
         return plan.orGroups.some((andTerms) =>
           andTerms.every((term) =>
             lower.includes(term),
           ),
         )
       }
-      function chatHl(text, botMode = true, plan = createChatSearchPlan(chatQuery)) {
+      // Mark every match in one plain-text segment.
+      //
+      // Matching happens on the folded copy (so "cafe" marks "café") but the
+      // marks are written into the original, which is only sound because
+      // `foldDiacritics` preserves length. Ranges are merged before insertion:
+      // two terms can overlap, and nesting <mark> inside <mark> renders wrong.
+      function _chatMarkSegment(seg, reGs) {
+        const hay = foldDiacritics(seg)
+        const ranges = []
+        for (const reG of reGs) {
+          reG.lastIndex = 0
+          let m
+          while ((m = reG.exec(hay)) !== null) {
+            if (!m[0].length) {
+              reG.lastIndex++
+              continue
+            }
+            ranges.push([m.index, m.index + m[0].length])
+          }
+        }
+        if (!ranges.length) return seg
+        // Longest first at a given start, so "opening" nested inside a match
+        // for "openingstijden" is swallowed rather than splitting it in two.
+        ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1])
+        let out = ""
+        let cursor = 0
+        for (const [start, end] of ranges) {
+          if (end <= cursor) continue
+          const from = Math.max(start, cursor)
+          if (from > cursor) out += seg.slice(cursor, from)
+          out += `\x00MARK\x00${seg.slice(from, end)}\x00/MARK\x00`
+          cursor = end
+        }
+        return out + seg.slice(cursor)
+      }
+
+      function chatHl(text, botMode = true, plan = currentChatSearchPlan()) {
         const { body, options, ctas, asks } = parseCmOutput(text, botMode)
         if (!plan.query || !plan.valid) return { body, options, ctas, asks }
         const reGs = plan.highlightRegexes
@@ -21403,15 +21716,7 @@
         // HTML would inject <mark> into an attribute and break the element.
         let highlighted = body
           .split(/(<[^>]+>)/)
-          .map((seg) => {
-            if (seg.startsWith("<")) return seg
-            let out = seg
-            for (const reG of reGs) {
-              reG.lastIndex = 0
-              out = out.replace(reG, (m) => `\x00MARK\x00${m}\x00/MARK\x00`)
-            }
-            return out
-          })
+          .map((seg) => (seg.startsWith("<") ? seg : _chatMarkSegment(seg, reGs)))
           .join("")
         highlighted = highlighted
           .replace(/\x00MARK\x00/g, "<mark>")
@@ -21452,12 +21757,23 @@
         const isGenAi =
           chatRowIsGenAi(interaction) ||
           interaction.recognitionType === "GenerativeAI"
-        const entityMatches =
-          !isGenAi &&
-          recognitionDetails &&
-          Array.isArray(recognitionDetails.entityMatches)
+        const rawEntityMatches =
+          recognitionDetails && Array.isArray(recognitionDetails.entityMatches)
             ? recognitionDetails.entityMatches
             : []
+        // Is this entity why the turn is in the results?
+        const entityIsHit = (em) =>
+          chatMatchEntities &&
+          [em.displayName, em.name, em.match, em.entityId]
+            .filter((v) => v !== undefined && v !== null && v !== "")
+            .some((v) => chatQueryMatchesText(String(v)))
+        // A GenAI row hides its recognition data because that data explains
+        // something other than the answer. The one exception is an entity
+        // search: suppressing the entity that put the turn in the results
+        // leaves the match with no visible reason at all.
+        const entityMatches = isGenAi
+          ? rawEntityMatches.filter(entityIsHit)
+          : rawEntityMatches
         const quality = interaction.recognitionQuality
 
         let html = ""
@@ -21524,12 +21840,16 @@
             const matchedSpan = matched
               ? ` <span class="em-matched">${matched}</span>`
               : ""
+            // When the entity is *why* this turn is in the results, say so —
+            // otherwise an entity-only search shows turns whose text contains
+            // nothing the user typed, with no visible reason.
+            const hitCls = entityIsHit(em) ? " is-hit" : ""
             if (base && entityId) {
               const url = `${base}/entities/${entityId}`
               const safeUrl = esc(url)
-              html += `<button class="entity-match-chip"${titleAttr} onclick="event.stopPropagation();openLink('${safeUrl}');return false">&#x1F516; ${name}${matchedSpan}</button>`
+              html += `<button class="entity-match-chip${hitCls}"${titleAttr} onclick="event.stopPropagation();openLink('${safeUrl}');return false">&#x1F516; ${name}${matchedSpan}</button>`
             } else {
-              html += `<span class="entity-match-chip-static"${titleAttr}>&#x1F516; ${name}${matchedSpan}</span>`
+              html += `<span class="entity-match-chip-static${hitCls}"${titleAttr}>&#x1F516; ${name}${matchedSpan}</span>`
             }
           })
           html += `</div></div>`
@@ -21591,6 +21911,29 @@
 
       function chatRowHasBotOutput(r) {
         return Boolean(r.outputText)
+      }
+
+      // The searchable text of the entities the recognizer matched on a row:
+      // display name, internal name, the words that actually matched, and the
+      // entity id. Cached on the row — `recognition_details` is a sizeable JSON
+      // blob and a long conversation is re-rendered on every filter change.
+      function rowEntityFields(row) {
+        if (row._entityFields) return row._entityFields
+        const details = parseJsonSafe(row.recognitionDetails || "")
+        const matches =
+          details && Array.isArray(details.entityMatches)
+            ? details.entityMatches
+            : []
+        const fields = []
+        for (const m of matches) {
+          if (m.displayName) fields.push(String(m.displayName))
+          if (m.name) fields.push(String(m.name))
+          if (m.match) fields.push(String(m.match))
+          if (m.entityId !== undefined && m.entityId !== null)
+            fields.push(String(m.entityId))
+        }
+        row._entityFields = fields
+        return fields
       }
 
       // Body HTML for a user bubble. Redacted values keep their turn visible —
@@ -21817,6 +22160,11 @@
             if (convSearchIds) {
               fields.push(r.articleIds || "", r.dialogPaths || "")
             }
+            // The entities the recognizer fired on this turn. Without them an
+            // entity search opens on "no messages match": the entity's name is
+            // a label the recognizer assigned, and it need not appear anywhere
+            // in what was said.
+            if (chatMatchEntities) fields.push(...rowEntityFields(r))
             // Use AND/OR aware matching
             return fields.some((f) => chatQueryMatchesText(f, searchPlan))
           })

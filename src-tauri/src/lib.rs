@@ -15,6 +15,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const WATCH_EVENT_NAME: &str = "data-folder-updated";
 
+/// Phase updates for [`export_conversations_for_ai`], which is one long await
+/// with a save dialog, a full-result query and a file write inside it.
+const AI_EXPORT_PROGRESS_EVENT: &str = "ai-export-progress";
+
 /// Rows buffered before an import commits a transaction.
 ///
 /// Each flush is one commit, so this is the commit interval as much as a buffer
@@ -1001,6 +1005,21 @@ CREATE TABLE IF NOT EXISTS context_index (
 );
 CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_index(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_ctx_name_session ON context_index(name, session_uuid);
+-- The entities the recognizer found in a user turn, lifted out of the
+-- `recognition_details` JSON so searching for one is a scan of a small narrow
+-- table instead of a JSON parse of every interaction in the database.
+--
+-- Deliberately carries no secondary index: the search is a substring LIKE,
+-- which no index can serve, and every extra b-tree here is a per-row tax on
+-- import. WITHOUT ROWID keeps it to a single write per entity match.
+CREATE TABLE IF NOT EXISTS entity_index (
+    log_id       INTEGER NOT NULL,
+    session_uuid TEXT NOT NULL,
+    entity_id    INTEGER,
+    name         TEXT NOT NULL,
+    matched      TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (log_id, name)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS session_summary (
     session_uuid                     TEXT PRIMARY KEY,
     first_ts                         TEXT NOT NULL,
@@ -1078,6 +1097,10 @@ DROP INDEX IF EXISTS idx_type;";
 /// summary rebuild. See [`ensure_session_summary`] for why its own two
 /// invariants are not enough on their own.
 const META_PENDING_FINALIZE: &str = "pending_finalize";
+
+/// Set once `entity_index` has been backfilled from the `recognition_details`
+/// already in the database. Imports maintain it incrementally from then on.
+const META_ENTITY_INDEX_BUILT: &str = "entity_index_built";
 
 // ── Flagged DB schema ────────────────────────────────────────────────────────
 
@@ -1617,6 +1640,43 @@ fn open_db(path: &str) -> Result<Connection, String> {
         .ok();
     }
 
+    // Backfill entity_index from existing interactions (one-time migration).
+    //
+    // Gated on a meta flag rather than "is the table empty?": a database whose
+    // interactions genuinely triggered no entities would re-run this whole-table
+    // json_each scan on every launch.
+    if !meta_flag_set(&conn, META_ENTITY_INDEX_BUILT) {
+        let started = Instant::now();
+        let built = conn
+            .execute_batch(
+                "INSERT OR IGNORE INTO entity_index(log_id, session_uuid, entity_id, name, matched) \
+                 SELECT i.log_id, i.session_uuid, \
+                        json_extract(e.value, '$.entityId'), \
+                        LOWER(TRIM(COALESCE(NULLIF(json_extract(e.value, '$.displayName'), ''), \
+                                            json_extract(e.value, '$.name'), ''))), \
+                        LOWER(TRIM(COALESCE(json_extract(e.value, '$.match'), ''))) \
+                 FROM interactions i, json_each(i.recognition_details, '$.entityMatches') e \
+                 WHERE i.recognition_details IS NOT NULL \
+                   AND i.recognition_details != '' \
+                   AND json_valid(i.recognition_details) \
+                   AND json_type(i.recognition_details, '$.entityMatches') = 'array' \
+                   AND LOWER(TRIM(COALESCE(NULLIF(json_extract(e.value, '$.displayName'), ''), \
+                                           json_extract(e.value, '$.name'), ''))) != ''",
+            )
+            .is_ok();
+        if built {
+            let rows: i64 = conn
+                .query_row("SELECT COUNT(*) FROM entity_index", [], |r| r.get(0))
+                .unwrap_or(0);
+            log::info!(
+                target: "import",
+                "indexed {rows} triggered entities in {}ms",
+                started.elapsed().as_millis()
+            );
+            set_meta_flag(&conn, META_ENTITY_INDEX_BUILT);
+        }
+    }
+
     // Optional FTS5 and materialized summaries are repairable caches.
     repair_fts_index(&conn);
     // An import run that never reached its finalize step left session_summary
@@ -1828,9 +1888,14 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
         ),
         params![cutoff_dt],
     );
-    // Remove stale FTS5 entries before deleting from interactions
+    // Remove stale FTS5 and entity entries before deleting from interactions
     let _ = conn.execute(
         "DELETE FROM interactions_fts WHERE rowid IN \
+         (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
+        params![cutoff_dt],
+    );
+    let _ = conn.execute(
+        "DELETE FROM entity_index WHERE log_id IN \
          (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
         params![cutoff_dt],
     );
@@ -2179,6 +2244,63 @@ struct CsvContext<'a> {
     value: Option<std::borrow::Cow<'a, str>>,
 }
 
+/// One entity the recognizer matched in a user turn, as it appears inside the
+/// `RecognitionDetails` column's `entityMatches` array.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CsvEntityMatch<'a> {
+    #[serde(borrow, default)]
+    name: Option<std::borrow::Cow<'a, str>>,
+    #[serde(borrow, default)]
+    display_name: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default)]
+    entity_id: Option<i64>,
+    #[serde(rename = "match", borrow, default)]
+    matched: Option<std::borrow::Cow<'a, str>>,
+}
+
+/// Only the part of `RecognitionDetails` [`entity_index`] is built from.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CsvRecognitionDetails<'a> {
+    #[serde(borrow, default)]
+    entity_matches: Vec<CsvEntityMatch<'a>>,
+}
+
+/// The name an entity is searched by, and the text that matched it.
+///
+/// Lowercased on the way in so the search side never has to. Empty names are
+/// dropped — they would index a row nobody can find.
+fn entity_index_rows(recognition_details: &str) -> Vec<(Option<i64>, String, String)> {
+    // Cheap gate: most interactions carry recognition details with no entity
+    // matches at all, and parsing those is pure cost.
+    if !recognition_details.contains("entityMatches") {
+        return Vec::new();
+    }
+    let Ok(details) = serde_json::from_str::<CsvRecognitionDetails>(recognition_details) else {
+        return Vec::new();
+    };
+    details
+        .entity_matches
+        .iter()
+        .filter_map(|m| {
+            let name = m
+                .display_name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .or(m.name.as_deref())
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
+            if name.is_empty() {
+                return None;
+            }
+            let matched = m.matched.as_deref().unwrap_or("").trim().to_lowercase();
+            Some((m.entity_id, name, matched))
+        })
+        .collect()
+}
+
 /// The whole import, against an open connection.
 ///
 /// Split out of the command so tests can drive a real CSV into a real database
@@ -2331,6 +2453,13 @@ fn import_csv_into(
             Ok(s) => s,
             Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
         };
+        let mut ent_stmt = match tx.prepare_cached(
+            "INSERT OR IGNORE INTO entity_index(log_id, session_uuid, entity_id, name, matched) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
         let mut backfill_stmt = match tx.prepare_cached(
             "UPDATE interactions SET recognition_details = ?1 WHERE log_id = ?2 AND (recognition_details IS NULL OR recognition_details = '')",
         ) {
@@ -2423,6 +2552,19 @@ fn import_csv_into(
                             }
                         }
                     }
+                    // Index the entities this turn triggered, so an entity
+                    // search never has to parse recognition_details at query
+                    // time. Only on a genuine insert: a duplicate row's
+                    // entities are already indexed.
+                    for (entity_id, name, matched) in entity_index_rows(get_r(c_recog_details)) {
+                        let _ = ent_stmt.execute(params![
+                            log_id,
+                            session_id,
+                            entity_id,
+                            name.as_str(),
+                            matched.as_str()
+                        ]);
+                    }
                     *inserted += 1;
                 }
                 Ok(_) => {
@@ -2445,6 +2587,7 @@ fn import_csv_into(
         drop(ins_stmt);
         drop(fts_stmt);
         drop(ctx_stmt);
+        drop(ent_stmt);
         drop(backfill_stmt);
         drop(touched_stmt);
         let _ = tx.commit();
@@ -2568,7 +2711,7 @@ async fn get_date_range(db_state: State<'_, SharedDbState>) -> Result<DateRange,
     .map_err(|e| e.to_string())?
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct GetSessionsArgs {
     page: Option<i64>,
@@ -2577,12 +2720,133 @@ struct GetSessionsArgs {
     filter: Option<String>, // "all" | "genai" | "neg_feedback" | "low_recog" | "zero_recog"
     query: Option<String>,
     query_regex: Option<bool>,                   // treat query as a regex
-    query_scope: Option<String>,                 // "both" | "user" | "bot"
-    query_ids: Option<bool>,                     // also search article_ids and dialog_paths columns
+    query_scope: Option<String>,                 // "both" | "user" | "bot" | "none"
+    query_entities: Option<bool>, // also (or only, with scope "none") search triggered entities
+    query_ids: Option<bool>,      // also search article_ids and dialog_paths columns
     query_ids_only: Option<bool>, // search ONLY article_ids and dialog_paths, not message text
-    query_id_type: Option<String>, // "article" | "dialog" | "node" — which ID column/pattern to use
+    query_id_type: Option<String>, // "article" | "dialog" — "dialog" accepts "<dialog>-<node>"
     low_recog_threshold: Option<i64>, // threshold for "low recognition" filter (default 60, range 1–99)
     context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
+}
+
+/// The quoted strings inside a flat JSON array or object, without parsing it.
+///
+/// `article_ids` is `["qa-1234","dn-6391-4"]` and `dialog_paths` is
+/// `{"EndedOrInProgress" : "6391:2/15/4"}`; neither ever contains an escaped
+/// quote, so splitting on `"` and taking every second run yields the values
+/// (and, for an object, the keys — which never look like an id and fall out of
+/// the comparisons below on their own).
+fn json_quoted_items(s: &str) -> impl Iterator<Item = &str> {
+    s.split('"').skip(1).step_by(2)
+}
+
+/// What an `#ID` search is looking for, resolved once per search.
+///
+/// Matching is exact rather than the substring `LIKE` it replaced: `qa-123`
+/// used to also match `qa-1234`, and `dn-6391-4` also matched `dn-6391-42`.
+#[derive(Clone, Debug, PartialEq)]
+enum IdTarget {
+    /// A single Article, as it appears in `article_ids`: `qa-<id>`.
+    Article(i64),
+    /// Every interaction that touched a Dialog, whether it answered from one of
+    /// its nodes (`article_ids`) or merely walked through it (`dialog_paths`).
+    Dialog(i64),
+    /// One node of one Dialog — answered from it, or passed through it.
+    Node(i64, i64),
+}
+
+impl IdTarget {
+    /// Read the `#ID` query box. A `-` separates a Dialog from one of its
+    /// nodes, which is what lets Dialog and Node be one filter.
+    fn parse(query: &str, id_type: &str) -> Option<IdTarget> {
+        let query = query.trim();
+        if let Some((left, right)) = query.split_once('-') {
+            let (d, n) = (left.trim().parse().ok()?, right.trim().parse().ok()?);
+            // An article id never carries a node, so a `-` in article mode is
+            // a typo rather than a request to search dialog nodes.
+            if id_type == "article" {
+                return None;
+            }
+            return Some(IdTarget::Node(d, n));
+        }
+        let id: i64 = query.parse().ok()?;
+        Some(match id_type {
+            "article" => IdTarget::Article(id),
+            _ => IdTarget::Dialog(id),
+        })
+    }
+
+    /// FTS5 MATCH expression that narrows the scan to plausible rows. It is a
+    /// filter, not the answer — [`IdTarget::matches`] decides. Tokenization
+    /// splits `qa-1234` into `qa` + `1234`, so this is deliberately loose.
+    fn fts_match(&self) -> String {
+        match self {
+            IdTarget::Article(id) => format!("article_ids : \"qa-{id}\""),
+            IdTarget::Dialog(d) | IdTarget::Node(d, _) => {
+                format!("{{article_ids dialog_paths}} : {d}")
+            }
+        }
+    }
+
+    fn matches(&self, article_ids: &str, dialog_paths: &str) -> bool {
+        match *self {
+            IdTarget::Article(id) => {
+                let needle = format!("qa-{id}");
+                json_quoted_items(article_ids).any(|item| item == needle)
+            }
+            IdTarget::Dialog(d) => {
+                let prefix = format!("dn-{d}-");
+                json_quoted_items(article_ids).any(|item| item.starts_with(&prefix))
+                    || json_quoted_items(dialog_paths)
+                        .any(|item| Self::path_dialog(item) == Some(d))
+            }
+            IdTarget::Node(d, n) => {
+                let needle = format!("dn-{d}-{n}");
+                json_quoted_items(article_ids).any(|item| item == needle)
+                    || json_quoted_items(dialog_paths).any(|item| Self::path_has_node(item, d, n))
+            }
+        }
+    }
+
+    /// The dialog id of a `dialog_paths` value like `6391:2/15/4`.
+    fn path_dialog(path: &str) -> Option<i64> {
+        path.split_once(':')?.0.trim().parse().ok()
+    }
+
+    /// Whether a `dialog_paths` value walked through node `n` of dialog `d`.
+    /// Checked together so a second path in the same cell cannot contribute the
+    /// dialog while another contributes the node.
+    fn path_has_node(path: &str, d: i64, n: i64) -> bool {
+        let Some((head, nodes)) = path.split_once(':') else {
+            return false;
+        };
+        if head.trim().parse::<i64>() != Ok(d) {
+            return false;
+        }
+        nodes.split('/').any(|seg| seg.trim().parse::<i64>() == Ok(n))
+    }
+}
+
+/// The tokens SQLite's `unicode61` tokenizer would produce for a search term.
+///
+/// Everything that is not alphanumeric is a separator, so `www.efteling.nl`
+/// indexes as three tokens and `€10,-` as one.
+fn fts_tokens(term: &str) -> Vec<String> {
+    term.split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// Whether a term carries punctuation the tokenizer throws away.
+///
+/// `www.efteling.nl` and `www efteling nl` are the same query to FTS5, so a
+/// term like this needs an exact check on the stored text on top of the index
+/// lookup. Whitespace does not count: a quoted phrase is already matched as
+/// adjacent tokens, and requiring byte equality there would break the
+/// diacritic-insensitive matching the tokenizer gives us for free.
+fn term_needs_exact_check(term: &str) -> bool {
+    term.chars().any(|c| !c.is_alphanumeric() && !c.is_whitespace())
 }
 
 fn build_session_filter_query(
@@ -2806,282 +3070,381 @@ fn build_session_filter_query(
         String::new()
     };
 
-    if !query.is_empty() {
-        if query_ids_only {
-            search_mode = "id".to_string();
-            let (column, like_val) = match query_id_type.as_str() {
-                "dialog" => (
-                    "i.dialog_paths",
-                    format!("%\"{}:%", query.replace('%', "\\%").replace('_', "\\_")),
-                ),
-                "node" => (
-                    "i.article_ids",
-                    format!("%dn-{}%", query.replace('%', "\\%").replace('_', "\\_")),
-                ),
-                _ => (
-                    "i.article_ids",
-                    format!("%qa-{}%", query.replace('%', "\\%").replace('_', "\\_")),
-                ),
-            };
-            let p = next_param(&mut param_idx);
-            param_values.push(Box::new(like_val));
-            let search_from = if is_feedback_filter {
-                "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
-            } else {
-                "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-            };
-            let row_filter = if is_feedback_filter {
-                ""
-            } else {
-                search_row_filter
-            };
-            search_cte = format!(
-                "{feedback_origins_cte}, search_matches AS (\
-                    SELECT i.session_uuid, i.log_id AS match_log_id \
-                    FROM {search_from} \
-                    WHERE {column} LIKE {p} ESCAPE '\\'{row_filter}\
-                ), search_sessions AS (\
-                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                    FROM search_matches \
-                    GROUP BY session_uuid\
-                )"
-            );
-            filtered_from =
-                "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
-        } else if query_regex {
-            search_mode = "regex".to_string();
-            use regex::Regex;
-            let compiled = Arc::new(Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?);
-            conn.create_scalar_function(
-                "regexp",
-                2,
-                rusqlite::functions::FunctionFlags::SQLITE_UTF8
-                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-                move |ctx: &rusqlite::functions::Context<'_>| {
-                    // Borrow the column text directly — no per-row String allocation
-                    let text = ctx.get_raw(1).as_str().unwrap_or("");
-                    Ok(compiled.is_match(text) as i32)
-                },
-            )
-            .ok();
+    // Every text / ID / entity search resolves to one or more SELECTs producing
+    // (session_uuid, match_log_id); they are UNIONed below. Keeping them in a
+    // list is what lets a single query look in more than one place at once —
+    // message text and the entities that text triggered — and what lets an OR
+    // group that needs an exact re-check carry its own WHERE clause.
+    let mut match_selects: Vec<String> = Vec::new();
+    let row_filter = if is_feedback_filter {
+        ""
+    } else {
+        search_row_filter
+    };
+    let interactions_from = if is_feedback_filter {
+        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+    } else {
+        "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+    };
+    let fts_from = if is_feedback_filter {
+        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id JOIN interactions_fts ON interactions_fts.rowid = i.log_id"
+    } else {
+        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+    };
+    // The entity table only carries a log_id, so a row-level filter (GenAI, low
+    // recognition) needs the interaction row joined back in to be applied.
+    let entity_from = if is_feedback_filter {
+        "entity_index e JOIN feedback_origins fo ON fo.match_log_id = e.log_id".to_string()
+    } else if row_filter.is_empty() {
+        "entity_index e JOIN base_sessions b ON b.session_uuid = e.session_uuid".to_string()
+    } else {
+        "entity_index e JOIN interactions i ON i.log_id = e.log_id \
+         JOIN base_sessions b ON b.session_uuid = e.session_uuid"
+            .to_string()
+    };
+    let entity_row_filter = if is_feedback_filter { "" } else { row_filter };
 
-            let p = next_param(&mut param_idx);
+    fn table_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?1",
+            params![name],
+            |_| Ok(true),
+        )
+        .unwrap_or(false)
+    }
+
+    /// `col LIKE '%term%'` over one or more columns, escaping the wildcards a
+    /// user can type. Backslash is escaped first, or escaping the others would
+    /// produce a dangling escape character of its own.
+    fn like_cond(
+        cols: &[&str],
+        term: &str,
+        idx: &mut usize,
+        vals: &mut Vec<Box<dyn ToSql>>,
+    ) -> String {
+        let like_val = format!(
+            "%{}%",
+            term.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let parts: Vec<String> = cols
+            .iter()
+            .map(|c| {
+                *idx += 1;
+                vals.push(Box::new(like_val.clone()));
+                format!("{c} LIKE ?{idx} ESCAPE '\\'")
+            })
+            .collect();
+        if parts.len() == 1 {
+            parts.into_iter().next().unwrap_or_default()
+        } else {
+            format!("({})", parts.join(" OR "))
+        }
+    }
+
+    fn text_columns(scope: &str, ids: bool) -> Vec<&'static str> {
+        let mut cols: Vec<&'static str> = match scope {
+            "user" => vec!["i.interaction_value"],
+            "bot" => vec!["i.output_text"],
+            _ => vec!["i.interaction_value", "i.output_text"],
+        };
+        if ids {
+            cols.push("i.article_ids");
+            cols.push("i.dialog_paths");
+        }
+        cols
+    }
+
+    /// The FTS5 column filter for a scope.
+    ///
+    /// Always emitted, and always applied to a *parenthesized* expression: a
+    /// bare `interaction_value : a OR b` binds the filter to `a` alone and lets
+    /// `b` match any column, which is how a user-only search kept returning
+    /// sessions that only matched the bot's answer. "Both" is a filter too —
+    /// without one, an unparenthesized query also searched `article_ids` and
+    /// `dialog_paths`, so a number matched dialog paths nobody asked about.
+    fn fts_columns(scope: &str, ids: bool) -> String {
+        let mut cols: Vec<&str> = match scope {
+            "user" => vec!["interaction_value"],
+            "bot" => vec!["output_text"],
+            _ => vec!["interaction_value", "output_text"],
+        };
+        if ids {
+            cols.push("article_ids");
+            cols.push("dialog_paths");
+        }
+        format!("{{{}}}", cols.join(" "))
+    }
+
+    let fts_available = !query.is_empty() && table_exists(conn, "interactions_fts");
+    let search_entities =
+        args.query_entities.unwrap_or(false) && table_exists(conn, "entity_index");
+    // "none" is both message toggles off, which is only meaningful alongside the
+    // entity toggle. With nothing selected at all, search the text — an empty
+    // result set would read as "no matches" rather than "you turned it all off".
+    let text_scope: Option<&str> = match query_scope.as_str() {
+        _ if query.is_empty() => None,
+        "none" if search_entities => None,
+        "user" => Some("user"),
+        "bot" => Some("bot"),
+        _ => Some("both"),
+    };
+
+    if !query.is_empty() && query_ids_only {
+        search_mode = "id".to_string();
+        match IdTarget::parse(&query, &query_id_type) {
+            // A malformed id matches nothing. Saying so explicitly beats
+            // falling through to a text search the user did not ask for.
+            None => match_selects
+                .push("SELECT '' AS session_uuid, NULL AS match_log_id WHERE 0".to_string()),
+            Some(target) => {
+                let matcher = target.clone();
+                conn.create_scalar_function(
+                    "cai_id_hit",
+                    2,
+                    rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                        | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+                    move |ctx: &rusqlite::functions::Context<'_>| {
+                        let article_ids = ctx.get_raw(0).as_str().unwrap_or("");
+                        let dialog_paths = ctx.get_raw(1).as_str().unwrap_or("");
+                        Ok(matcher.matches(article_ids, dialog_paths) as i32)
+                    },
+                )
+                .ok();
+                // The FTS lookup narrows the scan from every interaction to the
+                // handful mentioning the number; the function then decides
+                // exactly, so `qa-123` can no longer match `qa-1234`.
+                let (from, mut conds) = if fts_available {
+                    param_idx += 1;
+                    param_values.push(Box::new(target.fts_match()));
+                    (
+                        fts_from,
+                        vec![format!("interactions_fts MATCH ?{param_idx}")],
+                    )
+                } else {
+                    (interactions_from, Vec::new())
+                };
+                conds.push("cai_id_hit(i.article_ids, i.dialog_paths)".to_string());
+                match_selects.push(format!(
+                    "SELECT i.session_uuid, i.log_id AS match_log_id \
+                     FROM {from} WHERE {}{row_filter}",
+                    conds.join(" AND ")
+                ));
+            }
+        }
+    } else if !query.is_empty() && query_regex {
+        search_mode = "regex".to_string();
+        use regex::Regex;
+        let compiled = Arc::new(Regex::new(&query).map_err(|e| format!("Invalid regex: {e}"))?);
+        conn.create_scalar_function(
+            "regexp",
+            2,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            move |ctx: &rusqlite::functions::Context<'_>| {
+                // Borrow the column text directly — no per-row String allocation
+                let text = ctx.get_raw(1).as_str().unwrap_or("");
+                Ok(compiled.is_match(text) as i32)
+            },
+        )
+        .ok();
+
+        if let Some(scope) = text_scope {
+            param_idx += 1;
             param_values.push(Box::new(query.clone()));
-            let text_cond = match query_scope.as_str() {
+            let p = format!("?{param_idx}");
+            let text_cond = match scope {
                 "user" => format!("regexp({p}, i.interaction_value)"),
                 "bot" => format!("regexp({p}, i.output_text)"),
                 _ => format!("(regexp({p}, i.interaction_value) OR regexp({p}, i.output_text))"),
             };
             let final_cond = if query_ids {
-                let p2 = next_param(&mut param_idx);
+                param_idx += 1;
                 param_values.push(Box::new(query.clone()));
+                let p2 = format!("?{param_idx}");
                 format!(
                     "({text_cond} OR regexp({p2}, i.article_ids) OR regexp({p2}, i.dialog_paths))"
                 )
             } else {
                 text_cond
             };
-            let search_from = if is_feedback_filter {
-                "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
-            } else {
-                "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-            };
-            let row_filter = if is_feedback_filter {
-                ""
-            } else {
-                search_row_filter
-            };
-            search_cte = format!(
-                "{feedback_origins_cte}, search_matches AS (\
-                    SELECT i.session_uuid, i.log_id AS match_log_id \
-                    FROM {search_from} \
-                    WHERE {final_cond}{row_filter}\
-                ), search_sessions AS (\
-                    SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                    FROM search_matches \
-                    GROUP BY session_uuid\
-                )"
-            );
-            filtered_from =
-                "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
-        } else {
-            let fts_available = conn
-                .query_row(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='interactions_fts'",
-                    [],
-                    |_| Ok(true),
-                )
-                .unwrap_or(false);
-            let or_groups: Vec<Vec<String>> = query
-                .split('|')
-                .map(|g| tokenize_segment(g.trim()))
-                .filter(|g| !g.is_empty())
-                .collect();
+            match_selects.push(format!(
+                "SELECT i.session_uuid, i.log_id AS match_log_id \
+                 FROM {interactions_from} WHERE {final_cond}{row_filter}"
+            ));
+        }
+        if search_entities {
+            param_idx += 1;
+            param_values.push(Box::new(query.clone()));
+            let p = format!("?{param_idx}");
+            match_selects.push(format!(
+                "SELECT e.session_uuid, e.log_id AS match_log_id \
+                 FROM {entity_from} \
+                 WHERE (regexp({p}, e.name) OR regexp({p}, e.matched)){entity_row_filter}"
+            ));
+            if text_scope.is_none() {
+                search_mode = "entity_regex".to_string();
+            }
+        }
+    } else if !query.is_empty() {
+        let or_groups: Vec<Vec<String>> = query
+            .split('|')
+            .map(|g| tokenize_segment(g.trim()))
+            .filter(|g| !g.is_empty())
+            .collect();
 
-            if fts_available {
-                let fts_groups = or_groups
+        // Per OR group: the FTS expression that finds candidates (None when the
+        // group contains a term the tokenizer cannot represent at all, e.g. a
+        // lone "€"), and the terms whose punctuation the index throws away and
+        // which therefore need an exact re-check on the stored text.
+        let mut groups: Vec<(Option<String>, Vec<String>)> = Vec::new();
+        for terms in &or_groups {
+            let mut fts_terms: Vec<String> = Vec::new();
+            let mut expressible = true;
+            let mut exact: Vec<String> = Vec::new();
+            for term in terms {
+                let tokens = fts_tokens(term);
+                if tokens.is_empty() {
+                    expressible = false;
+                } else {
+                    // Quoting is not optional: `www.efteling.nl` or `qa-1234`
+                    // as a bareword is an FTS5 *syntax error*, which failed the
+                    // whole search rather than the one term.
+                    let phrase = format!("\"{}\"", tokens.join(" "));
+                    // Prefix matching stays a single-word affordance, as before.
+                    fts_terms.push(if term.chars().any(char::is_whitespace) {
+                        phrase
+                    } else {
+                        format!("{phrase}*")
+                    });
+                }
+                if term_needs_exact_check(term) {
+                    exact.push(term.clone());
+                }
+            }
+            let fts = if expressible && !fts_terms.is_empty() {
+                Some(if fts_terms.len() == 1 {
+                    fts_terms.remove(0)
+                } else {
+                    format!("({})", fts_terms.join(" "))
+                })
+            } else {
+                None
+            };
+            groups.push((fts, exact));
+        }
+
+        let use_fts = fts_available && !groups.is_empty() && groups.iter().all(|g| g.0.is_some());
+        let needs_exact = groups.iter().any(|g| !g.1.is_empty());
+
+        if let Some(scope) = text_scope {
+            if use_fts && !needs_exact {
+                search_mode = "fts".to_string();
+                let expr = groups
                     .iter()
-                    .map(|group| {
-                        group
-                            .iter()
-                            .filter_map(|t| {
-                                if t.contains(' ') {
-                                    let phrase_terms = t
-                                        .split_whitespace()
-                                        .map(|w| {
-                                            w.chars()
-                                                .filter(|c| {
-                                                    c.is_alphanumeric()
-                                                        || matches!(*c, '-' | '_' | '.')
-                                                })
-                                                .collect::<String>()
-                                        })
-                                        .filter(|w| !w.is_empty())
-                                        .collect::<Vec<_>>();
-                                    if phrase_terms.is_empty() {
-                                        None
-                                    } else {
-                                        Some(format!("\"{}\"", phrase_terms.join(" ")))
-                                    }
-                                } else {
-                                    let clean = t
-                                        .chars()
-                                        .filter(|c| {
-                                            c.is_alphanumeric() || matches!(*c, '-' | '_' | '.')
-                                        })
-                                        .collect::<String>();
-                                    if clean.is_empty() {
-                                        None
-                                    } else {
-                                        Some(format!("{clean}*"))
-                                    }
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .filter(|g| !g.is_empty())
-                    .collect::<Vec<_>>();
-
-                if !fts_groups.is_empty() {
-                    search_mode = "fts".to_string();
-                    let fts_query = fts_groups
-                        .iter()
-                        .map(|terms| {
-                            if terms.len() == 1 {
-                                terms[0].clone()
-                            } else {
-                                format!("({})", terms.join(" "))
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" OR ");
-                    let fts_match_expr = match (query_scope.as_str(), query_ids) {
-                        ("user", false) => format!("interaction_value : {fts_query}"),
-                        ("user", true) => {
-                            format!("{{interaction_value article_ids dialog_paths}} : {fts_query}")
-                        }
-                        ("bot", false) => format!("output_text : {fts_query}"),
-                        ("bot", true) => {
-                            format!("{{output_text article_ids dialog_paths}} : {fts_query}")
-                        }
-                        (_, _) => fts_query,
-                    };
-                    let p = next_param(&mut param_idx);
-                    param_values.push(Box::new(fts_match_expr));
-                    let search_from = if is_feedback_filter {
-                        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id JOIN interactions_fts ON interactions_fts.rowid = i.log_id"
-                    } else {
-                        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-                    };
-                    let row_filter = if is_feedback_filter {
-                        ""
-                    } else {
-                        search_row_filter
-                    };
-                    search_cte = format!(
-                        "{feedback_origins_cte}, search_matches AS (\
-                            SELECT i.session_uuid, i.log_id AS match_log_id \
-                            FROM {search_from} \
-                            WHERE interactions_fts MATCH {p}{row_filter}\
-                        ), search_sessions AS (\
-                            SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                            FROM search_matches \
-                            GROUP BY session_uuid\
-                        )"
-                    );
-                    filtered_from =
-                        "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                    .filter_map(|g| g.0.clone())
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                param_idx += 1;
+                param_values.push(Box::new(format!(
+                    "{} : ({expr})",
+                    fts_columns(scope, query_ids)
+                )));
+                match_selects.push(format!(
+                    "SELECT i.session_uuid, i.log_id AS match_log_id \
+                     FROM {fts_from} WHERE interactions_fts MATCH ?{param_idx}{row_filter}"
+                ));
+            } else if use_fts {
+                // One SELECT per OR group, because the exact re-check belongs to
+                // the group that needed it. Folded into a single MATCH the check
+                // would either be skipped for rows that matched a different
+                // group, or wrongly applied to them.
+                search_mode = "fts_exact".to_string();
+                let cols = text_columns(scope, query_ids);
+                for (fts, exact) in &groups {
+                    param_idx += 1;
+                    param_values.push(Box::new(format!(
+                        "{} : ({})",
+                        fts_columns(scope, query_ids),
+                        fts.clone().unwrap_or_default()
+                    )));
+                    let mut conds = vec![format!("interactions_fts MATCH ?{param_idx}")];
+                    for term in exact {
+                        conds.push(like_cond(&cols, term, &mut param_idx, &mut param_values));
+                    }
+                    match_selects.push(format!(
+                        "SELECT i.session_uuid, i.log_id AS match_log_id \
+                         FROM {fts_from} WHERE {}{row_filter}",
+                        conds.join(" AND ")
+                    ));
                 }
             } else if !or_groups.is_empty() {
                 search_mode = "like".to_string();
-                let or_clauses = or_groups
-                    .iter()
-                    .map(|and_terms| {
-                        and_terms
-                            .iter()
-                            .map(|term| {
-                                let like_val =
-                                    format!("%{}%", term.replace('%', "\\%").replace('_', "\\_"));
-                                let text_cond = match query_scope.as_str() {
-                                    "user" => {
-                                        let p = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val.clone()));
-                                        format!("i.interaction_value LIKE {p} ESCAPE '\\'")
-                                    }
-                                    "bot" => {
-                                        let p = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val.clone()));
-                                        format!("i.output_text LIKE {p} ESCAPE '\\'")
-                                    }
-                                    _ => {
-                                        let p1 = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val.clone()));
-                                        let p2 = next_param(&mut param_idx);
-                                        param_values.push(Box::new(like_val.clone()));
-                                        format!("(i.interaction_value LIKE {p1} ESCAPE '\\' OR i.output_text LIKE {p2} ESCAPE '\\')")
-                                    }
-                                };
-                                if query_ids {
-                                    let pi1 = next_param(&mut param_idx);
-                                    param_values.push(Box::new(like_val.clone()));
-                                    let pi2 = next_param(&mut param_idx);
-                                    param_values.push(Box::new(like_val));
-                                    format!("({text_cond} OR i.article_ids LIKE {pi1} ESCAPE '\\' OR i.dialog_paths LIKE {pi2} ESCAPE '\\')")
-                                } else {
-                                    text_cond
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(" AND ")
-                    })
-                    .map(|g| format!("({g})"))
-                    .collect::<Vec<_>>()
-                    .join(" OR ");
-                let search_from = if is_feedback_filter {
-                    "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
-                } else {
-                    "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
-                };
-                let row_filter = if is_feedback_filter {
-                    ""
-                } else {
-                    search_row_filter
-                };
-                search_cte = format!(
-                    "{feedback_origins_cte}, search_matches AS (\
-                        SELECT i.session_uuid, i.log_id AS match_log_id \
-                        FROM {search_from} \
-                        WHERE {or_clauses}{row_filter}\
-                    ), search_sessions AS (\
-                        SELECT session_uuid, MIN(match_log_id) AS match_log_id \
-                        FROM search_matches \
-                        GROUP BY session_uuid\
-                    )"
-                );
-                filtered_from =
-                    "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
+                let cols = text_columns(scope, query_ids);
+                let mut or_clauses: Vec<String> = Vec::new();
+                for terms in &or_groups {
+                    let mut ands: Vec<String> = Vec::new();
+                    for term in terms {
+                        ands.push(like_cond(&cols, term, &mut param_idx, &mut param_values));
+                    }
+                    or_clauses.push(format!("({})", ands.join(" AND ")));
+                }
+                match_selects.push(format!(
+                    "SELECT i.session_uuid, i.log_id AS match_log_id \
+                     FROM {interactions_from} WHERE {}{row_filter}",
+                    or_clauses.join(" OR ")
+                ));
             }
         }
+
+        if search_entities && !or_groups.is_empty() {
+            let mut or_clauses: Vec<String> = Vec::new();
+            for terms in &or_groups {
+                let mut ands: Vec<String> = Vec::new();
+                for term in terms {
+                    let text_part = like_cond(
+                        &["e.name", "e.matched"],
+                        term,
+                        &mut param_idx,
+                        &mut param_values,
+                    );
+                    // A bare number is far more likely to be an entity id than
+                    // part of an entity's name.
+                    if let Ok(entity_id) = term.trim().parse::<i64>() {
+                        param_idx += 1;
+                        param_values.push(Box::new(entity_id));
+                        ands.push(format!("({text_part} OR e.entity_id = ?{param_idx})"));
+                    } else {
+                        ands.push(text_part);
+                    }
+                }
+                or_clauses.push(format!("({})", ands.join(" AND ")));
+            }
+            match_selects.push(format!(
+                "SELECT e.session_uuid, e.log_id AS match_log_id \
+                 FROM {entity_from} WHERE {}{entity_row_filter}",
+                or_clauses.join(" OR ")
+            ));
+            if text_scope.is_none() {
+                search_mode = "entity".to_string();
+            } else {
+                search_mode = format!("{search_mode}+entity");
+            }
+        }
+    }
+
+    if !match_selects.is_empty() {
+        let union = match_selects.join(" UNION ALL ");
+        search_cte = format!(
+            "{feedback_origins_cte}, search_sessions AS (\
+                SELECT session_uuid, MIN(match_log_id) AS match_log_id \
+                FROM ({union}) \
+                GROUP BY session_uuid\
+            )"
+        );
+        filtered_from =
+            "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
     } else if is_feedback_filter {
         search_cte = format!(
             "{feedback_origins_cte}, feedback_sessions AS (\
@@ -3862,6 +4225,7 @@ async fn export_conversations_for_ai(
         "query": args.query.clone(),
         "queryRegex": args.query_regex.unwrap_or(false),
         "queryScope": args.query_scope.clone(),
+        "queryEntities": args.query_entities.unwrap_or(false),
         "queryIds": args.query_ids.unwrap_or(false),
         "queryIdsOnly": args.query_ids_only.unwrap_or(false),
         "queryIdType": args.query_id_type.clone(),
@@ -3901,6 +4265,14 @@ async fn export_conversations_for_ai(
     if jsonl_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
         jsonl_path.set_extension("jsonl");
     }
+
+    // From here on the command is one long await with two genuinely slow phases
+    // in it, and the renderer cannot see the boundary between them — or tell
+    // "the save dialog is open" from "it is working" — without being told.
+    let _ = app.emit(
+        AI_EXPORT_PROGRESS_EVENT,
+        serde_json::json!({ "phase": "querying" }),
+    );
 
     let db = db_state.inner().clone();
     let (sessions, search_mode, planned_turns) = tauri::async_runtime::spawn_blocking(move || {
@@ -4001,6 +4373,15 @@ ORDER BY p.first_ts DESC"#,
             serde_json::Value::String(search_mode),
         );
     }
+    let _ = app.emit(
+        AI_EXPORT_PROGRESS_EVENT,
+        serde_json::json!({
+            "phase": "writing",
+            "sessionCount": sessions.len(),
+            "interactionCount": planned_turns,
+        }),
+    );
+
     let jsonl_path_for_work = jsonl_path.clone();
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -4683,10 +5064,18 @@ async fn delete_interactions_by_dates(
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
             args.dates.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
 
-        // Remove stale FTS5 entries in one set-based statement before deleting
+        // Remove stale FTS5 and entity entries in set-based statements before
+        // deleting the interactions they point at.
         let _ = tx.execute(
             &format!(
                 "DELETE FROM interactions_fts WHERE rowid IN \
+                 (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
+            ),
+            params_refs.as_slice(),
+        );
+        let _ = tx.execute(
+            &format!(
+                "DELETE FROM entity_index WHERE log_id IN \
                  (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
             ),
             params_refs.as_slice(),
@@ -7413,3 +7802,489 @@ mod fts_semantics {
         assert_eq!(n, 1);
     }
 }
+
+/// Conversation search: what a query is allowed to match, and what it must not.
+///
+/// Every test here drives the real [`build_session_filter_query`] against a real
+/// (in-memory) database with the real FTS index, because each of these bugs was
+/// invisible in the SQL and only showed up in the rows that came back.
+#[cfg(test)]
+mod conv_search {
+    use super::*;
+
+    struct Turn<'a> {
+        log_id: i64,
+        session: &'a str,
+        user: &'a str,
+        bot: &'a str,
+        article_ids: &'a str,
+        dialog_paths: &'a str,
+        recognition_details: &'a str,
+    }
+
+    impl<'a> Default for Turn<'a> {
+        fn default() -> Self {
+            Turn {
+                log_id: 0,
+                session: "s",
+                user: "",
+                bot: "",
+                article_ids: "",
+                dialog_paths: "",
+                recognition_details: "",
+            }
+        }
+    }
+
+    fn search_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        conn
+    }
+
+    fn add(conn: &Connection, t: Turn) {
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             timestamp_end, culture, interaction_value, output_text, main_interaction_type, \
+             all_interaction_types, article_ids, dialog_paths, recognition_details, \
+             recognition_quality, imported_at) \
+             VALUES (?1,'u',?2,'2026-06-01T09:00:00','2026-06-01T09:00:00','nl',?3,?4,\
+                     'Question','Question',?5,?6,?7,0.9,0)",
+            params![
+                t.log_id,
+                t.session,
+                t.user,
+                t.bot,
+                t.article_ids,
+                t.dialog_paths,
+                t.recognition_details
+            ],
+        )
+        .expect("insert turn");
+        conn.execute(
+            "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, dialog_paths) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![t.log_id, t.user, t.bot, t.article_ids, t.dialog_paths],
+        )
+        .expect("index turn");
+        for (entity_id, name, matched) in entity_index_rows(t.recognition_details) {
+            conn.execute(
+                "INSERT OR IGNORE INTO entity_index(log_id, session_uuid, entity_id, name, matched) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![t.log_id, t.session, entity_id, name, matched],
+            )
+            .expect("index entity");
+        }
+    }
+
+    /// The sessions a search returns, in a stable order.
+    fn found(conn: &Connection, args: &GetSessionsArgs) -> Vec<String> {
+        let fq = build_session_filter_query(conn, args).expect("build query");
+        let sql = format!(
+            "WITH base_sessions AS (SELECT s.* FROM session_summary s {base_where}) \
+             {search_cte}, filtered_sessions AS ({filtered_from}) \
+             SELECT session_uuid FROM filtered_sessions ORDER BY session_uuid",
+            base_where = fq.base_where,
+            search_cte = fq.search_cte,
+            filtered_from = fq.filtered_from,
+        );
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).expect("prepare search");
+        stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0))
+            .expect("run search")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect search")
+    }
+
+    fn text_args(query: &str, scope: &str) -> GetSessionsArgs {
+        GetSessionsArgs {
+            query: Some(query.to_string()),
+            query_scope: Some(scope.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// A column filter in FTS5 binds to the phrase that follows it and nothing
+    /// more, so `interaction_value : a OR b` scopes only `a` — `b` was free to
+    /// match the bot's answer. That is why "search user messages" kept returning
+    /// conversations where only the bot had said the word.
+    #[test]
+    fn a_user_scoped_search_never_matches_the_bot_side() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "user-said-it", user: "waar kan ik parkeren", bot: "bij de hoofdingang", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "bot-said-it", user: "goedemiddag", bot: "je kunt parkeren bij de hoofdingang", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        assert_eq!(found(&conn, &text_args("parkeren", "user")), vec!["user-said-it"]);
+        assert_eq!(found(&conn, &text_args("parkeren", "bot")), vec!["bot-said-it"]);
+
+        // The OR form is the one that broke: only the first group was scoped.
+        assert_eq!(
+            found(&conn, &text_args("parkeren | fietsen", "user")),
+            vec!["user-said-it"],
+            "every OR group must stay inside the scoped columns"
+        );
+    }
+
+    /// With no column filter at all, an unscoped search also matched the two id
+    /// columns in the index — so a plain number found conversations by their
+    /// dialog path rather than by anything anyone said.
+    #[test]
+    fn an_unscoped_search_still_leaves_the_id_columns_alone() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "only-in-path", user: "hallo", bot: "hoi", article_ids: r#"["dn-6391-4"]"#, dialog_paths: r#"{"EndedOrInProgress" : "6391:2/15/4"}"#, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "actually-said", user: "mijn code is 6391", bot: "dank je", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        assert_eq!(found(&conn, &text_args("6391", "both")), vec!["actually-said"]);
+        // …unless the caller asks for the id columns explicitly.
+        let mut with_ids = text_args("6391", "both");
+        with_ids.query_ids = Some(true);
+        assert_eq!(found(&conn, &with_ids), vec!["actually-said", "only-in-path"]);
+    }
+
+    /// `www.efteling.nl` as an FTS5 bareword is a *syntax error*, so the search
+    /// failed outright; quoting it makes it a phrase, but the tokenizer drops
+    /// the dots, so `www efteling nl` would match it too. Both halves matter.
+    #[test]
+    fn a_term_with_punctuation_searches_and_matches_exactly() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "with-dots", user: "kijk op www.efteling.nl", bot: "", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "without-dots", user: "kijk op www efteling nl", bot: "", ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "priced", user: "kost dat €10,- per stuk", bot: "", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        assert_eq!(found(&conn, &text_args("www.efteling.nl", "user")), vec!["with-dots"]);
+        assert_eq!(found(&conn, &text_args("€10,-", "user")), vec!["priced"]);
+        // A term the tokenizer cannot represent at all must still search.
+        assert_eq!(found(&conn, &text_args("€", "user")), vec!["priced"]);
+    }
+
+    /// Punctuation-exactness is per OR group: a row that matched the clean group
+    /// must not be held to the other group's exact check, and vice versa.
+    #[test]
+    fn an_exact_check_only_applies_to_the_group_that_needed_it() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "with-dots", user: "zie www.efteling.nl", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "without-dots", user: "zie www efteling nl", ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "other-group", user: "openingstijden vandaag", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        assert_eq!(
+            found(&conn, &text_args("www.efteling.nl | openingstijden", "user")),
+            vec!["other-group", "with-dots"]
+        );
+    }
+
+    /// A `-` is what tells Dialog and Node apart, which is what lets them be one
+    /// filter instead of two pills the user has to choose between.
+    #[test]
+    fn a_minus_turns_a_dialog_id_into_a_node_id() {
+        assert_eq!(IdTarget::parse("6391", "dialog"), Some(IdTarget::Dialog(6391)));
+        assert_eq!(IdTarget::parse("6391-4", "dialog"), Some(IdTarget::Node(6391, 4)));
+        assert_eq!(IdTarget::parse(" 6391 - 4 ", "dialog"), Some(IdTarget::Node(6391, 4)));
+        assert_eq!(IdTarget::parse("1234", "article"), Some(IdTarget::Article(1234)));
+        // An Article never carries a node, so this is a typo, not a node search.
+        assert_eq!(IdTarget::parse("1234-5", "article"), None);
+        assert_eq!(IdTarget::parse("nonsense", "dialog"), None);
+    }
+
+    /// The old `LIKE '%qa-123%'` matched `qa-1234` too, and `dn-6391-4` matched
+    /// `dn-6391-42`. Ids are now compared whole.
+    #[test]
+    fn an_id_search_matches_the_whole_id_not_a_prefix() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "article-123", user: "a", article_ids: r#"["qa-123"]"#, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "article-1234", user: "b", article_ids: r#"["qa-1234"]"#, ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "node-4", user: "c", article_ids: r#"["dn-6391-4"]"#, dialog_paths: r#"{"EndedOrInProgress" : "6391:2/15/4"}"#, ..Default::default() });
+        add(&conn, Turn { log_id: 4, session: "node-42", user: "d", article_ids: r#"["dn-6391-42"]"#, dialog_paths: r#"{"EndedOrInProgress" : "6391:2/42"}"#, ..Default::default() });
+        add(&conn, Turn { log_id: 5, session: "other-dialog", user: "e", article_ids: r#"["dn-5803-4"]"#, dialog_paths: r#"{"EndedOrInProgress" : "5803:4"}"#, ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let id_args = |q: &str, kind: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            query_ids_only: Some(true),
+            query_id_type: Some(kind.to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(found(&conn, &id_args("123", "article")), vec!["article-123"]);
+        assert_eq!(found(&conn, &id_args("4", "article")), Vec::<String>::new());
+        // A Dialog id finds every conversation that touched the dialog…
+        assert_eq!(found(&conn, &id_args("6391", "dialog")), vec!["node-4", "node-42"]);
+        // …and adding the node narrows it to that one node.
+        assert_eq!(found(&conn, &id_args("6391-4", "dialog")), vec!["node-4"]);
+        // The node number alone must not pull in a different dialog's node 4.
+        assert_eq!(found(&conn, &id_args("5803-4", "dialog")), vec!["other-dialog"]);
+    }
+
+    /// A dialog path visited through, but not answered from, still counts —
+    /// that is the question "did anyone reach this node" actually asks.
+    #[test]
+    fn a_node_walked_through_counts_as_a_hit() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "walked", user: "a", article_ids: r#"["dn-6391-18"]"#, dialog_paths: r#"{"EndedOrInProgress" : "6391:2/15/3/18"}"#, ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+        let args = GetSessionsArgs {
+            query: Some("6391-15".to_string()),
+            query_ids_only: Some(true),
+            query_id_type: Some("dialog".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &args), vec!["walked"]);
+    }
+
+    /// The recognizer stores the entity it matched, not the words the user
+    /// typed, so an entity search finds conversations whose message text does
+    /// not contain the search term at all.
+    #[test]
+    fn entities_are_searchable_even_when_the_words_are_not() {
+        let conn = search_conn();
+        let details = r#"{"entityMatches": [{"name": "FLES_2", "match": "wijn", "entityId": 2611, "displayName": "WIJN"}]}"#;
+        add(&conn, Turn { log_id: 1, session: "wine", user: "mag ik een fles rood meenemen", bot: "nee", recognition_details: details, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "says-wijn", user: "wijn", bot: "nee", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let entity_only = |q: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            query_scope: Some("none".to_string()),
+            query_entities: Some(true),
+            ..Default::default()
+        };
+        // The displayName, the matched text, and the entity id all find it.
+        assert_eq!(found(&conn, &entity_only("wijn")), vec!["wine"]);
+        assert_eq!(found(&conn, &entity_only("2611")), vec!["wine"]);
+        // The message text is off the table in entity-only mode.
+        assert_eq!(found(&conn, &entity_only("fles rood")), Vec::<String>::new());
+
+        // Combined with a text scope, both sources contribute.
+        let both = GetSessionsArgs {
+            query: Some("wijn".to_string()),
+            query_scope: Some("user".to_string()),
+            query_entities: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &both), vec!["says-wijn", "wine"]);
+    }
+
+    /// Turning every toggle off has to keep searching *something*; an empty
+    /// result set would read as "no matches" rather than "you switched it off".
+    #[test]
+    fn an_empty_toggle_set_falls_back_to_searching_the_text() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "s", user: "parkeren", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+        assert_eq!(found(&conn, &text_args("parkeren", "none")), vec!["s"]);
+    }
+
+    /// The FTS index only *narrows* an id search; the exact check decides. Point
+    /// `CAI_TEST_DB` at a copy of a real conversations database to confirm the
+    /// pair returns exactly what a boundary-exact `LIKE` over the whole table
+    /// does — the ground truth the fast path has to reproduce. Skips silently
+    /// when the variable is unset.
+    #[test]
+    fn an_id_search_on_a_real_database_matches_an_exhaustive_scan() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            return;
+        };
+        let conn = Connection::open(&path).expect("open test database");
+
+        let dialogs: Vec<i64> = conn
+            .prepare(
+                "SELECT DISTINCT CAST(SUBSTR(dialog_paths, INSTR(dialog_paths, ': \"') + 3) AS INTEGER) \
+                 FROM interactions WHERE dialog_paths LIKE '%:%' LIMIT 5",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        for dialog in dialogs.into_iter().filter(|d| *d > 0) {
+            let expected: Vec<String> = conn
+                .prepare(
+                    "SELECT DISTINCT s.session_uuid FROM session_summary s \
+                     WHERE s.has_real_user_input = 1 AND EXISTS ( \
+                       SELECT 1 FROM interactions i WHERE i.session_uuid = s.session_uuid \
+                         AND (i.dialog_paths LIKE '%\"' || ?1 || ':%' \
+                              OR i.article_ids LIKE '%\"dn-' || ?1 || '-%')) \
+                     ORDER BY 1",
+                )
+                .unwrap()
+                .query_map(params![dialog], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+
+            let args = GetSessionsArgs {
+                query: Some(dialog.to_string()),
+                query_ids_only: Some(true),
+                query_id_type: Some("dialog".to_string()),
+                ..Default::default()
+            };
+            assert_eq!(found(&conn, &args), expected, "dialog {dialog}");
+        }
+    }
+
+    /// The import path and the one-time backfill must produce the same rows, or
+    /// an older database would search differently from a freshly imported one.
+    #[test]
+    fn the_entity_backfill_matches_what_an_import_would_have_indexed() {
+        let details = r#"{"entityMatches": [
+            {"name": "SHUTTLESERVICE_1", "match": "shuttle service", "entityId": 617, "displayName": "SHUTTLESERVICE"},
+            {"name": "DIENST", "match": "service", "entityId": 93, "displayName": ""}
+        ]}"#;
+        let conn = Connection::open_in_memory().expect("mem db");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             recognition_details, imported_at) VALUES (1,'u','s','2026-06-01T09:00:00',?1,0)",
+            params![details],
+        )
+        .expect("insert");
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO entity_index(log_id, session_uuid, entity_id, name, matched) \
+             SELECT i.log_id, i.session_uuid, \
+                    json_extract(e.value, '$.entityId'), \
+                    LOWER(TRIM(COALESCE(NULLIF(json_extract(e.value, '$.displayName'), ''), \
+                                        json_extract(e.value, '$.name'), ''))), \
+                    LOWER(TRIM(COALESCE(json_extract(e.value, '$.match'), ''))) \
+             FROM interactions i, json_each(i.recognition_details, '$.entityMatches') e \
+             WHERE i.recognition_details IS NOT NULL \
+               AND i.recognition_details != '' \
+               AND json_valid(i.recognition_details) \
+               AND json_type(i.recognition_details, '$.entityMatches') = 'array' \
+               AND LOWER(TRIM(COALESCE(NULLIF(json_extract(e.value, '$.displayName'), ''), \
+                                       json_extract(e.value, '$.name'), ''))) != ''",
+        )
+        .expect("backfill");
+
+        let mut backfilled: Vec<String> = conn
+            .prepare("SELECT entity_id || '|' || name || '|' || matched FROM entity_index")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        backfilled.sort();
+
+        let mut imported: Vec<String> = entity_index_rows(details)
+            .into_iter()
+            .map(|(id, name, matched)| format!("{}|{name}|{matched}", id.unwrap_or(-1)))
+            .collect();
+        imported.sort();
+
+        assert_eq!(backfilled, imported);
+        // The empty displayName falls back to the internal name, in both paths.
+        assert!(imported.iter().any(|r| r.contains("|dienst|service")));
+    }
+}
+
+/// Conversation-search timings against a real database.
+///
+/// Not assertions — a measurement harness. Point `CAI_TEST_DB` at a copy of a
+/// real conversations database and run:
+///   CAI_TEST_DB=/path/to/copy.db cargo test --release perf::search_cost -- --nocapture --ignored
+#[cfg(test)]
+mod search_perf {
+    use super::*;
+
+    fn time_search(conn: &Connection, label: &str, args: &GetSessionsArgs) {
+        let started = Instant::now();
+        let fq = build_session_filter_query(conn, args).expect("build query");
+        let sql = format!(
+            "WITH base_sessions AS (SELECT s.* FROM session_summary s {base_where}) \
+             {search_cte}, filtered_sessions AS ({filtered_from}) \
+             SELECT COUNT(*) FROM filtered_sessions",
+            base_where = fq.base_where,
+            search_cte = fq.search_cte,
+            filtered_from = fq.filtered_from,
+        );
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let hits: i64 = conn
+            .prepare(&sql)
+            .expect("prepare")
+            .query_row(params.as_slice(), |r| r.get(0))
+            .expect("run");
+        println!(
+            "{label:<44} {:>6} ms   {hits:>6} sessions   [{}]",
+            started.elapsed().as_millis(),
+            fq.search_mode
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn search_cost() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            println!("set CAI_TEST_DB to a copy of a real conversations database");
+            return;
+        };
+        let conn = open_db(&path).expect("open test database");
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
+            .unwrap_or(0);
+        let entities: i64 = conn
+            .query_row("SELECT COUNT(*) FROM entity_index", [], |r| r.get(0))
+            .unwrap_or(0);
+        println!("{rows} interactions, {entities} indexed entities\n");
+
+        // The ids actually present, so the timings are of a search that hits.
+        let article: String = conn
+            .query_row(
+                "SELECT REPLACE(SUBSTR(article_ids, INSTR(article_ids, 'qa-') + 3), '\"]', '') \
+                 FROM interactions WHERE article_ids LIKE '%qa-%' LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        let dialog: String = conn
+            .query_row(
+                "SELECT SUBSTR(dialog_paths, INSTR(dialog_paths, ': \"') + 3, \
+                        INSTR(SUBSTR(dialog_paths, INSTR(dialog_paths, ': \"') + 3), ':') - 1) \
+                 FROM interactions WHERE dialog_paths LIKE '%:%' LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+
+        let id_args = |q: &str, kind: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            query_ids_only: Some(true),
+            query_id_type: Some(kind.to_string()),
+            ..Default::default()
+        };
+        time_search(&conn, &format!("article id qa-{article}"), &id_args(&article, "article"));
+        time_search(&conn, &format!("dialog id {dialog}"), &id_args(&dialog, "dialog"));
+        time_search(
+            &conn,
+            "text, user scope",
+            &GetSessionsArgs {
+                query: Some("openingstijden".to_string()),
+                query_scope: Some("user".to_string()),
+                ..Default::default()
+            },
+        );
+        time_search(
+            &conn,
+            "text with punctuation (exact re-check)",
+            &GetSessionsArgs {
+                query: Some("www.efteling.nl".to_string()),
+                query_scope: Some("both".to_string()),
+                ..Default::default()
+            },
+        );
+        time_search(
+            &conn,
+            "entities only",
+            &GetSessionsArgs {
+                query: Some("wijn".to_string()),
+                query_scope: Some("none".to_string()),
+                query_entities: Some(true),
+                ..Default::default()
+            },
+        );
+    }
+}
+
