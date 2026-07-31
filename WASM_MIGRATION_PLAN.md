@@ -127,6 +127,47 @@ from, so the architecture holds.
 Also note `PRAGMA journal_mode` returning something other than what was asked is
 not an error in SQLite. Any code that assumes WAL took effect should check.
 
+### `std::time` traps on wasm — a clean compile proves nothing about runtime
+
+The best illustration of why this migration needs runtime verification rather
+than build output. `Instant::now()` and `SystemTime::now()` do not return an
+error on `wasm32-unknown-unknown` — they reach an `unreachable` instruction,
+which is a **trap**, not a panic. `panic = "abort"` means `catch_unwind` cannot
+contain it, and a trap poisons the module instance, so recovery means reloading
+the entire worker.
+
+Probed side by side in one module:
+
+| Call | Result |
+| --- | --- |
+| `std::time::Instant::now()` | **`RuntimeError: unreachable`** |
+| `std::time::SystemTime::now()` | **`RuntimeError: unreachable`** |
+| `clock::Instant::now()` + `elapsed()` (the seam) | OK |
+| `clock::now_unix_secs()` (the seam) | OK — `1785527710`, i.e. 2026 |
+
+The exposure was **21 sites across 7 core functions**: `open_db`,
+`import_csv_into`, `finalize_import_run_into`, `purge_old`, `repair_fts_index`,
+`now_iso`, `window_day_hours`. `open_db` reads the clock, so *opening a
+database* would have taken the module down — and the crate compiled cleanly
+either way.
+
+`src/clock.rs` is now the only place the core reads a clock. Natively it is a
+straight re-export of `std::time::Instant`, so the desktop build and all 57 tests
+keep std's exact behaviour; on wasm it is a `Date::now()`-backed stand-in with the
+same `now()`/`elapsed()` surface, so no call site changed.
+
+- **`Date::now()` rather than `performance.now()`** trades monotonicity for
+  needing no `web-sys` dependency and no Window-vs-WorkerGlobalScope branch. Fair
+  here: every use is import/query instrumentation in whole milliseconds, nothing
+  correctness depends on. A backwards clock adjustment can make an interval read
+  as zero (it is clamped) but never negative.
+- Millisecond resolution is real: a sub-millisecond span reports `0`.
+
+**This is also the first confirmed member of the host seam**, and the one a
+paper-designed trait would most likely have missed — the 42 commands make file
+I/O, dialogs and HTTP obvious, and say nothing about the clock. It is the
+evidence for doing the vertical slice before designing the abstraction.
+
 ### Capability probes must run in the worker
 
 The spike's main-thread probe reported `syncAccessHandle=false` while the worker

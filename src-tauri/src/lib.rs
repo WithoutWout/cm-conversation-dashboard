@@ -20,6 +20,10 @@ mod analytics_api;
 #[cfg(not(target_arch = "wasm32"))]
 mod tauri_host;
 
+/// The single seam the core reads a clock through — `std::time::Instant::now()`
+/// and `SystemTime::now()` *trap* on wasm rather than failing gracefully.
+mod clock;
+
 /// `main.rs` entry point. Only the desktop build has one.
 #[cfg(not(target_arch = "wasm32"))]
 pub use tauri_host::run;
@@ -32,7 +36,8 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use clock::Instant;
+use std::time::SystemTime;
 
 const WATCH_EVENT_NAME: &str = "data-folder-updated";
 
@@ -760,11 +765,7 @@ fn open_flagged_db(path: &str) -> Result<Connection, String> {
 }
 
 fn now_iso() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let secs = clock::now_unix_secs();
     let s = secs % 60;
     let m = (secs / 60) % 60;
     let h = (secs / 3600) % 24;
@@ -1384,11 +1385,7 @@ fn is_iso_second_prefix(s: &str) -> bool {
 /// afterwards when this returns a non-zero count.
 fn purge_old(conn: &Connection, max_days: u64) -> i64 {
     let cutoff = {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let secs = clock::now_unix_secs();
         secs.saturating_sub(max_days * 24 * 3600)
     };
     // timestamp_start stored as ISO text "YYYY-MM-DDTHH:MM:SS"
@@ -1677,10 +1674,7 @@ fn import_csv_into(
     let c_feedback        = col("FeedbackInfo");
     let c_output_meta     = col("OutputMetadata");
 
-    let now_secs = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+    let now_secs = clock::now_unix_secs() as i64;
 
     // Sessions this import (and any purge it triggers) touches, so the summary
     // rebuild at the end costs the size of the import instead of the size of
