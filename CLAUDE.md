@@ -950,14 +950,25 @@ launches without the SmartScreen prompt that a manually downloaded one shows.
 - Requires no new capability grant: the renderer goes through our own commands,
   not the plugin's JS API.
 - **`bundle.targets` must include `app`, and that is for the updater, not for
-  distribution.** `dmg` is not an updater-enabled target, so with only
-  `["nsis", "dmg"]` the macOS build produces `.app.tar.gz` and its `.sig` and
-  then discards them — `Warn The bundler was configured to create updater
-  artifacts but no updater-enabled targets were built`, then `Signature not
-  found for the updater JSON. Skipping upload...`. Both jobs still go green and
-  the release still publishes; the only symptom is a `latest.json` with no
-  `darwin-*` key, so every Mac silently reports itself up to date forever. That
-  is what shipped in v0.12.0. Windows ignores the extra target.
+  distribution.** `dmg` is not an updater-enabled target, so without `app` the
+  macOS build produces `.app.tar.gz` and its `.sig` and then discards them —
+  `Warn The bundler was configured to create updater artifacts but no
+  updater-enabled targets were built`, then `Signature not found for the updater
+  JSON. Skipping upload...`. Both jobs still go green and the release still
+  publishes; the only symptom is a `latest.json` with no `darwin-*` key, so every
+  Mac silently reports itself up to date forever. That is what shipped in v0.12.0.
+- **`bundle.targets` is macOS-only (`["dmg", "app"]`) and Windows builds with
+  `--no-bundle`.** Windows ships one artifact — the portable zip, built from the
+  plain `.exe` by the workflow itself. The NSIS installer was dropped once the
+  portable build could update itself: its only real advantage was managed
+  updates, it was blocked by the IT policy the portable build exists to work
+  around, and across six releases it was downloaded once, by the author, testing.
+  - **If it ever comes back, `latest.json` must keep a `windows-x86_64-nsis`
+    key.** An installed copy asks for exactly that key, and a missing one is the
+    same silent "up to date forever" failure as the macOS bug above. Pointing
+    installed copies at `windows-portable` also works — the swap is fine inside
+    an NSIS `currentUser` install under `%LOCALAPPDATA%`, it just leaves a stale
+    version in Add/Remove Programs.
 - **Check the manifest after every release**, because the above failed silently:
   `gh release download <tag> --pattern latest.json -O - | jq '.platforms|keys'`
   should list `windows-portable`, `windows-x86_64-nsis` and `darwin-aarch64`.
