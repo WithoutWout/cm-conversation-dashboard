@@ -137,6 +137,30 @@ offers a reload.
   reloading first would just re-run the current build from the old cache and look
   like the button did nothing. A 3 s timeout reloads anyway rather than leaving a
   dead button.
+- **When there is no waiting worker, Reload must not be a plain `location.reload()`,
+  and this was a real shipped bug.** `version.json` can report a new build before
+  or without the worker noticing (a partial upload, a host serving stale HTML, a
+  registration that never revalidated). Navigation is cache-first, so reloading
+  re-served the exact build being escaped: the banner returned, the button looked
+  broken, and it looped forever — reproduced deliberately by advancing only
+  `version.json`. `applyUpdate` now calls `reg.update()` first, and failing that
+  drops every cache **and** unregisters before reloading.
+  - Both, in that order. Dropping caches alone leaves the *old* worker active,
+    which would refill its own build-named cache with the new build's files — the
+    mismatch cache-first exists to prevent.
+  - Skipped when `navigator.onLine === false`: it would delete the offline shell
+    and leave nothing to load.
+  - Neither the database nor any setting lives in the Cache API or the
+    registration, so this touches only the copy of the app.
+- **A forced refresh that changes nothing must stop asking.** `applyUpdate` records
+  the build it forced for in `sessionStorage`; if the next load still reports the
+  old build, the banner names both ids and says the host or CDN is caching
+  `index.html` — **with no Reload button**, because no client-side action can fix
+  it. Session-scoped, and cleared once the new build is actually running, so a
+  later genuine update gets the normal offer.
+- **The banner guard is keyed on its message, not a boolean.** With a boolean the
+  first message shown froze the banner for the page's life, so a genuine update
+  arriving after the "your host is caching" message had nowhere to put its button.
 - `checkForUpdates()` returns `unsupported` **on purpose**, not as a stub: the
   banner it feeds offers a GitHub download, which is meaningless here, and
   returning `available` would show two banners, one pointing at a desktop
