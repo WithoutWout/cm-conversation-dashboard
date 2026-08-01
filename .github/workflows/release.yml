@@ -74,40 +74,42 @@ jobs:
           # `notes`, and `check_for_updates` passes it to the renderer. Rewrite
           # it per release — stale notes are now visible in two places.
           releaseBody: |
-            ## What's new in v0.12.0
+            ## What's new in v0.13.0
 
-            **The app now updates itself.** This is the last version you have to
-            download and replace by hand.
+            A tidier Settings screen, a backup that actually restores everything,
+            and a fix for automatic updates on macOS.
 
-            ### Updating from here on
+            ### Settings backup is now complete
 
-            When a new version is out you get the usual notification — but the button
-            now says **Install and restart**. The app downloads the new version,
-            replaces itself and reopens, in about ten seconds.
+            **Settings → Backup…** now saves your Analytics API credentials too —
+            client ID, client secret, customer key and project key. Restoring a
+            backup on a new machine used to leave you re-entering all of them by
+            hand, which meant it was not really a backup.
 
-            The portable Windows version updates itself just like the installed one.
-            Nothing gets installed, no administrator rights are needed, and the app
-            stays exactly where you put it — including on a USB stick or a work
-            laptop where installers are blocked.
+            > ⚠️ **The backup file now contains live credentials.** Anyone who
+            > opens it can read your CM.com data. Treat it exactly like a password:
+            > don't email it, don't put it in shared storage, and delete it once
+            > you've restored. The app warns you before writing it, and on macOS
+            > and Linux the file is created readable only by you.
 
-            A useful side effect on Windows: because the app downloads the update
-            itself rather than through a browser, the new version starts without the
-            SmartScreen **"Meer informatie → Toch uitvoeren"** warning.
+            Your database path and data folder are still left out — restoring those
+            on another machine just points the app at something that isn't there.
 
-            ### If it can't
+            ### Settings is less cluttered
 
-            If the app is in a folder it isn't allowed to write to — a read-only
-            network share, for instance — it says so and offers the manual download
-            instead, rather than giving you a button that fails halfway. Moving the
-            app somewhere like your Documents folder is enough to fix it.
+            The backup panel used to sit at the top of Settings, pushing the actual
+            settings down behind a heading, a description, two buttons and a
+            warning. It now lives behind a **Backup…** button in the Settings
+            header, so the first thing you see is the setting you came to change.
 
-            ### Safety
+            ### Fixed: automatic updates on macOS
 
-            Every update is cryptographically signed and the signature is checked
-            before anything is replaced. An update that has been tampered with, or
-            that arrives incomplete, is refused. Your previous version is kept until
-            the new one has started successfully, so a bad update can always be
-            undone.
+            v0.12.0 introduced self-updating, but macOS builds shipped without the
+            file the updater needs — so Macs reported themselves up to date
+            forever. Fixed. **If you are on v0.12.0 on a Mac, this release will be
+            offered to you normally**, and updates work from here on.
+
+            Windows was unaffected.
 
             ---
 
