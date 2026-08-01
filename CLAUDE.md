@@ -90,14 +90,62 @@ Rules that are easy to break:
   points at. `build/CAIDashboard.icon/` is the Icon Composer source (a glyph plus
   a fill colour), so its `Assets/Image.png` is a mask, not a finished icon.
 - The service worker's cache is **build-scoped** (`BUILD_ID`), which keeps the JS
-  and the `.wasm` a consistent pair. The cost is that the first load after a
-  deploy can serve the previous build; the next load is current.
+  and the `.wasm` a consistent pair. See `### Versions and updating` for why every
+  request — navigations included — is cache-first, and how a new deploy reaches
+  the user.
 
 Ported so far: content export loading (Articles/Dialogs/Entities), session
 search, CSV import, date range, daily stats, hour coverage, context options,
 session interactions, begin/finalize import run, the Analytics API import.
 Everything else rejects with a "not available in the web app yet" message from
 `wasm-bridge.js` rather than failing silently.
+
+### Versions and updating
+
+The desktop app checks GitHub releases and points at an installer. Neither half
+applies to a page already served from the user's own host, so the web build asks
+a different question — *is this tab still running what the server has?* — and
+offers a reload.
+
+- **`build-web.sh` stamps one id in three places**: `sw.js` (its cache name),
+  `<html data-app-version data-build-id>` (what the tab is running), and
+  `version.json` (what the server is serving). The version itself is read out of
+  `src-tauri/Cargo.toml`, the same place `get_version` reads it natively, so the
+  two builds cannot report different numbers. This is what fixed the app
+  reporting **`vweb`** — `getVersion()` was falling back to a literal `"web"`
+  because nothing ever set the attribute.
+- **Every request is cache-first, navigations included, and that is the fix for a
+  real bug.** Navigations used to be network-first while assets stayed
+  cache-first, which can serve a **mismatched pair**: a fresh `index.html` plus
+  scripts from the *previous* build's cache, because a cache hit for
+  `wasm-bridge.js` cannot know the HTML asking for it changed. Half-new is worse
+  than uniformly old here — the renderer and the `.wasm` must agree. One cache
+  therefore only ever holds one self-consistent build.
+- **`sw.js` deliberately does not call `skipWaiting()` on install.** A new worker
+  installs the next build into a second cache and waits, so nothing swaps under a
+  running page. `clients.claim()` stays in `activate`, because reaching activate
+  now means either every old page closed or one explicitly asked for the swap.
+- **Two independent signals raise the same banner**, because they fail
+  differently: the worker's own `updatefound`, and `version.json` fetched
+  `no-store` (which still works if a registration is stuck, a host caches oddly,
+  or a tab has been open for a week). `version.json` is the one URL the fetch
+  handler refuses to answer from the cache — a cached copy would report the
+  running build as the latest one forever.
+- **The prompt is suppressed on first install** (`navigator.serviceWorker.controller`
+  absent), or a first-time visitor is told to reload for nothing.
+- Reload posts `SKIP_WAITING` and waits for `controllerchange` before reloading —
+  reloading first would just re-run the current build from the old cache and look
+  like the button did nothing. A 3 s timeout reloads anyway rather than leaving a
+  dead button.
+- `checkForUpdates()` returns `unsupported` **on purpose**, not as a stub: the
+  banner it feeds offers a GitHub download, which is meaningless here, and
+  returning `available` would show two banners, one pointing at a desktop
+  installer.
+- Verified end to end on a clean origin: first install precaches 19 files and
+  shows no banner; a second deploy leaves the running tab on the old build with
+  both caches present and raises the banner; Reload swaps to the new build and
+  drops the old cache; and with the server stopped the app still loads, opens
+  OPFS and queries, with no false update prompt.
 
 ### Analytics API in the web build
 

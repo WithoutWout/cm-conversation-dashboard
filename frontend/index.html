@@ -8725,6 +8725,7 @@
          shim below wins. analytics-web.js first, so window.__analyticsWeb exists
          by the time the bridge wires the Analytics commands to it. -->
     <script src="analytics-web.js"></script>
+    <script src="web-update.js"></script>
     <script src="wasm-bridge.js"></script>
 
     <script>
@@ -16242,6 +16243,11 @@
         if (el) el.textContent = `Content Dashboard \u00b7 v${v}`
         const verEl = document.getElementById("settingsCurrentVersion")
         if (verEl) verEl.textContent = `v${v}`
+        // The web build also has a build id, and it is the thing that actually
+        // distinguishes two uploads of the same version \u2014 so it belongs next to
+        // the version rather than only in the update check.
+        const build = window.__webUpdate?.running().buildId
+        if (verEl && build) verEl.textContent = `v${v} \u00b7 build ${build}`
       })
 
       // ── Startup update check ────────────────────────────────────────

@@ -57,7 +57,8 @@ echo "==> assembling $DIST"
 # Only the files the app actually loads. Deliberately explicit: a `cp -r` of
 # frontend/ would also ship tests/ and any scratch file left lying around.
 for f in index.html search-worker.js db-worker.js wasm-bridge.js \
-         analytics-web.js analytics-fetch.js manifest.json sw.js cmwhitelogo.svg; do
+         analytics-web.js analytics-fetch.js web-update.js \
+         manifest.json sw.js cmwhitelogo.svg; do
   cp "$ROOT/frontend/$f" "$DIST/$f"
 done
 mkdir -p "$DIST/vendor" "$DIST/icons"
@@ -77,17 +78,42 @@ find "$DIST" -name '.DS_Store' -delete
 rm -f "$DIST"/pkg/package.json "$DIST"/pkg/.gitignore "$DIST"/pkg/README.md
 rm -f "$DIST"/pkg/*.d.ts
 
-# Stamp the build id into the service worker. This is the whole cache strategy:
-# a new id means a new cache name, so the previous build is dropped wholesale.
-BUILD_ID="$(date -u +%Y%m%d-%H%M%S)-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
-if sed --version >/dev/null 2>&1; then
-  sed -i "s/__BUILD_ID__/$BUILD_ID/" "$DIST/sw.js"          # GNU
-else
-  sed -i '' "s/__BUILD_ID__/$BUILD_ID/" "$DIST/sw.js"       # BSD/macOS
-fi
+# ── version stamping ────────────────────────────────────────────────────────
+#
+# Three consumers, one id:
+#   sw.js         names its cache after it, so a new build gets a new cache
+#   index.html    carries it on <html> so the running page knows what it is
+#   version.json  is what the running page compares itself against
+#
+# The version itself comes from Cargo.toml, the same place `get_version` reads it
+# on the desktop, so the two builds cannot report different numbers.
+APP_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$ROOT/src-tauri/Cargo.toml" | head -1)"
+[[ -n "$APP_VERSION" ]] || { echo "could not read version from src-tauri/Cargo.toml" >&2; exit 1; }
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+BUILD_ID="$(date -u +%Y%m%d-%H%M%S)-$COMMIT"
+
+# `sed -i` takes an argument on BSD/macOS and not on GNU.
+sedi() { if sed --version >/dev/null 2>&1; then sed -i "$@"; else sed -i '' "$@"; fi; }
+
+sedi "s/__BUILD_ID__/$BUILD_ID/" "$DIST/sw.js"
 grep -q "$BUILD_ID" "$DIST/sw.js" || { echo "failed to stamp BUILD_ID into sw.js" >&2; exit 1; }
 
-echo "==> done: $BUILD_ID"
+# web-update.js reads both off <html>; without this the app reported "vweb".
+sedi "s|<html lang=\"en\">|<html lang=\"en\" data-app-version=\"$APP_VERSION\" data-build-id=\"$BUILD_ID\">|" "$DIST/index.html"
+grep -q "data-build-id=\"$BUILD_ID\"" "$DIST/index.html" || {
+  echo "failed to stamp the version into index.html — did the <html> tag change?" >&2; exit 1; }
+
+cat > "$DIST/version.json" <<JSON
+{
+  "version": "$APP_VERSION",
+  "buildId": "$BUILD_ID",
+  "commit": "$COMMIT",
+  "builtAt": "$BUILT_AT"
+}
+JSON
+
+echo "==> done: v$APP_VERSION  build $BUILD_ID"
 du -sh "$DIST" | awk '{print "    total: " $1}'
 find "$DIST" -name '*.wasm' -exec du -h {} \; | awk '{print "    wasm:  " $1}'
 echo "    upload the *contents* of dist-web/ to your web host"

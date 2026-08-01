@@ -279,9 +279,19 @@
       return Promise.resolve()
     },
     openPreviewWindow: (url) => window.electronAPI.openUrl(url),
-    getVersion: () => Promise.resolve(document.documentElement.dataset.appVersion || "web"),
+    // Stamped into index.html by build-web.sh, so this is the real crate version
+    // rather than the literal "web" it used to report.
+    getVersion: () => Promise.resolve(document.documentElement.dataset.appVersion || "dev"),
+    /// Always "unsupported", and that is not a stub. The shared banner this feeds
+    /// offers a GitHub *download*, which is meaningless for a page already served
+    /// from the user's own host. web-update.js runs the real check and offers a
+    /// reload instead; returning "available" here would show both banners, one of
+    /// them pointing at a desktop installer.
     checkForUpdates: () =>
-      Promise.resolve({ status: "unsupported", message: "The web app updates itself." }),
+      Promise.resolve({
+        status: "unsupported",
+        message: "The web app checks its own build and offers a reload.",
+      }),
     onDataFolderUpdated: () => Promise.resolve(() => {}),
 
     // ── not ported yet ────────────────────────────────────────────────────
@@ -345,14 +355,8 @@
     .then((e) => window.__analyticsWeb?.adoptEndpoints(e))
     .catch(() => {})
 
-  // Register the service worker so the app is installable and works offline.
-  // Deliberately after the bridge is in place — registration failing must never
-  // stop the app from running, it only costs offline support.
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker
-        .register("sw.js")
-        .catch((e) => console.warn("service worker registration failed:", e.message))
-    })
-  }
+  // The service worker is registered by web-update.js, which also owns the
+  // update prompt. Registering here as well would give two owners for one
+  // registration and race the `updatefound` listener that has to be attached
+  // before the worker finishes installing.
 })()
