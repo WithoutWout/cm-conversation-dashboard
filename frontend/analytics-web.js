@@ -77,8 +77,12 @@
   const nowSecs = () => Math.floor(Date.now() / 1000)
   const tokenValid = (t) => !!t.accessToken && (!t.expiresAt || t.expiresAt > nowSecs() + skewSecs)
 
+  /// Describes a cached token only. Whether the *absence* of one is a problem
+  /// depends on the mechanism in use, so that judgement belongs to `tokenStatus`
+  /// rather than here — this used to end in "paste one below", which read as an
+  /// instruction even when a relay was set up and nothing needed pasting.
   function describeToken(t) {
-    if (!t.accessToken) return { ok: false, text: "No token — paste one below." }
+    if (!t.accessToken) return { ok: false, text: "No token cached yet." }
     if (!t.expiresAt) return { ok: true, text: "Token stored (no expiry given)." }
     const left = t.expiresAt - nowSecs()
     if (left <= 0) return { ok: false, text: "Token expired — paste a fresh one." }
@@ -246,23 +250,15 @@
           text-transform: none;
         }
       </style>
-      <div class="analytics-web-note">
-        <strong>Access token</strong> — a browser cannot request one itself.
-        Microsoft answers the token endpoint cross-origin for browser sign-in
-        flows, but refuses it for the client-secret flow the Analytics API
-        requires, at every origin. The desktop app is unaffected because CORS is a
-        browser rule, not a server one. So the token has to come from somewhere
-        that is not a browser:
-      </div>
-
       <label class="analytics-web-label" for="setting-analytics-token-proxy"
-        >Token relay URL <span class="analytics-web-tag">recommended</span></label
+        >Token relay <span class="analytics-web-tag">set this up once</span></label
       >
       <p class="hint" style="margin:2px 0 6px">
         Upload <code>cai-token.php</code> from <code>tools/token-proxy/</code>
-        next to this app and put its name here. It holds the client secret, so
-        tokens refresh on their own and there is nothing to paste. A Cloudflare
-        Worker version is there too, for hosts that cannot run PHP.
+        next to this app, then put its name and its <code>SHARED_KEY</code> here.
+        It holds the client secret and mints tokens for you, so they refresh
+        automatically and there is nothing to paste — ever. A Cloudflare Worker
+        version is included for hosts that cannot run PHP.
       </p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="setting-analytics-token-proxy" type="text" autocomplete="off"
@@ -273,14 +269,29 @@
           value="${esc(cfg.tokenProxyKey)}" style="flex:1 1 150px;min-width:0" />
       </div>
 
-      <details style="margin-top:12px">
+      <details style="margin-top:10px">
         <summary class="hint" style="cursor:pointer">
-          No server-side code on your host? Paste a token instead
+          Why can't the browser get a token by itself?
+        </summary>
+        <div class="analytics-web-note" style="margin-top:6px">
+          Microsoft answers the token endpoint cross-origin for browser sign-in
+          flows, but refuses it for the client-secret flow the Analytics API
+          requires — at every origin, with no setting that changes it. The desktop
+          app is unaffected because CORS is a rule browsers enforce, not servers,
+          and it uses a native HTTP client. So the secret has to live somewhere
+          that is not a browser. The relay is the smallest such place: one file,
+          and your secret never reaches this page.
+        </div>
+      </details>
+
+      <details style="margin-top:6px">
+        <summary class="hint" style="cursor:pointer">
+          Can't run any server-side code? Paste a token manually instead
         </summary>
         <p class="hint" style="margin:6px 0">
-          Mint one in your terminal and paste it below. Tokens last about 24 hours,
-          so this needs repeating roughly daily — which is why the relay above is
-          the better option wherever it is possible.
+          A last resort for a purely static host. Tokens last about 24 hours, so
+          this has to be repeated roughly daily — set up the relay above instead
+          wherever that is possible.
         </p>
         <textarea id="setting-analytics-token" rows="3" spellcheck="false"
           autocomplete="off" placeholder="Paste an access token (eyJ0eXAi…)"
@@ -294,28 +305,38 @@
     `
     grid.insertAdjacentElement("afterend", block)
 
-    /// Says which mechanism is in play, not just whether a token is cached — with
-    /// a relay configured, "No token" is not a problem, it just means one has not
-    /// been fetched yet.
+    /// Says which mechanism is in play, not merely whether a token is cached.
+    ///
+    /// Two things this must not do: report "no token" as a problem when a relay is
+    /// configured (none has simply been fetched yet), and tell an unconfigured user
+    /// to paste something. The relay is the setup step, so that is what an empty
+    /// state points at.
     const tokenStatus = () => {
       const el = document.getElementById("analyticsTokenStatus")
       if (!el) return
       const c = loadCfg()
       const t = loadTok()
+      const d = describeToken(t)
+
       if (c.tokenProxyUrl) {
-        const d = describeToken(t)
-        const missingKey = !c.tokenProxyKey
-        el.textContent = missingKey
-          ? "Relay set, but no relay key — the relay will refuse the request."
-          : t.accessToken
-            ? `Relay set. ${d.text} Refreshes automatically.`
-            : "Relay set. A token will be fetched on the first import."
-        el.style.color = missingKey ? "var(--orange)" : "var(--green)"
+        if (!c.tokenProxyKey) {
+          el.textContent = "Relay set, but no relay key — the relay will refuse the request."
+          el.style.color = "var(--orange)"
+          return
+        }
+        el.textContent = t.accessToken
+          ? `Relay active. ${d.text} Refreshes automatically.`
+          : "Relay active. A token is fetched automatically on the first import."
+        el.style.color = "var(--green)"
         return
       }
-      const d = describeToken(t)
-      el.textContent = d.text
-      el.style.color = d.ok ? "var(--green)" : "var(--muted)"
+      if (t.accessToken) {
+        el.textContent = `Using a manually pasted token. ${d.text} Set up a relay above to stop repeating this.`
+        el.style.color = d.ok ? "var(--muted)" : "var(--orange)"
+        return
+      }
+      el.textContent = "Not set up yet — add a token relay above."
+      el.style.color = "var(--muted)"
     }
     refreshTokenStatus = tokenStatus
 
