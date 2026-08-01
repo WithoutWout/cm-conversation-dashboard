@@ -56,7 +56,8 @@ wasm-pack build "$ROOT/src-tauri" \
 echo "==> assembling $DIST"
 # Only the files the app actually loads. Deliberately explicit: a `cp -r` of
 # frontend/ would also ship tests/ and any scratch file left lying around.
-for f in index.html search-worker.js db-worker.js wasm-bridge.js manifest.json sw.js cmwhitelogo.svg; do
+for f in index.html search-worker.js db-worker.js wasm-bridge.js \
+         analytics-web.js analytics-fetch.js manifest.json sw.js cmwhitelogo.svg; do
   cp "$ROOT/frontend/$f" "$DIST/$f"
 done
 mkdir -p "$DIST/vendor" "$DIST/icons"

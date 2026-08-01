@@ -366,6 +366,59 @@ pub fn get_content_data() -> Result<String, JsValue> {
     })
 }
 
+// ── Analytics API ────────────────────────────────────────────────────────────
+//
+// Only the validators cross over. `frontend/analytics-web.js` owns the transport,
+// because the browser's transport *is* `fetch` — but it must not own the two
+// checks below, which are what keeps an HTML error page served with a `200` from
+// being imported as interaction rows.
+
+/// The endpoint constants and timeouts, so the browser client has no second copy
+/// of them to drift from.
+#[wasm_bindgen]
+pub fn analytics_endpoints() -> String {
+    let a = crate::analytics_api::TOKEN_URL;
+    let b = crate::analytics_api::TOKEN_RESOURCE;
+    let c = crate::analytics_api::API_BASE;
+    format!(
+        "{{\"tokenUrl\":{},\"tokenResource\":{},\"apiBase\":{},\
+          \"fetchTimeoutSecs\":{},\"tokenSkewSecs\":{}}}",
+        serde_json::to_string(a).unwrap_or_default(),
+        serde_json::to_string(b).unwrap_or_default(),
+        serde_json::to_string(c).unwrap_or_default(),
+        crate::analytics_api::FETCH_TIMEOUT_SECS,
+        crate::analytics_api::TOKEN_SKEW_SECS,
+    )
+}
+
+/// A [`FetchError`](crate::analytics_api::FetchError) as JSON, so the JS
+/// scheduler sees the same `{kind, message, retryable}` shape the Tauri command
+/// rejects with and its timeout-vs-backoff branch needs no second code path.
+fn fetch_err_json(e: crate::analytics_api::FetchError) -> JsValue {
+    JsValue::from_str(
+        &serde_json::to_string(&e).unwrap_or_else(|_| {
+            "{\"kind\":\"invalidResponse\",\"message\":\"unserializable error\",\"retryable\":false}"
+                .into()
+        }),
+    )
+}
+
+/// Enforces the request-window rules before a request is made: parseable UTC
+/// timestamps, ordered, strictly under 24 hours, inside the 90-day retention.
+#[wasm_bindgen]
+pub fn analytics_validate_window(start_utc: &str, end_utc: &str) -> Result<(), JsValue> {
+    crate::analytics_api::validate_window(start_utc, end_utc).map_err(fetch_err_json)
+}
+
+/// Confirms a response body really is the interaction-log CSV, returning the
+/// delimiter it detected.
+#[wasm_bindgen]
+pub fn analytics_validate_csv(body: &str) -> Result<String, JsValue> {
+    crate::analytics_api::validate_csv_header(body)
+        .map(|d| d.to_string())
+        .map_err(fetch_err_json)
+}
+
 /// Runs arbitrary read-only SQL. Diagnostics for the port — not a renderer API.
 #[wasm_bindgen]
 pub fn scalar_query(sql: &str) -> Result<String, JsValue> {

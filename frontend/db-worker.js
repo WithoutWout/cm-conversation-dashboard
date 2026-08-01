@@ -9,9 +9,16 @@
 // payload: a JSON string plus JSON.parse beats a serde-wasm-bindgen object graph
 // by 2–3.5x, and is ~20x cheaper to structured-clone out of the worker.
 import init, * as wasm from "./pkg/cai_dashboard_lib.js"
+import { createAnalyticsFetcher } from "./analytics-fetch.js"
 
 let ready = null
 const ensureReady = () => (ready ??= init())
+
+// The Analytics API download lives here rather than on the main thread so a day's
+// CSV never crosses the worker boundary: it is fetched, validated and imported on
+// this side. See analytics-fetch.js for why the token is passed in instead.
+let analytics = null
+const analyticsFetcher = () => (analytics ??= createAnalyticsFetcher(wasm))
 
 // name -> (arg) => result. Anything returning a JSON string is parsed here so the
 // renderer gets objects, matching what Tauri's invoke() resolved to.
@@ -62,6 +69,37 @@ const handlers = {
         a.deferFinalize ?? undefined
       )
     ),
+
+  // ── Analytics API ──
+  analyticsEndpoints: () => json(wasm.analytics_endpoints()),
+  analyticsFetchWindow: (a) => analyticsFetcher().fetchWindow(a),
+  analyticsCleanup: (a) => analyticsFetcher().cleanup(a?.paths),
+  analyticsLimitations: () => analyticsFetcher().limitations(),
+
+  /// Imports a window this worker downloaded. Separate from `importCsvBytes`
+  /// because the CSV is already here — encoding it in place beats sending it to
+  /// the main thread and straight back.
+  importAnalyticsWindow: (a) => {
+    const f = analyticsFetcher()
+    const csv = f.take(a.tempPath)
+    try {
+      return json(
+        wasm.import_csv(
+          new TextEncoder().encode(csv),
+          a.tempPath,
+          a.maxAgeDays === null || a.maxAgeDays === undefined
+            ? undefined
+            : BigInt(a.maxAgeDays),
+          a.delimiter ?? undefined,
+          a.deferFinalize ?? undefined
+        )
+      )
+    } finally {
+      // Mirrors the native path's `finally`: the temp copy goes whether the
+      // import succeeded, failed or was cancelled.
+      f.cleanup([a.tempPath])
+    }
+  },
 }
 
 self.onmessage = async (e) => {
@@ -72,7 +110,16 @@ self.onmessage = async (e) => {
     if (!fn) throw new Error(`${cmd} is not available in the web app yet`)
     self.postMessage({ id, ok: true, result: await fn(arg) })
   } catch (err) {
-    self.postMessage({ id, ok: false, error: String(err?.message ?? err) })
+    // `fetchError` carries the {kind, message, retryable} taxonomy the import
+    // scheduler branches on. Without it every failure would arrive as a plain
+    // string and normalise to a non-retryable `http`, so a timeout would never
+    // split its window and a 429 would never back off.
+    self.postMessage({
+      id,
+      ok: false,
+      error: String(err?.message ?? err),
+      fetchError: err?.fetchError,
+    })
   }
 }
 

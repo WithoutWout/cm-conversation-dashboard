@@ -12,9 +12,12 @@
 //! * WAL is unavailable under the browser's OPFS VFS (`journal_mode` reports
 //!   back `delete`), so WAL-specific tuning belongs behind a target gate.
 
-/// Analytics API client — `reqwest` with a native TLS backend, so native only
-/// for now. The wasm port needs `reqwest`'s fetch backend instead.
-#[cfg(not(target_arch = "wasm32"))]
+/// Analytics API client. Builds for both targets, but the browser gets only the
+/// pure half — config types, error taxonomy, and the two validators — because the
+/// transport there is `fetch` in `frontend/analytics-web.js`. That split is not a
+/// porting shortcut: the OAuth2 token endpoint sends no CORS headers, so a
+/// browser cannot mint a token at all, while the interactions endpoint answers
+/// `Access-Control-Allow-Origin: *` and can be read directly.
 mod analytics_api;
 
 #[cfg(not(target_arch = "wasm32"))]

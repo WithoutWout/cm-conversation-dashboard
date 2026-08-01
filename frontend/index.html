@@ -8721,8 +8721,10 @@
       </div>
     </div>
 
-    <!-- Browser build only. Sets window.electronAPI from the OPFS/wasm worker and
-         then no-ops on the desktop, where the inline Tauri shim below wins. -->
+    <!-- Browser build only. Both no-op on the desktop, where the inline Tauri
+         shim below wins. analytics-web.js first, so window.__analyticsWeb exists
+         by the time the bridge wires the Analytics commands to it. -->
+    <script src="analytics-web.js"></script>
     <script src="wasm-bridge.js"></script>
 
     <script>
@@ -17989,6 +17991,19 @@
           if (s !== "skipped" && s !== "done") todo.push(i)
         }
         _impRecountDone()
+
+        // Anything the current host cannot check, said once per run rather than
+        // per window. In the browser build two of the desktop client's checks are
+        // genuinely unavailable (a browser cannot read the response headers that
+        // reveal pagination or Retry-After) — silence there would read as "all
+        // the same safeguards ran".
+        if (window.electronAPI.analyticsLimitations) {
+          try {
+            for (const note of (await window.electronAPI.analyticsLimitations()) || []) {
+              _impLogLine(`Note: ${note}`)
+            }
+          } catch (_) {}
+        }
 
         let nextFetch = null
         let failure = null

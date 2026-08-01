@@ -27,12 +27,24 @@
   const booted = new Promise((r) => (bootResolve = r))
 
   worker.onmessage = (e) => {
-    const { id, ok, result, error, ready } = e.data
+    const { id, ok, result, error, fetchError, ready } = e.data
     if (ready) return bootResolve()
     const entry = pending.get(id)
     if (!entry) return
     pending.delete(id)
-    ok ? entry.resolve(result) : entry.reject(new Error(error))
+    if (ok) return entry.resolve(result)
+    // An Analytics failure carries its {kind, retryable} classification, which the
+    // import scheduler branches on to choose between splitting the window and
+    // backing off. An Error would flatten every one of them to a non-retryable
+    // `http`, so the object is preserved — with `message` still present, which is
+    // all `_impNormErr` requires.
+    if (fetchError) {
+      const err = new Error(fetchError.message || error)
+      Object.assign(err, fetchError)
+      err.fetchError = fetchError
+      return entry.reject(err)
+    }
+    entry.reject(new Error(error))
   }
   worker.onerror = (e) => {
     console.error("db-worker failed:", e.message, e.filename, e.lineno)
@@ -235,6 +247,16 @@
     // its progress UI and its begin/finalize bracketing then work unmodified.
     selectCsvFiles: () => pickCsvFiles(),
     importInteractionsCsv: async (filePath, maxAgeDays, delimiter, deferFinalize) => {
+      // A window this app downloaded is already sitting in the worker; importing
+      // it in place avoids sending a day's CSV out and straight back in.
+      if (typeof filePath === "string" && filePath.startsWith("analytics://")) {
+        return call("importAnalyticsWindow", {
+          tempPath: filePath,
+          maxAgeDays,
+          delimiter,
+          deferFinalize,
+        })
+      }
       const file = pickedFiles.get(filePath)
       if (!file) throw new Error(`No picked file named ${filePath}`)
       const bytes = new Uint8Array(await file.arrayBuffer())
@@ -281,17 +303,47 @@
     getFlaggedSessions: notYet("Flagged conversations"),
     getFlaggedSessionInteractions: notYet("Flagged conversations"),
     saveFlaggedNote: notYet("Flagged notes"),
-    getAnalyticsConfig: notYet("Analytics API settings"),
-    saveAnalyticsConfig: notYet("Analytics API settings"),
-    testAnalyticsConnection: notYet("Analytics API settings"),
-    fetchAnalyticsWindow: notYet("The Analytics API import"),
-    cleanupAnalyticsTemp: () => Promise.resolve(0),
+    // ── Analytics API ─────────────────────────────────────────────────────
+    // `analytics-web.js` owns config and the token; the worker owns the fetch.
+    // If that script somehow failed to load, these fall back to the same "not
+    // available" rejection every other unported command gives, rather than
+    // throwing on `undefined`.
+    getAnalyticsConfig: () =>
+      Promise.resolve(
+        window.__analyticsWeb
+          ? window.__analyticsWeb.getConfig()
+          : { configured: false, hasSecret: false, clientId: "", customerKey: "", projectKey: "", culture: "", environment: "Production", activeSessionOnly: false }
+      ),
+    saveAnalyticsConfig: (args) =>
+      window.__analyticsWeb
+        ? Promise.resolve(window.__analyticsWeb.saveConfig(args))
+        : notYet("Analytics API settings")(),
+    testAnalyticsConnection: () =>
+      window.__analyticsWeb
+        ? window.__analyticsWeb.testConnection(call)
+        : notYet("Analytics API settings")(),
+    fetchAnalyticsWindow: (startUtc, endUtc) =>
+      window.__analyticsWeb
+        ? window.__analyticsWeb.fetchWindow(call, startUtc, endUtc)
+        : notYet("The Analytics API import")(),
+    cleanupAnalyticsTemp: (paths) =>
+      call("analyticsCleanup", { paths: paths || null }).catch(() => 0),
+    /// Browser-only, and absent on the desktop on purpose: the import modal only
+    /// prints these when the host declares some, so the desktop log stays clean.
+    analyticsLimitations: () => call("analyticsLimitations").catch(() => []),
     resizeToAvailableHeight: () => Promise.resolve(),
   }
 
   // Open the OPFS database immediately: unlike the desktop app there is no path
   // to pick first, so waiting for a user action would only delay the first query.
   window.electronAPI.setDbPath().catch((e) => console.error("open database:", e))
+
+  // Take the Analytics endpoint constants from Rust rather than keeping a second
+  // copy of them in JS. Best-effort: a failure here only costs the Settings copy
+  // button its exact URL, so it must not break startup.
+  call("analyticsEndpoints")
+    .then((e) => window.__analyticsWeb?.adoptEndpoints(e))
+    .catch(() => {})
 
   // Register the service worker so the app is installable and works offline.
   // Deliberately after the bridge is in place — registration failing must never

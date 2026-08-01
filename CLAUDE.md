@@ -95,9 +95,64 @@ Rules that are easy to break:
 
 Ported so far: content export loading (Articles/Dialogs/Entities), session
 search, CSV import, date range, daily stats, hour coverage, context options,
-session interactions, begin/finalize import run.
+session interactions, begin/finalize import run, the Analytics API import.
 Everything else rejects with a "not available in the web app yet" message from
 `wasm-bridge.js` rather than failing silently.
+
+### Analytics API in the web build
+
+**One of the two requests the import needs is blocked by CORS, and which one is
+the entire design.** Measured against the live hosts, not assumed:
+
+| Endpoint | `Access-Control-Allow-Origin` | Reachable from a page |
+| --- | --- | --- |
+| `analytics.digitalcx.com/…/interactions` | `*` | **yes** — a bad token returns a real `403` body |
+| `login.microsoftonline.com/…/oauth2/token` | absent (v1 *and* v2.0) | **no** — `fetch` rejects `TypeError` before any credential is checked |
+
+So the data is readable and the token is not. The token is therefore **supplied**
+rather than minted: pasted by the user (the SOP's tokens last ~24h, so this is a
+once-a-day action), or fetched from an optional proxy URL they host themselves.
+
+- **There is no client-secret field in the web build**, and that is a security
+  *improvement* over the desktop's `0600` file, not a gap. In the paste flow the
+  secret never leaves the user's terminal — the Settings pane hands them a `curl`
+  to run there; with a proxy it never leaves the proxy. Nothing in the browser is
+  trusted with it. The two fields are **hidden, not removed**:
+  `loadAnalyticsConfigIntoSettings` and `readAnalyticsConfigFromSettings` address
+  them by id with no null guard, so deleting the nodes throws before Settings can
+  open.
+- **The validators are shared with Rust, the transport is not.** `validate_window`
+  and `validate_csv_header` compile for both targets and are reached through
+  `wasm::analytics_validate_window` / `analytics_validate_csv`; only the pure half
+  of `analytics_api.rs` builds for wasm. They are what stops a JSON error object
+  or an HTML page served with a `200` from being imported as interaction rows, so
+  a JS reimplementation would be the one place a second copy must not exist. The
+  wasm exports reject with serialized `FetchError` JSON so the scheduler's
+  `{kind, retryable}` branch needs no web-only path.
+- **`validate_window` is why `now_epoch_secs` goes through `clock`.** Its
+  90-day retention check reads the clock, and `SystemTime::now()` *traps* on wasm
+  — this would have taken the module down on the first window checked.
+- **The download runs in the db worker, not on the main thread.** A day's CSV is
+  fetched, validated and imported without ever being structured-cloned across the
+  worker boundary. `analytics-fetch.js` holds the bodies in a Map keyed by an
+  `analytics://…` synthetic path — the browser's answer to the native temp
+  directory, with the same lifecycle and the same `cleanupAnalyticsTemp` call. The
+  main thread never sees the CSV.
+- **Two native safeguards are genuinely absent, and the import log says so.** The
+  host sends no `Access-Control-Expose-Headers`, so only the CORS-safelisted
+  response headers are readable: pagination cannot be detected the way
+  `detect_pagination` detects it, and `Retry-After` is invisible (backoff falls
+  back to exponential, which `_impBackoffMs` already handles). `analyticsLimitations`
+  reports both once per run rather than leaving silence that reads as "all the
+  same checks ran".
+- **A `403` is classified `unauthorized` here** though the native client maps only
+  `401`. The native path always holds a fresh token; a stale *pasted* one returns
+  `403 {"message":"Missing token or token is incorrect"}`, and calling that a
+  generic `http` error would report "unexpected error" when the fix is "paste a
+  fresh token".
+- Config lives in `localStorage` under `cm-analytics-config`, the token under
+  `cm-analytics-token` with its expiry read from the JWT's own `exp` claim
+  (unverified — it is a refresh hint, not a security decision).
 
 ---
 

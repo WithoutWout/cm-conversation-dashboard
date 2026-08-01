@@ -15,19 +15,45 @@
 //! own politeness cap. The 24-hour rule is our invariant too — the SOP says a
 //! full-day request *frequently times out*, not that it is rejected — and it
 //! exists so every window maps 1:1 onto a UTC day the importer can reason about.
+//!
+//! ## What compiles for wasm, and why only that
+//!
+//! This module builds for **both** targets, but the browser gets only three
+//! things: the endpoint constants, the error taxonomy, and the two validators
+//! [`validate_window`] and [`validate_csv_header`]. Transport, token cache, temp
+//! files and the config file are all native — see `frontend/analytics-web.js` for
+//! the browser side, and `## Analytics API in the web build` in CLAUDE.md for why
+//! the split falls exactly here (the token endpoint sends no CORS headers, so a
+//! browser cannot mint a token even though it *can* read the data endpoint).
+//!
+//! The validators are shared rather than reimplemented in JS because they are
+//! what stands between an HTML error page served with a `200` and a corrupted
+//! import — and they already have tests.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+// Only `AnalyticsConfig` is deserialized, and that is native-only.
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Deserialize;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const TOKEN_URL: &str = "https://login.microsoftonline.com/digitalcx.onmicrosoft.com/oauth2/token";
-const TOKEN_RESOURCE: &str = "https://digitalcx.onmicrosoft.com/external-api";
-const API_BASE: &str = "https://analytics.digitalcx.com";
+// `pub` so the browser client can read them through `wasm::analytics_endpoints`
+// instead of hardcoding a second copy of the URLs.
+pub const TOKEN_URL: &str =
+    "https://login.microsoftonline.com/digitalcx.onmicrosoft.com/oauth2/token";
+pub const TOKEN_RESOURCE: &str = "https://digitalcx.onmicrosoft.com/external-api";
+pub const API_BASE: &str = "https://analytics.digitalcx.com";
 
 /// Subdirectory of the app cache dir holding in-flight downloads.
+#[cfg(not(target_arch = "wasm32"))]
 pub const TEMP_DIR_NAME: &str = "analytics-tmp";
+#[cfg(not(target_arch = "wasm32"))]
 const CONFIG_FILE_NAME: &str = "analytics-api.json";
 
 /// A single request must stay strictly under 24 hours (`00:00:00`–`23:59:59`).
@@ -39,13 +65,21 @@ const MAX_WINDOW_SECS: i64 = 24 * 3600;
 /// SOP: data can only be queried up to 90 days back.
 const RETENTION_DAYS: i64 = 90;
 
+#[cfg(not(target_arch = "wasm32"))]
 const TOKEN_TIMEOUT_SECS: u64 = 30;
-const FETCH_TIMEOUT_SECS: u64 = 300;
+pub const FETCH_TIMEOUT_SECS: u64 = 300;
 /// Refresh a little before actual expiry so a long fetch can't outlive it.
-const TOKEN_SKEW_SECS: u64 = 120;
+pub const TOKEN_SKEW_SECS: u64 = 120;
 
 // ── Config ───────────────────────────────────────────────────────────────────
+//
+// Native only. `AnalyticsConfigView` exists to keep the client secret off the
+// IPC bridge, and that boundary has no browser counterpart: there is no second
+// process, and the code that sends the request is the renderer itself. So the
+// browser keeps its config in `localStorage` and there is nothing here to share.
+// That is a real security downgrade, and the Settings UI says so out loud.
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AnalyticsConfig {
@@ -58,6 +92,7 @@ pub struct AnalyticsConfig {
     pub active_session_only: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for AnalyticsConfig {
     fn default() -> Self {
         Self {
@@ -72,6 +107,7 @@ impl Default for AnalyticsConfig {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AnalyticsConfig {
     /// Every field the API needs is present.
     pub fn is_complete(&self) -> bool {
@@ -84,6 +120,7 @@ impl AnalyticsConfig {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// What the renderer is allowed to see — never includes the client secret.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +135,7 @@ pub struct AnalyticsConfigView {
     pub active_session_only: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<&AnalyticsConfig> for AnalyticsConfigView {
     fn from(c: &AnalyticsConfig) -> Self {
         Self {
@@ -113,10 +151,12 @@ impl From<&AnalyticsConfig> for AnalyticsConfigView {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn config_path(data_dir: &Path) -> PathBuf {
     data_dir.join(CONFIG_FILE_NAME)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_config(data_dir: &Path) -> AnalyticsConfig {
     match std::fs::read_to_string(config_path(data_dir)) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
@@ -124,6 +164,7 @@ pub fn load_config(data_dir: &Path) -> AnalyticsConfig {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn save_config(data_dir: &Path, cfg: &AnalyticsConfig) -> Result<(), String> {
     std::fs::create_dir_all(data_dir)
         .map_err(|e| format!("Cannot create config directory: {e}"))?;
@@ -140,13 +181,18 @@ pub fn save_config(data_dir: &Path, cfg: &AnalyticsConfig) -> Result<(), String>
 }
 
 // ── Shared state ─────────────────────────────────────────────────────────────
+//
+// Native only: the browser has no second thread to serialise against and no
+// place to keep a process-lifetime cache, so `analytics-web.js` owns the token.
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct CachedToken {
     access_token: String,
     expires_at: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct AnalyticsState {
     token: Mutex<CachedToken>,
     /// Caps in-flight API requests at one. Self-imposed politeness, not an API
@@ -157,6 +203,7 @@ pub struct AnalyticsState {
     temp_counter: AtomicU64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for AnalyticsState {
     fn default() -> Self {
         Self {
@@ -169,6 +216,11 @@ impl Default for AnalyticsState {
 
 // ── Errors ───────────────────────────────────────────────────────────────────
 
+// On wasm only the two validators construct these, but every variant must stay:
+// `analytics-web.js` classifies HTTP failures into the same `kind` strings, and
+// the scheduler's split-vs-backoff branch reads them. The taxonomy is the
+// contract, so it lives in one place even where one target only uses part of it.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FetchErrorKind {
@@ -222,6 +274,7 @@ impl FetchError {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn with_retry_after(mut self, secs: Option<u64>) -> Self {
         self.retry_after_secs = secs;
         self
@@ -267,11 +320,10 @@ pub fn parse_utc_iso(s: &str) -> Option<i64> {
     Some(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec)
 }
 
+/// Through `clock`, not `SystemTime`: `validate_window` runs in the browser too,
+/// where `SystemTime::now()` traps rather than erroring. See `clock.rs`.
 fn now_epoch_secs() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
+    crate::clock::now_unix_secs() as i64
 }
 
 /// Validate a requested window against the SOP's constraints.
@@ -364,6 +416,7 @@ pub fn validate_csv_header(body: &str) -> Result<char, FetchError> {
 /// Response headers that would mean the payload is only one page of the result.
 /// The SOP requires confirming the pagination mechanism before implementing it,
 /// so rather than guess we refuse to import what may be a partial day.
+#[cfg(not(target_arch = "wasm32"))]
 fn detect_pagination(headers: &reqwest::header::HeaderMap) -> Option<String> {
     for name in ["link", "x-next-link", "x-continuation-token", "x-has-more", "x-next-page"] {
         if let Some(v) = headers.get(name) {
@@ -382,6 +435,7 @@ fn detect_pagination(headers: &reqwest::header::HeaderMap) -> Option<String> {
 /// Only the delta-seconds form is honoured. The HTTP-date form is legal but
 /// needs a date parser this crate deliberately doesn't carry; the scheduler's
 /// own exponential backoff covers that case.
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
     // Cap it: a server asking us to wait an hour should stall the run, not hide
@@ -391,6 +445,7 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 
 // ── Token ────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 fn http_client(timeout_secs: u64) -> Result<reqwest::Client, FetchError> {
     reqwest::Client::builder()
         .user_agent("cm-conversation-dashboard")
@@ -399,6 +454,7 @@ fn http_client(timeout_secs: u64) -> Result<reqwest::Client, FetchError> {
         .map_err(|e| FetchError::new(FetchErrorKind::Network, format!("HTTP client error: {e}")))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AnalyticsState {
     fn cached_token(&self) -> Option<String> {
         let cache = self.token.lock().ok()?;
@@ -491,6 +547,7 @@ impl AnalyticsState {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn extract_oauth_error(body: &str) -> String {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
         let desc = v
@@ -505,6 +562,7 @@ fn extract_oauth_error(body: &str) -> String {
     body.chars().take(200).collect()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn classify_reqwest_error(e: &reqwest::Error, context: &str) -> FetchError {
     if e.is_timeout() {
         FetchError::new(
@@ -523,6 +581,7 @@ fn classify_reqwest_error(e: &reqwest::Error, context: &str) -> FetchError {
 
 // ── Fetch ────────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FetchOutcome {
@@ -533,6 +592,7 @@ pub struct FetchOutcome {
     pub duration_ms: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AnalyticsState {
     /// Download one window into a temp CSV. Holds the single-request permit for
     /// the whole call, so concurrent callers queue rather than overlap. See
@@ -703,10 +763,12 @@ impl AnalyticsState {
 
 // ── Temp file management ─────────────────────────────────────────────────────
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn temp_dir(cache_dir: &Path) -> PathBuf {
     cache_dir.join(TEMP_DIR_NAME)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// True when `candidate` is a file directly inside the temp directory.
 ///
 /// Guards the cleanup command: it accepts paths from the renderer, so it must
@@ -727,6 +789,7 @@ pub fn is_temp_path(cache_dir: &Path, candidate: &Path) -> bool {
             .unwrap_or(false)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Delete the given temp files, or every file in the temp directory when
 /// `paths` is empty. Returns how many files were removed.
 pub fn cleanup_temp(cache_dir: &Path, paths: &[String]) -> u32 {
