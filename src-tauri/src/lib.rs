@@ -5254,6 +5254,190 @@ fn save_analytics_config(
     Ok((&cfg).into())
 }
 
+// ── Settings backup ─────────────────────────────────────────────────────────
+//
+// The backup deliberately carries live credentials: a restore that leaves you
+// re-typing a client secret is not a restore. The file says so and the UI warns
+// before writing it.
+//
+// Both halves run in Rust for one reason: `analytics-api.json` holds the client
+// secret, and `getAnalyticsConfig` has never let it reach the renderer (see the
+// Tauri security rules in CLAUDE.md). Exporting it does not change that — Rust
+// merges the secret into the file it writes, and reads it back out on import
+// before handing the rest to the renderer. The secret goes to disk, which the
+// user asked for; it still never crosses the IPC bridge, which they did not.
+
+/// Key holding the Analytics API section inside a settings backup.
+const SETTINGS_BACKUP_ANALYTICS_KEY: &str = "analyticsApi";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsImportResult {
+    ok: bool,
+    canceled: bool,
+    /// The `settings` object verbatim — localStorage keys only, no credentials.
+    settings: serde_json::Value,
+    app_version: Option<String>,
+    schema_version: Option<u32>,
+    /// Whether the file carried Analytics API credentials that were restored.
+    analytics_restored: bool,
+}
+
+/// Merge the Analytics API credentials into the renderer's backup payload.
+///
+/// Split out of the command so the file format is testable without a save
+/// dialog — the whole point of this function is what ends up on disk.
+fn backup_with_analytics(
+    payload: &str,
+    cfg: &AnalyticsConfig,
+) -> Result<serde_json::Value, String> {
+    let mut doc: serde_json::Value =
+        serde_json::from_str(payload).map_err(|e| format!("Cannot build the backup: {e}"))?;
+    let obj = doc
+        .as_object_mut()
+        .ok_or_else(|| "Backup payload must be a JSON object.".to_string())?;
+    // An untouched config would write a block of empty strings that reads as
+    // "credentials were exported and they are blank" on restore.
+    if *cfg != AnalyticsConfig::default() {
+        obj.insert(
+            SETTINGS_BACKUP_ANALYTICS_KEY.to_string(),
+            serde_json::to_value(cfg).map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(doc)
+}
+
+/// Pull the Analytics API credentials out of a backup, if it carries any.
+///
+/// `Err` rather than `None` for a section that will not parse: a hand-edited or
+/// truncated file must not silently leave working credentials half-replaced.
+fn analytics_from_backup(doc: &serde_json::Value) -> Result<Option<AnalyticsConfig>, String> {
+    match doc.get(SETTINGS_BACKUP_ANALYTICS_KEY) {
+        None => Ok(None),
+        Some(section) => serde_json::from_value(section.clone())
+            .map(Some)
+            .map_err(|e| format!("The Analytics API section of that file is unreadable: {e}")),
+    }
+}
+
+/// Write a settings backup, merging in the Analytics API credentials.
+///
+/// `payload` is the renderer's JSON object; this adds the credentials the
+/// renderer cannot see and writes the result to a user-chosen path.
+#[tauri::command]
+async fn export_settings_backup(
+    app: AppHandle,
+    default_name: String,
+    payload: String,
+) -> Result<FileSaveResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let dir = analytics_data_dir(&app)?;
+    let doc = backup_with_analytics(&payload, &analytics_api::load_config(&dir))?;
+    let content = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .set_file_name(&default_name)
+        .save_file(move |path| {
+            let _ = tx.send(path.and_then(|fp| fp.into_path().ok()));
+        });
+
+    let Some(mut path) = rx.await.ok().flatten() else {
+        return Ok(FileSaveResult {
+            ok: false,
+            canceled: true,
+            path: None,
+        });
+    };
+    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        path.set_extension("json");
+    }
+    fs::write(&path, content).map_err(|e| format!("Cannot write the backup: {e}"))?;
+    // The file now holds a client secret — match analytics-api.json's own perms
+    // rather than leaving it world-readable in someone's Downloads folder.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(FileSaveResult {
+        ok: true,
+        canceled: false,
+        path: Some(path.to_string_lossy().into_owned()),
+    })
+}
+
+/// Read a settings backup, restoring the Analytics API credentials from it.
+///
+/// Returns everything *except* the credentials, which are written straight to
+/// `analytics-api.json` so they never pass through the renderer.
+#[tauri::command]
+async fn import_settings_backup(
+    app: AppHandle,
+    analytics: State<'_, SharedAnalytics>,
+) -> Result<SettingsImportResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .pick_file(move |path| {
+            let _ = tx.send(path.and_then(|fp| fp.into_path().ok()));
+        });
+
+    let Some(path) = rx.await.ok().flatten() else {
+        return Ok(SettingsImportResult {
+            ok: false,
+            canceled: true,
+            settings: serde_json::Value::Null,
+            app_version: None,
+            schema_version: None,
+            analytics_restored: false,
+        });
+    };
+
+    let text = fs::read_to_string(&path).map_err(|e| format!("Cannot read that file: {e}"))?;
+    let doc: serde_json::Value =
+        serde_json::from_str(&text).map_err(|_| "That file is not valid JSON.".to_string())?;
+
+    if doc.get("kind").and_then(|v| v.as_str()) != Some("settings") {
+        return Err("That does not look like a settings backup from this app.".into());
+    }
+
+    let mut analytics_restored = false;
+    if let Some(cfg) = analytics_from_backup(&doc)? {
+        analytics_api::save_config(&analytics_data_dir(&app)?, &cfg)?;
+        analytics.clear_token();
+        analytics_restored = true;
+        log::info!(target: "analytics", "credentials restored from a settings backup");
+    }
+
+    Ok(SettingsImportResult {
+        ok: true,
+        canceled: false,
+        settings: doc
+            .get("settings")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        app_version: doc
+            .get("appVersion")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        schema_version: doc
+            .get("schemaVersion")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        analytics_restored,
+    })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConnectionTestResult {
@@ -5838,6 +6022,8 @@ pub fn run() {
             install_update,
             get_version,
             save_collection_export,
+            export_settings_backup,
+            import_settings_backup,
             set_db_path,
             get_db_path,
             select_csv_files,
@@ -5880,6 +6066,77 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Settings backup ─────────────────────────────────────────────────────
+
+    fn a_real_analytics_config() -> AnalyticsConfig {
+        AnalyticsConfig {
+            client_id: "cid-123".into(),
+            client_secret: "SUPER-SECRET-VALUE".into(),
+            customer_key: "cust-key".into(),
+            project_key: "proj-key".into(),
+            culture: "nl-NL".into(),
+            environment: "Production".into(),
+            active_session_only: false,
+        }
+    }
+
+    const A_BACKUP: &str = r#"{"app":"cm-conversation-dashboard","kind":"settings",
+        "schemaVersion":2,"settings":{"cm-base-url":"https://example.test/"}}"#;
+
+    /// The point of exporting credentials at all: a restore that leaves you
+    /// re-typing a client secret is not a restore.
+    #[test]
+    fn a_backup_carries_the_client_secret() {
+        let doc = backup_with_analytics(A_BACKUP, &a_real_analytics_config()).unwrap();
+        let section = &doc[SETTINGS_BACKUP_ANALYTICS_KEY];
+        assert_eq!(section["clientSecret"], "SUPER-SECRET-VALUE");
+        assert_eq!(section["customerKey"], "cust-key");
+        // The renderer's own half must survive untouched beside it.
+        assert_eq!(doc["settings"]["cm-base-url"], "https://example.test/");
+    }
+
+    /// Writing a block of empty strings would read as "credentials were
+    /// exported and they are blank", which on restore is worse than silence.
+    #[test]
+    fn an_unconfigured_analytics_api_adds_no_section() {
+        let doc = backup_with_analytics(A_BACKUP, &AnalyticsConfig::default()).unwrap();
+        assert!(doc.get(SETTINGS_BACKUP_ANALYTICS_KEY).is_none());
+    }
+
+    #[test]
+    fn a_backup_round_trips_its_credentials() {
+        let cfg = a_real_analytics_config();
+        let doc = backup_with_analytics(A_BACKUP, &cfg).unwrap();
+        assert_eq!(analytics_from_backup(&doc).unwrap(), Some(cfg));
+    }
+
+    #[test]
+    fn a_backup_without_credentials_restores_none() {
+        let doc: serde_json::Value = serde_json::from_str(A_BACKUP).unwrap();
+        assert_eq!(analytics_from_backup(&doc).unwrap(), None);
+    }
+
+    /// A truncated or hand-edited section must not be silently skipped — that
+    /// would leave the localStorage half restored and the credentials stale.
+    #[test]
+    fn an_unreadable_analytics_section_is_an_error_not_a_skip() {
+        let doc: serde_json::Value =
+            serde_json::json!({ "kind": "settings", "analyticsApi": "not an object" });
+        assert!(analytics_from_backup(&doc).is_err());
+    }
+
+    /// The invariant the split between these two halves exists to protect: what
+    /// `import_settings_backup` hands back to the renderer is the `settings`
+    /// object alone, so the secret reaches disk but never the IPC bridge.
+    #[test]
+    fn the_secret_is_never_in_what_the_renderer_receives() {
+        let doc = backup_with_analytics(A_BACKUP, &a_real_analytics_config()).unwrap();
+        let to_renderer = doc.get("settings").cloned().unwrap();
+        assert!(!to_renderer.to_string().contains("SUPER-SECRET-VALUE"));
+        // And it really was in the file, so this test cannot pass vacuously.
+        assert!(doc.to_string().contains("SUPER-SECRET-VALUE"));
+    }
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory sqlite");

@@ -35,7 +35,8 @@ frontend/
   tests/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
-    conv-search.test.js, update-modal.test.js      — `npm run test:frontend`
+    conv-search.test.js, update-modal.test.js,
+    settings-backup.test.js                        — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
@@ -69,6 +70,8 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `install_update`      | `installUpdate()`                | Downloads the verified artifact, installs it, restarts. Portable Windows copies swap their own `.exe`; everything else uses the plugin's installer |
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }` |
+| `export_settings_backup` | `exportSettingsBackup(defaultName, payload)` | Merges the Analytics API credentials into the renderer's payload and writes the backup (`0600`). See `## Settings backup` |
+| `import_settings_backup` | `importSettingsBackup()`          | Picks a backup, restores the Analytics API credentials from it, returns everything else — `{ ok, canceled, settings, appVersion, schemaVersion, analyticsRestored }` |
 
 | `get_analytics_config`     | `getAnalyticsConfig()`            | Analytics API settings **without the client secret** — returns `hasSecret` only |
 | `save_analytics_config`    | `saveAnalyticsConfig(args)`       | Writes `analytics-api.json` to the app data dir (`0600`); a blank secret keeps the stored one |
@@ -661,10 +664,16 @@ The detail header states the collection in one line (`N items · N export rows �
   filter pills (GenAI / feedback / Low % / Zero %)
 
 <div#settingsModal>
+  header: Settings | Backup… (opens #settingsBackupModal) | ✕
   Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)
   Conversations tab: Halo Studio URL, low recognition threshold, chat copy format,
                      Analytics API (client ID / secret / customer key / project key /
                      culture / environment / activeSessionOnly / Test connection)
+
+<div#settingsBackupModal>
+  what the file does and does not contain
+  amber warning: the file holds live credentials, treat it as a password
+  Export settings / Import settings | status line
 
 <div#convImportModal>
   Source tabs (Analytics API / CSV file)
@@ -779,7 +788,7 @@ Always use these terms in the UI:
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 
-Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer.
+Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer. A settings backup does export them, and still does not break that rule; see `## Settings backup`.
 
 Example `cm-base-url` value: `https://www.cm.com/en-gb/app/aicloud/dbd80c7c-e9b1-44d2-9762-fb5ad1664b7f/Efteling/EFTELING/nl/`
 
@@ -793,6 +802,69 @@ Release URL pattern: `https://github.com/WithoutWout/cm-conversation-dashboard/r
 
 - Always use `WithoutWout` as the GitHub username, never `wouttonio`.
 - `check_for_updates` reads `releases/latest/download/latest.json`, not the GitHub API — see `## Self-update`.
+
+---
+
+## Settings backup
+
+Saves everything on the Settings screen to a file and restores it elsewhere.
+`SETTINGS_EXPORT_SCHEMA` is 2.
+
+**It lives behind a `Backup…` button in the Settings header, in its own
+`#settingsBackupModal`.** It used to sit above the Settings tabs, where its
+heading, description, two buttons, warning and status line were the first thing
+on a screen that exists to change a setting — four rows of chrome in front of
+the thing you opened Settings for. The modal opens *on top of* Settings rather
+than replacing it (`z-index: 300` against `.modal-overlay`'s 100), so closing it
+returns you to the tab you were on.
+
+**The file deliberately contains live credentials** — context URLs, the bearer
+token, and on the desktop the full Analytics API config including the client
+secret. A backup that leaves you re-typing a client secret is not a backup. The
+amber warning in the modal is what carries that risk and says so in those words;
+the export status line repeats it. Don't quietly narrow what is exported without
+changing that warning too.
+
+**`SETTINGS_EXPORT_KEYS` is an allowlist, not a denylist**, so a localStorage key
+added later defaults to *not* exported and this list stays the only place that
+decision is made. `SETTINGS_EXPORT_EXCLUDED` now holds only `cm-conv-db-path`,
+`cm-data-folder` and `cm-perf-debug` — paths stay out because restoring one on
+another machine points the app at something that isn't there, which is a
+different argument from the one that used to keep credentials out.
+
+**Both halves run in Rust, and that is what preserves the IPC rule.** The client
+secret has never crossed the bridge (`getAnalyticsConfig` returns `hasSecret`
+only). Exporting it does not change that: `export_settings_backup` merges the
+secret into the file *Rust* writes, and `import_settings_backup` reads it back
+out and writes `analytics-api.json` before handing the renderer the rest. The
+secret reaches disk, which the user asked for; it still never reaches the
+renderer, which they did not.
+`the_secret_is_never_in_what_the_renderer_receives` pins that, and is written so
+it cannot pass vacuously.
+
+- `backup_with_analytics` / `analytics_from_backup` are split out of the
+  commands so the on-disk format is testable without a file dialog.
+- **An unconfigured Analytics API adds no section at all.** A block of empty
+  strings reads as "credentials were exported and they are blank", which on
+  restore is worse than silence.
+- **An unreadable `analyticsApi` section is an error, not a skip** — otherwise a
+  truncated file restores the localStorage half and silently leaves stale
+  credentials behind it.
+- The exported file is `0600` on unix, matching `analytics-api.json`. It holds
+  the same secret and usually lands in a Downloads folder.
+
+**On the desktop the confirm comes *before* the file picker**, unlike the web
+path. Rust writes `analytics-api.json` as soon as it reads the file, so a
+confirm afterwards could be declined with the credentials already replaced — a
+half-restore with no way back. Cancelling the picker cancels everything, which
+is the guarantee that actually matters. The web build has no credentials file
+and keeps the original parse-then-confirm order.
+
+**Importing can only ever write keys this build knows about**, so a crafted or
+newer file cannot set arbitrary localStorage entries. `_applyImportedSettings`
+is the single place that filter lives, shared by both paths, and
+`frontend/tests/settings-backup.test.js` covers it along with the
+include/exclude split.
 
 ---
 
@@ -877,6 +949,18 @@ launches without the SmartScreen prompt that a manually downloaded one shows.
   no further updates can ever be shipped**, to any installed copy.
 - Requires no new capability grant: the renderer goes through our own commands,
   not the plugin's JS API.
+- **`bundle.targets` must include `app`, and that is for the updater, not for
+  distribution.** `dmg` is not an updater-enabled target, so with only
+  `["nsis", "dmg"]` the macOS build produces `.app.tar.gz` and its `.sig` and
+  then discards them — `Warn The bundler was configured to create updater
+  artifacts but no updater-enabled targets were built`, then `Signature not
+  found for the updater JSON. Skipping upload...`. Both jobs still go green and
+  the release still publishes; the only symptom is a `latest.json` with no
+  `darwin-*` key, so every Mac silently reports itself up to date forever. That
+  is what shipped in v0.12.0. Windows ignores the extra target.
+- **Check the manifest after every release**, because the above failed silently:
+  `gh release download <tag> --pattern latest.json -O - | jq '.platforms|keys'`
+  should list `windows-portable`, `windows-x86_64-nsis` and `darwin-aarch64`.
 
 ---
 

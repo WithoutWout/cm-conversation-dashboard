@@ -5885,7 +5885,6 @@
         max-height: 90vh;
       }
       #settingsModal .modal-header,
-      #settingsModal .settings-io,
       #settingsModal .settings-tabs,
       #settingsModal .modal-footer {
         flex-shrink: 0;
@@ -5897,17 +5896,18 @@
         min-height: 0;
         overflow-y: auto;
       }
-      /* Settings backup — above the tabs, so it reads as acting on all of them. */
-      .settings-io {
-        padding: 12px 18px 10px;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface2);
+      /* Settings backup. It used to sit above the Settings tabs, where its
+         heading, description, two buttons, warning and status line were the
+         first thing on a screen that is otherwise about configuring the app —
+         four rows of chrome in front of the setting you opened Settings to
+         change. It is its own modal now, behind one header button. */
+      #settingsBackupModal {
+        /* Above .modal-overlay's 100: it opens on top of Settings, which stays
+           open behind it so closing returns you where you were. */
+        z-index: 300;
       }
-      .settings-io-row {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 16px;
+      #settingsBackupModal .modal-box {
+        max-width: 560px;
       }
       .settings-io-text {
         display: flex;
@@ -5915,13 +5915,11 @@
         gap: 3px;
         min-width: 0;
       }
-      .settings-io-text strong {
-        font-size: 0.8rem;
-      }
       .settings-io-actions {
         display: flex;
         gap: 8px;
-        flex-shrink: 0;
+        flex-wrap: wrap;
+        margin-top: 14px;
       }
       .settings-io-warn {
         display: flex;
@@ -7837,57 +7835,12 @@
       <div class="modal-box">
         <div class="modal-header">
           <h3>Settings</h3>
-          <button class="close-btn" id="closeSettings">&#x2715;</button>
-        </div>
-        <!-- Above the tabs on purpose: this acts on every tab's settings, so it
-             is not a Content or a Conversations concern. -->
-        <div class="settings-io">
-          <div class="settings-io-row">
-            <div class="settings-io-text">
-              <strong>Settings backup</strong>
-              <span class="hint"
-                >Save everything on this page to a file, or restore it on another
-                machine. Your conversation database and your
-                Article&nbsp;/&nbsp;Dialog&nbsp;/&nbsp;Entities exports are
-                <em>not</em> included — this is settings only.</span
-              >
-            </div>
-            <div class="settings-io-actions">
-              <button class="btn-secondary" id="settingsExportBtn">
-                Export settings
-              </button>
-              <button class="btn-secondary" id="settingsImportBtn">
-                Import settings
-              </button>
-              <input
-                type="file"
-                id="settingsImportFile"
-                accept=".json,application/json"
-                hidden
-              />
-            </div>
+          <div style="display: flex; align-items: center; gap: 6px">
+            <button class="btn-secondary" id="openSettingsBackup">
+              Backup&hellip;
+            </button>
+            <button class="close-btn" id="closeSettings">&#x2715;</button>
           </div>
-          <p class="settings-io-warn" id="settingsIoWarn">
-            <span class="settings-io-warn-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
-                <path
-                  d="M8 2.2 1.6 13.2h12.8L8 2.2Z"
-                  stroke="currentColor"
-                  stroke-width="1.3"
-                  stroke-linejoin="round"
-                />
-                <path d="M8 6.3v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-                <circle cx="8" cy="11.3" r=".85" fill="currentColor" />
-              </svg>
-            </span>
-            <span
-              >May contain sensitive data. The file includes your context URLs
-              and, in the web app, your Analytics API customer and project keys —
-              enough to identify your CM.com environment. Access tokens are never
-              exported. Treat the file like a credential and don't share it.</span
-            >
-          </p>
-          <p class="hint" id="settingsIoStatus" style="min-height: 1.1em"></p>
         </div>
         <div class="settings-tabs">
           <button class="settings-tab-btn active" data-settings-tab="content">
@@ -8186,6 +8139,65 @@
             <button class="btn-secondary" id="cancelSettings">Cancel</button>
             <button class="btn-primary" id="saveSettings">Save</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS BACKUP MODAL -->
+    <!-- Opens on top of Settings, which stays open behind it, so closing this
+         returns you to the tab you were on. -->
+    <div class="modal-overlay" id="settingsBackupModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Settings backup</h3>
+          <button class="close-btn" id="closeSettingsBackup">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-io-text">
+            <span class="hint"
+              >Save everything on the Settings screen to a file, or restore it on
+              another machine. Your conversation database and your
+              Article&nbsp;/&nbsp;Dialog&nbsp;/&nbsp;Entities exports are
+              <em>not</em> included — this is settings only.</span
+            >
+          </div>
+          <p class="settings-io-warn" id="settingsIoWarn">
+            <span class="settings-io-warn-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path
+                  d="M8 2.2 1.6 13.2h12.8L8 2.2Z"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+                <path d="M8 6.3v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <circle cx="8" cy="11.3" r=".85" fill="currentColor" />
+              </svg>
+            </span>
+            <span
+              ><strong>This file contains live credentials.</strong> It includes
+              your context URLs and your full Analytics API details — client ID,
+              <em>client secret</em>, customer key and project key. Anyone who
+              opens it can read your CM.com data. Treat it exactly like a
+              password: don't email it, don't put it in shared storage, and
+              delete it once you've restored.</span
+            >
+          </p>
+          <div class="settings-io-actions">
+            <button class="btn-secondary" id="settingsExportBtn">
+              Export settings
+            </button>
+            <button class="btn-secondary" id="settingsImportBtn">
+              Import settings
+            </button>
+            <input
+              type="file"
+              id="settingsImportFile"
+              accept=".json,application/json"
+              hidden
+            />
+          </div>
+          <p class="hint" id="settingsIoStatus" style="min-height: 1.1em"></p>
         </div>
       </div>
     </div>
@@ -9072,6 +9084,9 @@
           getVersion: () => invoke("get_version"),
           saveCollectionExport: (defaultName, content) =>
             invoke("save_collection_export", { defaultName, content }),
+          exportSettingsBackup: (defaultName, payload) =>
+            invoke("export_settings_backup", { defaultName, payload }),
+          importSettingsBackup: () => invoke("import_settings_backup"),
           // Conversations DB commands
           setDbPath: (path) => invoke("set_db_path", { path }),
           getDbPath: () => invoke("get_db_path"),
@@ -16184,8 +16199,12 @@
       // for anything new has to be "not exported" so this list is the only place
       // that decision is made.
       //
-      // `sensitive: true` is what the warning above the buttons is describing.
-      const SETTINGS_EXPORT_SCHEMA = 1
+      // `sensitive: true` is what the warning in the backup modal is describing.
+      //
+      // Schema 2 added the `analyticsApi` section (desktop only, written and
+      // read by Rust) and started exporting `cm-analytics-token`. A schema-1
+      // file still imports — it simply carries no credentials.
+      const SETTINGS_EXPORT_SCHEMA = 2
       const SETTINGS_EXPORT_KEYS = [
         { key: "cm-base-url", sensitive: true }, // identifies the CM.com tenant
         { key: "halo-base-url", sensitive: true },
@@ -16203,25 +16222,28 @@
         { key: "conv-low-recog-threshold" },
         { key: "conv-data-retention-days" },
         { key: "cm-dismissed-version" },
-        // Web build only; absent keys are simply omitted from the file.
+        // Web build only; absent keys are simply omitted from the file. On the
+        // desktop the equivalent lives in analytics-api.json and is merged in
+        // by Rust, secret included.
         { key: "cm-analytics-config", sensitive: true }, // customer + project keys
+        { key: "cm-analytics-token", sensitive: true }, // live bearer token
       ]
       //
-      // Excluded, each for its own reason — not an oversight:
-      //   cm-conv-db-path / cm-data-folder  machine-specific paths. Restoring one
-      //                                     on another machine points the app at
-      //                                     something that isn't there, and the
-      //                                     path leaks a home directory name.
-      //   cm-analytics-token                a bearer credential. Exporting it
-      //                                     would put a live token in a file
-      //                                     users are likely to email themselves.
+      // Credentials are deliberately included. A backup that leaves you
+      // re-typing a client secret is not a backup, and the warning in the modal
+      // is what carries that risk — so `cm-analytics-token` is exported, and on
+      // the desktop the Analytics API config (client id, secret, customer and
+      // project key) is merged in by Rust; see `export_settings_backup`.
+      //
+      // Still excluded, each for its own reason — not an oversight:
+      //   cm-conv-db-path / cm-data-folder  machine-specific paths. Restoring
+      //                                     one on another machine points the
+      //                                     app at something that isn't there,
+      //                                     and the path leaks a home directory
+      //                                     name. Nothing is recoverable from
+      //                                     carrying them, unlike a credential.
       //   cm-perf-debug                     a developer toggle.
-      const SETTINGS_EXPORT_EXCLUDED = [
-        "cm-conv-db-path",
-        "cm-data-folder",
-        "cm-analytics-token",
-        "cm-perf-debug",
-      ]
+      const SETTINGS_EXPORT_EXCLUDED = ["cm-conv-db-path", "cm-data-folder", "cm-perf-debug"]
 
       function _settingsIoStatus(msg, tone) {
         const el = document.getElementById("settingsIoStatus")
@@ -16283,14 +16305,19 @@
           settings,
         }
         const stamp = new Date().toISOString().slice(0, 10)
+        const name = `cai-dashboard-settings-${stamp}.json`
+        const body = JSON.stringify(payload, null, 2)
         try {
-          const res = await _saveJsonFile(
-            `cai-dashboard-settings-${stamp}.json`,
-            JSON.stringify(payload, null, 2),
-          )
+          // On the desktop Rust writes the file, so it can merge in the
+          // Analytics API credentials — which have never been readable from
+          // here and still aren't. The web build has no such config and falls
+          // back to the plain save.
+          const res = window.electronAPI.exportSettingsBackup
+            ? await window.electronAPI.exportSettingsBackup(name, body)
+            : await _saveJsonFile(name, body)
           if (res && res.canceled) return _settingsIoStatus("")
           _settingsIoStatus(
-            `Exported ${Object.keys(settings).length} settings.`,
+            `Exported ${Object.keys(settings).length} settings. Keep the file safe — it contains your credentials.`,
             "ok",
           )
         } catch (e) {
@@ -16298,7 +16325,82 @@
         }
       }
 
-      async function importSettings(file) {
+      /// Write the localStorage half of a restore and reload.
+      ///
+      /// Shared by both import paths so they cannot drift on which keys are
+      /// allowed through or how the result is reported.
+      function _applyImportedSettings(settings, appVersion, analyticsRestored) {
+        // Only keys this build knows about are applied, so a file from a newer
+        // version cannot write arbitrary localStorage entries.
+        const known = new Set(SETTINGS_EXPORT_KEYS.map((k) => k.key))
+        const applying = Object.keys(settings).filter((k) => known.has(k))
+        const ignored = Object.keys(settings).filter((k) => !known.has(k))
+        if (!applying.length && !analyticsRestored) {
+          return _settingsIoStatus(
+            "That file contained no settings this app uses.",
+            "error",
+          )
+        }
+        for (const k of applying) {
+          const v = settings[k]
+          // Guard the type: every managed key is stored as a string, and writing
+          // an object here would make the reader that parses it throw on startup
+          // — which would look like the app broke, not like a bad import.
+          localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v))
+        }
+        const extras = []
+        if (analyticsRestored) extras.push("Analytics API credentials")
+        if (ignored.length) extras.push(`ignored ${ignored.length} unknown`)
+        _settingsIoStatus(
+          `Restored ${applying.length} settings${
+            extras.length ? ` (${extras.join(", ")})` : ""
+          }. Reloading…`,
+          "ok",
+        )
+        // Most settings are read once into module-level state at startup, so a
+        // reload is the only honest way to make them all take effect.
+        setTimeout(() => location.reload(), 700)
+      }
+
+      const SETTINGS_IMPORT_CONFIRM =
+        "Settings in the file replace the ones here, including your Analytics " +
+        "API credentials. Anything not in the file is left alone. Your " +
+        "conversation database and content exports are not touched.\n\n" +
+        "The app will reload."
+
+      /// Desktop path: Rust picks the file, restores the credentials from it and
+      /// hands back everything else.
+      ///
+      /// The confirm comes *before* the picker here, unlike the web path. Rust
+      /// writes analytics-api.json as soon as it reads the file, so a confirm
+      /// afterwards could be declined with the credentials already replaced —
+      /// a half-restore with no way back. Cancelling the picker cancels
+      /// everything, which is the guarantee that actually matters.
+      async function importSettingsViaBackend() {
+        if (!confirm(`Restore settings from a backup file?\n\n${SETTINGS_IMPORT_CONFIRM}`))
+          return
+        let res
+        try {
+          res = await window.electronAPI.importSettingsBackup()
+        } catch (e) {
+          return _settingsIoStatus(`Import failed: ${e.message || e}`, "error")
+        }
+        if (!res || res.canceled) return _settingsIoStatus("")
+        if (res.schemaVersion > SETTINGS_EXPORT_SCHEMA) {
+          return _settingsIoStatus(
+            `That file was written by a newer version (schema ${res.schemaVersion}). Update the app first.`,
+            "error",
+          )
+        }
+        _applyImportedSettings(
+          res.settings || {},
+          res.appVersion,
+          !!res.analyticsRestored,
+        )
+      }
+
+      /// Web path: no Rust, no credentials file — parse in the renderer.
+      async function importSettingsFromFile(file) {
         let payload
         try {
           payload = JSON.parse(await file.text())
@@ -16317,44 +16419,41 @@
             "error",
           )
         }
-        // Only keys this build knows about are applied, so a file from a newer
-        // version cannot write arbitrary localStorage entries.
         const known = new Set(SETTINGS_EXPORT_KEYS.map((k) => k.key))
-        const applying = Object.keys(payload.settings).filter((k) => known.has(k))
-        const ignored = Object.keys(payload.settings).filter((k) => !known.has(k))
-        if (!applying.length) {
-          return _settingsIoStatus("That file contained no settings this app uses.", "error")
-        }
+        const count = Object.keys(payload.settings).filter((k) => known.has(k)).length
         const from = payload.appVersion ? ` from v${payload.appVersion}` : ""
-        if (
-          !confirm(
-            `Restore ${applying.length} settings${from}?\n\n` +
-              "Settings in the file replace the ones here. Anything not in the " +
-              "file is left alone. Your conversation database and content " +
-              "exports are not touched.\n\nThe app will reload.",
-          )
-        )
+        if (!confirm(`Restore ${count} settings${from}?\n\n${SETTINGS_IMPORT_CONFIRM}`))
           return
-        for (const k of applying) {
-          const v = payload.settings[k]
-          // Guard the type: every managed key is stored as a string, and writing
-          // an object here would make the reader that parses it throw on startup
-          // — which would look like the app broke, not like a bad import.
-          localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v))
-        }
-        _settingsIoStatus(
-          `Restored ${applying.length} settings${ignored.length ? `, ignored ${ignored.length} unknown` : ""}. Reloading…`,
-          "ok",
-        )
-        // Most settings are read once into module-level state at startup, so a
-        // reload is the only honest way to make them all take effect.
-        setTimeout(() => location.reload(), 700)
+        _applyImportedSettings(payload.settings, payload.appVersion, false)
       }
+
+      function openSettingsBackupModal() {
+        _settingsIoStatus("")
+        document.getElementById("settingsBackupModal").classList.add("open")
+      }
+      function closeSettingsBackupModal() {
+        document.getElementById("settingsBackupModal").classList.remove("open")
+      }
+      document
+        .getElementById("openSettingsBackup")
+        .addEventListener("click", openSettingsBackupModal)
+      document
+        .getElementById("closeSettingsBackup")
+        .addEventListener("click", closeSettingsBackupModal)
+      document
+        .getElementById("settingsBackupModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("settingsBackupModal"))
+            closeSettingsBackupModal()
+        })
 
       document
         .getElementById("settingsExportBtn")
         .addEventListener("click", exportSettings)
       document.getElementById("settingsImportBtn").addEventListener("click", () => {
+        // Rust owns the file dialog on the desktop because it also has to
+        // restore the client secret, which never reaches this side.
+        if (window.electronAPI.importSettingsBackup) return importSettingsViaBackend()
         document.getElementById("settingsImportFile").click()
       })
       document
@@ -16363,7 +16462,7 @@
           const file = e.target.files?.[0]
           // Reset first, so picking the same file twice fires `change` again.
           e.target.value = ""
-          if (file) importSettings(file)
+          if (file) importSettingsFromFile(file)
         })
 
       document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
