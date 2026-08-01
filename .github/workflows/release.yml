@@ -22,8 +22,11 @@ jobs:
         include:
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+          # --no-bundle because Windows ships only the portable zip, which the
+          # steps below build from the plain .exe. There is no Windows bundle
+          # left to produce: `bundle.targets` is macOS-only.
           - platform: windows-latest
-            args: ""
+            args: "--no-bundle"
 
     runs-on: ${{ matrix.platform }}
 
@@ -72,69 +75,45 @@ jobs:
           # This text is also the release-notes panel inside the app's update
           # dialog: tauri-action copies the release body into `latest.json` as
           # `notes`, and `check_for_updates` passes it to the renderer. Rewrite
-          # it per release — stale notes are now visible in two places.
+          # the "What's new" section per release — stale notes are now visible in
+          # two places. The heading takes the tag so at least the version cannot
+          # go stale on its own. English only: the audience is mixed.
           releaseBody: |
-            ## What's new in v0.13.0
+            ## What's new in ${{ github.ref_name }}
 
-            A tidier Settings screen, a backup that actually restores everything,
-            and a fix for automatic updates on macOS.
+            ### One download per platform
 
-            ### Settings backup is now complete
+            Windows no longer has two downloads to choose between. The installer
+            has been dropped and the portable version is now the only one — it
+            updates itself, needs no administrator rights, and works in places
+            where installers are blocked. Pick Windows or Mac and you're done.
 
-            **Settings → Backup…** now saves your Analytics API credentials too —
-            client ID, client secret, customer key and project key. Restoring a
-            backup on a new machine used to leave you re-entering all of them by
-            hand, which meant it was not really a backup.
-
-            > ⚠️ **The backup file now contains live credentials.** Anyone who
-            > opens it can read your CM.com data. Treat it exactly like a password:
-            > don't email it, don't put it in shared storage, and delete it once
-            > you've restored. The app warns you before writing it, and on macOS
-            > and Linux the file is created readable only by you.
-
-            Your database path and data folder are still left out — restoring those
-            on another machine just points the app at something that isn't there.
-
-            ### Settings is less cluttered
-
-            The backup panel used to sit at the top of Settings, pushing the actual
-            settings down behind a heading, a description, two buttons and a
-            warning. It now lives behind a **Backup…** button in the Settings
-            header, so the first thing you see is the setting you came to change.
-
-            ### Fixed: automatic updates on macOS
-
-            v0.12.0 introduced self-updating, but macOS builds shipped without the
-            file the updater needs — so Macs reported themselves up to date
-            forever. Fixed. **If you are on v0.12.0 on a Mac, this release will be
-            offered to you normally**, and updates work from here on.
-
-            Windows was unaffected.
+            Nothing changes if you already run the portable version, which is
+            everyone.
 
             ---
 
             ## Download
 
-            You only need this once. After installing this version, future updates
-            arrive inside the app.
+            Click **Assets** below and pick the file for your computer. You only
+            need to do this once — after that the app updates itself.
 
-            ### Windows (geen admin nodig, geen installatie) — aanbevolen
-            - Klik hieronder op **Assets** en download:
-              `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`
-            - Pak het zip-bestand uit en dubbelklik op `CAIDashboard.exe`.
-            - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren —
-              maar kies een map waar je zelf in kunt schrijven, zodat de app zichzelf
-              kan bijwerken.
+            ### Windows
+            `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`
 
-            > ⚠️ Let op: de app is niet gecode‑signed. Windows Defender/SmartScreen kan een waarschuwing tonen.
-            > Klik op **"Meer informatie" → "Toch uitvoeren"** om de app te starten.
-            > Dit is eenmalig: updates die de app zelf ophaalt, starten zonder deze waarschuwing.
+            - Unzip it and double-click `CAIDashboard.exe`.
+            - No installation, no administrator rights. Keep it wherever you like —
+              but pick a folder you can write to, so the app can update itself.
 
-            ---
+            > ⚠️ The app is not code-signed, so Windows Defender/SmartScreen may
+            > warn you. Click **"More info" → "Run anyway"**. This is a one-off:
+            > updates the app downloads itself start without that warning.
 
-            ### macOS
-            - Download het `.dmg`‑bestand.
-            - Open het `.dmg`, sleep de app naar `Applications` en open hem via `Launchpad`/`Programma's`.
+            ### macOS (Apple Silicon)
+            `Conversational.AI.Dashboard_*_aarch64.dmg`
+
+            - Open the `.dmg`, drag the app to `Applications`, and start it from
+              Launchpad.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
