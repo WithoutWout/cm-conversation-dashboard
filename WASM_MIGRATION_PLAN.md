@@ -1,5 +1,46 @@
 # Client-side WASM/PWA migration plan
 
+> ## ⏸ PAUSED — 1 August 2026
+>
+> Parked deliberately, not abandoned or blocked. Everything lives on
+> **`client-side-refactor`**; `main` is untouched at v0.11.0 and the desktop app
+> builds and tests clean from this branch too (`cargo check --all-targets` exits 0,
+> 57 Rust tests and 110 frontend checks pass).
+>
+> **Why paused:** the Analytics API import is the one feature that is structurally
+> worse in a browser than on the desktop, and it cannot be made equal. The desktop
+> mints its own token with `reqwest`; a browser cannot (see the CORS finding below),
+> so the web build needs either a server-side relay file or a token pasted daily.
+> That is a real regression for the feature that matters most, and it is not
+> something more work removes.
+>
+> **What is actually finished and working**, verified against real data in a real
+> browser: content export loading, session search, CSV import, date range, daily
+> stats, hour coverage, context options, session interactions, import-run
+> bracketing, the Analytics API import (via relay), PWA install + offline, and
+> version/update handling.
+>
+> **Where to pick up** — the remaining unported commands, in rough order of value:
+> 1. **Flagged conversations** — 11 commands, all plain SQLite, the biggest gap.
+> 2. **Export for AI** — needs a `Vec<u8>` sink instead of a `File`, plus a Blob
+>    download.
+> 3. **Save collection export** — trivial (Blob download); the only content-side gap.
+> 4. **Delete stored days** / **Compact database** — `compact_database` needs a real
+>    seam, since it reads file size via `fs::metadata`.
+> 5. **Choose a database file** — arguably N/A; there is one OPFS database.
+>
+> Everything not ported rejects with a named "not available in the web app yet"
+> message from `wasm-bridge.js`, so nothing fails silently.
+>
+> **Two known issues if resuming:** the app only works in one browser tab at a time
+> (OPFS holds its sync handles in one worker) and a second tab fails with a cryptic
+> error; and `package.json`'s electron-builder config still points at the old
+> `build/icon.png`.
+>
+> **Three commits here are not web-specific** and improve the desktop app too, if you
+> want them without the rest: `e87ed54` (settings export/import), `e427733` (emoji →
+> SVG icon sprite), `55041e2` (stop `build-web.sh` rewriting `Cargo.lock`).
+
 Branch: `client-side-refactor`. Goal: a 100% client-side PWA built from static
 files, uploadable to an ordinary web host, with the SQLite database and the big
 export files living on the user's own machine.
@@ -48,25 +89,46 @@ Two dead ends, recorded so they are not retried:
   must stay a pure re-export — which is fine, because `sqlite-wasm-rs` already
   has them.
 
-### The Analytics API survives the move to a browser
+### The Analytics API only half survives the move to a browser
 
-This was expected to be the feature that could not work client-side. It can.
-Both endpoints answer CORS preflight with `Access-Control-Allow-Origin: *`:
+**This entry was wrong for most of the project, and the way it was wrong is the
+lesson.** It originally concluded that both endpoints allow cross-origin calls,
+based on this preflight measurement:
 
-| Endpoint | Preflight | `Allow-Origin` |
+| Endpoint | `OPTIONS` preflight | `Allow-Origin` |
 | --- | --- | --- |
-| `login.microsoftonline.com/digitalcx.onmicrosoft.com/oauth2/token` | 200 | `*`, `POST` + `content-type` allowed |
-| `analytics.digitalcx.com` | 204 | `*`, `GET` + `authorization` allowed |
+| `login.microsoftonline.com/…/oauth2/token` | 200 | `*` |
+| `analytics.digitalcx.com` | 204 | `*` |
 
-So the OAuth2 client-credentials flow and the interactions fetch both run from
-the page with no proxy and no server.
+**A permissive preflight does not mean the response is readable.** What matters is
+the header on the *actual* response, and there the two differ — measured with the
+real POST bodies, then confirmed in a real browser:
 
-**One deliberate security downgrade to surface in the UI:** the client secret
-moves from `app_data_dir()/analytics-api.json` at `0600` to browser-origin
-storage. It is no longer protected by file permissions, and any script running on
-the app's origin can read it. The current design's promise that "the client secret
-never crosses the IPC bridge" cannot be kept in a browser — say so in Settings
-rather than changing it silently.
+| Request | `Access-Control-Allow-Origin` on the real response | From a page |
+| --- | --- | --- |
+| `GET analytics.digitalcx.com/…/interactions` | `*` | **works** — a bad token returns a real `403` body |
+| `POST …/oauth2/token`, `grant_type=authorization_code` | `*` | works |
+| `POST …/oauth2/token`, `grant_type=client_credentials` | **absent** | **`TypeError: Failed to fetch`** |
+
+Same URL, opposite answers by grant type. Entra ID grants CORS to the
+browser-safe sign-in grant and withholds it from `client_credentials`, because
+that grant carries a client secret and a browser cannot hold one safely. No
+configuration changes it, and the SOP mandates that grant.
+
+Two corollaries worth keeping:
+
+- **CORS is enforced by the browser, never the server.** The desktop uses
+  `reqwest`, where CORS does not exist, so the identical request to the identical
+  host succeeds there. "But the desktop manages it" is not evidence of anything.
+- **Always test the request you will actually send.** A preflight probe with the
+  wrong method or grant is worse than no probe, because it produces a confident
+  wrong answer.
+
+**Consequence for the design:** the token cannot be minted in the page, so it is
+supplied — by a small server-side relay (`tools/token-proxy/`, the default) or by
+pasting one. Both mean the **client secret never enters the browser at all**, which
+inverts the security note this entry used to carry: there is no client-secret field
+in the web build, and that is stricter than the desktop's `0600` file, not weaker.
 
 ### Storage forces the database into a Web Worker
 
