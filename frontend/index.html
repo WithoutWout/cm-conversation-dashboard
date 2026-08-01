@@ -5831,6 +5831,75 @@
         width: 100%;
       }
       /* Settings tabs */
+      /* The Settings modal is the tallest one and the only one with a fixed block
+         above its scrolling body, so it lays itself out as a flex column capped
+         at the viewport. The body's height used to be a hardcoded
+         `calc(90vh - 160px)`, which has to be re-tuned every time anything above
+         it changes — and silently clipped the header when it wasn't. Scoped to
+         #settingsModal so the other modals keep their own sizing. */
+      #settingsModal .modal-box {
+        display: flex;
+        flex-direction: column;
+        max-height: 90vh;
+      }
+      #settingsModal .modal-header,
+      #settingsModal .settings-io,
+      #settingsModal .settings-tabs,
+      #settingsModal .modal-footer {
+        flex-shrink: 0;
+      }
+      #settingsModal .modal-body {
+        flex: 1 1 auto;
+        /* Without this a flex item refuses to shrink below its content height,
+           so the overflow would move to the box instead of the body. */
+        min-height: 0;
+        overflow-y: auto;
+      }
+      /* Settings backup — above the tabs, so it reads as acting on all of them. */
+      .settings-io {
+        padding: 12px 18px 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface2);
+      }
+      .settings-io-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .settings-io-text {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+      }
+      .settings-io-text strong {
+        font-size: 0.8rem;
+      }
+      .settings-io-actions {
+        display: flex;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .settings-io-warn {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        margin: 9px 0 0;
+        padding: 7px 9px;
+        border-left: 2px solid var(--orange);
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--orange) 9%, transparent);
+        font-size: 0.72rem;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      .settings-io-warn-icon {
+        color: var(--orange);
+        flex-shrink: 0;
+        margin-top: 1px;
+        display: inline-flex;
+      }
       .settings-tabs {
         display: flex;
         gap: 0;
@@ -7584,6 +7653,56 @@
           <h3>Settings</h3>
           <button class="close-btn" id="closeSettings">&#x2715;</button>
         </div>
+        <!-- Above the tabs on purpose: this acts on every tab's settings, so it
+             is not a Content or a Conversations concern. -->
+        <div class="settings-io">
+          <div class="settings-io-row">
+            <div class="settings-io-text">
+              <strong>Settings backup</strong>
+              <span class="hint"
+                >Save everything on this page to a file, or restore it on another
+                machine. Your conversation database and your
+                Article&nbsp;/&nbsp;Dialog&nbsp;/&nbsp;Entities exports are
+                <em>not</em> included — this is settings only.</span
+              >
+            </div>
+            <div class="settings-io-actions">
+              <button class="btn-secondary" id="settingsExportBtn">
+                Export settings
+              </button>
+              <button class="btn-secondary" id="settingsImportBtn">
+                Import settings
+              </button>
+              <input
+                type="file"
+                id="settingsImportFile"
+                accept=".json,application/json"
+                hidden
+              />
+            </div>
+          </div>
+          <p class="settings-io-warn" id="settingsIoWarn">
+            <span class="settings-io-warn-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none">
+                <path
+                  d="M8 2.2 1.6 13.2h12.8L8 2.2Z"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linejoin="round"
+                />
+                <path d="M8 6.3v3.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                <circle cx="8" cy="11.3" r=".85" fill="currentColor" />
+              </svg>
+            </span>
+            <span
+              >May contain sensitive data. The file includes your context URLs
+              and, in the web app, your Analytics API customer and project keys —
+              enough to identify your CM.com environment. Access tokens are never
+              exported. Treat the file like a credential and don't share it.</span
+            >
+          </p>
+          <p class="hint" id="settingsIoStatus" style="min-height: 1.1em"></p>
+        </div>
         <div class="settings-tabs">
           <button class="settings-tab-btn active" data-settings-tab="content">
             Content
@@ -7592,10 +7711,9 @@
             Conversations
           </button>
         </div>
-        <div
-          class="modal-body"
-          style="max-height: calc(90vh - 160px); overflow-y: auto"
-        >
+        <!-- Height comes from the flex rules in the stylesheet, not an inline
+             calc() that has to be retuned whenever the block above it changes. -->
+        <div class="modal-body">
           <!-- TAB: Content -->
           <div class="settings-tab-panel active" id="settings-panel-content">
             <label for="setting-base-url">CM.com Context URL</label>
@@ -15851,6 +15969,195 @@
         })
 
       // Settings tabs
+      // ── Settings backup (export / import) ─────────────────────────────
+      //
+      // An **allowlist**, deliberately not a denylist. A key added to the app
+      // later must not silently start appearing in an exported file — the default
+      // for anything new has to be "not exported" so this list is the only place
+      // that decision is made.
+      //
+      // `sensitive: true` is what the warning above the buttons is describing.
+      const SETTINGS_EXPORT_SCHEMA = 1
+      const SETTINGS_EXPORT_KEYS = [
+        { key: "cm-base-url", sensitive: true }, // identifies the CM.com tenant
+        { key: "halo-base-url", sensitive: true },
+        { key: "cm-open-mode" },
+        { key: "cm-other-open-mode" },
+        { key: "cm-view" },
+        { key: "cm-sort-all" },
+        { key: "cm-sort-articles" },
+        { key: "cm-sort-dialogs" },
+        { key: "cm-flow-direction" },
+        { key: "cm-collections" },
+        { key: "cm-export-filters" },
+        { key: "cm-export-keep-unreachable" },
+        { key: "chat-copy-format" },
+        { key: "conv-low-recog-threshold" },
+        { key: "conv-data-retention-days" },
+        { key: "cm-dismissed-version" },
+        // Web build only; absent keys are simply omitted from the file.
+        { key: "cm-analytics-config", sensitive: true }, // customer + project keys
+      ]
+      //
+      // Excluded, each for its own reason — not an oversight:
+      //   cm-conv-db-path / cm-data-folder  machine-specific paths. Restoring one
+      //                                     on another machine points the app at
+      //                                     something that isn't there, and the
+      //                                     path leaks a home directory name.
+      //   cm-analytics-token                a bearer credential. Exporting it
+      //                                     would put a live token in a file
+      //                                     users are likely to email themselves.
+      //   cm-perf-debug                     a developer toggle.
+      const SETTINGS_EXPORT_EXCLUDED = [
+        "cm-conv-db-path",
+        "cm-data-folder",
+        "cm-analytics-token",
+        "cm-perf-debug",
+      ]
+
+      function _settingsIoStatus(msg, tone) {
+        const el = document.getElementById("settingsIoStatus")
+        if (!el) return
+        el.textContent = msg || ""
+        el.style.color =
+          tone === "error"
+            ? "var(--red)"
+            : tone === "ok"
+              ? "var(--green)"
+              : "var(--muted)"
+      }
+
+      /// One save path for both builds. On the desktop this reuses
+      /// `saveCollectionExport`, which is really just "open a .json save dialog
+      /// and write this string" — its name predates this use, and adding a second
+      /// Tauri command that does exactly the same thing would be worse than the
+      /// slightly odd name.
+      async function _saveJsonFile(defaultName, content) {
+        if (window.__TAURI__?.core?.invoke && window.electronAPI.saveCollectionExport) {
+          return window.electronAPI.saveCollectionExport(defaultName, content)
+        }
+        const url = URL.createObjectURL(
+          new Blob([content], { type: "application/json" }),
+        )
+        const a = document.createElement("a")
+        a.href = url
+        a.download = defaultName
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        // Revoked late rather than immediately: some browsers cancel an in-flight
+        // download when the object URL disappears from under it.
+        setTimeout(() => URL.revokeObjectURL(url), 30000)
+        return { ok: true, canceled: false, path: defaultName }
+      }
+
+      async function exportSettings() {
+        const settings = {}
+        for (const { key } of SETTINGS_EXPORT_KEYS) {
+          const v = localStorage.getItem(key)
+          // Absent and empty are different: an empty string is a real choice
+          // ("no context URL"), so only truly missing keys are skipped.
+          if (v !== null) settings[key] = v
+        }
+        let version = "unknown"
+        try {
+          version = await window.electronAPI.getVersion()
+        } catch (_) {}
+        const payload = {
+          app: "cm-conversation-dashboard",
+          kind: "settings",
+          schemaVersion: SETTINGS_EXPORT_SCHEMA,
+          appVersion: version,
+          exportedAt: new Date().toISOString(),
+          // Stated in the file itself, so anyone reading it later knows what is
+          // deliberately absent rather than assuming it is a full backup.
+          excluded: SETTINGS_EXPORT_EXCLUDED,
+          settings,
+        }
+        const stamp = new Date().toISOString().slice(0, 10)
+        try {
+          const res = await _saveJsonFile(
+            `cai-dashboard-settings-${stamp}.json`,
+            JSON.stringify(payload, null, 2),
+          )
+          if (res && res.canceled) return _settingsIoStatus("")
+          _settingsIoStatus(
+            `Exported ${Object.keys(settings).length} settings.`,
+            "ok",
+          )
+        } catch (e) {
+          _settingsIoStatus(`Export failed: ${e.message || e}`, "error")
+        }
+      }
+
+      async function importSettings(file) {
+        let payload
+        try {
+          payload = JSON.parse(await file.text())
+        } catch (e) {
+          return _settingsIoStatus("That file is not valid JSON.", "error")
+        }
+        if (!payload || payload.kind !== "settings" || !payload.settings) {
+          return _settingsIoStatus(
+            "That does not look like a settings export from this app.",
+            "error",
+          )
+        }
+        if (payload.schemaVersion > SETTINGS_EXPORT_SCHEMA) {
+          return _settingsIoStatus(
+            `That file was written by a newer version (schema ${payload.schemaVersion}). Update the app first.`,
+            "error",
+          )
+        }
+        // Only keys this build knows about are applied, so a file from a newer
+        // version cannot write arbitrary localStorage entries.
+        const known = new Set(SETTINGS_EXPORT_KEYS.map((k) => k.key))
+        const applying = Object.keys(payload.settings).filter((k) => known.has(k))
+        const ignored = Object.keys(payload.settings).filter((k) => !known.has(k))
+        if (!applying.length) {
+          return _settingsIoStatus("That file contained no settings this app uses.", "error")
+        }
+        const from = payload.appVersion ? ` from v${payload.appVersion}` : ""
+        if (
+          !confirm(
+            `Restore ${applying.length} settings${from}?\n\n` +
+              "Settings in the file replace the ones here. Anything not in the " +
+              "file is left alone. Your conversation database and content " +
+              "exports are not touched.\n\nThe app will reload.",
+          )
+        )
+          return
+        for (const k of applying) {
+          const v = payload.settings[k]
+          // Guard the type: every managed key is stored as a string, and writing
+          // an object here would make the reader that parses it throw on startup
+          // — which would look like the app broke, not like a bad import.
+          localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v))
+        }
+        _settingsIoStatus(
+          `Restored ${applying.length} settings${ignored.length ? `, ignored ${ignored.length} unknown` : ""}. Reloading…`,
+          "ok",
+        )
+        // Most settings are read once into module-level state at startup, so a
+        // reload is the only honest way to make them all take effect.
+        setTimeout(() => location.reload(), 700)
+      }
+
+      document
+        .getElementById("settingsExportBtn")
+        .addEventListener("click", exportSettings)
+      document.getElementById("settingsImportBtn").addEventListener("click", () => {
+        document.getElementById("settingsImportFile").click()
+      })
+      document
+        .getElementById("settingsImportFile")
+        .addEventListener("change", (e) => {
+          const file = e.target.files?.[0]
+          // Reset first, so picking the same file twice fires `change` again.
+          e.target.value = ""
+          if (file) importSettings(file)
+        })
+
       document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
           document
