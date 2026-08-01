@@ -2867,6 +2867,22 @@
         font-family: monospace;
         font-weight: 700;
       }
+      /* Release notes come from the GitHub release body via latest.json, so the
+         length is not ours to control — scroll rather than let the modal grow
+         past the viewport. */
+      .update-notes {
+        max-height: 190px;
+        overflow-y: auto;
+        margin: 12px 0 4px;
+        padding: 10px 12px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 0.78rem;
+        line-height: 1.55;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
       .btn-primary-download {
         display: inline-flex;
         align-items: center;
@@ -8380,23 +8396,40 @@
         </div>
         <div class="modal-body">
           <p style="font-size: 0.85rem; line-height: 1.6">
-            A new version of the Conversational AI Dashboard is ready to
-            download.
+            A new version of the Conversational AI Dashboard is ready.
           </p>
           <div class="update-version-diff">
             <span class="ver-from" id="updateModalVersionFrom"></span>
             <span class="ver-arrow">&#x2192;</span>
             <span class="ver-to" id="updateModalVersion"></span>
           </div>
-          <p class="hint">
-            Download the latest release, then reinstall to get the newest
-            features and fixes.
-          </p>
+          <div class="update-notes" id="updateModalNotes" hidden></div>
+          <p class="hint" id="updateModalHint"></p>
+          <div id="updateModalProgress" hidden>
+            <div class="import-progress-bar">
+              <div
+                class="import-progress-fill"
+                id="updateModalProgressFill"
+                style="width: 0%"
+              ></div>
+            </div>
+            <p class="hint" id="updateModalProgressText"></p>
+          </div>
+          <p
+            class="hint"
+            id="updateModalError"
+            style="color: var(--red)"
+            hidden
+          ></p>
         </div>
         <div class="modal-footer">
           <button class="btn-secondary" id="closeUpdateModal2">Later</button>
-          <button id="updateModalDownloadBtn" class="btn-primary-download">
-            <svg class=ui-icon><use href=#i-download /></svg> Download update
+          <button class="btn-secondary" id="updateModalDownloadBtn" hidden>
+            <svg class=ui-icon><use href=#i-link /></svg> Download manually
+          </button>
+          <button id="updateModalInstallBtn" class="btn-primary-download">
+            <svg class=ui-icon><use href=#i-download /></svg> Install and
+            restart
           </button>
         </div>
       </div>
@@ -9031,6 +9064,11 @@
               ? listen("data-folder-updated", handler)
               : Promise.resolve(() => {}),
           checkForUpdates: () => invoke("check_for_updates"),
+          installUpdate: () => invoke("install_update"),
+          onUpdateProgress: (handler) =>
+            listen
+              ? listen("update-progress", handler)
+              : Promise.resolve(() => {}),
           getVersion: () => invoke("get_version"),
           saveCollectionExport: (defaultName, content) =>
             invoke("save_collection_export", { defaultName, content }),
@@ -16405,7 +16443,17 @@
           if (res.status === "available") {
             el.innerHTML = `<svg class=ui-icon><use href=#i-download /></svg> v${esc(
               res.version,
-            )} available \u2014 <button class="update-banner-download" style="vertical-align:middle" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')">Download</button>`
+            )} available \u2014 <button class="update-banner-download" style="vertical-align:middle" id="settingsUpdateAction">${
+              res.canSelfUpdate ? "Install" : "Download"
+            }</button>`
+            document
+              .getElementById("settingsUpdateAction")
+              .addEventListener("click", () => {
+                closeSettings()
+                window.electronAPI
+                  .getVersion()
+                  .then((current) => openUpdateModal(res, current))
+              })
           } else if (res.status === "up-to-date") {
             el.innerHTML = `&#x2713; You\u2019re on the latest version.`
           } else if (res.status === "dev") {
@@ -16710,19 +16758,123 @@
         if (verEl) verEl.textContent = `v${v}`
       })
 
-      // ── Startup update check ────────────────────────────────────────
-      function openUpdateModal(version, currentVersion) {
+      // ── Update flow ─────────────────────────────────────────────────
+      // The install half of this is not the updater plugin's: on Windows a
+      // portable .exe replaces itself by renaming its own file, because an
+      // installer needs privileges some users' IT policy withholds. See
+      // src-tauri/src/self_update.rs. All the renderer needs to know is
+      // whether that is possible for this copy, which `check_for_updates`
+      // answers with `canSelfUpdate` — so there is never a button here that
+      // cannot finish what it starts.
+      const UPDATE_RELEASES_URL =
+        "https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest"
+      let lastUpdateCheck = null
+      let updateInstalling = false
+
+      function openUpdateModal(res, currentVersion) {
+        lastUpdateCheck = res
+        updateInstalling = false
         document.getElementById(
           "updateModalVersion",
-        ).textContent = `v${version}`
+        ).textContent = `v${res.version}`
         const fromEl = document.getElementById("updateModalVersionFrom")
         if (fromEl)
           fromEl.textContent = currentVersion ? `v${currentVersion}` : ""
+
+        // Release notes are the GitHub release body, i.e. text we do not
+        // control at render time — set as textContent, never innerHTML.
+        const notes = document.getElementById("updateModalNotes")
+        notes.textContent = (res.notes || "").trim()
+        notes.hidden = !notes.textContent
+
+        const install = document.getElementById("updateModalInstallBtn")
+        const manual = document.getElementById("updateModalDownloadBtn")
+        install.hidden = !res.canSelfUpdate
+        install.disabled = false
+        install.innerHTML = `<svg class=ui-icon><use href=#i-download /></svg> Install and restart`
+        manual.hidden = !!res.canSelfUpdate
+
+        document.getElementById("updateModalHint").textContent =
+          res.canSelfUpdate
+            ? "The app downloads the new version, replaces itself and restarts. Nothing is installed and no administrator rights are needed."
+            : res.blockedReason ||
+              "This copy cannot update itself. Download the new version and replace this one by hand."
+
+        document.getElementById("updateModalProgress").hidden = true
+        const fill = document.getElementById("updateModalProgressFill")
+        fill.style.width = "0%"
+        fill.className = "import-progress-fill"
+        document.getElementById("updateModalProgressText").textContent = ""
+        document.getElementById("updateModalError").hidden = true
         document.getElementById("updateModal").classList.add("open")
       }
       function closeUpdateModal() {
+        // An install renames the running executable and relaunches it.
+        // Closing the window does not stop that, and letting the user believe
+        // it did would be worse than keeping the modal up for a few seconds.
+        if (updateInstalling) return
         document.getElementById("updateModal").classList.remove("open")
       }
+
+      /// Download and install, reporting progress.
+      ///
+      /// On success this never returns anything worth rendering — the process
+      /// is replaced and relaunched from Rust — so the success branch only
+      /// explains why the window is about to vanish.
+      async function runUpdateInstall() {
+        if (updateInstalling) return
+        updateInstalling = true
+        const install = document.getElementById("updateModalInstallBtn")
+        const later = document.getElementById("closeUpdateModal2")
+        const err = document.getElementById("updateModalError")
+        install.disabled = true
+        later.disabled = true
+        install.innerHTML = `<span class="import-spinner"></span> Downloading…`
+        err.hidden = true
+        document.getElementById("updateModalProgress").hidden = false
+        document.getElementById("updateModalProgressText").textContent =
+          "Starting download…"
+        try {
+          await window.electronAPI.installUpdate()
+          install.innerHTML = `<span class="import-spinner"></span> Restarting…`
+          document.getElementById("updateModalProgressText").textContent =
+            "Restarting into the new version…"
+        } catch (e) {
+          updateInstalling = false
+          install.disabled = false
+          later.disabled = false
+          install.innerHTML = `<svg class=ui-icon><use href=#i-download /></svg> Try again`
+          document.getElementById("updateModalProgress").hidden = true
+          err.textContent = String(e && e.message ? e.message : e)
+          err.hidden = false
+          // Whatever failed, downloading it by hand still works — and at this
+          // point that is the only advice worth giving.
+          document.getElementById("updateModalDownloadBtn").hidden = false
+        }
+      }
+
+      window.electronAPI.onUpdateProgress((evt) => {
+        const p = evt && evt.payload
+        if (!p) return
+        const fill = document.getElementById("updateModalProgressFill")
+        const text = document.getElementById("updateModalProgressText")
+        if (p.phase === "installing") {
+          fill.style.width = "100%"
+          text.textContent = "Replacing the application…"
+          return
+        }
+        if (p.total) {
+          const pct = Math.min(100, Math.round((p.downloaded / p.total) * 100))
+          fill.style.width = `${pct}%`
+          text.textContent = `${_fmtBytes(p.downloaded)} of ${_fmtBytes(
+            p.total,
+          )} (${pct}%)`
+        } else {
+          // No Content-Length: report what has arrived rather than a bar that
+          // never moves.
+          text.textContent = `${_fmtBytes(p.downloaded)} downloaded`
+        }
+      })
       function openDataChangedModal(folder) {
         const el = document.getElementById("dataChangedFolder")
         if (el) {
@@ -16755,10 +16907,14 @@
         .getElementById("updateModalDownloadBtn")
         .addEventListener("click", (e) => {
           e.preventDefault()
-          window.electronAPI.openUrl(
-            "https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest",
-          )
+          window.electronAPI.openUrl(UPDATE_RELEASES_URL)
           closeUpdateModal()
+        })
+      document
+        .getElementById("updateModalInstallBtn")
+        .addEventListener("click", (e) => {
+          e.preventDefault()
+          runUpdateInstall()
         })
       document
         .getElementById("closeDataChangedModal")
@@ -16786,16 +16942,27 @@
         .then((res) => {
           if (res.status !== "available") return
           const dismissedVersion = localStorage.getItem("cm-dismissed-version")
-          // Banner
+          // Banner. It and the modal both go through openUpdateModal, so the
+          // install path and the manual-download fallback get decided once,
+          // from one `canSelfUpdate`, instead of in two places that can drift.
           const banner = document.getElementById("updateBanner")
           document.getElementById("updateBannerText").innerHTML = `v${esc(
             res.version,
-          )} is available \u2014 <button class="update-banner-download" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')"><svg class=ui-icon><use href=#i-download /></svg> Download</button>`
+          )} is available \u2014 <button class="update-banner-download" id="updateBannerAction"><svg class=ui-icon><use href=#i-download /></svg> ${
+            res.canSelfUpdate ? "Install" : "Download"
+          }</button>`
+          document
+            .getElementById("updateBannerAction")
+            .addEventListener("click", () => {
+              window.electronAPI
+                .getVersion()
+                .then((current) => openUpdateModal(res, current))
+            })
           banner.classList.add("visible")
           // Modal — skip if user already dismissed this version
           if (dismissedVersion !== res.version) {
             window.electronAPI.getVersion().then((current) => {
-              openUpdateModal(res.version, current)
+              openUpdateModal(res, current)
             })
           }
         })

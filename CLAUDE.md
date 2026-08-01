@@ -23,8 +23,10 @@ src-tauri/
     main.rs         — Entry point, calls lib::run()
     analytics_api.rs — Analytics API client: config storage, OAuth2 token cache,
                        one-request-at-a-time fetch, CSV validation, temp files
-  tauri.conf.json   — App config, window setup, frontendDist: ../frontend
-  Cargo.toml        — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog)
+    self_update.rs  — Portable-exe self-update: install-kind detection, the
+                      rename swap and its rollback, stale-backup cleanup
+  tauri.conf.json   — App config, window setup, frontendDist: ../frontend, updater pubkey
+  Cargo.toml        — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog, tauri-plugin-updater)
   capabilities/
     default.json    — Capability grants: core:default, opener:default, dialog:default
 frontend/
@@ -33,7 +35,7 @@ frontend/
   tests/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
-    conv-search.test.js                            — `npm run test:frontend`
+    conv-search.test.js, update-modal.test.js      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
@@ -63,7 +65,8 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `open_url`            | `openUrl(url)`                   | Opens a URL with `opener::open_url` (https/http only) |
 | `open_preview_window` | `openPreviewWindow(url)`         | Opens a validated URL in an in-app preview window |
 | `select_data_folder`  | `selectDataFolder()`             | Opens a native folder picker, returns `{ ok, canceled, path }` |
-| `check_for_updates`   | `checkForUpdates()`              | Fetches GitHub releases API, returns `{ status, version, message }` |
+| `check_for_updates`   | `checkForUpdates()`              | Reads the release's `latest.json` through `tauri-plugin-updater`, returns `{ status, version, message, notes, canSelfUpdate, mode, blockedReason }`. See `## Self-update` |
+| `install_update`      | `installUpdate()`                | Downloads the verified artifact, installs it, restarts. Portable Windows copies swap their own `.exe`; everything else uses the plugin's installer |
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }` |
 
@@ -109,6 +112,7 @@ The Conversations toolbar's **Export for AI** button writes the *entire current 
 | --------------------- | -------------------- | ----------- |
 | `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher when export files change |
 | `ai-export-progress`  | `{ phase, sessionCount?, interactionCount? }` | Phase boundaries inside `export_conversations_for_ai` — `"querying"` once the save dialog is answered, `"writing"` once the result set is known |
+| `update-progress`     | `{ phase, downloaded, total? }` | Download/install progress for `install_update`. `total` is absent when the server sends no `Content-Length` |
 
 ---
 
@@ -788,7 +792,91 @@ Repository: `WithoutWout/cm-conversation-dashboard`
 Release URL pattern: `https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest`
 
 - Always use `WithoutWout` as the GitHub username, never `wouttonio`.
-- The `check_for_updates` Tauri command fetches `api.github.com/repos/WithoutWout/cm-conversation-dashboard/releases/latest`.
+- `check_for_updates` reads `releases/latest/download/latest.json`, not the GitHub API — see `## Self-update`.
+
+---
+
+## Self-update
+
+The app replaces itself in place. The **portable Windows `.exe` is the case that
+matters**: an installer needs privileges some users' IT policy withholds, so the
+portable build is the primary distribution and it has to be able to update
+without one.
+
+`tauri-plugin-updater` is used for **check, download and signature
+verification only**. Its install step can only drive an installer on Windows
+(NSIS or MSI), so the install half is ours — `src-tauri/src/self_update.rs`.
+
+**Windows will not let you write to or delete a running `.exe`, but it will let
+you rename it.** The loader holds the image with `FILE_SHARE_DELETE` and a
+rename only rewrites a directory entry. That single fact is the whole mechanism:
+
+```text
+write   <dir>/CAIDashboard.exe.new      (verified bytes, same directory)
+rename  CAIDashboard.exe      -> .old   (allowed while running)
+rename  CAIDashboard.exe.new  -> CAIDashboard.exe
+spawn CAIDashboard.exe; app.exit(0)
+next launch deletes *.exe.old
+```
+
+- **Everything happens in the app's own directory**, so both renames are
+  same-volume and atomic, and the first is undoable — if the second fails,
+  `.old` goes back and the user is exactly where they started. The error message
+  for the case where even *that* fails names the backup file and how to rename
+  it by hand.
+- **The old binary is deleted on a later launch, never at the end of the
+  update.** Keeping it until the new one has actually run is what makes a bad
+  release recoverable. `cleanup_stale_backups` retries on a background thread
+  because this process was spawned by the one it is cleaning up after, and
+  Windows only releases the image once that has fully exited.
+- **`is_backup_name` deliberately does not match a bare `*.old`** — that is a
+  common enough suffix for a user's own files, and a portable app shares its
+  folder with them.
+- **`apply_portable_zip` must never be handed unverified bytes**: what it writes
+  becomes the application on the next launch. It isn't — `Update::download`
+  verifies the minisign signature against the `pubkey` in `tauri.conf.json`
+  *before* returning, which is exactly why the plugin is kept for that half. It
+  also re-checks the `MZ` magic, so a wrong or truncated asset fails before the
+  working binary is moved aside.
+
+**Portable vs managed is decided by `uninstall.exe` sitting beside the binary**,
+which the Tauri NSIS template always writes and a portable zip never contains.
+Not the registry: this is a property of the directory we would actually modify,
+so someone who copies an installed exe onto a USB stick is portable from that
+point on. The check is biased toward `Portable` on purpose — misreading a
+portable copy as managed runs an installer it cannot use, while the reverse just
+swaps the binary in place, which works.
+
+**`canSelfUpdate` is answered before an update is offered**, so the UI never
+shows a button that cannot finish. A portable copy in a folder it cannot write
+to (a read-only share, Controlled Folder Access) and any debug build both report
+`false` with a reason, and the modal shows the manual download instead.
+`exe_dir_writable` probes with a real file — permission bits do not account for
+any of those cases.
+
+**An unexpected property worth keeping**: files written by our own Rust code get
+no Mark-of-the-Web, because the Zone.Identifier stream is applied by browsers
+and the Attachment Manager, not by `fs::write`. A self-updated exe therefore
+launches without the SmartScreen prompt that a manually downloaded one shows.
+
+### Release plumbing
+
+- **`latest.json` needs a `windows-portable` entry that `tauri-action` does not
+  write**, because the portable zip is built after it runs and is not one of its
+  bundles. The `finalize-updater-manifest` job in `.github/workflows/release.yml`
+  adds it, and fails the release if `latest.json`'s version disagrees with the
+  tag — a stale manifest would hand every client the wrong artifact while
+  looking healthy.
+- **That job is separate from the matrix on purpose.** Both platform jobs
+  already rewrite `latest.json` read-modify-write; a third writer inside the
+  matrix would race them. The matrix itself runs `max-parallel: 1` for the same
+  reason.
+- **The portable zip is signed by its own step** (`npx tauri signer sign`) with
+  the same key, verified by the same pubkey. `TAURI_SIGNING_PRIVATE_KEY` /
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are repo secrets; **losing that key means
+  no further updates can ever be shipped**, to any installed copy.
+- Requires no new capability grant: the renderer goes through our own commands,
+  not the plugin's JS API.
 
 ---
 
