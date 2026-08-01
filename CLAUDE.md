@@ -209,6 +209,12 @@ order the UI presents them:
   the project. `hash_equals` compares it, so a wrong key cannot be found a byte at
   a time. Same-origin is the documented default, which means no CORS headers and
   no preflight; `ALLOWED_ORIGIN` exists only for the Worker case.
+  - **The key is invented by the user, not issued by CM.com**, and it goes in two
+    places that must match: the relay's `SHARED_KEY` line and the Settings field.
+    That was the one thing the first version left implicit, and it is the question
+    it actually got asked. `tools/token-proxy/README.md` is the step-by-step; the
+    Settings hint and the PHP comment both state it outright rather than deferring
+    to the README.
 - **The "still a placeholder" check tests a `PUT-` prefix, not the placeholder
   text.** An earlier version compared `SHARED_KEY` against its own placeholder
   literal — so configuring the file by find-and-replace (the obvious way) rewrote

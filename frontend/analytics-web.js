@@ -254,11 +254,18 @@
         >Token relay <span class="analytics-web-tag">set this up once</span></label
       >
       <p class="hint" style="margin:2px 0 6px">
-        Upload <code>cai-token.php</code> from <code>tools/token-proxy/</code>
-        next to this app, then put its name and its <code>SHARED_KEY</code> here.
-        It holds the client secret and mints tokens for you, so they refresh
-        automatically and there is nothing to paste — ever. A Cloudflare Worker
+        Upload <code>cai-token.php</code> from <code>tools/token-proxy/</code> next
+        to this app. It holds your client secret and mints tokens for you, so they
+        refresh automatically and there is nothing to paste — ever. Full setup
+        steps are in <code>tools/token-proxy/README.md</code>; a Cloudflare Worker
         version is included for hosts that cannot run PHP.
+      </p>
+      <p class="hint" style="margin:2px 0 6px">
+        <strong>Relay key</strong> is a password <em>you</em> invent — not
+        something CM.com gives you. Put the same value in the relay file's
+        <code>SHARED_KEY</code> line and in the second field below, so only your
+        browser can use the relay. Generate one with
+        <code>openssl rand -base64 32</code>.
       </p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <input id="setting-analytics-token-proxy" type="text" autocomplete="off"

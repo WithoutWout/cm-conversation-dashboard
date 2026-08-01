@@ -39,11 +39,20 @@ const CLIENT_ID     = 'PUT-YOUR-CLIENT-ID-HERE';
 const CLIENT_SECRET = 'PUT-YOUR-CLIENT-SECRET-HERE';
 
 /**
- * A password of your own invention, also entered in the app's Settings.
+ * A password you invent yourself. NOT something CM.com gives you.
  *
- * This is not optional. Without it the URL is a public token vending machine for
- * your CM.com project — the path is guessable and the endpoint would mint a
- * working bearer token for anyone who asked.
+ * Generate one with:  openssl rand -base64 32
+ *
+ * Put the same value in TWO places, matching exactly:
+ *   1. here
+ *   2. the app: Settings -> Conversations -> Token relay -> "Relay key (SHARED_KEY)"
+ *
+ * It is not optional. This file's address is guessable — if the app is at
+ * https://example.com/dash/ then this is at https://example.com/dash/cai-token.php
+ * — so without a key anyone who guessed it could mint working bearer tokens for
+ * your CM.com project. The key means only your browser can use it.
+ *
+ * Avoid apostrophes: the value sits inside single quotes below.
  */
 const SHARED_KEY = 'PUT-A-LONG-RANDOM-STRING-HERE';
 
