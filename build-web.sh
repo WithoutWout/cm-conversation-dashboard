@@ -45,6 +45,22 @@ if [[ "$(uname -s)" == "Darwin" && -z "${CC_wasm32_unknown_unknown:-}" ]]; then
   }
 fi
 
+# The patch changes how `libsqlite3-sys` resolves, so cargo rewrites Cargo.lock:
+# the shim (depending on sqlite-wasm-rs) replaces the real crates.io entry and its
+# cc/pkg-config/vcpkg deps. The next native build rewrites it straight back, which
+# means the lock file oscillates and whichever build ran last is what gets
+# committed — a fresh clone would then start from a lock describing the *other*
+# target. The lock is restored afterwards so only the native resolution is ever
+# recorded; `--locked` is not an option here because the patch is meant to change
+# resolution.
+LOCK="$ROOT/src-tauri/Cargo.lock"
+if [[ -f "$LOCK" ]]; then
+  LOCK_BACKUP="$(mktemp)"
+  cp "$LOCK" "$LOCK_BACKUP"
+  # A trap, so an interrupted or failed build does not leave it rewritten either.
+  trap 'cp "$LOCK_BACKUP" "$LOCK"; rm -f "$LOCK_BACKUP"' EXIT
+fi
+
 echo "==> building wasm ($PROFILE)"
 wasm-pack build "$ROOT/src-tauri" \
   --target web \
