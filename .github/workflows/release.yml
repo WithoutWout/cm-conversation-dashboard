@@ -62,82 +62,41 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: |
-            ## What's new in v0.11.0
+            ## What's new in v0.11.1
 
-            Conversations search has been rebuilt. Two of the changes below mean it was
-            returning the **wrong conversations**, not just slow ones — if you have relied
-            on a search recently, it is worth running it again.
+            A small release: one new convenience feature, and a visual pass over every
+            icon in the app.
 
-            ### Fixed: searching user messages also matched the bot
+            ### New: Settings backup
 
-            With only **U** selected, a search still returned conversations where only the
-            bot had said the word. The scope was being applied to the first search term
-            only, so everything after an `|` searched everywhere.
+            At the top of **Settings** you can now export everything on that screen to a
+            single file, and import it back — on another machine, or after changing
+            something you want to undo.
 
-            The same fix stops an unscoped search from quietly matching Article and Dialog
-            IDs — a plain number used to find conversations by their dialog path rather
-            than by anything anyone said.
+            It covers your context URLs, the open-in-popup/browser choices, sort and view
+            preferences, Collections, smart filters, the retention window and the chat
+            copy format.
 
-            ### Fixed: terms with dots, dashes or symbols returned nothing
+            It deliberately does **not** include your conversations database or your
+            Article/Dialog/Entities exports. This is settings only, and the file itself
+            records what it left out.
 
-            `www.efteling.nl`, `qa-1234` and `€10,-` failed outright rather than searching.
-            They work now, and match exactly — `www.efteling.nl` no longer also matches
-            "www efteling nl". A term made only of symbols now falls back to a plain text
-            search instead of silently returning **every** conversation.
+            > The file contains your CM.com context URLs, which identify your environment,
+            > so the app warns you before exporting and the file is worth treating like a
+            > credential. Access tokens are never included.
 
-            ### Searching by ID is roughly 1000x faster, and now exact
+            ### Every icon is now drawn by the app
 
-            Searching by Article or Dialog ID went from about **5 seconds to a few
-            milliseconds** on a database of 110,000 interactions.
+            All 63 emoji in the interface have been replaced by a matching set of line
+            icons. Emoji are rendered by the operating system's own font, so they arrived
+            in someone else's colour, weight and size — full-colour glyphs in a monochrome
+            interface, and different on Windows than on macOS. The new icons take the
+            colour and size of the text beside them, so they stay correct inside the
+            green, orange and accent states too.
 
-            It is also correct now: `qa-123` no longer also matches `qa-1234`, and
-            `6391-4` no longer matches node `42`.
+            ### Fixed
 
-            ### Dialog ID and Node ID are one filter
-
-            Instead of picking between **Dialog ID** and **Node ID**, type either into the
-            same box. A `-` is what says you gave a node: `6391` finds every conversation
-            that touched the dialog, `6391-4` narrows it to that one node — whether the bot
-            answered from it or only passed through it.
-
-            ### New: search by triggered Entity
-
-            A new **E** button next to **U** and **B** searches the entities the bot
-            recognised, rather than the words that were typed. Searching `WIJN` finds
-            "mag ik een fles rood meenemen" — a conversation where the word never appears.
-
-            - Matches the entity name, the text that triggered it, or the Entity ID.
-            - **U + E is now the default**: what someone asked for, and what the bot
-              understood it as. Switch **U** off for entities only.
-            - Opening a result filters the conversation to the turns that matched, and
-              marks the entity that put it there.
-
-            ### Fixed: searching in a conversation missed accented words
-
-            Searching `cafe` in the conversation list found messages containing `café`, but
-            opening one of those results said *no messages match*. Both searches now treat
-            accents the same way.
-
-            ### Entities tab
-
-            - **New Conversations button** on every entity — opens the conversation search
-              showing every conversation that entity was triggered in.
-            - **Fixed: attached Articles were missing.** An Article could show
-              *Entity: WIJN* on its chip while WIJN's own view did not list that Article.
-              On a real export this affected **almost half of all entities** — 2013
-              entities now show their Articles, up from 1167. The **Used in Articles** and
-              **Used in Dialogs** filters were wrong in the same way and are fixed with it.
-
-            ### Export for AI tells you it is working
-
-            A large export runs for several seconds with nothing on screen moving. It now
-            shows a progress message — *Collecting search results…*, then *Writing 4,182
-            conversations · 31,940 interactions…* — that stays up until the export
-            finishes.
-
-            > **First launch after updating** takes a few seconds longer than usual: the
-            > app indexes the entities already in your database, and rebuilds its search
-            > index once. This happens only once.
+            - The Settings window could cut off its own title on a shorter screen.
 
             ---
 
