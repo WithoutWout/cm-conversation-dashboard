@@ -78,12 +78,16 @@
     }
   }
 
+  /// The service-worker signal can fire before `version.json` has answered, so
+  /// the new version number is often simply not known yet. Say so generically
+  /// rather than interpolating a placeholder — an earlier draft rendered
+  /// "Version new is available."
   function announce(newVersion) {
-    const same = newVersion && newVersion.version === RUNNING.version
+    const known = newVersion && newVersion.version && newVersion.version !== RUNNING.version
     showBanner(
-      same
-        ? "An updated build of this app is available."
-        : `Version ${newVersion?.version || "new"} is available.`
+      known
+        ? `Version ${newVersion.version} is available.`
+        : "An updated build of this app is available."
     )
   }
 
