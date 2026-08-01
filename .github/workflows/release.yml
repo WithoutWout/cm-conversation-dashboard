@@ -14,6 +14,10 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      # Both jobs write `latest.json` to the same release, and tauri-action
+      # merges it read-modify-write. Run them one at a time or the second
+      # upload can drop the first platform's entry.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -52,6 +56,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts. Without these the build still succeeds
+          # but produces no .sig files, and every client rejects the update.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -61,55 +69,64 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
+          # This text is also the release-notes panel inside the app's update
+          # dialog: tauri-action copies the release body into `latest.json` as
+          # `notes`, and `check_for_updates` passes it to the renderer. Rewrite
+          # it per release — stale notes are now visible in two places.
           releaseBody: |
-            ## What's new in v0.11.1
+            ## What's new in v0.12.0
 
-            A small release: one new convenience feature, and a visual pass over every
-            icon in the app.
+            **The app now updates itself.** This is the last version you have to
+            download and replace by hand.
 
-            ### New: Settings backup
+            ### Updating from here on
 
-            At the top of **Settings** you can now export everything on that screen to a
-            single file, and import it back — on another machine, or after changing
-            something you want to undo.
+            When a new version is out you get the usual notification — but the button
+            now says **Install and restart**. The app downloads the new version,
+            replaces itself and reopens, in about ten seconds.
 
-            It covers your context URLs, the open-in-popup/browser choices, sort and view
-            preferences, Collections, smart filters, the retention window and the chat
-            copy format.
+            The portable Windows version updates itself just like the installed one.
+            Nothing gets installed, no administrator rights are needed, and the app
+            stays exactly where you put it — including on a USB stick or a work
+            laptop where installers are blocked.
 
-            It deliberately does **not** include your conversations database or your
-            Article/Dialog/Entities exports. This is settings only, and the file itself
-            records what it left out.
+            A useful side effect on Windows: because the app downloads the update
+            itself rather than through a browser, the new version starts without the
+            SmartScreen **"Meer informatie → Toch uitvoeren"** warning.
 
-            > The file contains your CM.com context URLs, which identify your environment,
-            > so the app warns you before exporting and the file is worth treating like a
-            > credential. Access tokens are never included.
+            ### If it can't
 
-            ### Every icon is now drawn by the app
+            If the app is in a folder it isn't allowed to write to — a read-only
+            network share, for instance — it says so and offers the manual download
+            instead, rather than giving you a button that fails halfway. Moving the
+            app somewhere like your Documents folder is enough to fix it.
 
-            All 63 emoji in the interface have been replaced by a matching set of line
-            icons. Emoji are rendered by the operating system's own font, so they arrived
-            in someone else's colour, weight and size — full-colour glyphs in a monochrome
-            interface, and different on Windows than on macOS. The new icons take the
-            colour and size of the text beside them, so they stay correct inside the
-            green, orange and accent states too.
+            ### Safety
 
-            ### Fixed
-
-            - The Settings window could cut off its own title on a shorter screen.
+            Every update is cryptographically signed and the signature is checked
+            before anything is replaced. An update that has been tampered with, or
+            that arrives incomplete, is refused. Your previous version is kept until
+            the new one has started successfully, so a bad update can always be
+            undone.
 
             ---
 
             ## Download
 
+            You only need this once. After installing this version, future updates
+            arrive inside the app.
+
             ### Windows (geen admin nodig, geen installatie) — aanbevolen
             - Klik hieronder op **Assets** en download:
               `Conversational-AI-Dashboard-portable-${{ github.ref_name }}-x64.zip`
             - Pak het zip-bestand uit en dubbelklik op `CAIDashboard.exe`.
-            - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren.
+            - Geen installatie nodig. Je kunt het bestand op elke locatie bewaren —
+              maar kies een map waar je zelf in kunt schrijven, zodat de app zichzelf
+              kan bijwerken.
 
             > ⚠️ Let op: de app is niet gecode‑signed. Windows Defender/SmartScreen kan een waarschuwing tonen.
             > Klik op **"Meer informatie" → "Toch uitvoeren"** om de app te starten.
+            > Dit is eenmalig: updates die de app zelf ophaalt, starten zonder deze waarschuwing.
 
             ---
 
@@ -134,10 +151,79 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath $zipName
           echo "ZIP_PATH=$zipName" >> $env:GITHUB_ENV
 
+      # The portable zip is built here, after tauri-action, so it is not one of
+      # the artifacts tauri-action signs. It is what the portable build
+      # downloads to update itself, so it needs a signature of its own — from
+      # the same key, verified by the same pubkey in tauri.conf.json.
+      - name: Sign portable zip
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          npx --yes @tauri-apps/cli@2 signer sign "$env:ZIP_PATH"
+          if (-not (Test-Path "$($env:ZIP_PATH).sig")) {
+            Write-Error "signer produced no .sig for $env:ZIP_PATH"; exit 1
+          }
+
       - name: Upload portable zip to release
         if: matrix.platform == 'windows-latest'
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ZIP_PATH }}
+          files: |
+            ${{ env.ZIP_PATH }}
+            ${{ env.ZIP_PATH }}.sig
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # `latest.json` is what every installed copy reads to decide whether there is
+  # an update and which artifact to fetch. tauri-action writes one entry per
+  # bundle it produced — but the portable zip is not one of its bundles, so the
+  # key the portable build asks for (`windows-portable`, from
+  # `self_update::updater_target`) has to be added afterwards.
+  #
+  # A separate job rather than another step in the Windows one: both matrix jobs
+  # already rewrite latest.json read-modify-write, and a third writer inside the
+  # matrix would race them. `needs: build` puts this strictly after both.
+  finalize-updater-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Add the portable target to latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          ZIP="Conversational-AI-Dashboard-portable-${TAG}-x64.zip"
+
+          gh release download "$TAG" --repo "$REPO" --pattern 'latest.json' --clobber
+          gh release download "$TAG" --repo "$REPO" --pattern "${ZIP}.sig" --clobber
+
+          node -e '
+            const fs = require("fs")
+            const [zip, tag, repo] = process.argv.slice(1)
+            const manifest = JSON.parse(fs.readFileSync("latest.json", "utf8"))
+
+            // A stale manifest would hand every client the wrong artifact while
+            // looking entirely healthy, so fail the release instead.
+            if (manifest.version !== tag.replace(/^v/, "")) {
+              throw new Error(
+                `latest.json is for ${manifest.version}, tag is ${tag}`
+              )
+            }
+
+            manifest.platforms = manifest.platforms || {}
+            manifest.platforms["windows-portable"] = {
+              signature: fs.readFileSync(zip + ".sig", "utf8").trim(),
+              url: `https://github.com/${repo}/releases/download/${tag}/${zip}`,
+            }
+            fs.writeFileSync("latest.json", JSON.stringify(manifest, null, 2))
+            console.log("platforms: " + Object.keys(manifest.platforms).join(", "))
+          ' "$ZIP" "$TAG" "$REPO"
+
+          gh release upload "$TAG" latest.json --repo "$REPO" --clobber

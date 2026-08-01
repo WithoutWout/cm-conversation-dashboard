@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Conversational AI Dashboard",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "identifier": "com.cm.conversation-dashboard",
   "build": {
     "frontendDist": "../frontend"
@@ -22,9 +22,21 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFOTg0RjQzNTYzRTNGMDEKUldRQlB6NVdRMCtZVGxhWVNCQXBHdFM3SUgvZUE2MWw0STh0VGJRMGJBaEtiTU9PcGFCTjF4NDkK",
+      "endpoints": [
+        "https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "dmg"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

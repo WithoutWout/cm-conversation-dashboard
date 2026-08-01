@@ -1,4 +1,5 @@
 mod analytics_api;
+mod self_update;
 
 use analytics_api::{AnalyticsConfig, AnalyticsConfigView, AnalyticsState, FetchError, FetchOutcome};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -12,8 +13,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_updater::UpdaterExt;
 
 const WATCH_EVENT_NAME: &str = "data-folder-updated";
+
+/// Download/install progress for [`install_update`]. Replacing the app is the
+/// one operation where a silent wait is genuinely alarming.
+const UPDATE_PROGRESS_EVENT: &str = "update-progress";
 
 /// Phase updates for [`export_conversations_for_ai`], which is one long await
 /// with a save dialog, a full-result query and a file write inside it.
@@ -80,10 +86,29 @@ struct AppData {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateResult {
     status: String,
     version: Option<String>,
     message: Option<String>,
+    /// Release notes from `latest.json`, which CI fills from the release body.
+    notes: Option<String>,
+    /// Whether this copy can replace itself. False sends the UI to the manual
+    /// download rather than to a button that cannot finish.
+    can_self_update: bool,
+    /// `"portable"` or `"managed"` — see `self_update::InstallKind`.
+    mode: String,
+    blocked_reason: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProgress {
+    /// `"downloading"` or `"installing"`.
+    phase: String,
+    downloaded: u64,
+    /// Absent when the server sends no `Content-Length`.
+    total: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -868,89 +893,143 @@ async fn select_data_folder(app: AppHandle) -> FolderSelectionResult {
     }
 }
 
+/// Build the updater, asking for the portable artifact when this is a portable
+/// copy.
+///
+/// `self_update::updater_target` returns `Some("windows-portable")` only for a
+/// bare `.exe`, which is what routes it to the plain zip in `latest.json`
+/// instead of the NSIS setup it cannot run.
+fn updater_for(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let mut builder = app.updater_builder();
+    if let Some(target) = self_update::updater_target() {
+        builder = builder.target(target);
+    }
+    builder.build().map_err(|e| e.to_string())
+}
+
+/// Why this copy cannot replace itself, if it cannot.
+///
+/// Answered *before* an update is offered, so the UI can show a working manual
+/// download rather than a button that fails halfway through the swap.
+fn self_update_blocker() -> Option<String> {
+    if cfg!(debug_assertions) {
+        return Some("Updates are installed manually in a development build.".into());
+    }
+    if self_update::install_kind() == self_update::InstallKind::Portable
+        && !self_update::exe_dir_writable()
+    {
+        return Some(format!(
+            "This copy is in a folder it cannot write to ({}). Move it somewhere \
+             like your Documents folder, or download the new version manually.",
+            self_update::current_exe_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|_| "unknown location".into())
+        ));
+    }
+    None
+}
+
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> UpdateResult {
-    let current = app.package_info().version.to_string();
+    let blocker = self_update_blocker();
+    let mode = self_update::install_kind().as_str().to_string();
 
-    let client = match reqwest::Client::builder()
-        .user_agent("cm-conversation-dashboard")
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-    {
-        Ok(c) => c,
+    let base = UpdateResult {
+        status: "up-to-date".into(),
+        version: None,
+        message: None,
+        notes: None,
+        can_self_update: blocker.is_none(),
+        mode,
+        blocked_reason: blocker,
+    };
+
+    let updater = match updater_for(&app) {
+        Ok(u) => u,
         Err(e) => {
             return UpdateResult {
                 status: "error".into(),
-                version: None,
-                message: Some(format!("Client error: {}", e)),
+                message: Some(e),
+                ..base
             }
         }
     };
 
-    let resp = match client
-        .get("https://api.github.com/repos/WithoutWout/cm-conversation-dashboard/releases/latest")
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            return UpdateResult {
-                status: "error".into(),
-                version: None,
-                message: Some(format!("Network: {}", e)),
-            }
-        }
-    };
-
-    let json: serde_json::Value = match resp.json().await {
-        Ok(j) => j,
-        Err(e) => {
-            return UpdateResult {
-                status: "error".into(),
-                version: None,
-                message: Some(format!("Parse error: {}", e)),
-            }
-        }
-    };
-
-    let latest = json
-        .get("tag_name")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim_start_matches('v').to_string())
-        .unwrap_or_default();
-
-    if latest.is_empty() {
-        let msg = json
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("no tag_name");
-        return UpdateResult {
+    match updater.check().await {
+        Ok(Some(update)) => UpdateResult {
+            status: "available".into(),
+            version: Some(update.version.clone()),
+            notes: update.body.clone(),
+            ..base
+        },
+        Ok(None) => base,
+        Err(e) => UpdateResult {
             status: "error".into(),
-            version: None,
-            message: Some(format!("API: {}", msg)),
-        };
+            message: Some(e.to_string()),
+            ..base
+        },
+    }
+}
+
+/// Download and install the pending update, then restart into it.
+///
+/// The download comes from `tauri-plugin-updater`, which verifies the minisign
+/// signature before returning the bytes — see `self_update`'s module docs for
+/// why the install half is ours and the download half is not.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(reason) = self_update_blocker() {
+        return Err(reason);
     }
 
-    let current_ver = semver::Version::parse(&current).ok();
-    let latest_ver = semver::Version::parse(&latest).ok();
+    let updater = updater_for(&app)?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "There is no update to install.".to_string())?;
 
-    let is_newer = match (latest_ver, current_ver) {
-        (Some(l), Some(c)) => l > c,
-        // Fall back to string equality if either is unparseable
-        _ => latest != current,
-    };
+    let emitter = app.clone();
+    let mut downloaded: u64 = 0;
+    let bytes = update
+        .download(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = emitter.emit(
+                    UPDATE_PROGRESS_EVENT,
+                    UpdateProgress {
+                        phase: "downloading".into(),
+                        downloaded,
+                        total,
+                    },
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| format!("Download failed: {e}"))?;
 
-    if is_newer {
-        UpdateResult {
-            status: "available".into(),
-            version: Some(latest),
-            message: None,
+    let _ = app.emit(
+        UPDATE_PROGRESS_EVENT,
+        UpdateProgress {
+            phase: "installing".into(),
+            downloaded: bytes.len() as u64,
+            total: Some(bytes.len() as u64),
+        },
+    );
+
+    match self_update::install_kind() {
+        self_update::InstallKind::Portable => {
+            let exe = self_update::apply_portable_zip(&bytes)?;
+            log::info!(target: "update", "installed {} into {}", update.version, exe.display());
+            self_update::relaunch(&app, &exe)
         }
-    } else {
-        UpdateResult {
-            status: "up-to-date".into(),
-            version: None,
-            message: None,
+        self_update::InstallKind::Managed => {
+            update
+                .install(bytes)
+                .map_err(|e| format!("Install failed: {e}"))?;
+            // Windows never reaches this — its installer exits the app itself.
+            app.restart();
         }
     }
 }
@@ -5711,6 +5790,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(Mutex::new(WatchState::default())))
         .manage(Arc::new(Mutex::new(DbState::default())) as SharedDbState)
         .manage(Arc::new(Mutex::new(None)) as SharedSearchInterrupt)
@@ -5730,6 +5810,11 @@ pub fn run() {
             if let Ok(cache_dir) = app.path().app_cache_dir() {
                 analytics_api::cleanup_temp(&cache_dir, &[]);
             }
+            // Delete the previous executable a portable self-update left
+            // behind. Deliberately here and not at the end of the update:
+            // keeping the old binary until the new one has actually launched
+            // is what makes a bad release recoverable by hand.
+            self_update::cleanup_stale_backups();
             // Initialize flagged database in app data directory
             if let Ok(data_dir) = app.path().app_data_dir() {
                 let flagged_path = data_dir.join("flagged.db");
@@ -5750,6 +5835,7 @@ pub fn run() {
             open_preview_window,
             select_data_folder,
             check_for_updates,
+            install_update,
             get_version,
             save_collection_export,
             set_db_path,
