@@ -49,9 +49,9 @@
     environment: "Production",
     activeSessionOnly: false,
     tokenProxyUrl: "",
-    // Sent as `x-proxy-key`. Without it the relay URL is a public token vending
-    // machine for the project — the path is guessable and it would mint a working
-    // bearer token for anyone who asked.
+    // Optional, and normally empty. Sent as `x-proxy-key` only when set; the
+    // relay's default protection is its own same-origin check, so that nobody
+    // using the dashboard has to know a password.
     tokenProxyKey: "",
   }
 
@@ -254,27 +254,31 @@
         >Token relay <span class="analytics-web-tag">set this up once</span></label
       >
       <p class="hint" style="margin:2px 0 6px">
-        Upload <code>cai-token.php</code> from <code>tools/token-proxy/</code> next
-        to this app. It holds your client secret and mints tokens for you, so they
-        refresh automatically and there is nothing to paste — ever. Full setup
-        steps are in <code>tools/token-proxy/README.md</code>; a Cloudflare Worker
-        version is included for hosts that cannot run PHP.
+        Put your CM.com client ID and secret into
+        <code>cai-token.php</code> (from <code>tools/token-proxy/</code>), upload it
+        next to this app, and enter its filename below. It mints tokens for you, so
+        they refresh automatically and there is nothing to paste — ever. Nobody
+        using the dashboard needs a password: the relay only answers pages served
+        from this same site. Setup steps are in
+        <code>tools/token-proxy/README.md</code>, and a Cloudflare Worker version is
+        included for hosts that cannot run PHP.
       </p>
-      <p class="hint" style="margin:2px 0 6px">
-        <strong>Relay key</strong> is a password <em>you</em> invent — not
-        something CM.com gives you. Put the same value in the relay file's
-        <code>SHARED_KEY</code> line and in the second field below, so only your
-        browser can use the relay. Generate one with
-        <code>openssl rand -base64 32</code>.
-      </p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input id="setting-analytics-token-proxy" type="text" autocomplete="off"
-          spellcheck="false" placeholder="cai-token.php"
-          value="${esc(cfg.tokenProxyUrl)}" style="flex:2 1 200px;min-width:0" />
+      <input id="setting-analytics-token-proxy" type="text" autocomplete="off"
+        spellcheck="false" placeholder="cai-token.php"
+        value="${esc(cfg.tokenProxyUrl)}" style="width:100%" />
+      <details style="margin-top:8px">
+        <summary class="hint" style="cursor:pointer">
+          Relay key — only if you set <code>SHARED_KEY</code> in the relay file
+        </summary>
+        <p class="hint" style="margin:6px 0">
+          Optional and normally left empty. If you set <code>SHARED_KEY</code> in
+          the relay, every browser that uses this dashboard needs the same value
+          here — which is why it is off by default.
+        </p>
         <input id="setting-analytics-token-key" type="password" autocomplete="new-password"
-          spellcheck="false" placeholder="Relay key (SHARED_KEY)"
-          value="${esc(cfg.tokenProxyKey)}" style="flex:1 1 150px;min-width:0" />
-      </div>
+          spellcheck="false" placeholder="Leave empty unless you set SHARED_KEY"
+          value="${esc(cfg.tokenProxyKey)}" style="width:100%" />
+      </details>
 
       <details style="margin-top:10px">
         <summary class="hint" style="cursor:pointer">
@@ -326,11 +330,8 @@
       const d = describeToken(t)
 
       if (c.tokenProxyUrl) {
-        if (!c.tokenProxyKey) {
-          el.textContent = "Relay set, but no relay key — the relay will refuse the request."
-          el.style.color = "var(--orange)"
-          return
-        }
+        // A missing key is the normal case now — the relay's own same-origin check
+        // is the default protection, so this must not be reported as a problem.
         el.textContent = t.accessToken
           ? `Relay active. ${d.text} Refreshes automatically.`
           : "Relay active. A token is fetched automatically on the first import."

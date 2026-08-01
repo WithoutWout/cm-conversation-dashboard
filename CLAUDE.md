@@ -204,17 +204,29 @@ order the UI presents them:
 - **The relay is deliberately *not* copied into `dist-web/`.** The build output is
   uploaded wholesale, so shipping a template copy would overwrite the user's
   configured relay on every redeploy. It is uploaded once, by hand.
-- **The relay requires a shared key** (`x-proxy-key`), and this is not optional:
-  the URL is guessable, and without a key it is a public token vending machine for
-  the project. `hash_equals` compares it, so a wrong key cannot be found a byte at
-  a time. Same-origin is the documented default, which means no CORS headers and
-  no preflight; `ALLOWED_ORIGIN` exists only for the Worker case.
-  - **The key is invented by the user, not issued by CM.com**, and it goes in two
-    places that must match: the relay's `SHARED_KEY` line and the Settings field.
-    That was the one thing the first version left implicit, and it is the question
-    it actually got asked. `tools/token-proxy/README.md` is the step-by-step; the
-    Settings hint and the PHP comment both state it outright rather than deferring
-    to the README.
+- **The relay needs no password, and `SHARED_KEY` is off by default.** Setup is two
+  CM.com values in the file plus its filename in Settings — nothing a user has to
+  be told. An earlier version made a shared key mandatory, which was wrong for the
+  actual deployment shape: a key has to be handed to **every person and typed into
+  every browser** that opens the dashboard, and it is not a secret the user was
+  ever given.
+  - **What replaces it is `Sec-Fetch-Site: same-origin`**, which the browser sets
+    and page JS cannot forge. A cross-site page gets `cross-site`, and `curl` or a
+    crawler sends nothing — both `403`. Older browsers fall back to an
+    `Origin`/`Referer` host comparison. Sending no `Access-Control-Allow-Origin`
+    then means another origin could not *read* a response even if it made the
+    request, so the token cannot be lifted cross-origin.
+  - **It is a lock, not a guard, and the README says so.** A script that knows the
+    URL can forge the header. The honest framing: anyone who can load the dashboard
+    can import conversation data by design, so the dashboard's own access control
+    *is* the access control — a public URL means public logs, relay or not.
+  - `SHARED_KEY` remains as an opt-in second lock; the Settings field for it lives
+    in a collapsed disclosure so it never reads as a required step.
+  - **The Worker variant requires `ALLOWED_ORIGIN`** and refuses everything when it
+    is unset. Being on another origin it has no same-origin signal, so defaulting
+    to open would be the one genuinely unsafe configuration.
+- `tools/token-proxy/README.md` is the setup guide, and it leads with the two values
+  that come from CM.com rather than with the CORS explanation.
 - **The "still a placeholder" check tests a `PUT-` prefix, not the placeholder
   text.** An earlier version compared `SHARED_KEY` against its own placeholder
   literal — so configuring the file by find-and-replace (the obvious way) rewrote

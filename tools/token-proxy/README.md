@@ -1,12 +1,16 @@
 # Token relay — setup
 
 One file you upload once. After that the Analytics API import works on its own:
-tokens are fetched and refreshed automatically, and there is nothing to paste.
+tokens are fetched and refreshed automatically, there is nothing to paste, and
+**nobody using the dashboard needs a password.**
+
+You edit **two values**, both of which CM.com gave you: your client ID and your
+client secret. That's it.
 
 ## Why this file has to exist
 
-The Analytics API needs two requests. A browser can make one of them and not the
-other, and that is not a limitation of this app:
+The Analytics API needs two requests. A browser can make one and not the other,
+and that is not a limitation of this app:
 
 | Request | Can a browser do it? |
 | --- | --- |
@@ -14,8 +18,8 @@ other, and that is not a limitation of this app:
 | `POST login.microsoftonline.com/…/oauth2/token` with `grant_type=client_credentials` | **no** — no CORS headers, at any origin |
 
 Microsoft *does* allow the token endpoint cross-origin for browser sign-in flows,
-and deliberately refuses it for the client-secret flow the Analytics API requires
-— a browser cannot hold a secret safely. No setting changes this.
+and deliberately refuses it for the client-secret flow the Analytics API requires —
+a browser cannot hold a secret safely. No setting changes this.
 
 The desktop app is unaffected because CORS is a rule **browsers** enforce, not
 servers, and it uses a native HTTP client.
@@ -26,66 +30,19 @@ and hands back only the short-lived token.
 
 ---
 
-## What you need
+## Setup
 
-Three values. **Two come from CM.com, one you make up yourself.**
+### 1. Edit two lines
 
-| Value | Where it comes from |
-| --- | --- |
-| `CLIENT_ID` | CM.com — the same one the desktop app uses |
-| `CLIENT_SECRET` | CM.com — the same one the desktop app uses |
-| `SHARED_KEY` | **You invent it.** See below. |
-
-### The shared key, specifically
-
-It is a password **you choose yourself**. Nobody issues it, and it has nothing to
-do with your CM.com credentials.
-
-It exists because the relay's address is guessable — if the app lives at
-`https://example.com/dashboard/`, then the relay is at
-`https://example.com/dashboard/cai-token.php`. Without a key, anyone who
-guessed that URL could make it mint working bearer tokens for your CM.com
-project. The key means only your browser can use it.
-
-You write the same value in **two places**, and they must match exactly:
-
-1. in `cai-token.php`, on the `SHARED_KEY` line
-2. in the app, in the **Relay key (SHARED_KEY)** field
-
-Generate one with any of these, or use a password manager:
-
-```bash
-openssl rand -base64 32
-```
-
-Length is what matters, not cleverness — 30+ random characters. Avoid `'`
-characters, since the value sits inside single quotes in the PHP file.
-
----
-
-## Setup, step by step
-
-### 1. Edit the file
-
-Open `cai-token.php` and replace the three placeholder values. They are near the
-top, at lines 38, 39 and 48:
+Open `cai-token.php` and replace the two placeholders near the top:
 
 ```php
 const CLIENT_ID     = 'PUT-YOUR-CLIENT-ID-HERE';
 const CLIENT_SECRET = 'PUT-YOUR-CLIENT-SECRET-HERE';
-const SHARED_KEY    = 'PUT-A-LONG-RANDOM-STRING-HERE';
 ```
 
-becomes, for example:
-
-```php
-const CLIENT_ID     = '8f3c1e42-...';
-const CLIENT_SECRET = 'abc123~...';
-const SHARED_KEY    = 'Qk9pQm5UdGhpc0lzUmFuZG9tMzJCeXRlcw==';
-```
-
-Leave `ALLOWED_ORIGIN` empty — you only need it if the relay lives on a
-*different* domain than the app.
+Both come from CM.com — the same pair the desktop app uses. Leave `SHARED_KEY`
+and `ALLOWED_ORIGIN` empty.
 
 ### 2. Upload it
 
@@ -96,71 +53,107 @@ Put it in the **same folder as `index.html`**, alongside the other files from
 > because you upload that folder wholesale on every update — a template copy in
 > there would overwrite your configured file each time.
 
-### 3. Check it works, before touching the app
+### 3. Enter the filename in the app
 
-```bash
-curl -s -X POST -H 'x-proxy-key: YOUR_SHARED_KEY' https://YOUR-SITE/cai-token.php
+**Settings** (gear, top right) → **Conversations** tab → **Token relay** → type:
+
+```
+cai-token.php
 ```
 
-A working relay answers with a token:
+Just the filename, if it sits next to `index.html`. A full URL works too.
 
-```json
-{"access_token":"eyJ0eXAiOiJKV1Qi...","expires_in":86399}
-```
+The line underneath should turn green: *"Relay active. A token is fetched
+automatically on the first import."* Click **Test connection** to confirm the
+whole chain.
 
-### 4. Enter it in the app
+That's the whole setup. Every person who opens the dashboard gets working imports
+with nothing to configure.
 
-**Settings** (gear, top right) → **Conversations** tab → scroll to **Token relay**:
+---
 
-| Field | Value |
-| --- | --- |
-| first field | `cai-token.php` — just the filename, if it sits next to `index.html`. A full URL also works. |
-| **Relay key (SHARED_KEY)** | the same shared key you put in the file |
+## How protected is this?
 
-The line underneath should turn green and read *"Relay active. A token is fetched
-automatically on the first import."*
+There is no password, by design — one would have to be handed to every person and
+typed into every browser that uses the dashboard. Instead the relay refuses
+anything that did not come from a page on your own site:
 
-Then click **Test connection** to confirm the whole chain end to end.
+- **`Sec-Fetch-Site: same-origin`** is set by the browser and cannot be forged by
+  page JavaScript. A page on another domain gets `cross-site`; a bare `curl` or a
+  crawler sends no such header at all. Both are refused with a `403`. (Older
+  browsers that don't send it fall back to an `Origin`/`Referer` host comparison.)
+- **No CORS headers are sent**, so even if another site made the request, the
+  browser would not let it *read* the response. A cross-origin web page cannot
+  lift the token.
+
+**What this does not stop:** someone who knows the URL and forges the header from a
+script. So be clear about what is actually protecting your data:
+
+> Anyone who can load the dashboard can import conversation data — that is the
+> point of it. So the dashboard's own access control *is* the access control.
+> If the app is on a public URL with no login, treat the conversation logs as
+> public too, relay or no relay.
+
+If the dashboard is behind HTTP basic auth, an IP allowlist, a VPN, or an intranet,
+the relay sits behind exactly the same protection, because it is on the same host.
+
+### If you do want a second lock
+
+Set `SHARED_KEY` in the relay file to a long random string
+(`openssl rand -base64 32`), then enter the same value in the app under
+**Token relay → Relay key**. It is off by default because every browser that uses
+the dashboard then needs that value entered, which is a real cost for a shared
+deployment.
 
 ---
 
 ## If something goes wrong
 
-The message tells you which step failed.
-
 | What you see | What it means |
 | --- | --- |
-| `Relay is not configured: CLIENT_ID is still a placeholder.` | One of the three values wasn't replaced. The message names which. |
-| `403` / `Forbidden: missing or incorrect proxy key.` | The key in the app doesn't match the one in the file. Check for a trailing space or a partial copy. |
-| `Relay set, but no relay key` | The **Relay key** field in Settings is empty. |
-| `The token relay did not return JSON` | The host is serving the file as plain text instead of running it — PHP isn't enabled for that folder. Use the Cloudflare Worker version instead. |
+| `Relay is not configured: CLIENT_ID is still a placeholder.` | One of the two values wasn't replaced. The message names which. |
+| `403` / `only answers the dashboard served from the same site` | The request didn't look like it came from your dashboard. Normal if you tested with `curl`; from the app it means the relay is on a different domain than the app — set `ALLOWED_ORIGIN` to the app's origin. |
+| `403` / `missing or incorrect relay key` | You set `SHARED_KEY` in the file but not in the app (or they differ). |
+| `The token relay did not return JSON` | The host is serving the file as text instead of running it — PHP isn't enabled for that folder. Use the Cloudflare Worker version. |
 | `AADSTS700016: Application with identifier '…' was not found` | `CLIENT_ID` is wrong. |
 | `AADSTS7000215: Invalid client secret provided` | `CLIENT_SECRET` is wrong or expired. |
-| `404` | Wrong path. Open `https://YOUR-SITE/cai-token.php` in a browser — you should get JSON (an error is fine), not your host's 404 page. |
+| `404` | Wrong path. Open `https://YOUR-SITE/cai-token.php` in a browser — you should get JSON (a `403` is expected and fine), not your host's 404 page. |
+
+To test from a terminal you have to imitate the browser, since a bare request is
+refused on purpose:
+
+```bash
+curl -s -X POST -H 'Sec-Fetch-Site: same-origin' https://YOUR-SITE/cai-token.php
+```
+
+A working relay answers `{"access_token":"eyJ0eXAi…","expires_in":86399}`.
 
 ---
 
 ## Security notes
 
-- **The shared key is not a CM.com credential.** Losing it lets someone mint
-  tokens for your project until you change it; it does not expose your secret.
-  To rotate it, change both places.
 - **The client secret never reaches the browser.** Only the short-lived token
-  does. That is the point, and it is stricter than the desktop app, which keeps
-  the secret in a local file.
+  does. That is stricter than the desktop app, which keeps the secret in a local
+  file.
 - **Don't commit your configured copy** to a public repository — it contains the
   secret. The template here is safe to commit; your filled-in copy is not.
-- The relay only ever accepts `POST`, only answers with a token or an error, and
-  compares the key with `hash_equals` so it cannot be guessed a byte at a time.
+- If your host lets you, keep the file non-world-readable at the filesystem level
+  (`chmod 600` where the web server runs as your user). It only matters against
+  other accounts on shared hosting.
+- The relay only ever accepts `POST` and only ever answers with a token or an
+  error.
 
 ---
 
 ## No PHP on your host?
 
-Use `cloudflare-worker.js` instead — same idea, runs on Cloudflare's free tier,
-no server of your own. Its header comment has the deploy steps. Because it lives
-on a different domain than the app, that one *does* need `ALLOWED_ORIGIN` set to
-the exact origin serving the dashboard.
+Use `cloudflare-worker.js` — same idea, runs on Cloudflare's free tier, no server
+of your own. Its header comment has the deploy steps.
+
+One difference: because it lives on a *different* domain than the app, it cannot
+use the same-origin check, so `ALLOWED_ORIGIN` **must** be set to the exact origin
+serving the dashboard. With it unset the worker refuses everything rather than
+defaulting to open. Still no password.
 
 ## Neither is possible?
 

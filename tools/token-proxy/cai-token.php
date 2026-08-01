@@ -39,22 +39,21 @@ const CLIENT_ID     = 'PUT-YOUR-CLIENT-ID-HERE';
 const CLIENT_SECRET = 'PUT-YOUR-CLIENT-SECRET-HERE';
 
 /**
- * A password you invent yourself. NOT something CM.com gives you.
+ * OPTIONAL, and empty is the normal setting. Leave it alone unless you have a
+ * specific reason.
  *
- * Generate one with:  openssl rand -base64 32
+ * With it empty, the relay accepts requests that the *browser itself* marks as
+ * coming from a page on this same origin (see the `Sec-Fetch-Site` check below).
+ * Nobody using the dashboard has to know or enter anything — which is the point,
+ * because a shared key would have to be handed to every person and typed into
+ * every browser that uses the app.
  *
- * Put the same value in TWO places, matching exactly:
- *   1. here
- *   2. the app: Settings -> Conversations -> Token relay -> "Relay key (SHARED_KEY)"
- *
- * It is not optional. This file's address is guessable — if the app is at
- * https://example.com/dash/ then this is at https://example.com/dash/cai-token.php
- * — so without a key anyone who guessed it could mint working bearer tokens for
- * your CM.com project. The key means only your browser can use it.
- *
- * Avoid apostrophes: the value sits inside single quotes below.
+ * Set it only if you want a second lock on top of that, and understand that every
+ * user then needs the same value entered in
+ * Settings -> Conversations -> Token relay -> "Relay key". Generate one with
+ * `openssl rand -base64 32`; avoid apostrophes, since it sits in single quotes.
  */
-const SHARED_KEY = 'PUT-A-LONG-RANDOM-STRING-HERE';
+const SHARED_KEY = '';
 
 /**
  * Leave empty when this file sits beside index.html (the normal case).
@@ -102,20 +101,17 @@ if ($method !== 'POST') {
  * against the placeholder text.
  *
  * The obvious way to configure this file is a find-and-replace of the placeholder
- * string, and an earlier version compared `SHARED_KEY` against that same literal
- * — so the replace rewrote the guard too, and every request was rejected with a
- * "Forbidden" that pointed at the key rather than at the real cause. Any
- * replacement of the value necessarily removes the prefix, so this cannot repeat.
+ * string, and an earlier version compared a constant against that same literal —
+ * so the replace rewrote the guard too and every request was rejected with a
+ * misleading error. Any replacement of the value necessarily removes the prefix.
  */
 function is_placeholder(string $value): bool
 {
     return $value === '' || str_starts_with($value, 'PUT-');
 }
 
-// Fail loudly on a half-configured relay, rather than forwarding placeholders to
-// Microsoft and reporting its "unauthorized_client" as if the credentials were
-// merely wrong.
-foreach (['CLIENT_ID' => CLIENT_ID, 'CLIENT_SECRET' => CLIENT_SECRET, 'SHARED_KEY' => SHARED_KEY] as $name => $value) {
+// Only the two CM.com values are required. SHARED_KEY is deliberately optional.
+foreach (['CLIENT_ID' => CLIENT_ID, 'CLIENT_SECRET' => CLIENT_SECRET] as $name => $value) {
     if (is_placeholder($value)) {
         http_response_code(500);
         echo json_encode(['error' => "Relay is not configured: $name is still a placeholder."]);
@@ -123,12 +119,61 @@ foreach (['CLIENT_ID' => CLIENT_ID, 'CLIENT_SECRET' => CLIENT_SECRET, 'SHARED_KE
     }
 }
 
-$provided = $_SERVER['HTTP_X_PROXY_KEY'] ?? '';
-// hash_equals, not ===, so a wrong key cannot be discovered a byte at a time.
-if (!hash_equals(SHARED_KEY, $provided)) {
+/**
+ * The default protection, and the reason no password is needed.
+ *
+ * `Sec-Fetch-Site` is set by the browser and cannot be set by page JavaScript, so
+ * `same-origin` means the request genuinely came from a page served from this same
+ * host — i.e. from the dashboard. A page on another domain gets `cross-site`, and
+ * a bare `curl` or crawler sends no such header at all. Both are refused.
+ *
+ * Combined with sending no `Access-Control-Allow-Origin` (the same-origin default
+ * below), a page on another domain also cannot *read* a response even if it made
+ * the request, so a cross-origin web attacker cannot lift the token.
+ *
+ * What this does not stop is someone who knows this URL and forges the header from
+ * a script. It is a lock on the door, not a guard: the dashboard's own access
+ * control is what actually keeps strangers out, since anyone who can load the app
+ * can use the relay by design. See README.md, "How protected is this?".
+ */
+$fetchSite = $_SERVER['HTTP_SEC_FETCH_SITE'] ?? '';
+if ($fetchSite === '') {
+    // Older browsers don't send Sec-Fetch-Site. Fall back to comparing the host
+    // that the request claims to come from against the host serving this file.
+    $claimed = $_SERVER['HTTP_ORIGIN'] ?? $_SERVER['HTTP_REFERER'] ?? '';
+    $claimedHost = $claimed === '' ? '' : (parse_url($claimed, PHP_URL_HOST) ?? '');
+    $selfHost = parse_url('http://' . ($_SERVER['HTTP_HOST'] ?? ''), PHP_URL_HOST) ?? '';
+    $sameOrigin = $claimedHost !== '' && strcasecmp($claimedHost, $selfHost) === 0;
+} else {
+    $sameOrigin = $fetchSite === 'same-origin';
+}
+
+// ALLOWED_ORIGIN being set means the app is deliberately on another origin, so a
+// cross-site request is expected — that case is gated by the CORS headers above
+// plus the Origin check here instead.
+if (ALLOWED_ORIGIN !== '') {
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    $sameOrigin = $origin !== '' && strcasecmp($origin, ALLOWED_ORIGIN) === 0;
+}
+
+if (!$sameOrigin) {
     http_response_code(403);
-    echo json_encode(['error' => 'Forbidden: missing or incorrect proxy key.']);
+    echo json_encode([
+        'error' => 'Forbidden: this relay only answers the dashboard served from the same site.',
+    ]);
     exit;
+}
+
+// The optional second lock. Skipped entirely when SHARED_KEY is empty, which is
+// the normal configuration.
+if (SHARED_KEY !== '') {
+    $provided = $_SERVER['HTTP_X_PROXY_KEY'] ?? '';
+    // hash_equals, not ===, so a wrong key cannot be discovered a byte at a time.
+    if (!hash_equals(SHARED_KEY, $provided)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Forbidden: missing or incorrect relay key.']);
+        exit;
+    }
 }
 
 $ch = curl_init(TOKEN_URL);

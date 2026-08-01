@@ -10,17 +10,24 @@
 //
 // DEPLOY
 //   1. npx wrangler init cai-token   (or paste this into the dashboard editor)
-//   2. Set three secrets — never put them in wrangler.toml:
+//   2. Set the two CM.com secrets — never put them in wrangler.toml:
 //        npx wrangler secret put CM_CLIENT_ID
 //        npx wrangler secret put CM_CLIENT_SECRET
-//        npx wrangler secret put SHARED_KEY
 //   3. Set ALLOWED_ORIGIN as a plain var to the exact origin serving the app,
 //      e.g. https://dashboard.example.com
-//   4. In the app: Settings → Analytics API → Token relay URL = the worker URL,
-//      plus the same SHARED_KEY.
+//   4. In the app: Settings → Conversations → Token relay = the worker URL.
 //
-// This one *is* cross-origin, so unlike the PHP version it must send CORS headers
-// and answer the preflight that the x-proxy-key header triggers.
+// No password anywhere: ALLOWED_ORIGIN is what restricts this, and nobody using
+// the dashboard has to know or enter anything.
+//
+// ALLOWED_ORIGIN is REQUIRED here, unlike in the PHP version. This worker is on a
+// different origin than the app, so it cannot use the PHP file's same-origin
+// check; the Origin header is the only signal it has. With it unset the worker
+// refuses everything rather than defaulting to open.
+//
+// SHARED_KEY is optional. Set it as a third secret only if you want a second lock,
+// and note that every browser using the dashboard then needs the same value
+// entered in Settings.
 
 const TOKEN_URL =
   "https://login.microsoftonline.com/digitalcx.onmicrosoft.com/oauth2/token"
@@ -55,14 +62,33 @@ export default {
     if (request.method !== "POST") {
       return json({ error: "Use POST." }, 405, env)
     }
-    if (!env.CM_CLIENT_ID || !env.CM_CLIENT_SECRET || !env.SHARED_KEY) {
-      return json({ error: "Relay is not configured (missing secrets)." }, 500, env)
+    if (!env.CM_CLIENT_ID || !env.CM_CLIENT_SECRET) {
+      return json({ error: "Relay is not configured (missing CM.com secrets)." }, 500, env)
+    }
+    // Refuse rather than default to open: without a configured origin this worker
+    // has no way at all to tell the dashboard from anyone else.
+    if (!env.ALLOWED_ORIGIN) {
+      return json({ error: "Relay is not configured (ALLOWED_ORIGIN is not set)." }, 500, env)
     }
 
-    // Constant-time compare, so a wrong key cannot be found a byte at a time.
-    const provided = request.headers.get("x-proxy-key") || ""
-    if (!timingSafeEqual(provided, env.SHARED_KEY)) {
-      return json({ error: "Forbidden: missing or incorrect proxy key." }, 403, env)
+    // The default protection, and why no password is needed. The browser sets
+    // Origin and page JavaScript cannot forge it, so this is what restricts the
+    // worker to the dashboard's own origin.
+    const origin = request.headers.get("origin") || ""
+    if (origin.toLowerCase() !== env.ALLOWED_ORIGIN.toLowerCase()) {
+      return json(
+        { error: "Forbidden: this relay only answers the configured dashboard origin." },
+        403,
+        env
+      )
+    }
+
+    // Optional second lock; skipped entirely when SHARED_KEY is unset.
+    if (env.SHARED_KEY) {
+      const provided = request.headers.get("x-proxy-key") || ""
+      if (!timingSafeEqual(provided, env.SHARED_KEY)) {
+        return json({ error: "Forbidden: missing or incorrect relay key." }, 403, env)
+      }
     }
 
     let upstream
