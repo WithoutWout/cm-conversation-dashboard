@@ -46,7 +46,9 @@ const TOKEN_SKEW_SECS: u64 = 120;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+// `PartialEq` so a settings backup can tell an untouched config from a real one
+// and skip writing a block of empty strings — see `export_settings_backup`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AnalyticsConfig {
     pub client_id: String,
