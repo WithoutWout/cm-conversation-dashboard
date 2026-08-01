@@ -1,28 +1,41 @@
 // Analytics API settings and token handling for the browser build.
 //
 // The desktop app keeps credentials in `app_data_dir()/analytics-api.json` at
-// 0600 and mints its own OAuth2 token. Neither is possible here, and the reason
-// is worth stating plainly because it shapes the whole design:
+// 0600 and mints its own OAuth2 token. A browser cannot do the second part, and
+// the reason is specific enough to be worth writing down, because "the desktop
+// manages it" is the obvious objection:
 //
-//   the token endpoint (`login.microsoftonline.com/.../oauth2/token`) sends no
-//   `Access-Control-Allow-Origin`, on both its v1 and v2.0 forms, so a browser
-//   cannot read a token response at all — `fetch` rejects before any credential
-//   is checked. The interactions endpoint *does* send `*`, so the data itself is
-//   reachable.
+//   CORS is enforced by the *browser*, never by the server. The desktop build
+//   uses `reqwest`, a native HTTP client where CORS does not exist as a concept,
+//   so the identical request to the identical server succeeds there.
 //
-// One request of the two is blocked, so the token is supplied rather than minted:
+//   And Entra ID's refusal is deliberate, not incidental. Measured against the
+//   live endpoint:
 //
-//   1. **Paste a token** (default). The user mints one wherever they like — the
-//      Copy button hands them a ready `curl` — and pastes it here. Tokens last
-//      24h per the SOP, so this is a once-a-day action.
-//   2. **A token proxy** (optional). Any URL that returns `{access_token,
-//      expires_in}`. For anyone who can host one small file this makes it
-//      automatic again.
+//     POST /oauth2/v2.0/token  grant_type=authorization_code  -> ACAO: *
+//     POST /oauth2/v2.0/token  grant_type=client_credentials  -> no ACAO
 //
-// Both are a security *improvement* over storing the secret in the browser, and
-// that is why there is no client-secret field in the web build: in mode 1 the
-// secret never leaves the user's terminal, and in mode 2 it never leaves the
-// proxy. Nothing here has to be trusted with it.
+//   Same URL, same host, opposite answers. `client_credentials` carries a client
+//   *secret*, which a browser cannot hold safely, so it is refused cross-origin
+//   at every origin — there is no configuration that changes this. The CM.com SOP
+//   mandates exactly that grant. (The *data* endpoint sends `*`, which is why the
+//   interaction log itself is readable from a page.)
+//
+// So the token has to come from somewhere that is not a browser. Two ways, in
+// preference order:
+//
+//   1. **A token relay** (preferred, and the default in the UI). One file the
+//      user uploads beside the app — see `tools/token-proxy/`. It holds the
+//      secret, performs the one request a browser may not, and returns only the
+//      short-lived token. Tokens then refresh on their own and there is nothing
+//      to paste, ever.
+//   2. **Paste a token** (fallback). For a host that cannot run any server-side
+//      code at all. Tokens last ~24h per the SOP, so it is a once-a-day action.
+//
+// Either way the client secret never enters the browser, which is why this build
+// has no client-secret field: in mode 1 it lives on the relay, in mode 2 it never
+// leaves the user's terminal. That is strictly better than the desktop's local
+// file, not a compromise.
 ;(function () {
   if (window.__TAURI__?.core?.invoke) return // desktop: the Rust client owns this
 
@@ -36,6 +49,10 @@
     environment: "Production",
     activeSessionOnly: false,
     tokenProxyUrl: "",
+    // Sent as `x-proxy-key`. Without it the relay URL is a public token vending
+    // machine for the project — the path is guessable and it would mint a working
+    // bearer token for anyone who asked.
+    tokenProxyKey: "",
   }
 
   const readJson = (key, fallback) => {
@@ -85,24 +102,40 @@
     }
   }
 
-  /// Mint a token through a user-supplied proxy. The proxy holds the credentials;
-  /// we only ever see the token it returns.
-  async function tokenFromProxy(url) {
+  /// Mint a token through the user's relay. The relay holds the credentials; this
+  /// side only ever sees the short-lived token it returns.
+  async function tokenFromProxy(url, key) {
     const resp = await fetch(url, {
       method: "POST",
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        // Only sent when set. An empty custom header would still trigger a
+        // preflight cross-origin while conveying nothing.
+        ...(key ? { "x-proxy-key": key } : {}),
+      },
       cache: "no-store",
     })
     const text = await resp.text()
-    if (!resp.ok) throw new Error(`Token proxy returned ${resp.status}: ${text.slice(0, 200)}`)
+    if (!resp.ok) {
+      // 403 is overwhelmingly the shared key not matching, and saying so beats
+      // making the user read a JSON body to find out.
+      const hint =
+        resp.status === 403
+          ? " — check that the relay key here matches SHARED_KEY in the relay file"
+          : ""
+      throw new Error(`Token relay returned ${resp.status}${hint}: ${text.slice(0, 200)}`)
+    }
     let body
     try {
       body = JSON.parse(text)
     } catch (_) {
-      throw new Error("Token proxy did not return JSON")
+      throw new Error(
+        "The token relay did not return JSON. If the URL is right, the host may " +
+          "be serving the file as plain text instead of executing it."
+      )
     }
     const accessToken = body.access_token || body.accessToken
-    if (!accessToken) throw new Error("Token proxy response had no access_token")
+    if (!accessToken) throw new Error("The token relay returned no access_token")
     const expiresIn = Number(body.expires_in || body.expiresIn || 0)
     return {
       accessToken,
@@ -115,9 +148,9 @@
   async function currentToken() {
     let t = loadTok()
     if (tokenValid(t)) return t.accessToken
-    const { tokenProxyUrl } = loadCfg()
+    const { tokenProxyUrl, tokenProxyKey } = loadCfg()
     if (tokenProxyUrl) {
-      t = await tokenFromProxy(tokenProxyUrl)
+      t = await tokenFromProxy(tokenProxyUrl, tokenProxyKey)
       saveTok(t)
       return t.accessToken
     }
@@ -159,9 +192,17 @@
     )
   }
 
+  /// Set by `injectSettingsUi`, so opening Settings can re-read the token state
+  /// without rebuilding the block. A token expires while the page stays open, and
+  /// the status line is the only thing that says so.
+  let refreshTokenStatus = () => {}
+
   function injectSettingsUi() {
     const grid = document.querySelector(".analytics-cfg-grid")
-    if (!grid || document.getElementById("analyticsWebBlock")) return
+    if (!grid || document.getElementById("analyticsWebBlock")) {
+      refreshTokenStatus()
+      return
+    }
 
     // Client ID and secret have no job in the web build — see the file header.
     // They are *hidden*, not removed: `loadAnalyticsConfigIntoSettings` and
@@ -188,41 +229,95 @@
           line-height: 1.5;
         }
         #analyticsWebBlock .analytics-web-note strong { color: var(--text); }
+        #analyticsWebBlock .analytics-web-label {
+          display: block;
+          margin-top: 12px;
+        }
+        #analyticsWebBlock .analytics-web-tag {
+          display: inline-block;
+          margin-left: 5px;
+          padding: 1px 6px;
+          border-radius: 3px;
+          background: color-mix(in srgb, var(--green) 18%, transparent);
+          color: var(--green);
+          font-size: 0.62rem;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          text-transform: none;
+        }
       </style>
       <div class="analytics-web-note">
-        <strong>Access token</strong> — this browser cannot request one itself.
-        The CM.com token endpoint does not permit cross-origin requests, so mint a
-        token elsewhere and paste it here. Tokens last about 24 hours.
+        <strong>Access token</strong> — a browser cannot request one itself.
+        Microsoft answers the token endpoint cross-origin for browser sign-in
+        flows, but refuses it for the client-secret flow the Analytics API
+        requires, at every origin. The desktop app is unaffected because CORS is a
+        browser rule, not a server one. So the token has to come from somewhere
+        that is not a browser:
       </div>
-      <textarea id="setting-analytics-token" rows="3" spellcheck="false"
-        autocomplete="off" placeholder="Paste an access token (eyJ0eXAi…)"
-        style="width:100%;margin-top:8px;font-family:var(--mono,monospace);font-size:11px"></textarea>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
-        <button class="btn-secondary" id="analyticsCopyCurlBtn" type="button">Copy token command</button>
-        <button class="btn-secondary" id="analyticsClearTokenBtn" type="button">Clear token</button>
-        <span class="hint" id="analyticsTokenStatus"></span>
+
+      <label class="analytics-web-label" for="setting-analytics-token-proxy"
+        >Token relay URL <span class="analytics-web-tag">recommended</span></label
+      >
+      <p class="hint" style="margin:2px 0 6px">
+        Upload <code>cai-token.php</code> from <code>tools/token-proxy/</code>
+        next to this app and put its name here. It holds the client secret, so
+        tokens refresh on their own and there is nothing to paste. A Cloudflare
+        Worker version is there too, for hosts that cannot run PHP.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="setting-analytics-token-proxy" type="text" autocomplete="off"
+          spellcheck="false" placeholder="cai-token.php"
+          value="${esc(cfg.tokenProxyUrl)}" style="flex:2 1 200px;min-width:0" />
+        <input id="setting-analytics-token-key" type="password" autocomplete="new-password"
+          spellcheck="false" placeholder="Relay key (SHARED_KEY)"
+          value="${esc(cfg.tokenProxyKey)}" style="flex:1 1 150px;min-width:0" />
       </div>
-      <details style="margin-top:10px">
-        <summary class="hint" style="cursor:pointer">Automate it with a token proxy (optional)</summary>
+
+      <details style="margin-top:12px">
+        <summary class="hint" style="cursor:pointer">
+          No server-side code on your host? Paste a token instead
+        </summary>
         <p class="hint" style="margin:6px 0">
-          A URL that returns <code>{"access_token":"…","expires_in":86400}</code>.
-          The proxy holds your client secret so this browser never has to, and the
-          token then refreshes on its own. Leave empty to keep pasting.
+          Mint one in your terminal and paste it below. Tokens last about 24 hours,
+          so this needs repeating roughly daily — which is why the relay above is
+          the better option wherever it is possible.
         </p>
-        <input id="setting-analytics-token-proxy" type="url" autocomplete="off"
-          spellcheck="false" placeholder="https://your-host/cai-token"
-          value="${esc(cfg.tokenProxyUrl)}" style="width:100%" />
+        <textarea id="setting-analytics-token" rows="3" spellcheck="false"
+          autocomplete="off" placeholder="Paste an access token (eyJ0eXAi…)"
+          style="width:100%;font-family:var(--mono,monospace);font-size:11px"></textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap">
+          <button class="btn-secondary" id="analyticsCopyCurlBtn" type="button">Copy token command</button>
+          <button class="btn-secondary" id="analyticsClearTokenBtn" type="button">Clear token</button>
+        </div>
       </details>
+      <p class="hint" id="analyticsTokenStatus" style="margin-top:8px;min-height:1.1em"></p>
     `
     grid.insertAdjacentElement("afterend", block)
 
+    /// Says which mechanism is in play, not just whether a token is cached — with
+    /// a relay configured, "No token" is not a problem, it just means one has not
+    /// been fetched yet.
     const tokenStatus = () => {
       const el = document.getElementById("analyticsTokenStatus")
       if (!el) return
-      const d = describeToken(loadTok())
+      const c = loadCfg()
+      const t = loadTok()
+      if (c.tokenProxyUrl) {
+        const d = describeToken(t)
+        const missingKey = !c.tokenProxyKey
+        el.textContent = missingKey
+          ? "Relay set, but no relay key — the relay will refuse the request."
+          : t.accessToken
+            ? `Relay set. ${d.text} Refreshes automatically.`
+            : "Relay set. A token will be fetched on the first import."
+        el.style.color = missingKey ? "var(--orange)" : "var(--green)"
+        return
+      }
+      const d = describeToken(t)
       el.textContent = d.text
       el.style.color = d.ok ? "var(--green)" : "var(--muted)"
     }
+    refreshTokenStatus = tokenStatus
 
     const ta = document.getElementById("setting-analytics-token")
     ta.addEventListener("change", () => {
@@ -254,6 +349,15 @@
         const c = loadCfg()
         c.tokenProxyUrl = e.target.value.trim()
         saveCfg(c)
+        tokenStatus()
+      })
+    document
+      .getElementById("setting-analytics-token-key")
+      .addEventListener("change", (e) => {
+        const c = loadCfg()
+        c.tokenProxyKey = e.target.value
+        saveCfg(c)
+        tokenStatus()
       })
     tokenStatus()
   }
@@ -332,7 +436,12 @@
         return { ok: false, message: `Token proxy failed: ${e.message}` }
       }
       if (!token) {
-        return { ok: false, message: "No access token — paste one above, or set a token proxy." }
+        return {
+          ok: false,
+          message:
+            "No access token. Set a token relay URL and key above (recommended), " +
+            "or paste a token under the fallback option.",
+        }
       }
       // One second, an hour ago: inside retention, trivially small, and still a
       // real authenticated request against the real project.

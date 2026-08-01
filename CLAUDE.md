@@ -152,23 +152,50 @@ offers a reload.
 **One of the two requests the import needs is blocked by CORS, and which one is
 the entire design.** Measured against the live hosts, not assumed:
 
-| Endpoint | `Access-Control-Allow-Origin` | Reachable from a page |
+| Request | `Access-Control-Allow-Origin` | Reachable from a page |
 | --- | --- | --- |
 | `analytics.digitalcx.com/…/interactions` | `*` | **yes** — a bad token returns a real `403` body |
-| `login.microsoftonline.com/…/oauth2/token` | absent (v1 *and* v2.0) | **no** — `fetch` rejects `TypeError` before any credential is checked |
+| token endpoint, `grant_type=authorization_code` | `*` | yes |
+| token endpoint, `grant_type=client_credentials` | absent | **no** — `fetch` rejects `TypeError` |
 
-So the data is readable and the token is not. The token is therefore **supplied**
-rather than minted: pasted by the user (the SOP's tokens last ~24h, so this is a
-once-a-day action), or fetched from an optional proxy URL they host themselves.
+**Two facts settle "but the desktop manages it".** First, CORS is enforced by the
+*browser*, never by the server: the desktop uses `reqwest`, where CORS does not
+exist as a concept, so the identical request to the identical host succeeds there.
+Second, the last two rows are the same URL — Entra ID grants CORS to the
+browser-safe sign-in grant and withholds it from `client_credentials`, because
+that grant carries a client *secret* and a browser cannot hold one safely. No
+configuration changes this, and the SOP mandates exactly that grant.
 
+So the token must come from somewhere that is not a browser. Two ways, in the
+order the UI presents them:
+
+1. **A token relay** — `tools/token-proxy/cai-token.php`, or the Cloudflare Worker
+   beside it. One file the user uploads next to the app; it holds the secret, makes
+   the one request a browser may not, and returns only the short-lived token.
+   Tokens then refresh on their own and **nothing is ever pasted**. This is the
+   recommended path and the one Settings leads with.
+2. **Paste a token** — collapsed behind a disclosure, for a host that cannot run
+   any server-side code. ~24h per token, so roughly daily.
+
+- **The relay is deliberately *not* copied into `dist-web/`.** The build output is
+  uploaded wholesale, so shipping a template copy would overwrite the user's
+  configured relay on every redeploy. It is uploaded once, by hand.
+- **The relay requires a shared key** (`x-proxy-key`), and this is not optional:
+  the URL is guessable, and without a key it is a public token vending machine for
+  the project. `hash_equals` compares it, so a wrong key cannot be found a byte at
+  a time. Same-origin is the documented default, which means no CORS headers and
+  no preflight; `ALLOWED_ORIGIN` exists only for the Worker case.
+- **The "still a placeholder" check tests a `PUT-` prefix, not the placeholder
+  text.** An earlier version compared `SHARED_KEY` against its own placeholder
+  literal — so configuring the file by find-and-replace (the obvious way) rewrote
+  the guard too and rejected every request with a "Forbidden" that pointed at the
+  key instead of the cause. Found by actually running it.
 - **There is no client-secret field in the web build**, and that is a security
-  *improvement* over the desktop's `0600` file, not a gap. In the paste flow the
-  secret never leaves the user's terminal — the Settings pane hands them a `curl`
-  to run there; with a proxy it never leaves the proxy. Nothing in the browser is
-  trusted with it. The two fields are **hidden, not removed**:
-  `loadAnalyticsConfigIntoSettings` and `readAnalyticsConfigFromSettings` address
-  them by id with no null guard, so deleting the nodes throws before Settings can
-  open.
+  *improvement* over the desktop's `0600` file, not a gap: with a relay the secret
+  lives there, and in the paste flow it never leaves the user's terminal. The two
+  fields are **hidden, not removed** — `loadAnalyticsConfigIntoSettings` and
+  `readAnalyticsConfigFromSettings` address them by id with no null guard, so
+  deleting the nodes throws before Settings can open.
 - **The validators are shared with Rust, the transport is not.** `validate_window`
   and `validate_csv_header` compile for both targets and are reached through
   `wasm::analytics_validate_window` / `analytics_validate_csv`; only the pure half
@@ -198,9 +225,14 @@ once-a-day action), or fetched from an optional proxy URL they host themselves.
   `403 {"message":"Missing token or token is incorrect"}`, and calling that a
   generic `http` error would report "unexpected error" when the fix is "paste a
   fresh token".
-- Config lives in `localStorage` under `cm-analytics-config`, the token under
-  `cm-analytics-token` with its expiry read from the JWT's own `exp` claim
-  (unverified — it is a refresh hint, not a security decision).
+- Config lives in `localStorage` under `cm-analytics-config` (including
+  `tokenProxyUrl` / `tokenProxyKey`), the token under `cm-analytics-token` with its
+  expiry read from the JWT's own `exp` claim (unverified — it is a refresh hint,
+  not a security decision). The token is **never** included in a settings export.
+- The status line under the fields reports which mechanism is active, not merely
+  whether a token is cached: with a relay set, "no token" is not a problem, it just
+  means none has been fetched yet. `refreshTokenStatus` re-runs it when Settings
+  opens, because a token can expire while the page stays open.
 
 ---
 

@@ -106,8 +106,9 @@ export function createAnalyticsFetcher(wasm) {
     if (!token) {
       throw err(
         "unauthorized",
-        "No Analytics API access token. Paste one in Settings — a browser cannot " +
-          "request one itself, because the token endpoint does not allow cross-origin calls."
+        "No Analytics API access token. A browser cannot request one itself — the " +
+          "token endpoint refuses the client-secret flow cross-origin. Set a token " +
+          "relay in Settings (see tools/token-proxy/), or paste a token there."
       )
     }
     // Shared with the desktop build: ordered, parseable, under 24h, inside the
