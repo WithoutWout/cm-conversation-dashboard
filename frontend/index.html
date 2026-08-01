@@ -5831,6 +5831,32 @@
         width: 100%;
       }
       /* Settings tabs */
+      /* Icon sprite: defined once at the top of <body>, never rendered itself. */
+      .icon-sprite {
+        display: none;
+      }
+      /* Every icon in the app. Sized in `em` and coloured with `currentColor`, so
+         an icon inherits the size and colour of whatever text it sits next to
+         rather than needing a font-size the way the emoji did. */
+      .ui-icon {
+        width: 1em;
+        height: 1em;
+        flex-shrink: 0;
+        /* Optical baseline alignment — a 1em box centred on the cap height sits
+           slightly high next to lowercase text. */
+        vertical-align: -0.14em;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.35;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      /* For the few places the old emoji was visibly larger than its label. */
+      .ui-icon-lg {
+        width: 1.15em;
+        height: 1.15em;
+      }
+
       /* The Settings modal is the tallest one and the only one with a fixed block
          above its scrolling body, so it lays itself out as a flex column capped
          at the viewport. The body's height used to be a hardcoded
@@ -6491,9 +6517,153 @@
     <script src="vendor/vis-network.min.js"></script>
   </head>
   <body>
+    <!--
+      Icon sprite. Every icon in the app is defined exactly once here and drawn
+      with `<use href="#i-…">`, which is what lets one definition serve both the
+      static markup below and the HTML this app builds by string concatenation —
+      the alternative was pasting each path at every call site.
+
+      These replaced the emoji this UI used to draw with. Emoji are rendered by
+      the platform's own font, so they arrived in someone else's colour, weight
+      and metrics — full-colour glyphs in a monochrome UI, resizable only through
+      font-size. These inherit `currentColor` and `1em`, so an icon always matches
+      the text beside it, including in the accent, green and orange states that
+      recolour their containers.
+
+      One 16-unit grid, round caps and joins, `stroke-width: 1.35`. That is the
+      same optical weight as the ~93 Feather-style icons already inline in this
+      file, which use a 24 grid at `stroke-width: 2` (1.35/16 ≈ 2/24), so the two
+      sets sit together without a visible seam. Match that ratio if you add one.
+
+      Deliberately *not* replaced: ✕ ✓ → ← ↑ ↓ ↗ ‹ › ▾ ▶. Those are typographic
+      characters rather than emoji — they render identically everywhere, carry no
+      colour of their own, and some (→ especially) end up inside text this app
+      copies to the clipboard, where an <svg> would be lost.
+    -->
+    <svg class="icon-sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-chat" viewBox="0 0 16 16">
+          <rect x="2.2" y="2.9" width="11.6" height="8.1" rx="2" />
+          <path d="M5.7 11v2.7L8.6 11" />
+        </symbol>
+        <symbol id="i-link" viewBox="0 0 16 16">
+          <path d="M6.5 9.5 9.5 6.5" />
+          <path d="M7.7 4.7 8.9 3.5a2.55 2.55 0 0 1 3.6 3.6l-1.2 1.2" />
+          <path d="M8.3 11.3 7.1 12.5a2.55 2.55 0 0 1-3.6-3.6l1.2-1.2" />
+        </symbol>
+        <symbol id="i-folder" viewBox="0 0 16 16">
+          <path
+            d="M2.1 4.7c0-.7.6-1.3 1.3-1.3h2.3l1.4 1.7h4.5c.7 0 1.3.6 1.3 1.3v5.1c0 .7-.6 1.3-1.3 1.3H3.4c-.7 0-1.3-.6-1.3-1.3V4.7Z"
+          />
+        </symbol>
+        <symbol id="i-document" viewBox="0 0 16 16">
+          <path d="M4.1 2.6h4.4l3.4 3.4v7.4H4.1V2.6Z" />
+          <path d="M8.5 2.6V6h3.4" />
+        </symbol>
+        <symbol id="i-calendar" viewBox="0 0 16 16">
+          <rect x="2.3" y="3.7" width="11.4" height="9.7" rx="1.6" />
+          <path d="M2.3 6.7h11.4M5.6 2.4v2.4M10.4 2.4v2.4" />
+        </symbol>
+        <symbol id="i-trash" viewBox="0 0 16 16">
+          <path d="M2.9 4.9h10.2" />
+          <path d="M6.3 4.9V3.5c0-.5.4-.9.9-.9h1.6c.5 0 .9.4.9.9v1.4" />
+          <path d="M4.4 4.9l.5 7.9c0 .5.5.9 1 .9h4.2c.5 0 1-.4 1-.9l.5-7.9" />
+        </symbol>
+        <symbol id="i-lock" viewBox="0 0 16 16">
+          <rect x="3.4" y="7.1" width="9.2" height="6.3" rx="1.4" />
+          <path d="M5.7 7.1V5.5a2.3 2.3 0 0 1 4.6 0v1.6" />
+        </symbol>
+        <symbol id="i-download" viewBox="0 0 16 16">
+          <path d="M8 2.7v7.1" />
+          <path d="M4.9 6.9 8 10l3.1-3.1" />
+          <path d="M3 13.2h10" />
+        </symbol>
+        <!--
+          The one icon on a 24 grid, and deliberately so: this is the exact path
+          the header's Settings button already draws, so the gear in "click
+          Settings ⚙ to configure" is that same button rather than a second gear
+          that merely resembles it. `stroke-width` is set locally because 1.35 is
+          tuned for the 16 grid and would read thin at 24.
+        -->
+        <symbol id="i-gear" viewBox="0 0 24 24" stroke-width="2">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+          />
+        </symbol>
+        <symbol id="i-warning" viewBox="0 0 16 16">
+          <path d="M8 2.3 1.5 13.3h13L8 2.3Z" />
+          <path d="M8 6.4v3.1" />
+          <!-- fill/stroke set here so it overrides what .ui-icon inherits in. -->
+          <circle cx="8" cy="11.4" r=".8" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-flag" viewBox="0 0 16 16">
+          <path d="M4.2 2.3v11.4" />
+          <path d="M4.2 3.1h7.4l-1.6 2.6 1.6 2.6H4.2" />
+        </symbol>
+        <symbol id="i-thumb-up" viewBox="0 0 16 16">
+          <path
+            d="M5.5 13.4V7l2.4-4.1a1.15 1.15 0 0 1 2.1.9L9.4 6.3h2.7a1.3 1.3 0 0 1 1.27 1.57l-.85 4A1.3 1.3 0 0 1 11.25 13.4H5.5Z"
+          />
+          <path d="M5.5 7H3.2a.6.6 0 0 0-.6.6v5.2a.6.6 0 0 0 .6.6h2.3" />
+        </symbol>
+        <symbol id="i-thumb-down" viewBox="0 0 16 16">
+          <path
+            d="M5.5 2.6v6.4l2.4 4.1a1.15 1.15 0 0 0 2.1-.9L9.4 9.7h2.7a1.3 1.3 0 0 0 1.27-1.57l-.85-4A1.3 1.3 0 0 0 11.25 2.6H5.5Z"
+          />
+          <path d="M5.5 9H3.2a.6.6 0 0 1-.6-.6V3.2a.6.6 0 0 1 .6-.6h2.3" />
+        </symbol>
+        <symbol id="i-tag" viewBox="0 0 16 16">
+          <path d="M2.6 2.6h5.2l5.6 5.6-5.2 5.2L2.6 7.8V2.6Z" />
+          <circle cx="5.4" cy="5.4" r="1" />
+        </symbol>
+        <symbol id="i-bookmark" viewBox="0 0 16 16">
+          <path d="M4.3 2.6h7.4v10.8L8 10.8l-3.7 2.6V2.6Z" />
+        </symbol>
+        <symbol id="i-clipboard" viewBox="0 0 16 16">
+          <rect x="3.6" y="3.4" width="8.8" height="10" rx="1.3" />
+          <path d="M6 3.4V2.7c0-.3.2-.6.5-.6h3c.3 0 .5.3.5.6v.7" />
+          <path d="M6.3 7.2h3.4M6.3 9.8h3.4" />
+        </symbol>
+        <!-- "Copy table": a grid says what it copies far better than 🗃 did. -->
+        <symbol id="i-table" viewBox="0 0 16 16">
+          <rect x="2.3" y="3.4" width="11.4" height="9.2" rx="1.3" />
+          <path d="M2.3 6.6h11.4M6.4 6.6v6" />
+        </symbol>
+        <symbol id="i-copy" viewBox="0 0 16 16">
+          <rect x="5.7" y="5.7" width="7.7" height="7.7" rx="1.4" />
+          <path
+            d="M10.4 5.7V4.1a1.4 1.4 0 0 0-1.4-1.4H4.1a1.4 1.4 0 0 0-1.4 1.4V9a1.4 1.4 0 0 0 1.4 1.4h1.6"
+          />
+        </symbol>
+        <!-- "Open in window", which is what ❐ was standing in for. -->
+        <symbol id="i-window" viewBox="0 0 16 16">
+          <rect x="2.4" y="3.2" width="11.2" height="9.6" rx="1.4" />
+          <path d="M2.4 6.1h11.2" />
+        </symbol>
+        <symbol id="i-info" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="5.7" />
+          <path d="M8 7.4v3.9" />
+          <circle cx="8" cy="5.1" r=".85" fill="currentColor" stroke="none" />
+        </symbol>
+        <symbol id="i-no-entry" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="5.6" />
+          <path d="M5.2 8h5.6" />
+        </symbol>
+        <symbol id="i-pencil" viewBox="0 0 16 16">
+          <path d="M11.2 2.9a1.55 1.55 0 0 1 2.2 2.2L5.5 13l-2.9.8.8-2.9 7.8-8Z" />
+        </symbol>
+        <symbol id="i-dot" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="3.3" fill="currentColor" stroke="none" />
+        </symbol>
+      </defs>
+    </svg>
+
     <!-- UPDATE BANNER -->
     <div class="update-banner" id="updateBanner">
-      <span class="update-banner-icon">&#x2B07;</span>
+      <span class="update-banner-icon"
+        ><svg class="ui-icon"><use href="#i-download" /></svg
+      ></span>
       <span id="updateBannerText"></span>
       <button
         class="update-banner-close"
@@ -7091,7 +7261,7 @@
         <div class="conv-db-status" id="convDbStatus">
           <div class="conv-db-dot"></div>
           <span id="convDbStatusText"
-            >No database — click Settings ⚙ to configure</span
+            >No database — click Settings <svg class=ui-icon><use href=#i-gear /></svg> to configure</span
           >
         </div>
         <button
@@ -7241,7 +7411,7 @@
               </div>
             </div>
             <div class="conv-id-warning" id="convIdWarning">
-              &#x26A0; ID search expects a numeric value.
+              <svg class=ui-icon><use href=#i-warning /></svg> ID search expects a numeric value.
             </div>
             <div class="conv-id-type-row" id="convIdTypeRow">
               <span class="conv-id-type-label">Search by:</span>
@@ -7275,7 +7445,7 @@
                   id="convDateRangeBtn"
                   onclick="toggleDatePicker()"
                 >
-                  <span style="font-size: 0.85rem">&#128197;</span>
+                  <span style="font-size: 0.85rem"><svg class=ui-icon><use href=#i-calendar /></svg></span>
                   <span class="conv-date-range-label" id="convDateRangeLabel"
                     >All dates</span
                   >
@@ -7326,7 +7496,7 @@
                 data-conv-filter="neg_feedback"
                 id="feedbackFilterPill"
               >
-                &#x1F44E; feedback
+                <svg class=ui-icon><use href=#i-thumb-down /></svg> feedback
               </button>
               <button class="conv-pill" data-conv-filter="low_recog">
                 Low %
@@ -7506,7 +7676,7 @@
         <div class="flagged-sidebar">
           <div class="flagged-sidebar-header">
             <span class="flagged-sidebar-title"
-              >&#x2691; Flagged Conversations</span
+              ><svg class=ui-icon><use href=#i-flag /></svg> Flagged Conversations</span
             >
             <span class="flagged-session-count" id="flaggedCount"></span>
           </div>
@@ -8189,7 +8359,7 @@
               color: var(--orange);
             "
           >
-            &#x26A0;&nbsp; Only <strong>one day at a time</strong> can be
+            <svg class=ui-icon><use href=#i-warning /></svg> Only <strong>one day at a time</strong> can be
             exported. Repeat the steps above for each day you need.
           </div>
         </div>
@@ -8205,7 +8375,7 @@
     <div class="modal-overlay" id="updateModal">
       <div class="modal-box">
         <div class="modal-header">
-          <h3>&#x2B07;&nbsp; Update Available</h3>
+          <h3><svg class=ui-icon><use href=#i-download /></svg> Update Available</h3>
           <button class="close-btn" id="closeUpdateModal">&#x2715;</button>
         </div>
         <div class="modal-body">
@@ -8226,7 +8396,7 @@
         <div class="modal-footer">
           <button class="btn-secondary" id="closeUpdateModal2">Later</button>
           <button id="updateModalDownloadBtn" class="btn-primary-download">
-            &#x2B07;&nbsp;Download update
+            <svg class=ui-icon><use href=#i-download /></svg> Download update
           </button>
         </div>
       </div>
@@ -8603,7 +8773,7 @@
       ></div>
       <div class="ctx-modal-box" id="contentCtxModalBox">
         <div class="ctx-modal-header">
-          <span class="ctx-modal-title">&#x1F3F7; Filter by Context</span>
+          <span class="ctx-modal-title"><svg class=ui-icon><use href=#i-tag /></svg> Filter by Context</span>
           <div class="ctx-modal-actions">
             <button
               class="ctx-clear-btn"
@@ -8638,7 +8808,7 @@
       <div class="ctx-modal-backdrop" onclick="closeContextPanel()"></div>
       <div class="ctx-modal-box" id="ctxModalBox">
         <div class="ctx-modal-header">
-          <span class="ctx-modal-title">&#x1F3F7; Filter by Context</span>
+          <span class="ctx-modal-title"><svg class=ui-icon><use href=#i-tag /></svg> Filter by Context</span>
           <div class="ctx-modal-actions">
             <button
               class="ctx-clear-btn"
@@ -8716,7 +8886,7 @@
               title="Open in built-in window"
               style="font-size: 0.8rem; padding: 4px 10px"
             >
-              &#x2750; Open in window
+              <svg class=ui-icon><use href=#i-window /></svg> Open in window
             </button>
             <button
               class="btn-secondary"
@@ -8752,7 +8922,7 @@
               text-align: center;
             "
           >
-            <div style="font-size: 2rem">&#x26D4;</div>
+            <div style="font-size: 2rem"><svg class=ui-icon><use href=#i-no-entry /></svg></div>
             <div style="font-weight: 600; font-size: 0.95rem">
               This page can&rsquo;t be previewed
             </div>
@@ -8765,7 +8935,7 @@
             </div>
             <div style="display: flex; gap: 10px">
               <button class="btn-primary" onclick="openUrlPreviewWindow()">
-                &#x2750; Open in window
+                <svg class=ui-icon><use href=#i-window /></svg> Open in window
               </button>
               <button class="btn-secondary" onclick="openUrlPreviewExternal()">
                 &#x2197; Open in browser
@@ -10299,7 +10469,7 @@
           art.Id +
           ",'article');event.stopPropagation()\" title=\"Search Article ID " +
           art.Id +
-          ' in conversations">&#128172; Conversations</button>' +
+          ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>' +
           "</div>" +
           "</div>" +
           "</div>"
@@ -10599,7 +10769,7 @@
               kbaRef +
               ')" title="Open article ' +
               kbaRef +
-              '">&#128279; Article ' +
+              '"><svg class=ui-icon><use href=#i-link /></svg> Article ' +
               kbaRef +
               "</a> "
             : ""
@@ -10920,7 +11090,7 @@
             kbaRef +
             ')" title="Open article ' +
             kbaRef +
-            '">&#128279; Article ' +
+            '"><svg class=ui-icon><use href=#i-link /></svg> Article ' +
             kbaRef +
             "</a> "
           : ""
@@ -11063,7 +11233,7 @@
           dialog.id +
           "-" +
           node.id +
-          ' in conversations">&#128172;</button>' +
+          ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg></button>' +
           "</div>" +
           (ansRaw
             ? '<div class="node-answer">' +
@@ -11105,7 +11275,7 @@
             item.id +
             ",'dialog');event.stopPropagation()\" title=\"Search Transactional Dialog ID " +
             item.id +
-            ' in conversations">&#128172; Conversations</button>' +
+            ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>' +
             "</div>" +
             "</div>" +
             "</div>"
@@ -11170,7 +11340,7 @@
           item.id +
           ",'dialog');event.stopPropagation()\" title=\"Search Dialog ID " +
           item.id +
-          ' in conversations">&#128172; Conversations</button>' +
+          ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>' +
           "</div>" +
           "</div>" +
           "</div>"
@@ -12709,7 +12879,7 @@
           _jsq(name) +
           '\')" title="Search conversations where the ' +
           esc(name) +
-          ' entity was triggered">&#128172; Conversations</button>'
+          ' entity was triggered"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>'
         )
       }
 
@@ -12978,7 +13148,7 @@
           id +
           ",'article')\" title=\"Search Article ID " +
           id +
-          ' in conversations">&#128172; Conversations</button>'
+          ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>'
 
         _renderArticleModalBody(art, kind)
         _syncModalFilterBtn()
@@ -13283,7 +13453,7 @@
             id +
             ",'dialog')\" title=\"Search Transactional Dialog ID " +
             id +
-            ' in conversations">&#128172; Conversations</button>'
+            ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>'
         } else {
           const nodeCnt = (item.nodes || []).length
           const recCnt = (item.nodes || []).filter(
@@ -13309,7 +13479,7 @@
             id +
             ",'dialog')\" title=\"Search Dialog ID " +
             id +
-            ' in conversations">&#128172; Conversations</button>'
+            ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg> Conversations</button>'
         }
 
         _renderDialogModalBody(item, id, !!isTDialog)
@@ -14122,7 +14292,7 @@
               <button class="export-row-copy" title="Copy as link"
                 onclick="copyJiraLink('${esc(
                   url,
-                )}', ${safeIdText}, ${safeTitle}, this)">&#x1F517; Copy link</button>
+                )}', ${safeIdText}, ${safeTitle}, this)"><svg class=ui-icon><use href=#i-link /></svg> Copy link</button>
               <button class="export-row-drop" title="Remove from this share"
                 onclick="_exportDropItem('${esc(
                   _exportKey(item),
@@ -14285,15 +14455,15 @@
         const actions = document.getElementById("exportFooterActions")
         const n = getExportItemsForCurrentView().length
         const dis = n ? "" : " disabled"
-        const plain = `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}>&#x1F4CB; Copy as plain text</button>`
+        const plain = `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}><svg class=ui-icon><use href=#i-clipboard /></svg> Copy as plain text</button>`
         if (_exportView === "table") {
           actions.innerHTML =
-            `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}>&#x1F5C3; Copy table (${n} row${
+            `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}><svg class=ui-icon><use href=#i-table /></svg> Copy table (${n} row${
               n !== 1 ? "s" : ""
             })</button>` + plain
         } else {
           actions.innerHTML =
-            `<button class="btn-primary" onclick="_copyExportLinks(this)"${dis}>&#x1F517; Copy ${n} link${
+            `<button class="btn-primary" onclick="_copyExportLinks(this)"${dis}><svg class=ui-icon><use href=#i-link /></svg> Copy ${n} link${
               n !== 1 ? "s" : ""
             }</button>` + plain
         }
@@ -16233,7 +16403,7 @@
           btn.disabled = false
           btn.textContent = "Check for updates"
           if (res.status === "available") {
-            el.innerHTML = `&#x2B07; v${esc(
+            el.innerHTML = `<svg class=ui-icon><use href=#i-download /></svg> v${esc(
               res.version,
             )} available \u2014 <button class="update-banner-download" style="vertical-align:middle" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')">Download</button>`
           } else if (res.status === "up-to-date") {
@@ -16620,7 +16790,7 @@
           const banner = document.getElementById("updateBanner")
           document.getElementById("updateBannerText").innerHTML = `v${esc(
             res.version,
-          )} is available \u2014 <button class="update-banner-download" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')">&#x2B07; Download</button>`
+          )} is available \u2014 <button class="update-banner-download" onclick="window.electronAPI.openUrl('https://github.com/WithoutWout/cm-conversation-dashboard/releases/latest')"><svg class=ui-icon><use href=#i-download /></svg> Download</button>`
           banner.classList.add("visible")
           // Modal — skip if user already dismissed this version
           if (dismissedVersion !== res.version) {
@@ -16736,7 +16906,7 @@
         let html = `
           <div class="flagged-folder-row${allActiveCls}" onclick="setFolderFilter('all')"
                data-folder-target="">
-            <span class="flagged-folder-row-icon">&#x2691;</span>
+            <span class="flagged-folder-row-icon"><svg class=ui-icon><use href=#i-flag /></svg></span>
             <span class="flagged-folder-row-name">All</span>
             <span class="flagged-folder-count">${totalCount}</span>
           </div>`
@@ -16748,16 +16918,16 @@
             f.folderId
           })"
                  data-folder-target="${f.folderId}">
-              <span class="flagged-folder-row-icon">&#128193;</span>
+              <span class="flagged-folder-row-icon"><svg class=ui-icon><use href=#i-folder /></svg></span>
               <span class="flagged-folder-row-name">${esc(f.name)}</span>
               <span class="flagged-folder-count">${f.sessionCount}</span>
               <span class="flagged-folder-actions">
                 <button class="flagged-folder-action-btn" title="Rename" onclick="renameFlaggedFolderPrompt(${
                   f.folderId
-                },event)">&#9998;</button>
+                },event)"><svg class=ui-icon><use href=#i-pencil /></svg></button>
                 <button class="flagged-folder-action-btn" title="Delete folder (conversations move to Unfiled)" onclick="deleteFlaggedFolderConfirm(${
                   f.folderId
-                },event)">&#128465;</button>
+                },event)"><svg class=ui-icon><use href=#i-trash /></svg></button>
               </span>
             </div>`
         })
@@ -16765,7 +16935,7 @@
         html += `
           <div class="flagged-folder-row${unfiledActiveCls}" onclick="setFolderFilter('unfiled')"
                data-folder-target="">
-            <span class="flagged-folder-row-icon">&#128196;</span>
+            <span class="flagged-folder-row-icon"><svg class=ui-icon><use href=#i-document /></svg></span>
             <span class="flagged-folder-row-name">Unfiled</span>
             <span class="flagged-folder-count">${unfiledCount}</span>
           </div>
@@ -16890,7 +17060,7 @@
             activeFolderFilter !== "all" ? " in this folder" : " yet"
           }.<br>${
             activeFolderFilter === "all"
-              ? "Select interactions in a conversation and press &#x2691; Flag."
+              ? "Select interactions in a conversation and press <svg class=ui-icon><use href=#i-flag /></svg> Flag."
               : ""
           }</div>`
           if (countEl) countEl.textContent = `${flaggedSessions.length} saved`
@@ -16921,7 +17091,7 @@
               flaggedFolders.length > 0
                 ? `
             <div class="flagged-card-folder-row">
-              <span style="font-size:0.67rem;color:var(--muted)">&#128193;</span>
+              <span style="font-size:0.67rem;color:var(--muted)"><svg class=ui-icon><use href=#i-folder /></svg></span>
               <select class="flagged-card-folder-select" onchange="moveToFlaggedFolderById(${
                 s.flagId
               },this.value===''?null:Number(this.value))" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
@@ -16941,7 +17111,7 @@
               s.sessionUuid,
             )}">${uuidShort}</span>
             <div class="flagged-session-card-badges">
-              <span class="flagged-badge">&#x2691; ${
+              <span class="flagged-badge"><svg class=ui-icon><use href=#i-flag /></svg> ${
                 s.flaggedCount
               } flagged</span>
             </div>
@@ -17011,7 +17181,7 @@
               session.sessionUuid.slice(-8),
             )}`
             const ctxBtn = _flaggedViewContexts.length
-              ? `<button class="session-ctx-info-btn" onclick="openFlaggedContextsModal()" title="View session contexts">&#8505;</button>`
+              ? `<button class="session-ctx-info-btn" onclick="openFlaggedContextsModal()" title="View session contexts"><svg class=ui-icon><use href=#i-info /></svg></button>`
               : ""
             header.innerHTML = `
               <div class="chat-session-info" title="${esc(
@@ -17023,10 +17193,10 @@
               <span class="chat-meta">${
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
-              <span class="chat-meta" style="color:var(--orange)">&#x2691; ${
+              <span class="chat-meta" style="color:var(--orange)"><svg class=ui-icon><use href=#i-flag /></svg> ${
                 session.flaggedCount
               } flagged</span>
-              <button class="btn-chat-copy-sel" id="flaggedCopySelBtn" style="display:none" onclick="copyFlaggedSelectedTurns(this)">&#x2398; Copy 0</button>
+              <button class="btn-chat-copy-sel" id="flaggedCopySelBtn" style="display:none" onclick="copyFlaggedSelectedTurns(this)"><svg class=ui-icon><use href=#i-copy /></svg> Copy 0</button>
               <span class="chat-meta" id="flaggedSelCount" style="min-width:6ch;text-align:right"></span>
               <span class="btn-chat-sel-actions" id="flaggedSelAllBtn" style="display:none">
                 <button class="btn-chat-sel-action" onclick="selectAllFlaggedTurns()">All</button>
@@ -17093,7 +17263,7 @@
         const countEl = document.getElementById("flaggedSelCount")
         if (copyBtn) {
           copyBtn.style.display = count > 0 ? "" : "none"
-          copyBtn.innerHTML = `&#x2398; Copy ${count}`
+          copyBtn.innerHTML = `<svg class=ui-icon><use href=#i-copy /></svg> Copy ${count}`
         }
         if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
       }
@@ -17521,7 +17691,7 @@
 
             let inner = ""
             if (turn.linkClicked) {
-              inner += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
+              inner += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon"><svg class=ui-icon><use href=#i-link /></svg></span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
                 turn.linkClicked,
               )}</span></div></div>`
             }
@@ -19835,10 +20005,14 @@
             idWarning.classList.remove("visible")
             convSearchEl.classList.remove("regex-error")
           } else {
-            idWarning.textContent =
-              convIdType === "dialog"
-                ? "\u26A0 Expects a Dialog ID (e.g. 6391), optionally with a node (e.g. 6391-6)."
-                : "\u26A0 Article ID search expects a numeric value."
+            // innerHTML rather than textContent so the warning icon can be the
+            // same sprite as everywhere else. Both strings are literals with no
+            // interpolation, so there is nothing here to escape.
+            idWarning.innerHTML =
+              '<svg class=ui-icon><use href=#i-warning /></svg> ' +
+              (convIdType === "dialog"
+                ? "Expects a Dialog ID (e.g. 6391), optionally with a node (e.g. 6391-6)."
+                : "Article ID search expects a numeric value.")
             idWarning.classList.add("visible")
             convSearchEl.classList.add("regex-error")
             return
@@ -20046,12 +20220,12 @@
               <div class="session-badges">
                 ${
                   s.hasPosFeedback
-                    ? '<span class="session-badge pos-feedback" title="Positive feedback">&#x1F44D;</span>'
+                    ? '<span class="session-badge pos-feedback" title="Positive feedback"><svg class=ui-icon><use href=#i-thumb-up /></svg></span>'
                     : ""
                 }
                 ${
                   s.hasNegFeedback
-                    ? '<span class="session-badge neg-feedback" title="Negative feedback">&#x1F44E;</span>'
+                    ? '<span class="session-badge neg-feedback" title="Negative feedback"><svg class=ui-icon><use href=#i-thumb-down /></svg></span>'
                     : ""
                 }
                 ${
@@ -20079,7 +20253,7 @@
                   s.contexts
                     ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(
                         s.sessionUuid,
-                      )}');event.stopPropagation()" title="View session contexts">&#8505;</button>`
+                      )}');event.stopPropagation()" title="View session contexts"><svg class=ui-icon><use href=#i-info /></svg></button>`
                     : ""
                 }
               </div>
@@ -20593,14 +20767,14 @@
         const countEl = document.getElementById("chatSelCount")
         if (copyBtn) {
           copyBtn.style.display = count > 0 ? "" : "none"
-          copyBtn.innerHTML = `&#x2398; Copy ${count}`
+          copyBtn.innerHTML = `<svg class=ui-icon><use href=#i-copy /></svg> Copy ${count}`
         }
         if (flagBtn) {
           flagBtn.style.display = count > 0 ? "" : "none"
           const allFlagged =
             count > 0 &&
             [...selectedTurnIds].every((id) => chatFlaggedTurnMap.has(id))
-          flagBtn.innerHTML = allFlagged ? "&#x2691; Unflag" : "&#x2691; Flag"
+          flagBtn.innerHTML = allFlagged ? "<svg class=ui-icon><use href=#i-flag /></svg> Unflag" : "<svg class=ui-icon><use href=#i-flag /></svg> Flag"
           flagBtn.title = allFlagged
             ? "Remove from Flagged view"
             : "Save flagged conversation to Flagged view"
@@ -20711,7 +20885,7 @@
         prompt.className = "chat-filter-row flag-note-prompt"
         prompt.style.cssText = "gap:8px"
         prompt.innerHTML = `
-          <span style="font-size:0.72rem;color:var(--muted);white-space:nowrap;flex-shrink:0">&#x2691; Note</span>
+          <span style="font-size:0.72rem;color:var(--muted);white-space:nowrap;flex-shrink:0"><svg class=ui-icon><use href=#i-flag /></svg> Note</span>
           <input class="flag-note-prompt-input" placeholder="Add a note about this flagged conversation… (optional)" maxlength="500" autocomplete="off" style="flex:1">
           <button class="flag-note-prompt-ok">Save</button>
           <button class="flag-note-prompt-skip" title="Skip">✕</button>`
@@ -20979,7 +21153,7 @@
             .forEach((b) => b.classList.remove("active"))
           // Reset feedback pill label/filter to negative
           feedbackPill.dataset.convFilter = "neg_feedback"
-          feedbackPill.innerHTML = "&#x1F44E; feedback"
+          feedbackPill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-down /></svg> feedback"
           if (!wasActive) {
             btn.classList.add("active")
             convSessionFilter = btn.dataset.convFilter
@@ -20999,13 +21173,13 @@
         if (convSessionFilter === "pos_feedback") {
           // Switch back to neg feedback
           feedbackPill.dataset.convFilter = "neg_feedback"
-          feedbackPill.innerHTML = "&#x1F44E; feedback"
+          feedbackPill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-down /></svg> feedback"
           feedbackPill.classList.add("active")
           convSessionFilter = "neg_feedback"
         } else {
           // Switch to pos feedback
           feedbackPill.dataset.convFilter = "pos_feedback"
-          feedbackPill.innerHTML = "&#x1F44D; feedback"
+          feedbackPill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-up /></svg> feedback"
           feedbackPill.classList.add("active")
           convSessionFilter = "pos_feedback"
         }
@@ -21612,7 +21786,7 @@
                 session.contexts
                   ? `<button class="session-ctx-info-btn" onclick="openSessionContextModal('${esc(
                       uuid,
-                    )}')" title="View session contexts">&#8505;</button>`
+                    )}')" title="View session contexts"><svg class=ui-icon><use href=#i-info /></svg></button>`
                   : ""
               }
               <div class="chat-spacer"></div>
@@ -21620,8 +21794,8 @@
               <span class="chat-meta">${
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
-              <button class="btn-chat-copy-sel" id="chatCopySelBtn" style="display:none" onclick="copySelectedTurns(this)">&#x2398; Copy 0</button>
-              <button class="btn-chat-flag-sel" id="chatFlagSelBtn" style="display:none" onclick="flagCurrentSession(this)" title="Save flagged conversation to Flagged view">&#x2691; Flag</button>
+              <button class="btn-chat-copy-sel" id="chatCopySelBtn" style="display:none" onclick="copySelectedTurns(this)"><svg class=ui-icon><use href=#i-copy /></svg> Copy 0</button>
+              <button class="btn-chat-flag-sel" id="chatFlagSelBtn" style="display:none" onclick="flagCurrentSession(this)" title="Save flagged conversation to Flagged view"><svg class=ui-icon><use href=#i-flag /></svg> Flag</button>
               <span class="chat-meta" id="chatSelCount" style="min-width:6ch;text-align:right"></span>
               <span class="btn-chat-sel-actions" id="chatSelAllBtn" style="display:none;font-size:0.72rem;color:var(--muted);display:none">
                 <button class="btn-chat-sel-action" onclick="selectAllTurns()">All</button>
@@ -22107,7 +22281,7 @@
         if (qaIds.length) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           qaIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; Article ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> Article ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -22117,7 +22291,7 @@
         if (dialogIds.size) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Dialogs</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           dialogIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)">&#x1F7E3; Dialog ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)"><svg class=ui-icon><use href=#i-dot /></svg> Dialog ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -22130,7 +22304,7 @@
           const ids = faqsFound.DataRetrievalResults.slice(0, 8)
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">GenAI source articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           ids.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)">&#x1F4C4; ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -22154,9 +22328,9 @@
             if (base && entityId) {
               const url = `${base}/entities/${entityId}`
               const safeUrl = esc(url)
-              html += `<button class="entity-match-chip${hitCls}"${titleAttr} onclick="event.stopPropagation();openLink('${safeUrl}');return false">&#x1F516; ${name}${matchedSpan}</button>`
+              html += `<button class="entity-match-chip${hitCls}"${titleAttr} onclick="event.stopPropagation();openLink('${safeUrl}');return false"><svg class=ui-icon><use href=#i-bookmark /></svg> ${name}${matchedSpan}</button>`
             } else {
-              html += `<span class="entity-match-chip-static${hitCls}"${titleAttr}>&#x1F516; ${name}${matchedSpan}</span>`
+              html += `<span class="entity-match-chip-static${hitCls}"${titleAttr}><svg class=ui-icon><use href=#i-bookmark /></svg> ${name}${matchedSpan}</span>`
             }
           })
           html += `</div></div>`
@@ -22248,7 +22422,7 @@
       function userBubbleBody(value, plan) {
         const label = redactedUserLabel(value)
         if (label)
-          return `<span class="redacted-value"><span class="redacted-icon">&#128274;</span>${esc(
+          return `<span class="redacted-value"><span class="redacted-icon"><svg class=ui-icon><use href=#i-lock /></svg></span>${esc(
             label,
           )}<span class="redacted-note">not logged</span></span>`
         return chatHl(value, false, plan).body
@@ -22501,7 +22675,7 @@
         function renderTurnInner(turn) {
           let html = ""
           if (turn.linkClicked) {
-            html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon">&#128279;</span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
+            html += `<div class="link-click-pill"><div class="link-click-pill-inner"><span class="link-click-pill-icon"><svg class=ui-icon><use href=#i-link /></svg></span><span class="link-click-pill-label">User clicked</span><span class="link-click-url">${esc(
               turn.linkClicked,
             )}</span></div></div>`
           }

@@ -801,3 +801,34 @@ Release URL pattern: `https://github.com/WithoutWout/cm-conversation-dashboard/r
 - `buildSearchRegex` is the single source of truth for search logic — do not duplicate regex construction elsewhere.
 - Inline `onclick="..."` attributes are used intentionally for dynamically rendered cards (no event listener cleanup needed in this app).
 - Rust commands use `snake_case`; the JS shim maps them to `camelCase` on `window.electronAPI`.
+
+### Icons
+
+**No emoji in the UI.** They are drawn by the platform's own font, so they arrive
+in someone else's colour, weight and metrics — full-colour glyphs in a monochrome
+UI, resizable only through `font-size`. All 63 of them were replaced by the
+`.icon-sprite` at the top of `<body>`: 23 `<symbol>`s, each drawn with
+`<svg class=ui-icon><use href=#i-name /></svg>`.
+
+- **The sprite exists because this app builds HTML by string concatenation.** One
+  `<symbol>` definition serves both the static markup and the ~50 call sites
+  inside JS string literals; pasting paths at each site was the alternative.
+- **Those `<use>` references are deliberately written without attribute quotes.**
+  They sit inside JS strings of all three kinds (`'…'`, `"…"`, `` `…` ``), and an
+  unquoted attribute value is the only spelling that needs no escaping in every
+  one of them. It is valid HTML5 — don't "fix" the missing quotes.
+- **`1em` + `currentColor`, never a `font-size`.** An icon inherits the size and
+  colour of the text beside it, which is what keeps it correct inside the accent,
+  green and orange states that recolour their containers.
+- **Weight must match the ~93 Feather-style icons already inline in the file.**
+  Those use a 24 grid at `stroke-width: 2`; the sprite uses a 16 grid at `1.35`.
+  Same ratio, so the two sets sit together without a seam — keep it if you add one.
+- **`#i-gear` is the exception on a 24 grid**, because it is literally the header
+  Settings button's path: the gear in "click Settings ⚙ to configure" has to *be*
+  that button, not merely resemble it. It sets `stroke-width` locally.
+- **Typographic characters are deliberately left alone**: `✕ ✓ → ← ↑ ↓ ↗ ‹ › ▾ ▶`.
+  They render identically everywhere, carry no colour of their own, and some (`→`
+  especially) end up inside text this app copies to the clipboard, where an
+  `<svg>` would simply be lost.
+- Verify additions by rendering every symbol and checking `getBBox()` is non-zero
+  — a wrong id or a malformed path draws nothing at all, silently.
