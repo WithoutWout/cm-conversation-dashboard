@@ -81,6 +81,20 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
+            ### Every conversation opens in Halo Studio
+
+            The **Open in Halo Studio** button used to appear only on
+            conversations that contained an AI answer, so most conversations had
+            no way through. It is now on every conversation, as soon as the Halo
+            Studio URL is filled in under **Settings → Conversations**. Flagged
+            conversations have it too, which they never did.
+
+            ### Tidier conversation list
+
+            The language tag (`nl`, `en`, `de`, …) in the search results is now
+            the same size on every row, instead of changing width with the code
+            it happens to show and shifting when a row carried a feedback icon.
+
             ### One download per platform
 
             Windows no longer has two downloads to choose between. The installer

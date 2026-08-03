@@ -4395,6 +4395,10 @@
         display: flex;
         gap: 3px;
         flex-shrink: 0;
+        /* Without this the row stretches every badge to the tallest one, so a
+           card carrying a feedback badge (0.8rem) rendered a 17px-tall AI and
+           language chip where a card without one rendered 15.5px. */
+        align-items: center;
       }
       .session-badge {
         font-size: 0.6rem;
@@ -4420,6 +4424,13 @@
         background: var(--bg);
         color: var(--muted);
         border: 1px solid var(--border);
+        /* A language code is proportional text, so `it` came out 19px against
+           `de` at 24.3px — and this is the last chip in a right-aligned row,
+           so the badges ended at a different point on every card. 32px fits
+           any two-letter code (widest, `mm`, is 30.2px); a longer value such
+           as a full culture (nl-NL) still grows rather than truncating. */
+        min-width: 32px;
+        text-align: center;
       }
       .session-preview {
         font-size: 0.75rem;
@@ -17456,6 +17467,7 @@
               <span class="chat-meta">${esc(fmtTs(session.firstTs))}</span>
               ${ctxBtn}
               <div class="chat-spacer"></div>
+              ${haloConversationLink(session.sessionUuid)}
               <span class="chat-meta">${
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
@@ -21399,6 +21411,18 @@
         }
       }
 
+      // ── Halo Studio deep link ────────────────────────────────────────
+      // Every conversation has one as soon as the Halo Studio URL is set in
+      // Settings — the link is a property of the session id, not of what the
+      // session happens to contain.
+      function haloConversationLink(uuid) {
+        if (!haloBaseUrl || !uuid) return ""
+        const base = haloBaseUrl.replace(/\/+$/, "")
+        return `<a class="btn-open-url halo-studio-link" href="${esc(
+          base + "/conversations/" + uuid,
+        )}" title="Open this conversation in Halo Studio">Open in Halo Studio &#x2197;</a>`
+      }
+
       // ── Open link respecting the open-mode setting ───────────────────
       function openLink(url) {
         if (!url || !/^https?:\/\//i.test(url)) return
@@ -22037,12 +22061,7 @@
           const session = convSessions.find((s) => s.sessionUuid === uuid)
           const chatHeader = document.getElementById("chatHeader")
           if (session) {
-            const haloLink =
-              haloBaseUrl && session.hasGenAi
-                ? `<a class="btn-open-url halo-studio-link" href="${esc(
-                    haloBaseUrl + "/conversations/" + uuid,
-                  )}" title="Open this conversation in Halo Studio">Open in Halo Studio &#x2197;</a>`
-                : ""
+            const haloLink = haloConversationLink(uuid)
             chatHeader.innerHTML = `
               <div class="chat-session-info" title="${esc(uuid)}">${esc(
               uuid.slice(0, 8),
