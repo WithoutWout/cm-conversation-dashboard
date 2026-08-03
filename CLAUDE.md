@@ -935,14 +935,34 @@ launches without the SmartScreen prompt that a manually downloaded one shows.
 
 - **`latest.json` needs a `windows-portable` entry that `tauri-action` does not
   write**, because the portable zip is built after it runs and is not one of its
-  bundles. The `finalize-updater-manifest` job in `.github/workflows/release.yml`
-  adds it, and fails the release if `latest.json`'s version disagrees with the
-  tag — a stale manifest would hand every client the wrong artifact while
-  looking healthy.
-- **That job is separate from the matrix on purpose.** Both platform jobs
-  already rewrite `latest.json` read-modify-write; a third writer inside the
-  matrix would race them. The matrix itself runs `max-parallel: 1` for the same
-  reason.
+  bundles. The `finalize-release` job in `.github/workflows/release.yml` adds it.
+- **The release is created as a draft and published only by `finalize-release`.**
+  A draft is not served by `releases/latest/download/latest.json`, so any way a
+  run can fail leaves clients on the previous version instead of on a release
+  that only works for some of them. Before flipping the draft off, that job
+  checks three things, each of which has actually shipped broken:
+  - `latest.json`'s version matches the tag — a stale manifest hands every
+    client the wrong artifact while looking healthy.
+  - every target a client can ask for is present (`windows-portable`,
+    `darwin-aarch64`; add `windows-x86_64-nsis` if the installer returns). **A
+    missing platform key is not an error to the updater, it is an answer** — the
+    plugin returns `Ok(None)` and `check_for_updates` maps that to
+    `"up-to-date"`, so an absent key reads as "no update" forever.
+  - every URL in the manifest names an asset actually on the release, and
+    carries a non-empty signature. A key pointing at an artifact that was never
+    uploaded fails at download time rather than at check time.
+- **Only the macOS job runs `tauri-action`, and only it writes `latest.json`.**
+  `max-parallel: 1` is therefore no longer about a read-modify-write race — it
+  is about order: the Windows job uploads into a release that has to exist
+  already, with the body and draft flag the macOS job sets.
+- **`tauri-action` cannot be used for the Windows job.** It builds with
+  `--no-bundle` and so produces no bundles, and `tauri-action` treats nothing to
+  upload as a failure — `##[error]No artifacts were found.` after a clean
+  seven-minute compile. Windows runs `npm run tauri build -- --no-bundle`
+  directly and uploads with `gh release upload`, which targets the existing
+  draft rather than creating a release of its own. This is what half-published
+  v0.13.1: the Windows job died, `finalize` was skipped by `needs: build`, and
+  the release went out with only the `darwin-*` keys.
 - **The portable zip is signed by its own step** (`npx tauri signer sign`) with
   the same key, verified by the same pubkey. `TAURI_SIGNING_PRIVATE_KEY` /
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are repo secrets; **losing that key means
@@ -969,9 +989,14 @@ launches without the SmartScreen prompt that a manually downloaded one shows.
     installed copies at `windows-portable` also works — the swap is fine inside
     an NSIS `currentUser` install under `%LOCALAPPDATA%`, it just leaves a stale
     version in Add/Remove Programs.
-- **Check the manifest after every release**, because the above failed silently:
+- **The manifest check is now the `finalize-release` gate, not a manual step.**
+  Both silent failures above (v0.12.0's missing `darwin-*`, v0.13.1's missing
+  `windows-portable`) would fail that job while the release was still a draft.
+  To check by hand anyway:
   `gh release download <tag> --pattern latest.json -O - | jq '.platforms|keys'`
-  should list `windows-portable`, `windows-x86_64-nsis` and `darwin-aarch64`.
+- **A red release run means no release went out**, which is the point — but it
+  also means the draft is still sitting there. Fix the cause and re-tag; delete
+  the stale draft so it can't be published by hand later.
 
 ---
 

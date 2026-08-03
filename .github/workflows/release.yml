@@ -14,9 +14,11 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      # Both jobs write `latest.json` to the same release, and tauri-action
-      # merges it read-modify-write. Run them one at a time or the second
-      # upload can drop the first platform's entry.
+      # Only the macOS job creates the release and writes `latest.json`, so
+      # this is no longer about a read-modify-write race. It is about order:
+      # the Windows job uploads into a release that has to already exist, with
+      # the body and draft flag the macOS job sets. Matrix `include` order is
+      # the run order at max-parallel 1.
       max-parallel: 1
       matrix:
         include:
@@ -55,7 +57,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and publish
+      # macOS only. tauri-action builds the .dmg plus the updater .app.tar.gz
+      # and its .sig, creates the release, and writes latest.json.
+      #
+      # It cannot be used for Windows: that job builds with --no-bundle and so
+      # produces no bundles at all, and tauri-action treats "nothing to upload"
+      # as a failure — `##[error]No artifacts were found.` after a perfectly
+      # good 7-minute compile. That is what half-published v0.13.1.
+      - name: Build and publish (macOS)
+        if: matrix.platform == 'macos-latest'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,6 +90,17 @@ jobs:
           # go stale on its own. English only: the audience is mixed.
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
+
+            ### Windows: v0.13.1 never arrived
+
+            The v0.13.1 release only finished building for Mac, so Windows had
+            no download and no update to offer — the app kept reporting itself
+            up to date because, as far as it could tell, it was. Fixed, and the
+            release now refuses to publish at all unless both platforms are
+            complete, rather than going out half-built.
+
+            If you are on Windows, everything below is new to you. On Mac you
+            already have it.
 
             ### Every conversation opens in Halo Studio
 
@@ -128,9 +149,20 @@ jobs:
 
             - Open the `.dmg`, drag the app to `Applications`, and start it from
               Launchpad.
-          releaseDraft: false
+          # Published only by the finalize job, once every artifact this
+          # release needs is on it and latest.json names every platform. A
+          # draft is not served by `releases/latest/download/latest.json`, so
+          # a run that dies half way leaves clients on the previous version
+          # instead of showing them an incomplete one.
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      # Windows ships one artifact, the portable zip, built from the plain .exe
+      # by the steps below — so this is a plain build with no publishing step.
+      - name: Build Windows binary
+        if: matrix.platform == 'windows-latest'
+        run: npm run tauri build -- ${{ matrix.args }}
 
       - name: Zip portable Windows binary
         if: matrix.platform == 'windows-latest'
@@ -146,10 +178,11 @@ jobs:
           Compress-Archive -Path $exe.FullName -DestinationPath $zipName
           echo "ZIP_PATH=$zipName" >> $env:GITHUB_ENV
 
-      # The portable zip is built here, after tauri-action, so it is not one of
-      # the artifacts tauri-action signs. It is what the portable build
-      # downloads to update itself, so it needs a signature of its own — from
-      # the same key, verified by the same pubkey in tauri.conf.json.
+      # The portable zip is not one of the artifacts tauri-action signs — it is
+      # built here, and on a runner tauri-action never touches. It is what the
+      # portable build downloads to update itself, so it needs a signature of
+      # its own — from the same key, verified by the same pubkey in
+      # tauri.conf.json.
       - name: Sign portable zip
         if: matrix.platform == 'windows-latest'
         shell: pwsh
@@ -162,15 +195,18 @@ jobs:
             Write-Error "signer produced no .sig for $env:ZIP_PATH"; exit 1
           }
 
+      # `gh release upload` rather than an action that creates-or-updates:
+      # the release already exists as a draft and this must upload *into* it,
+      # never publish one of its own.
       - name: Upload portable zip to release
         if: matrix.platform == 'windows-latest'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.ZIP_PATH }}
-            ${{ env.ZIP_PATH }}.sig
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" `
+            "$env:ZIP_PATH" "$($env:ZIP_PATH).sig" `
+            --repo "${{ github.repository }}" --clobber
 
   # `latest.json` is what every installed copy reads to decide whether there is
   # an update and which artifact to fetch. tauri-action writes one entry per
@@ -178,16 +214,25 @@ jobs:
   # key the portable build asks for (`windows-portable`, from
   # `self_update::updater_target`) has to be added afterwards.
   #
-  # A separate job rather than another step in the Windows one: both matrix jobs
-  # already rewrite latest.json read-modify-write, and a third writer inside the
-  # matrix would race them. `needs: build` puts this strictly after both.
-  finalize-updater-manifest:
+  # A separate job rather than another step in the Windows one: `needs: build`
+  # puts it strictly after both platforms, which is the only point at which the
+  # release can be judged complete.
+  #
+  # It is also the gate. The release is a draft until this job verifies it and
+  # publishes it, so every way a run can fail — a build error, a missing
+  # artifact, a manifest that doesn't name a platform — leaves clients on the
+  # previous version rather than on a release that only works for some of them.
+  # v0.13.1 is why: the Windows job died, `latest.json` shipped with only the
+  # darwin keys, and every portable copy read that and reported itself up to
+  # date. Silently, and permanently — a missing platform key is not an error to
+  # the updater, it is an answer.
+  finalize-release:
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Add the portable target to latest.json
+      - name: Complete latest.json, verify the release, publish it
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -199,10 +244,20 @@ jobs:
           gh release download "$TAG" --repo "$REPO" --pattern 'latest.json' --clobber
           gh release download "$TAG" --repo "$REPO" --pattern "${ZIP}.sig" --clobber
 
+          # What the release must actually contain. `gh` lists a draft's assets
+          # the same as a published one's.
+          gh release view "$TAG" --repo "$REPO" --json assets \
+            --jq '.assets[].name' | sort > assets.txt
+          echo "assets on the release:"
+          sed 's/^/  /' assets.txt
+
           node -e '
             const fs = require("fs")
             const [zip, tag, repo] = process.argv.slice(1)
             const manifest = JSON.parse(fs.readFileSync("latest.json", "utf8"))
+            const assets = new Set(
+              fs.readFileSync("assets.txt", "utf8").split("\n").filter(Boolean)
+            )
 
             // A stale manifest would hand every client the wrong artifact while
             // looking entirely healthy, so fail the release instead.
@@ -217,8 +272,44 @@ jobs:
               signature: fs.readFileSync(zip + ".sig", "utf8").trim(),
               url: `https://github.com/${repo}/releases/download/${tag}/${zip}`,
             }
+
+            // Every target an installed copy can ask for. `self_update::
+            // updater_target` returns "windows-portable"; the plugin derives
+            // "darwin-aarch64" itself. A key missing here is a platform that
+            // would go on reporting itself up to date forever, so it fails the
+            // release while the release is still a draft nobody can see.
+            //
+            // If the NSIS installer ever comes back, add windows-x86_64-nsis.
+            const required = ["windows-portable", "darwin-aarch64"]
+            const missing = required.filter((k) => !manifest.platforms[k])
+            if (missing.length) {
+              throw new Error(
+                `latest.json is missing platform(s): ${missing.join(", ")}`
+              )
+            }
+
+            // A key pointing at an artifact that was never uploaded fails the
+            // same way at download time instead of at check time. Both halves
+            // have to be there.
+            const dangling = []
+            for (const [key, p] of Object.entries(manifest.platforms)) {
+              const name = decodeURIComponent(p.url.split("/").pop())
+              if (!assets.has(name)) dangling.push(`${key} -> ${name}`)
+              if (!p.signature) dangling.push(`${key} -> empty signature`)
+            }
+            if (dangling.length) {
+              throw new Error(
+                "latest.json points at artifacts that are not on the release:\n  " +
+                  dangling.join("\n  ")
+              )
+            }
+
             fs.writeFileSync("latest.json", JSON.stringify(manifest, null, 2))
             console.log("platforms: " + Object.keys(manifest.platforms).join(", "))
           ' "$ZIP" "$TAG" "$REPO"
 
           gh release upload "$TAG" latest.json --repo "$REPO" --clobber
+
+          # Only now is the release fit to be the one every client reads.
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+          echo "published $TAG"
