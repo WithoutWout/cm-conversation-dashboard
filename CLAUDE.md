@@ -467,6 +467,10 @@ Where they are wired, and why each one mattered:
 - Each tab's prepare paints its loading state *synchronously* before awaiting, so it is part of the height being animated to rather than a second jump straight after; the later content render wraps its own `_cdataResize`.
 - `prefers-reduced-motion` skips the animation **and clears any height left pinned by an earlier one**, so the escape hatch can't strand the box.
 - The Settings modal uses the same helper. Its tab handler is scoped to `#settingsModal` — the data modal's panels carry the same `.settings-tab-panel` class, and the unscoped query was clearing their active state.
+- **The Import tab's own source tabs (Analytics API / CSV file) animate too**, and they are a separate mechanism: they re-render `#convImportBody` directly rather than toggling a panel class, so they never passed through `_cdataResize`. It is the biggest height change in the modal — a full calendar and date pickers against two paragraphs.
+  - `_impSetupHtml` emits the tab strip and then `_impSourcePanelHtml()` inside a `.import-source-panel` wrapper. The split exists so the fade lands on the panel and **not** on the tab strip: the control you just clicked should stay put.
+  - **`panel-in` is added by `impSetSource` after the render, never baked into the markup.** `_impRenderModal` also runs on every time-input change, every calendar click and the skip checkbox; a class in the HTML would replay the animation on all of them. No cleanup is needed because the next render replaces the element outright.
+  - Clicking the already-active source returns early — it used to re-render for nothing.
 
 ## The conversation data modal
 

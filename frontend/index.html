@@ -6091,8 +6091,16 @@
         transition: height 200ms cubic-bezier(0.4, 0, 0.2, 1);
         overflow: hidden;
       }
+      /* Only on a real source switch — impSetSource adds it after the render.
+         The class is never in the markup, so the ~20 other reasons the setup
+         form re-renders (a calendar click, a time field, the skip checkbox)
+         don't replay it. */
+      .import-source-panel.panel-in {
+        animation: tab-panel-in 200ms ease;
+      }
       @media (prefers-reduced-motion: reduce) {
-        .settings-tab-panel.active {
+        .settings-tab-panel.active,
+        .import-source-panel.panel-in {
           animation: none;
         }
         .modal-box.resizing {
@@ -19355,6 +19363,15 @@
         _cdataRenderChrome()
       }
 
+      /**
+       * The Import tab's setup form: the source tabs, then the panel for
+       * whichever source is selected.
+       *
+       * The panel is wrapped so a source switch can fade *it* without the tab
+       * strip flashing — the control you just clicked should stay put. The
+       * wrapper is applied here, in one place, rather than at each of the
+       * branches below.
+       */
       function _impSetupHtml() {
         const tabs = `
           <div class="import-source-tabs">
@@ -19365,13 +19382,18 @@
               _impSource === "csv" ? "active" : ""
             }" onclick="impSetSource('csv')">CSV file</button>
           </div>`
+        return (
+          tabs +
+          `<div class="import-source-panel">${_impSourcePanelHtml()}</div>`
+        )
+      }
+
+      function _impSourcePanelHtml() {
         if (_impSource === "csv") {
           // The "how do I get one of these?" link lives here, next to the
           // thing that needs it. It used to sit under Database & retention,
           // two modals away from the button it explains.
-          return (
-            tabs +
-            `<p class="hint" style="line-height:1.7">
+          return `<p class="hint" style="line-height:1.7">
                Import an Interaction Log CSV you downloaded from the CM.com
                portal. Rows already in the database are detected and skipped, so
                re-importing a file is safe.
@@ -19379,12 +19401,9 @@
              <button class="btn-link" onclick="openInteractionLogInstructions()">
                How to export the Interaction Log?
              </button>`
-          )
         }
         if (!_impIsConfigured()) {
-          return (
-            tabs +
-            `<div class="import-summary">
+          return `<div class="import-summary">
                <strong>Analytics API is not configured.</strong>
                <div class="muted" style="margin-top:4px">
                  Add your client ID, client secret, customer key, project key and
@@ -19392,7 +19411,6 @@
                  then come back here.
                </div>
              </div>`
-          )
         }
         const p = _impPreview()
         let summary = ""
@@ -19434,7 +19452,6 @@
             `</div>`
         }
         return (
-          tabs +
           `<div class="import-range-row">
              <label>From</label>
              <button class="import-date-btn ${
@@ -19852,9 +19869,25 @@
       }
 
       // ── Import modal: actions (inline handlers) ──────────────────────
+      /**
+       * Switch between the Analytics API and CSV file sources.
+       *
+       * The biggest height change in the modal — a full calendar and date
+       * pickers against two paragraphs — so it animates like the tabs above
+       * it do. The fade is applied to the panel element *after* the render
+       * rather than baked into the HTML, because `_impRenderModal` also runs
+       * on every time-input change, calendar click and checkbox toggle; a
+       * class in the markup would replay the animation on all of them.
+       */
       function impSetSource(src) {
+        if (src === _impSource) return
         _impSource = src
-        _impRenderModal()
+        _cdataResize(() => _impRenderModal())
+        const panel = document.querySelector(
+          "#convImportBody .import-source-panel",
+        )
+        // No cleanup needed: the next render replaces this element outright.
+        if (panel) panel.classList.add("panel-in")
       }
       /// Choose which end of the range the next calendar click sets.
       function impPickEnd(phase) {
