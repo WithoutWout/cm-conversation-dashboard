@@ -91,64 +91,38 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Imports that failed on the first try now just work
+            A polish release on top of v0.14.0.
 
-            If an import stopped on a day and then went through when you pressed
-            Retry, that was a real bug, not bad luck. The access token could
-            expire *during* a download, and a download that loses its token
-            halfway doesn't fail cleanly — it comes back as a broken connection,
-            which the app treated as unrecoverable. Pressing Retry worked because
-            by then the token was old enough to be replaced up front.
+            ### One "files updated" message per export, not a stream of them
 
-            Tokens are now replaced before they can run out mid-download, and the
-            connection is reused between days instead of being rebuilt from
-            scratch for every one.
+            When new export files appeared in the watched folder, the app asked
+            you to reload — and then asked again, and again, every second or so
+            until the files finished being written. A drop is several files and
+            each one is written in several steps, so a single export could put
+            the same dialog in front of you half a dozen times.
 
-            ### Import problems now say what went wrong
+            It now waits for the folder to go quiet and asks once. Two separate
+            updates are still two messages.
 
-            The **Details** log under an import used to show little more than
-            "failed". It now records every step — which token was used and how
-            much life it had left, the exact request, the response and how long
-            it took, and the real reason underneath a network error — with a
-            **Copy log** button so the whole thing can be pasted into a message.
-            Errors that used to appear as `[object Object]` now say what they
-            are, and rows that could not be read are listed instead of silently
-            dropped.
+            ### Things no longer appear out of nowhere
 
-            **Settings → Test connection** shows the same detail when it fails.
+            Switching tabs, opening a filter menu, expanding a card, and the
+            "working on it" indicators all used to appear from one frame to the
+            next. They now fade in. Nothing waits for an animation to finish —
+            everything is on screen and clickable exactly as early as it was
+            before, it just arrives less abruptly.
 
-            ### Import and Manage DB are now one screen
+            If you have reduced motion turned on in your system settings, none of
+            it animates.
 
-            Two buttons and two windows have become one **Data** button with
-            three tabs: **Import**, **Stored data** and **Database**. They always
-            described two halves of the same question — what you have, and what
-            you're missing — so getting between them no longer means closing one
-            window and finding another button.
+            ### No more sideways jump while a window resizes
 
-            Which database you're connected to has moved out of the green line
-            above every search and into **Settings → Conversations**, where you
-            set it, plus the header of the Data screen.
+            A scrollbar appearing part-way through an animation shifted
+            everything next to it and then shifted it back. Result lists, the
+            conversation list, filter menus and the Data and Settings windows
+            all stay put now.
 
-            ### Filter by answer metadata
-
-            The filter button next to the search box now has two tabs: **Context**
-            as before, and **Metadata** — the tags on the bot's answers
-            (`entryType`, `nochat`, `transaction`, `escalation`, and the rest).
-            Both the Content and Conversations views have it.
-
-            Metadata that holds more than one value is split into its parts, so
-            you filter on `abortTransactionAction.topicName` rather than on an
-            unreadable line of raw data.
-
-            ### You can see when it's working
-
-            Opening a conversation, opening a database, and opening the Data
-            screen all used to show nothing at all while they worked — which on a
-            large database looked exactly like nothing happening. Each now shows
-            what it is doing, and the buttons that aren't ready yet are greyed
-            out rather than quietly doing nothing.
-
-            Switching tabs inside a window also no longer jumps.
+            Most visible on Windows, where scrollbars take up real space.
 
             ---
 
