@@ -113,9 +113,20 @@ The Conversations toolbar's **Export for AI** button writes the *entire current 
 
 | Event                 | Payload              | Description |
 | --------------------- | -------------------- | ----------- |
-| `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher when export files change |
+| `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher once the folder settles after export files change — see `### One drop, one notification` |
 | `ai-export-progress`  | `{ phase, sessionCount?, interactionCount? }` | Phase boundaries inside `export_conversations_for_ai` — `"querying"` once the save dialog is answered, `"writing"` once the result set is known |
 | `update-progress`     | `{ phase, downloaded, total? }` | Download/install progress for `install_update`. `total` is absent when the server sends no `Content-Length` |
+
+### One drop, one notification
+
+The renderer answers `data-folder-updated` by opening a modal, so every extra event is a dialog the user has to dismiss again. An export drop is two or three files and each file reaches the watcher as several events — a create, one or more writes as the bytes land, then a metadata update — so the event stream has to be collapsed before it is emitted.
+
+**It is a trailing-edge debounce, not a throttle, and that is the fix.** The old rule reported the *first* event immediately and then ignored everything for 700 ms — which meant a drop still being written produced a fresh notification every 700 ms for as long as it took. Now the watcher records the burst and a settle thread reports once the folder has been quiet for `WATCH_QUIET_PERIOD`.
+
+- **`WATCH_MAX_WAIT` is the safety valve.** Each write pushes `last_seen` forward, so a folder that never goes quiet — a slow copy over a network share — would wait for silence forever. Reporting late beats never reporting; `a_folder_that_never_goes_quiet_still_reports` pins it.
+- **`state.pending` doubles as "is a settle thread running?"**, which is what stops a stream of events spawning a thread each. The thread clears it under the same lock that decided to report, so a write landing at that instant starts a fresh burst instead of being folded into one already on its way out.
+- **`generation` is bumped on every `configure_folder_watch`.** Without it, a settle thread left over from the previous folder would wake up, find the *new* folder's pending burst, and announce a change against the wrong directory.
+- `burst_has_settled` is split out of the closure so the rule is testable; `notifications_for` in the tests replays a scripted event stream through both halves. `one_export_drop_is_one_notification` uses a realistic burst and returns 3 under the old throttle, so it is not vacuous — and `two_separate_drops_are_two_notifications` is its counterweight, since a debounce that swallowed the second drop would have replaced spam with silence.
 
 ---
 

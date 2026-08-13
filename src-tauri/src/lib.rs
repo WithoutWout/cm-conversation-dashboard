@@ -17,6 +17,29 @@ use tauri_plugin_updater::UpdaterExt;
 
 const WATCH_EVENT_NAME: &str = "data-folder-updated";
 
+/// How quiet the folder has to go before one change is reported.
+///
+/// A CM.com export drop is two or three files, and every one of them reaches
+/// the watcher as several events — a create, one or more writes as the bytes
+/// land, then a metadata update. The old rule was a *leading-edge* throttle:
+/// report the first event immediately, ignore anything for 700 ms, then report
+/// the next one and start again. A single export therefore produced a
+/// notification every 700 ms for as long as the files kept being written, and
+/// each one reopened a modal the user had just dismissed.
+///
+/// Waiting for the folder to settle instead means one drop is one notification,
+/// however many files and however many writes it took.
+const WATCH_QUIET_PERIOD: Duration = Duration::from_millis(900);
+
+/// …but never stay silent longer than this. A folder written to continuously —
+/// a slow copy over a network share — would otherwise never settle and never
+/// report anything at all, which is a worse failure than reporting twice.
+const WATCH_MAX_WAIT: Duration = Duration::from_secs(6);
+
+/// How often the settle thread re-checks. Only ever runs while a burst is in
+/// flight, and exits as soon as it has reported one.
+const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(150);
+
 /// Download/install progress for [`install_update`]. Replacing the app is the
 /// one operation where a silent wait is genuinely alarming.
 const UPDATE_PROGRESS_EVENT: &str = "update-progress";
@@ -370,10 +393,28 @@ struct ConversationAiExportResult {
     estimated_tokens: i64,
 }
 
+/// A burst of filesystem events being waited out.
+///
+/// `first_seen` is only there to enforce [`WATCH_MAX_WAIT`]; the decision to
+/// report is made off `last_seen`.
+#[derive(Clone, Copy)]
+struct PendingChange {
+    first_seen: Instant,
+    last_seen: Instant,
+}
+
 struct WatchState {
     watcher: Option<RecommendedWatcher>,
     watched_folder: Option<PathBuf>,
-    last_reload_signal: Option<Instant>,
+    /// The burst currently being waited out, if any. `Some` exactly while a
+    /// settle thread is running — which is what keeps a stream of events from
+    /// spawning one thread each.
+    pending: Option<PendingChange>,
+    /// Bumped every time the watch is reconfigured. A settle thread carries the
+    /// generation it was spawned under and reports nothing if it no longer
+    /// matches, so a thread left over from the previous folder cannot announce
+    /// a change against the new one.
+    generation: u64,
 }
 
 impl Default for WatchState {
@@ -381,7 +422,8 @@ impl Default for WatchState {
         Self {
             watcher: None,
             watched_folder: None,
-            last_reload_signal: None,
+            pending: None,
+            generation: 0,
         }
     }
 }
@@ -609,6 +651,19 @@ fn should_emit_for_event(event: &notify::Event) -> bool {
     event.paths.iter().any(|path| matches_any_source(path))
 }
 
+/// Has this burst of filesystem events finished, so the one notification it
+/// earns can go out?
+///
+/// Two ways to be done, and they answer different questions. `settled` is the
+/// normal one: nothing has touched the folder for [`WATCH_QUIET_PERIOD`], so
+/// whatever was being written has landed. `overdue` is the safety valve for a
+/// folder that never goes quiet — a slow copy over a network share — where
+/// waiting for silence would mean never reporting anything at all.
+fn burst_has_settled(pending: PendingChange, now: Instant) -> bool {
+    now.duration_since(pending.last_seen) >= WATCH_QUIET_PERIOD
+        || now.duration_since(pending.first_seen) >= WATCH_MAX_WAIT
+}
+
 fn path_uses_selected_folder(path: &Path, selected_folder: Option<&Path>) -> bool {
     selected_folder
         .and_then(|folder| path.parent().map(|parent| parent == folder))
@@ -624,7 +679,9 @@ fn configure_folder_watch(
 
     state.watcher = None;
     state.watched_folder = None;
-    state.last_reload_signal = None;
+    state.pending = None;
+    state.generation = state.generation.wrapping_add(1);
+    let generation = state.generation;
 
     let Some(folder) = selected_folder.filter(|path| path.is_dir()) else {
         return;
@@ -644,19 +701,52 @@ fn configure_folder_watch(
                 return;
             }
 
-            let mut state = state_handle.lock().expect("watch state lock poisoned");
             let now = Instant::now();
-            if state
-                .last_reload_signal
-                .map(|instant| now.duration_since(instant) < Duration::from_millis(700))
-                .unwrap_or(false)
-            {
+            let mut state = state_handle.lock().expect("watch state lock poisoned");
+            if state.generation != generation {
                 return;
             }
-            state.last_reload_signal = Some(now);
+            match state.pending.as_mut() {
+                // A burst is already being waited out — extend it and let the
+                // thread that owns it do the reporting.
+                Some(pending) => {
+                    pending.last_seen = now;
+                    return;
+                }
+                None => {
+                    state.pending = Some(PendingChange {
+                        first_seen: now,
+                        last_seen: now,
+                    })
+                }
+            }
             drop(state);
 
-            emit_watch_event(&app_handle, &event_folder, "filesystem-change");
+            let thread_state = Arc::clone(&state_handle);
+            let thread_app = app_handle.clone();
+            let thread_folder = event_folder.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(WATCH_POLL_INTERVAL);
+                    let mut state = thread_state.lock().expect("watch state lock poisoned");
+                    if state.generation != generation {
+                        return;
+                    }
+                    let Some(pending) = state.pending else {
+                        return;
+                    };
+                    if !burst_has_settled(pending, Instant::now()) {
+                        continue;
+                    }
+                    // Cleared under the same lock that decided to report, so a
+                    // write landing right now starts a fresh burst rather than
+                    // being folded into one already on its way out.
+                    state.pending = None;
+                    drop(state);
+                    emit_watch_event(&thread_app, &thread_folder, "filesystem-change");
+                    return;
+                }
+            });
         },
         Config::default(),
     );
@@ -6374,6 +6464,122 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Folder watch debounce ───────────────────────────────────────────────
+
+    fn burst(first_ago: Duration, last_ago: Duration) -> (PendingChange, Instant) {
+        let now = Instant::now();
+        (
+            PendingChange {
+                first_seen: now - first_ago,
+                last_seen: now - last_ago,
+            },
+            now,
+        )
+    }
+
+    /// The bug this whole mechanism exists for: an export drop is several files
+    /// and each file is several events, so a burst still being written must not
+    /// report anything yet.
+    #[test]
+    fn a_burst_still_being_written_reports_nothing() {
+        let (pending, now) = burst(Duration::from_millis(400), Duration::from_millis(100));
+        assert!(!burst_has_settled(pending, now));
+    }
+
+    #[test]
+    fn a_folder_that_has_gone_quiet_reports_once() {
+        let (pending, now) = burst(
+            WATCH_QUIET_PERIOD * 3,
+            WATCH_QUIET_PERIOD + Duration::from_millis(1),
+        );
+        assert!(burst_has_settled(pending, now));
+    }
+
+    /// Each new write pushes `last_seen` forward, so silence alone would never
+    /// arrive for a slow copy over a network share. Reporting late beats never.
+    #[test]
+    fn a_folder_that_never_goes_quiet_still_reports() {
+        let (pending, now) = burst(WATCH_MAX_WAIT + Duration::from_millis(1), Duration::ZERO);
+        assert!(burst_has_settled(pending, now));
+    }
+
+    /// A quiet period longer than the cap would make the cap the only rule that
+    /// ever fired, turning the debounce into a fixed 6-second delay.
+    #[test]
+    fn the_quiet_period_is_shorter_than_the_cap() {
+        assert!(WATCH_QUIET_PERIOD < WATCH_MAX_WAIT);
+    }
+
+    /// Replay a scripted stream of filesystem events through the same two rules
+    /// the watcher uses — fold into the pending burst if there is one, and
+    /// report when [`burst_has_settled`] says so — and count what comes out.
+    ///
+    /// This is the half that isn't in `burst_has_settled`: whether a second
+    /// event *extends* the wait or starts a second notification.
+    fn notifications_for(event_offsets: &[Duration]) -> usize {
+        let start = Instant::now();
+        let mut offsets = event_offsets.to_vec();
+        offsets.sort();
+        let last = offsets.last().copied().unwrap_or_default();
+        let mut pending: Option<PendingChange> = None;
+        let mut delivered = 0;
+        let mut reports = 0;
+        let mut step = Duration::ZERO;
+        // Run well past the last event so every burst gets to finish.
+        while step <= last + WATCH_MAX_WAIT + WATCH_QUIET_PERIOD {
+            let now = start + step;
+            while delivered < offsets.len() && offsets[delivered] <= step {
+                delivered += 1;
+                match pending.as_mut() {
+                    Some(burst) => burst.last_seen = now,
+                    None => {
+                        pending = Some(PendingChange {
+                            first_seen: now,
+                            last_seen: now,
+                        })
+                    }
+                }
+            }
+            if let Some(burst) = pending {
+                if burst_has_settled(burst, now) {
+                    pending = None;
+                    reports += 1;
+                }
+            }
+            step += WATCH_POLL_INTERVAL;
+        }
+        reports
+    }
+
+    /// The reported symptom. Three export files, several writes each, spread
+    /// over a couple of seconds — under the old leading-edge throttle that was
+    /// a notification every 700 ms.
+    #[test]
+    fn one_export_drop_is_one_notification() {
+        let drop: Vec<Duration> = [0, 120, 130, 300, 640, 900, 950, 1400, 1750, 1800, 2100]
+            .iter()
+            .map(|ms| Duration::from_millis(*ms))
+            .collect();
+        assert_eq!(notifications_for(&drop), 1);
+    }
+
+    /// …but two genuinely separate drops are still two, or the debounce would
+    /// have replaced spam with silence.
+    #[test]
+    fn two_separate_drops_are_two_notifications() {
+        let drops: Vec<Duration> = [0, 200, 400, 9000, 9200, 9400]
+            .iter()
+            .map(|ms| Duration::from_millis(*ms))
+            .collect();
+        assert_eq!(notifications_for(&drops), 2);
+    }
+
+    /// A single event is the ordinary case — one file replaced by hand.
+    #[test]
+    fn a_lone_change_is_still_reported() {
+        assert_eq!(notifications_for(&[Duration::ZERO]), 1);
+    }
 
     // ── Settings backup ─────────────────────────────────────────────────────
 
