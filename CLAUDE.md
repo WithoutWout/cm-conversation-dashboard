@@ -492,6 +492,14 @@ Three keyframes carry all of it, alongside the existing `tab-panel-in`:
 - **A fade on a loading affordance is not a delay.** `.pane-loading` and both overlays are in the DOM on exactly the frame they always were; the 140 ms only takes the flash off a fast read.
 - `prefers-reduced-motion` disables every one of these in the single media query at the end of the block — including `toast-in`, which predates it. `.import-toast.leaving` gets `opacity: 0` rather than nothing, because the timer that removes it does not know about the media query.
 
+#### No scrollbar may arrive mid-animation
+
+A scrollbar that appears and disappears during an animation is worse than no animation: where scrollbars take real width — Windows, and macOS set to always show them — every element inside the container reflows narrower and then jumps back, so the motion reads as a glitch. Two rules keep that from happening, and both are invisible on a Mac with overlay scrollbars, which is why this is easy to ship broken.
+
+- **A box animating its height clips the body inside it for the duration.** `.modal-box.resizing`'s own `overflow: hidden` covers the *box*; the element that actually scrolls is `.modal-body`, and for the length of the animation the box is deliberately shorter than its content — so the body became scrollable and then wasn't. `.modal-box.resizing .modal-body` clips instead; the content is growing into place anyway. The rule is duplicated under `#settingsModal` purely to outrank `#settingsModal .modal-body`'s ID specificity — check that with `getComputedStyle`, not by eye, if you touch either.
+- **Containers that cross the scrollable threshold reserve the gutter** (`scrollbar-gutter: stable`, as `.chat-thread` already did): both height-animated modal bodies, `.list-wrap` (one per content tab — whether it scrolls depends on the result count, so switching tabs or just searching shifted every card sideways), `.sessions-list` (spinner ↔ a full page of results), and `.ctx-modal-body` (the chip list is fetched *after* the popover opens, so the scrollbar used to land mid-pop-in).
+- Transforms are exempt by construction — they do not affect layout, so `pop-in`, `toast-out` and `tab-panel-in` cannot produce a scrollbar. Only the height animation and genuine content swaps can.
+
 ## The conversation data modal
 
 `#convDataModal` is the one place data enters or leaves the database. Three tabs — **Import**, **Stored data**, **Database** — behind a single toolbar button (`#convDataBtn`, labelled *Data*).

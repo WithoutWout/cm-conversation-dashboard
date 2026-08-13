@@ -533,6 +533,11 @@
       .list-wrap {
         flex: 1;
         overflow-y: auto;
+        /* One of these per content tab. Whether it scrolls depends on the
+           result count, so switching tabs — or just searching — used to shift
+           every card sideways by the scrollbar's width. Now the tab fade has
+           nothing moving underneath it. */
+        scrollbar-gutter: stable;
         padding: 6px 20px 10px;
       }
       ::-webkit-scrollbar {
@@ -3139,6 +3144,11 @@
          put while a 90-day import list grows underneath them. */
       .conv-data-modal-box .modal-body {
         overflow-y: auto;
+        /* The three tabs are very different heights and the box animates
+           between them, so this body crosses the scrollable threshold often.
+           Reserving the gutter means the scrollbar arrives without moving
+           anything sideways. A no-op wherever scrollbars are overlays. */
+        scrollbar-gutter: stable;
         flex: 1;
         padding: 0;
       }
@@ -4365,6 +4375,9 @@
       .sessions-list {
         flex: 1;
         overflow-y: auto;
+        /* Swaps between a spinner and a full page of results, so it crosses
+           the scrollable threshold on every search — under the overlay fade. */
+        scrollbar-gutter: stable;
         padding: 4px 0;
       }
       .session-card {
@@ -4742,6 +4755,9 @@
       }
       .ctx-modal-body {
         overflow-y: auto;
+        /* The chip list is fetched and rendered *after* the popover opens, so
+           without this the scrollbar lands mid-pop-in and reflows the chips. */
+        scrollbar-gutter: stable;
         flex: 1;
         padding: 8px 10px;
       }
@@ -5993,6 +6009,9 @@
            so the overflow would move to the box instead of the body. */
         min-height: 0;
         overflow-y: auto;
+        /* Same reason as the data modal's body: the box animates between tab
+           heights, so this crosses the scrollable threshold on every switch. */
+        scrollbar-gutter: stable;
       }
       /* Settings backup. It used to sit above the Settings tabs, where its
          heading, description, two buttons, warning and status line were the
@@ -6089,6 +6108,19 @@
          pinned to an explicit height while it is actually moving. */
       .modal-box.resizing {
         transition: height 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+      }
+      /* `overflow: hidden` above clips the *box*; the element that actually
+         scrolls is the body inside it, and for the length of the animation
+         the box is deliberately shorter than its content. So the body becomes
+         scrollable and then isn't — and where scrollbars take real width
+         (Windows, or macOS set to always show them) that reflows everything
+         inside twice mid-animation, which reads as a glitch rather than a
+         resize. Clip for the duration instead: the content is growing into
+         place anyway. The ID selector only exists to outrank the
+         `#settingsModal .modal-body` rule further up. */
+      .modal-box.resizing .modal-body,
+      #settingsModal .modal-box.resizing .modal-body {
         overflow: hidden;
       }
       /* Only on a real source switch — impSetSource adds it after the render.
