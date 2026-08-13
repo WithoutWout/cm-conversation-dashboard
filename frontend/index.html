@@ -3091,27 +3091,19 @@
         gap: 10px;
         flex-shrink: 0;
       }
-      .conv-db-status {
-        font-size: 0.72rem;
-        color: var(--muted);
-        display: flex;
-        align-items: center;
-        gap: 5px;
+      /* The path line in Settings → Conversations. Wraps rather than
+         truncating: a network share path is exactly the thing you open
+         Settings to read in full. */
+      .settings-db-line {
+        word-break: break-all;
+        margin-bottom: 8px;
       }
-      .conv-db-status.connected {
+      .settings-db-line.connected {
         color: var(--green);
       }
-      .conv-db-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: var(--muted);
-        flex-shrink: 0;
-      }
-      .conv-db-status.connected .conv-db-dot {
-        background: var(--green);
-      }
-      .conv-import-btn {
+      /* One class for both toolbar buttons. `.conv-import-btn` and
+         `.conv-manage-btn` were byte-identical rule sets under two names. */
+      .conv-toolbar-btn {
         background: none;
         border: 1px solid var(--border);
         border-radius: 6px;
@@ -3124,44 +3116,63 @@
         align-items: center;
         gap: 5px;
       }
-      .conv-import-btn:hover {
+      .conv-toolbar-btn:hover {
         border-color: var(--accent);
         color: var(--text);
       }
-      .conv-import-btn:disabled {
+      .conv-toolbar-btn:disabled {
         opacity: 0.4;
         cursor: not-allowed;
       }
-      .conv-manage-btn {
-        background: none;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--muted);
-        cursor: pointer;
-        font-size: 0.73rem;
-        padding: 5px 11px;
-        transition: all 0.15s;
-        display: flex;
-        align-items: center;
-        gap: 5px;
-      }
-      .conv-manage-btn:hover {
-        border-color: var(--accent);
-        color: var(--text);
-      }
-      .conv-manage-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-
-      /* === MANAGE DB MODAL === */
-      .manage-db-modal-box {
-        /* Matches .import-modal-box so the two calendars are the same size. */
+      /* === CONVERSATION DATA MODAL (Import · Stored data · Database) === */
+      /* 620px because that is what two calendar months want; the Import and
+         Manage DB boxes were separately set to the same value and it is now
+         set once. */
+      .conv-data-modal-box {
         width: 620px;
         max-width: 620px;
         max-height: 88vh;
         display: flex;
         flex-direction: column;
+      }
+      /* The body scrolls, not the box: the tab bar and the footer have to stay
+         put while a 90-day import list grows underneath them. */
+      .conv-data-modal-box .modal-body {
+        overflow-y: auto;
+        flex: 1;
+        padding: 0;
+      }
+      /* Stored data and Database lay out their own full-bleed sections; the
+         Import panel is prose and controls, so it keeps the normal inset. */
+      #cdata-panel-import {
+        padding: 16px 18px;
+      }
+      .conv-data-heading {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .conv-data-heading h3 {
+        margin: 0;
+      }
+      /* Where the toolbar's green status line went. Quiet by default and only
+         accented when something is actually connected, so "no database" reads
+         as a state rather than as an error. */
+      .conv-data-sub {
+        font-size: 0.7rem;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .conv-data-sub.connected {
+        color: var(--green);
+      }
+      .conv-data-modal-box .settings-tab-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
       }
       /* Selecting days to delete is destructive, so the range reads red rather
          than borrowing the accent colour the import picker uses. */
@@ -3227,11 +3238,6 @@
       }
       .manage-db-readout .muted {
         color: var(--muted);
-      }
-      .manage-db-modal-box .modal-body {
-        overflow-y: auto;
-        flex: 1;
-        padding: 0;
       }
       .manage-db-summary {
         display: flex;
@@ -4472,6 +4478,38 @@
         line-height: 1.6;
       }
       /* Loading overlay scoped to the conversations left-panel */
+      /* A pane that would otherwise sit blank while a query runs. Reading from
+         a large database is not instant, and "nothing on screen" is
+         indistinguishable from "finished, and empty" — which is the wrong
+         answer to give someone who is waiting. */
+      .pane-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 40px 20px;
+        color: var(--muted);
+        font-size: 0.8rem;
+        text-align: center;
+      }
+      .pane-loading .mini-spinner {
+        width: 22px;
+        height: 22px;
+        border-width: 2.5px;
+      }
+      .pane-loading-note {
+        font-size: 0.72rem;
+        opacity: 0.75;
+        max-width: 34ch;
+        line-height: 1.5;
+      }
+      /* Anything mid-read is inert rather than merely unresponsive: a control
+         that looks live but does nothing reads as a bug. */
+      .is-busy {
+        opacity: 0.5;
+        pointer-events: none;
+      }
       .conv-search-loading-overlay {
         display: none;
         position: absolute;
@@ -4510,7 +4548,7 @@
         flex-shrink: 0;
       }
       /* Scaled to the toolbar button's own type size. */
-      .conv-manage-btn .mini-spinner {
+      .conv-toolbar-btn .mini-spinner {
         width: 12px;
         height: 12px;
       }
@@ -4643,6 +4681,46 @@
         color: var(--text);
         background: var(--surface2);
       }
+      /* Context / Metadata inside the tag filter popover. Each tab carries its
+         own active-filter count, so a filter left on in the tab you are not
+         looking at can't quietly narrow your results. */
+      .ctx-kind-tabs {
+        display: flex;
+        gap: 4px;
+        padding: 6px 12px 0;
+        flex-shrink: 0;
+      }
+      .ctx-kind-tab {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.73rem;
+        padding: 4px 8px 6px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .ctx-kind-tab:hover {
+        color: var(--text);
+      }
+      .ctx-kind-tab.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+      .ctx-kind-count {
+        background: var(--accent);
+        border-radius: 8px;
+        color: #fff;
+        font-size: 0.62rem;
+        line-height: 1;
+        padding: 2px 5px;
+      }
+      .ctx-kind-count:empty {
+        display: none;
+      }
       .ctx-modal-search {
         padding: 8px 12px 6px;
         flex-shrink: 0;
@@ -4696,6 +4774,15 @@
         cursor: pointer;
         color: var(--text);
         transition: background 0.1s, border-color 0.1s;
+        /* A metadata value is arbitrary configured text. Nested JSON is split
+           into `key.subkey` leaves before it gets here, so this is a backstop
+           for the merely-long: one line, ellipsised, full value in the title.
+           Without it a single chip wrapped over four lines and pushed every
+           other one off the panel. */
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .ctx-chip:hover {
         border-color: var(--accent);
@@ -5983,6 +6070,34 @@
       }
       .settings-tab-panel.active {
         display: block;
+        /* The box animates its height around the swap; this keeps the new
+           content from appearing at full strength against the old size. */
+        animation: tab-panel-in 200ms ease;
+      }
+      @keyframes tab-panel-in {
+        from {
+          opacity: 0;
+          transform: translateY(-3px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      /* Driven by animateModalResize: the class is added for the duration of
+         the height transition and removed after, so the box is only ever
+         pinned to an explicit height while it is actually moving. */
+      .modal-box.resizing {
+        transition: height 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .settings-tab-panel.active {
+          animation: none;
+        }
+        .modal-box.resizing {
+          transition: none;
+        }
       }
       .bubble-ts {
         font-size: 0.63rem;
@@ -6041,15 +6156,7 @@
         width: 100%;
       }
 
-      /* === IMPORT MODAL === */
-      .import-modal-box {
-        max-width: 620px;
-        width: 620px;
-      }
-      .import-modal-box .modal-body {
-        max-height: calc(90vh - 150px);
-        overflow-y: auto;
-      }
+      /* === IMPORT TAB (inside the conversation data modal) === */
       .import-source-tabs {
         display: flex;
         gap: 4px;
@@ -6338,9 +6445,27 @@
       .import-log summary:hover {
         color: var(--text);
       }
+      /* Sits inside the <summary> so it can't be missed while the panel is
+         still closed — the copy is what a bug report needs, and the log is
+         long enough that selecting it by hand is unpleasant. */
+      .import-log-copy {
+        float: right;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.68rem;
+        padding: 1px 7px;
+        margin-top: -2px;
+      }
+      .import-log-copy:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
       .import-log-body {
         margin-top: 8px;
-        max-height: 180px;
+        max-height: 260px;
         overflow: auto;
         background: var(--bg);
         border: 1px solid var(--border);
@@ -6533,7 +6658,7 @@
         }
         .modal-box,
         .export-modal-box,
-        .manage-db-modal-box {
+        .conv-data-modal-box {
           width: calc(100vw - 20px) !important;
           max-width: calc(100vw - 20px) !important;
         }
@@ -7283,36 +7408,16 @@
       </div>
       <!-- Toolbar -->
       <div class="conv-toolbar" id="convToolbar">
-        <div class="conv-db-status" id="convDbStatus">
-          <div class="conv-db-dot"></div>
-          <span id="convDbStatusText"
-            >No database — click Settings <svg class=ui-icon><use href=#i-gear /></svg> to configure</span
-          >
-        </div>
+        <!--
+          One entry point for everything about the data behind this view. The
+          toolbar used to carry a green line naming the open database plus two
+          buttons into two modals; the line is now in the modal header and in
+          Settings, where a value you set once belongs.
+        -->
         <button
-          class="conv-import-btn"
-          id="convImportBtn"
-          disabled
-          title="Import interaction logs from the Analytics API or a CSV file"
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Import
-        </button>
-        <button
-          class="conv-manage-btn"
-          id="convManageDbBtn"
-          title="Manage database: view and delete data by day"
+          class="conv-toolbar-btn"
+          id="convDataBtn"
+          title="Import interactions, review what's stored, and manage the database file"
         >
           <svg
             width="12"
@@ -7326,10 +7431,10 @@
             <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
           </svg>
-          Manage DB
+          Data
         </button>
         <button
-          class="conv-manage-btn"
+          class="conv-toolbar-btn"
           id="convAiExportBtn"
           title="Export current conversation search results for ChatGPT or another LLM"
           disabled
@@ -7539,7 +7644,7 @@
           >
             <div class="conv-search-loading-box">
               <div class="mini-spinner"></div>
-              Searching…
+              <span class="conv-search-loading-label">Searching…</span>
               <button class="conv-search-cancel-btn" id="convSearchCancel">
                 &#x2715; Cancel
               </button>
@@ -7789,18 +7894,6 @@
       </div>
     </div>
 
-    <!-- IMPORT MODAL -->
-    <div class="modal-overlay" id="convImportModal">
-      <div class="modal-box import-modal-box">
-        <div class="modal-header">
-          <h3 id="convImportTitle">Import interactions</h3>
-          <button class="close-btn" id="closeConvImportModal">&#x2715;</button>
-        </div>
-        <div class="modal-body" id="convImportBody"></div>
-        <div class="modal-footer" id="convImportFooter"></div>
-      </div>
-    </div>
-
     <!-- ENTITY INFO MODAL -->
     <div class="modal-overlay" id="entityInfoModal">
       <div class="modal-box dialog-info-modal-box">
@@ -7979,18 +8072,41 @@
           </div>
           <!-- TAB: Conversations -->
           <div class="settings-tab-panel" id="settings-panel-conversations">
-            <label for="setting-halo-url">Halo Studio URL</label>
-            <input
-              id="setting-halo-url"
-              type="text"
-              placeholder="https://www.cm.com/en-gb/app/halo-studio/{tenantId}/profile/{profileId}"
-              autocomplete="off"
-            />
-            <p class="hint">
-              The base URL up to and including the profile segment of your Halo
-              Studio environment. Conversation links are generated by appending
-              <code>/conversations/{sessionId}</code>.
+            <!--
+              Where the toolbar's green "connected to X" line went. It is a
+              value you set once and then want to forget, so it belongs with
+              the other settings rather than across the top of every search.
+              The file is only *changed* from the data modal, which is also
+              where deletion and compaction live — so this states it and links
+              there rather than duplicating the controls.
+            -->
+            <label>Conversations database</label>
+            <p class="hint settings-db-line" id="settingsConvDbPath">
+              No database connected
             </p>
+            <button class="btn-secondary" id="settingsOpenDataModalBtn">
+              Manage database…
+            </button>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
+              <label for="setting-halo-url">Halo Studio URL</label>
+              <input
+                id="setting-halo-url"
+                type="text"
+                placeholder="https://www.cm.com/en-gb/app/halo-studio/{tenantId}/profile/{profileId}"
+                autocomplete="off"
+              />
+              <p class="hint">
+                The base URL up to and including the profile segment of your
+                Halo Studio environment. Conversation links are generated by
+                appending <code>/conversations/{sessionId}</code>.
+              </p>
+            </div>
             <div
               style="
                 margin-top: 14px;
@@ -8485,9 +8601,21 @@
       </div>
     </div>
 
-    <!-- MANAGE DB MODAL -->
-    <div class="modal-overlay" id="manageDbModal">
-      <div class="modal-box manage-db-modal-box">
+    <!-- CONVERSATION DATA MODAL -->
+    <!--
+      One modal for everything that puts data in the database or takes it out
+      again: Import, Stored data and Database. They were two modals with two
+      toolbar buttons, sharing the same 620px box, the same two-month calendar
+      and the same day-coverage colours while answering neighbouring halves of
+      one question — "what have I got, and what am I missing?" — so getting
+      from one to the other meant closing a modal and finding another button.
+
+      The header states the connected database, which is where the toolbar's
+      green status line went; the tabs are ordered by how the work actually
+      runs (bring data in → review it → maintain the file).
+    -->
+    <div class="modal-overlay" id="convDataModal">
+      <div class="modal-box conv-data-modal-box">
         <div class="modal-header">
           <svg
             width="15"
@@ -8502,28 +8630,36 @@
             <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
           </svg>
-          <h3 style="flex: 1">Manage Database</h3>
-          <button class="close-btn" onclick="closeManageDbModal()">
-            &#x2715;
-          </button>
+          <div class="conv-data-heading">
+            <h3 id="convDataTitle">Conversation data</h3>
+            <span class="conv-data-sub" id="convDataDbLabel"></span>
+          </div>
+          <button class="close-btn" id="closeConvDataModal">&#x2715;</button>
         </div>
-        <div class="settings-tabs">
-          <button class="settings-tab-btn active" data-mdb-tab="data">
+        <div class="settings-tabs" id="convDataTabs">
+          <button class="settings-tab-btn active" data-cdata-tab="import">
+            Import
+          </button>
+          <button class="settings-tab-btn" data-cdata-tab="stored">
             Stored data
           </button>
-          <button class="settings-tab-btn" data-mdb-tab="database">
-            Database &amp; retention
+          <button class="settings-tab-btn" data-cdata-tab="database">
+            Database
           </button>
         </div>
         <div class="modal-body">
+          <!-- TAB: Import — setup / running / finished, rendered by JS -->
+          <div class="settings-tab-panel active" id="cdata-panel-import">
+            <div id="convImportBody"></div>
+          </div>
           <!-- TAB: Stored data — calendar-driven cleanup, rendered by JS -->
-          <div class="settings-tab-panel active" id="mdb-panel-data">
+          <div class="settings-tab-panel" id="cdata-panel-stored">
             <div id="manageDbBody">
               <div class="manage-db-empty">Loading…</div>
             </div>
           </div>
-          <!-- TAB: Database & retention -->
-          <div class="settings-tab-panel" id="mdb-panel-database">
+          <!-- TAB: Database — file, retention, compaction -->
+          <div class="settings-tab-panel" id="cdata-panel-database">
             <div
               style="
                 padding: 14px 18px 12px;
@@ -8594,31 +8730,11 @@
                 <span class="hint" id="manageDbCompactStatus"></span>
               </div>
             </div>
-            <div style="padding: 14px 18px 12px">
-              <label>Interaction Log Import</label>
-              <p class="hint" style="margin-bottom: 8px">
-                Import daily interaction log exports (CSV) to populate the
-                Conversations view.
-              </p>
-              <button class="btn-link" id="openInteractionLogInstructionsBtn">
-                How to export the Interaction Log?
-              </button>
-            </div>
           </div>
         </div>
-        <div class="modal-footer" id="manageDbFooter">
-          <button class="btn-secondary" onclick="closeManageDbModal()">
-            Close
-          </button>
-          <button
-            class="btn-danger"
-            id="manageDbDeleteBtn"
-            disabled
-            onclick="manageDbDeleteSelected()"
-          >
-            Delete selected
-          </button>
-        </div>
+        <!-- One footer, re-rendered per tab: Import owns Start/Cancel/Retry,
+             Stored data owns Delete, Database owns only Close. -->
+        <div class="modal-footer" id="convDataFooter"></div>
       </div>
     </div>
 
@@ -8829,7 +8945,7 @@
       ></div>
       <div class="ctx-modal-box" id="contentCtxModalBox">
         <div class="ctx-modal-header">
-          <span class="ctx-modal-title"><svg class=ui-icon><use href=#i-tag /></svg> Filter by Context</span>
+          <span class="ctx-modal-title"><svg class=ui-icon><use href=#i-tag /></svg> Filter by tags</span>
           <div class="ctx-modal-actions">
             <button
               class="ctx-clear-btn"
@@ -8847,11 +8963,27 @@
             </button>
           </div>
         </div>
+        <!-- Context conditions and OutputMetaData tags, the same split as the
+             Conversations filter — see the comment on #ctxKindTabs. -->
+        <div class="ctx-kind-tabs" id="contentCtxKindTabs">
+          <button class="ctx-kind-tab active" data-content-ctx-kind="context">
+            Context<span
+              class="ctx-kind-count"
+              id="contentCtxKindCountContext"
+            ></span>
+          </button>
+          <button class="ctx-kind-tab" data-content-ctx-kind="metadata">
+            Metadata<span
+              class="ctx-kind-count"
+              id="contentCtxKindCountMetadata"
+            ></span>
+          </button>
+        </div>
         <div class="ctx-modal-search">
           <input
             type="text"
             id="contentCtxSearch"
-            placeholder="Search contexts…"
+            placeholder="Search tags…"
             autocomplete="off"
             oninput="filterContentContextSearch(this.value)"
           />
@@ -8864,7 +8996,7 @@
       <div class="ctx-modal-backdrop" onclick="closeContextPanel()"></div>
       <div class="ctx-modal-box" id="ctxModalBox">
         <div class="ctx-modal-header">
-          <span class="ctx-modal-title"><svg class=ui-icon><use href=#i-tag /></svg> Filter by Context</span>
+          <span class="ctx-modal-title"><svg class=ui-icon><use href=#i-tag /></svg> Filter by tags</span>
           <div class="ctx-modal-actions">
             <button
               class="ctx-clear-btn"
@@ -8879,11 +9011,28 @@
             </button>
           </div>
         </div>
+        <!--
+          Context and metadata are the two tag sets a session carries — what
+          the user's session was in, and what the bot's answer was marked with.
+          They filter identically, so they share one button and one popover
+          rather than putting a second identical funnel in the toolbar.
+        -->
+        <div class="ctx-kind-tabs" id="ctxKindTabs">
+          <button class="ctx-kind-tab active" data-ctx-kind="context">
+            Context<span class="ctx-kind-count" id="ctxKindCountContext"></span>
+          </button>
+          <button class="ctx-kind-tab" data-ctx-kind="metadata">
+            Metadata<span
+              class="ctx-kind-count"
+              id="ctxKindCountMetadata"
+            ></span>
+          </button>
+        </div>
         <div class="ctx-modal-search">
           <input
             type="text"
             id="ctxSearch"
-            placeholder="Search contexts…"
+            placeholder="Search tags…"
             autocomplete="off"
             oninput="filterContextSearch(this.value)"
           />
@@ -9138,6 +9287,7 @@
             invoke("get_session_interactions", { sessionUuid }),
           getDateRange: () => invoke("get_date_range"),
           getContextOptions: () => invoke("get_context_options"),
+          getMetadataOptions: () => invoke("get_metadata_options"),
           getDbDailyStats: () => invoke("get_db_daily_stats"),
           // sinceDate ("YYYY-MM-DD") bounds an otherwise full-table aggregate.
           // Omit it to cover everything stored — the Manage Database calendar
@@ -9273,6 +9423,8 @@
         window.electronAPI.getSessionInteractions = () => Promise.resolve([])
       if (!window.electronAPI.getContextOptions)
         window.electronAPI.getContextOptions = () => Promise.resolve([])
+      if (!window.electronAPI.getMetadataOptions)
+        window.electronAPI.getMetadataOptions = () => Promise.resolve([])
       if (!window.electronAPI.getDbDailyStats)
         window.electronAPI.getDbDailyStats = () =>
           Promise.resolve({ total: 0, days: [] })
@@ -9438,6 +9590,8 @@
       // ── Conversations state ─────────────────────────────────────────
       const CONV_DB_STORAGE_KEY = "cm-conv-db-path"
       let convDbPath = localStorage.getItem(CONV_DB_STORAGE_KEY) || ""
+      /// Filled in once `get_version` answers; used by the import log header.
+      let appVersion = ""
       let convSessions = []
       let convSessionFilter = "all"
       let convQuery = ""
@@ -9479,8 +9633,16 @@
       let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
       let contextPanelOpen = false
+      // The bot-side counterpart of the context filters: the OutputMetadata
+      // pairs an answer carried. Same shape, same semantics, its own tab in
+      // the tag filter popover — see CTX_KINDS.
+      let convMetadataFilters = [] // [{name, value}] — active metadata filters
+      let metadataOptions = [] // [{name, value, count}] — from metadata_index
+      let metadataOptionsLoaded = false
       let contentContextFilters = [] // [{name, value}] — active content context filters
       let contentContextOptions = [] // [{name, value, count}] — built from export data
+      let contentMetadataFilters = [] // [{name, value}] — active content metadata filters
+      let contentMetadataOptions = [] // [{name, value, count}] — from OutputMetaData
       let _contentCtxSearchQuery = ""
       let chatTurnsCache = {
         interactions: null,
@@ -13717,6 +13879,7 @@
           dSort,
           eSort,
           contentContextFilters,
+          contentMetadataFilters,
         })
       }
       function showInvalidRegexResults() {
@@ -16040,9 +16203,9 @@
           .getElementById("interactionLogInstructionsModal")
           .classList.remove("open")
       }
-      document
-        .getElementById("openInteractionLogInstructionsBtn")
-        .addEventListener("click", openInteractionLogInstructions)
+      // The button that opens this lives inside the Import tab's CSV panel,
+      // which is rebuilt on every render — so it carries an inline onclick
+      // like the rest of this app's generated markup, not a bound listener.
       document
         .getElementById("closeInteractionLogInstructions")
         .addEventListener("click", closeInteractionLogInstructions)
@@ -16065,7 +16228,7 @@
         document.getElementById("setting-halo-url").value = haloBaseUrl
         document.getElementById("setting-low-recog-threshold").value =
           lowRecogThreshold
-        // data-retention setting lives in the Manage DB modal
+        // data-retention setting lives on the data modal's Database tab
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
         ).checked = true
@@ -16178,10 +16341,20 @@
           try {
             const res = await window.electronAPI.testAnalyticsConnection()
             status.style.color = res.ok ? "var(--green)" : "var(--red)"
-            status.textContent = res.message
+            // A failure needs the steps, not just the verdict — the same
+            // trace the import log carries, so "Test connection" is a real
+            // first diagnostic rather than a yes/no.
+            if (!res.ok && res.trace && res.trace.length) {
+              status.innerHTML = `${esc(res.message)}<div class="import-log-body" style="margin-top:6px;max-height:120px">${esc(
+                res.trace.join("\n"),
+              )}</div>`
+            } else {
+              status.textContent = res.message
+            }
           } catch (e) {
             status.style.color = "var(--red)"
-            status.textContent = String(e)
+            status.textContent =
+              e && e.message ? e.message : JSON.stringify(e) || String(e)
           }
           btn.disabled = false
           btn.textContent = "Test connection"
@@ -16478,16 +16651,24 @@
 
       document.querySelectorAll("[data-settings-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          document
-            .querySelectorAll("[data-settings-tab]")
-            .forEach((b) => b.classList.remove("active"))
-          btn.classList.add("active")
-          document
-            .querySelectorAll(".settings-tab-panel")
-            .forEach((p) => p.classList.remove("active"))
-          document
-            .getElementById("settings-panel-" + btn.dataset.settingsTab)
-            .classList.add("active")
+          // Scoped to #settingsModal: the data modal's panels carry the same
+          // .settings-tab-panel class, and an unscoped query cleared their
+          // active state from here.
+          animateModalResize(
+            document.querySelector("#settingsModal .modal-box"),
+            () => {
+              document
+                .querySelectorAll("#settingsModal [data-settings-tab]")
+                .forEach((b) => b.classList.remove("active"))
+              btn.classList.add("active")
+              document
+                .querySelectorAll("#settingsModal .settings-tab-panel")
+                .forEach((p) => p.classList.remove("active"))
+              document
+                .getElementById("settings-panel-" + btn.dataset.settingsTab)
+                .classList.add("active")
+            },
+          )
         })
       })
       document.getElementById("saveSettings").addEventListener("click", () => {
@@ -16740,7 +16921,9 @@
             ...allDialogsCombined,
           ]
           buildContentContextOptions()
+          buildContentMetadataOptions()
           contentContextFilters = []
+          contentMetadataFilters = []
           _updateContentCtxBadge()
           // A data reload invalidates the selection. Reset the bar's UI too —
           // the lists aren't rendered yet, so don't go through
@@ -16862,6 +17045,7 @@
       loadData()
 
       window.electronAPI.getVersion().then((v) => {
+        appVersion = v
         const el = document.querySelector(".brand-sub")
         if (el) el.textContent = `Content Dashboard \u00b7 v${v}`
         const verEl = document.getElementById("settingsCurrentVersion")
@@ -18075,35 +18259,61 @@
       }
 
       // ── DB setup & status ───────────────────────────────────────────
+      /**
+       * Reflect the connected database everywhere it is named.
+       *
+       * There are three such places and none of them is the toolbar any more:
+       * the data modal's header, the Database tab's path line, and Settings →
+       * Conversations. Which database is open is something you set once and
+       * then want to forget, so it belongs where settings live, not in a green
+       * line across the top of every search.
+       */
       function updateConvDbStatus() {
-        const el = document.getElementById("convDbStatus")
-        const txt = document.getElementById("convDbStatusText")
-        const btn = document.getElementById("convImportBtn")
-        if (convDbPath) {
-          el.classList.add("connected")
-          // Show just filename
-          const name = convDbPath.replace(/\\/g, "/").split("/").pop()
-          txt.textContent = name
-          btn.disabled = false
-        } else {
-          el.classList.remove("connected")
-          txt.textContent = "No database — use Manage DB to configure"
-          btn.disabled = true
+        const name = convDbPath
+          ? convDbPath.replace(/\\/g, "/").split("/").pop()
+          : ""
+        for (const id of ["settingsDbPath", "settingsConvDbPath"]) {
+          const el = document.getElementById(id)
+          if (el) {
+            el.textContent = convDbPath || "No database connected"
+            el.title = convDbPath || ""
+            el.classList.toggle("connected", !!convDbPath)
+          }
         }
-        // Update settings panel path display
-        const settingsDbPath = document.getElementById("settingsDbPath")
-        if (settingsDbPath) {
-          settingsDbPath.textContent = convDbPath || "Not configured"
-        }
+        const short = document.getElementById("settingsConvDbName")
+        if (short) short.textContent = name || "None"
+        // The modal header carries the same label; refresh it if it is open.
+        if (document.getElementById("convDataModal")?.classList.contains("open"))
+          _cdataRenderChrome()
       }
 
+      /**
+       * Connect to a database file.
+       *
+       * `setDbPath` is the longest-running call in the app and the one that
+       * used to say nothing at all: it applies schema migrations, repairs the
+       * FTS index if it is stale, and runs the one-time entity and metadata
+       * backfills. On a mature database that is seconds of a frozen-looking
+       * window, so it gets the overlay — without a Cancel button, because
+       * there is nothing safe to cancel halfway through a migration.
+       */
       async function openDbAtPath(path) {
+        setConvOverlay(
+          true,
+          "Opening database…",
+          false,
+        )
+        setConvDbBusy(true)
+        // Same paint yield loadSessions() needs, and bounded for the same
+        // reason: this must not hang if the window isn't being composited.
+        await yieldToPaint()
         try {
           await window.electronAPI.setDbPath(path)
           convDbPath = path
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
           updateConvDbStatus()
           contextOptionsLoaded = false // reset when DB changes
+          metadataOptionsLoaded = false
           convDatePickerInited = false // re-initialise picker defaults for new DB
           // Fetch available date range to constrain the calendar picker
           window.electronAPI
@@ -18115,6 +18325,11 @@
         } catch (e) {
           showImportToast("error", "Could not open database: " + e)
           return false
+        } finally {
+          // loadSessions() owns the overlay on its own path and has already
+          // hidden it by now; hiding twice is harmless, leaving it up is not.
+          setConvOverlay(false)
+          setConvDbBusy(false)
         }
       }
 
@@ -18197,6 +18412,14 @@
       document
         .getElementById("settingsDbOpenBtn")
         .addEventListener("click", handleDbOpen)
+      // Settings names the database; changing it happens in the data modal,
+      // next to the deletion and compaction that act on the same file.
+      document
+        .getElementById("settingsOpenDataModalBtn")
+        .addEventListener("click", () => {
+          closeSettings()
+          openConvDataModal("database")
+        })
 
       // ── Toast notifications ─────────────────────────────────────────
       let _toastTimer = null
@@ -18228,13 +18451,90 @@
         if (el) el.remove()
       }
 
-      // ── DB busy state (disables Import + Manage DB during search/import) ──
+      // ── Loading affordances ─────────────────────────────────────────
+      //
+      // Every read from the conversations database goes through one of these.
+      // On a small database they flash by; on a large one — where a session
+      // query, a chat load or opening the file itself takes real seconds —
+      // they are the difference between "working" and "broken". A blank pane
+      // is not a neutral state: it looks exactly like a finished, empty one.
+
+      /**
+       * Wait for the browser to paint, but never longer than `PAINT_YIELD_MS`.
+       *
+       * WebKit will not repaint between a class change and a Tauri `invoke`
+       * that occupies the IPC channel, so the loading state has to be given
+       * two frames before the call goes out or it never appears. The catch is
+       * that `requestAnimationFrame` **does not fire in a window that isn't
+       * being composited** — minimised, fully occluded, or on a background
+       * space. Awaiting it bare therefore parks the caller forever, leaving
+       * whatever it was doing frozen behind a spinner that never resolves.
+       *
+       * The race is the whole point: on screen the frames win and the paint
+       * happens; off screen the timer wins and the work proceeds without one,
+       * which is correct — there is nobody watching.
+       */
+      const PAINT_YIELD_MS = 120
+      function yieldToPaint() {
+        return Promise.race([
+          new Promise((r) =>
+            requestAnimationFrame(() => requestAnimationFrame(r)),
+          ),
+          new Promise((r) => setTimeout(r, PAINT_YIELD_MS)),
+        ])
+      }
+
+      /// Fill a container with a centred spinner. `note` is the second line,
+      /// for saying *why* something is slow rather than only that it is.
+      function paneLoadingHtml(label, note) {
+        return `<div class="pane-loading"><div class="mini-spinner"></div>
+          <div>${esc(label)}</div>${
+            note ? `<div class="pane-loading-note">${esc(note)}</div>` : ""
+          }</div>`
+      }
+
+      function setPaneLoading(id, label, note) {
+        const el = document.getElementById(id)
+        if (el) el.innerHTML = paneLoadingHtml(label, note)
+      }
+
+      /// Mark controls inert while a read is in flight. Held as a class rather
+      /// than `disabled` so it applies to non-form elements (the calendar, the
+      /// quick-action rows) with one rule.
+      function setBusy(ids, busy) {
+        for (const id of ids) {
+          const el = document.getElementById(id)
+          if (el) el.classList.toggle("is-busy", !!busy)
+        }
+      }
+
+      /**
+       * Show the sessions-pane overlay with a message of its own.
+       *
+       * The overlay already existed for session search; opening a database
+       * needs the same treatment and a different sentence, because that call
+       * can run schema migrations, an FTS repair and the metadata backfill
+       * before it returns.
+       */
+      function setConvOverlay(visible, label, cancellable) {
+        const overlay = document.getElementById("convSearchLoadingOverlay")
+        if (!overlay) return
+        const text = overlay.querySelector(".conv-search-loading-label")
+        const cancel = document.getElementById("convSearchCancel")
+        if (text && label) text.textContent = label
+        if (cancel) cancel.style.display = cancellable === false ? "none" : ""
+        overlay.classList.toggle("visible", !!visible)
+      }
+
+      // ── DB busy state (disables the data modal during search/import) ──
+      //
+      // The Data button stays enabled with no database on purpose: with none
+      // connected it is the only way to connect one, and it opens on the
+      // Database tab in that case.
       function setConvDbBusy(busy) {
-        const importBtn = document.getElementById("convImportBtn")
-        const manageBtn = document.getElementById("convManageDbBtn")
+        const dataBtn = document.getElementById("convDataBtn")
         const exportBtn = document.getElementById("convAiExportBtn")
-        if (importBtn) importBtn.disabled = busy || !convDbPath
-        if (manageBtn) manageBtn.disabled = busy
+        if (dataBtn) dataBtn.disabled = busy && _impPhase !== "running"
         if (exportBtn)
           exportBtn.disabled =
             busy || !convDbPath || !convHasSearched || convTotalSessions <= 0
@@ -18256,9 +18556,9 @@
         }
         if (convImporting) return
         convImporting = true
-        const btn = document.getElementById("convImportBtn")
+        const btn = document.getElementById("convDataBtn")
         setConvDbBusy(true)
-        btn.textContent = "Importing…"
+        if (btn) btn.textContent = "Importing…"
         let totalInserted = 0,
           totalSkipped = 0,
           totalPurged = 0
@@ -18301,6 +18601,7 @@
           if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
           showImportToast("success", msg)
           contextOptionsLoaded = false // refresh context options on next panel open
+          metadataOptionsLoaded = false
           // Refresh date picker bounds without resetting user's selection
           window.electronAPI
             .getDateRange()
@@ -18316,12 +18617,14 @@
           await finalizeOnce()
           convImporting = false
           setImportOverlay(false)
-          btn.innerHTML = _CONV_IMPORT_BTN_HTML
+          if (btn) btn.innerHTML = _CONV_DATA_BTN_HTML
           setConvDbBusy(false)
         }
       }
 
-      const _CONV_IMPORT_BTN_HTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Import`
+      /// Must match the markup of #convDataBtn — doImport() overwrites the
+      /// label while a CSV import runs and puts this back afterwards.
+      const _CONV_DATA_BTN_HTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg> Data`
 
       document
         .getElementById("convAiExportBtn")
@@ -18478,16 +18781,47 @@
       }
 
       // ── logging ──
+      /// One line, timestamped. `_impLogWrite` is the only place the panel is
+      /// touched, so a burst of lines costs one DOM write rather than one each.
       function _impLogLine(msg) {
         const t = new Date().toTimeString().slice(0, 8)
         _impLog.push(`[${t}] ${msg}`)
-        const body = document.getElementById("convImportLogBody")
-        if (body) {
-          body.textContent = _impLog.join("\n")
-          body.scrollTop = body.scrollHeight
-        }
+        _impLogWrite()
       }
 
+      /**
+       * Append the backend's own account of a call, indented under the step
+       * that produced it.
+       *
+       * `fetch_analytics_window` returns a `trace` on success *and* on failure.
+       * Carrying it into this panel is what makes a failure on someone else's
+       * Windows machine diagnosable from the screen: the token's remaining
+       * life, the exact URL, the HTTP status and timing, the flattened error
+       * chain and the first 300 bytes of any unexpected body all land here,
+       * where Copy log can pick them up.
+       */
+      function _impLogTrace(trace) {
+        if (!trace || !trace.length) return
+        const t = new Date().toTimeString().slice(0, 8)
+        for (const line of trace) _impLog.push(`[${t}]   · ${line}`)
+        _impLogWrite()
+      }
+
+      function _impLogWrite() {
+        const body = document.getElementById("convImportLogBody")
+        if (!body) return
+        body.textContent = _impLog.join("\n")
+        body.scrollTop = body.scrollHeight
+      }
+
+      /**
+       * Normalise anything a rejected invoke can produce into one shape.
+       *
+       * The `String(e)` fallback used to turn any object without a `message`
+       * into the literal text `[object Object]`, which is precisely the
+       * "it gave errors" with nothing to act on. Anything unrecognised is now
+       * serialised instead.
+       */
       function _impNormErr(e) {
         if (e && typeof e === "object" && typeof e.message === "string") {
           return {
@@ -18495,9 +18829,20 @@
             message: e.message,
             retryable: !!e.retryable,
             retryAfterSecs: e.retryAfterSecs || null,
+            trace: Array.isArray(e.trace) ? e.trace : [],
           }
         }
-        return { kind: "http", message: String(e), retryable: false }
+        let message
+        if (e instanceof Error) message = `${e.name}: ${e.message}`
+        else if (typeof e === "string") message = e
+        else {
+          try {
+            message = JSON.stringify(e)
+          } catch (_) {
+            message = String(e)
+          }
+        }
+        return { kind: "http", message, retryable: false, trace: [] }
       }
 
       const _impSleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -18553,13 +18898,18 @@
               )} to ${endUtc.slice(11, 19)}`,
             )
           }
-          _impLogLine(`API request start ${startUtc} → ${endUtc}`)
+          _impLogLine(
+            `Download ${item.key} ${startUtc} → ${endUtc}${
+              depth ? ` (split depth ${depth})` : ""
+            }${attempt ? ` (attempt ${attempt + 1})` : ""}`,
+          )
           const res = await window.electronAPI.fetchAnalyticsWindow(
             startUtc,
             endUtc,
           )
+          _impLogTrace(res.trace)
           _impLogLine(
-            `API request done ${startUtc} → ${endUtc}: ${res.rowCount} rows, ${res.bytes} bytes, ${res.durationMs}ms`,
+            `Download ok ${startUtc} → ${endUtc}: ${res.rowCount} rows, ${res.bytes} bytes, ${res.durationMs}ms`,
           )
           _impSetOp(`Validating response…`, `${item.key} — ${res.rowCount} rows`)
           // Carry the window with the part: after the rows land, it is what
@@ -18568,13 +18918,26 @@
           return [{ ...res, startUtc, endUtc }]
         } catch (raw) {
           const e = _impNormErr(raw)
+          // The trace explains the failure — emit it before the verdict, so
+          // the log reads in the order things happened.
+          _impLogTrace(e.trace)
+          _impLogLine(
+            `Download failed ${startUtc} → ${endUtc} — ${e.kind}${
+              e.retryable ? " (retryable)" : ""
+            }: ${e.message}`,
+          )
           // Backpressure: same window, later. Splitting would be the opposite
           // of what the server just asked for.
           if (e.kind === "rateLimited" || e.kind === "serverError") {
-            if (attempt >= IMP_MAX_BACKOFF_ATTEMPTS) throw e
+            if (attempt >= IMP_MAX_BACKOFF_ATTEMPTS) {
+              _impLogLine(
+                `Giving up after ${IMP_MAX_BACKOFF_ATTEMPTS + 1} attempts at the same window`,
+              )
+              throw e
+            }
             const waitMs = _impBackoffMs(attempt, e.retryAfterSecs)
             _impLogLine(
-              `${e.message} — waiting ${Math.round(waitMs / 1000)}s before retrying ${startUtc} → ${endUtc}`,
+              `Backing off ${Math.round(waitMs / 1000)}s, then retrying ${startUtc} → ${endUtc} unchanged (attempt ${attempt + 2} of ${IMP_MAX_BACKOFF_ATTEMPTS + 1})`,
             )
             _impSetOp(
               `Waiting on the API`,
@@ -18590,14 +18953,22 @@
             !e.retryable ||
             depth >= IMP_MAX_SPLIT_DEPTH ||
             spanMs < 2 * IMP_MIN_SPLIT_MS
-          )
+          ) {
+            _impLogLine(
+              !e.retryable
+                ? `Not retryable — failing ${item.key}`
+                : depth >= IMP_MAX_SPLIT_DEPTH
+                  ? `Already split ${IMP_MAX_SPLIT_DEPTH} times — failing ${item.key}`
+                  : `Window is down to ${Math.round(spanMs / 60000)}min, at the one-hour split floor — failing ${item.key}`,
+            )
             throw e
+          }
           // The SOP warns that large windows time out and recommends querying
           // in smaller slices; halve and retry rather than failing the day.
           const halfMs = Math.floor(spanMs / 2000) * 1000
           const midMs = sMs + halfMs
           _impLogLine(
-            `${e.message} — splitting ${startUtc} → ${endUtc} into two ${Math.round(
+            `Splitting ${startUtc} → ${endUtc} into two ${Math.round(
               halfMs / 60000,
             )}min windows`,
           )
@@ -18637,12 +19008,27 @@
                 parts.length > 1 ? ` (part ${i + 1}/${parts.length})` : ""
               }`,
             )
-            const res = await window.electronAPI.importInteractionsCsv(
-              p.tempPath,
-              dataRetentionDays,
-              p.delimiter,
-              true, // deferFinalize — _impRunQueue finalizes once for the run
-            )
+            let res
+            try {
+              res = await window.electronAPI.importInteractionsCsv(
+                p.tempPath,
+                dataRetentionDays,
+                p.delimiter,
+                true, // deferFinalize — _impRunQueue finalizes once for the run
+              )
+            } catch (raw) {
+              // The import half fails for entirely different reasons than the
+              // download half — a locked database file, a full disk, a
+              // malformed row — and saying which is what stops "the import
+              // failed" from meaning two unrelated things.
+              const ie = _impNormErr(raw)
+              _impLogLine(
+                `Import failed ${item.key} from ${p.tempPath} (delimiter ${JSON.stringify(
+                  p.delimiter,
+                )}, ${p.rowCount} rows): ${ie.message}`,
+              )
+              throw raw
+            }
             const idx = remaining.indexOf(p.tempPath)
             if (idx >= 0) remaining.splice(idx, 1)
             // Only after the import returned: a window recorded ahead of the
@@ -18673,6 +19059,17 @@
                 res ? res.skipped : 0
               } duplicates${rowsMs != null ? ` in ${rowsMs}ms` : ""}`,
             )
+            // Row-level parse failures don't fail the import, so without this
+            // they were invisible: a day could report "done" having silently
+            // dropped rows.
+            if (res && res.errors && res.errors.length) {
+              _impLogLine(
+                `${res.errors.length} row${
+                  res.errors.length === 1 ? "" : "s"
+                } could not be parsed in ${item.key}:`,
+              )
+              _impLogTrace(res.errors.slice(0, 5))
+            }
           }
         } finally {
           await _impCleanup(remaining)
@@ -18855,6 +19252,7 @@
       async function _impAfterImport(totals) {
         if (totals.inserted > 0 || totals.days > 0) {
           contextOptionsLoaded = false
+          metadataOptionsLoaded = false
           window.electronAPI
             .getDateRange()
             .then(({ min, max }) => initDatePicker(min, max))
@@ -18945,20 +19343,16 @@
 
       function _impRenderModal() {
         const body = document.getElementById("convImportBody")
-        const footer = document.getElementById("convImportFooter")
-        const title = document.getElementById("convImportTitle")
         if (!body) return
         if (_impPhase === "setup") {
-          title.textContent = "Import interactions"
           body.innerHTML = _impSetupHtml()
-          footer.innerHTML = _impSetupFooterHtml()
           _impBindSetupInputs()
         } else {
-          title.textContent =
-            _impPhase === "running" ? "Importing…" : "Import finished"
           body.innerHTML = _impProgressHtml()
-          footer.innerHTML = _impProgressFooterHtml()
         }
+        // The title and footer belong to the shared modal chrome, and the
+        // phase decides both — so one call rather than two spellings of it.
+        _cdataRenderChrome()
       }
 
       function _impSetupHtml() {
@@ -18972,13 +19366,19 @@
             }" onclick="impSetSource('csv')">CSV file</button>
           </div>`
         if (_impSource === "csv") {
+          // The "how do I get one of these?" link lives here, next to the
+          // thing that needs it. It used to sit under Database & retention,
+          // two modals away from the button it explains.
           return (
             tabs +
             `<p class="hint" style="line-height:1.7">
                Import an Interaction Log CSV you downloaded from the CM.com
                portal. Rows already in the database are detected and skipped, so
                re-importing a file is safe.
-             </p>`
+             </p>
+             <button class="btn-link" onclick="openInteractionLogInstructions()">
+               How to export the Interaction Log?
+             </button>`
           )
         }
         if (!_impIsConfigured()) {
@@ -19260,7 +19660,8 @@
                   <button class="btn-primary" onclick="impPickCsv()">Choose CSV files…</button>`
         }
         const p = _impPreview()
-        const ready = _impIsConfigured() && !p.error && p.toDownload > 0
+        const ready =
+          !!convDbPath && _impIsConfigured() && !p.error && p.toDownload > 0
         return `<button class="btn-secondary" onclick="impClose()">Cancel</button>
                 <button class="btn-primary" onclick="impStart()" ${
                   ready ? "" : "disabled"
@@ -19344,7 +19745,7 @@
            }</div>
            <div class="import-day-list">${days}</div>
            <details class="import-log" ${_impOutcome && _impOutcome.type === "failed" ? "open" : ""}>
-             <summary>Details</summary>
+             <summary>Details<button class="import-log-copy" id="impCopyLogBtn" onclick="event.preventDefault();impCopyLog()">Copy log</button></summary>
              <div class="import-log-body" id="convImportLogBody">${esc(
                _impLog.join("\n"),
              )}</div>
@@ -19532,10 +19933,6 @@
           btn.textContent = "Cancelling…"
         }
       }
-      function impClose() {
-        if (_impPhase === "running") return
-        document.getElementById("convImportModal").classList.remove("open")
-      }
       async function impStart() {
         const p = _impPreview()
         if (p.error || !p.all) return
@@ -19557,6 +19954,7 @@
         _impDoneCount = 0
         _impOpText = "Preparing import…"
         _impOpDetail = ""
+        _impLogEnvironment()
         _impLogLine(
           `Queue created: ${_impQueue.length} day(s), ${_impQueue[0].startUtc} → ${
             _impQueue[_impQueue.length - 1].endUtc
@@ -19571,6 +19969,50 @@
         _impRenderModal()
         await _impRunQueue(0)
       }
+      /**
+       * The header every run's log opens with.
+       *
+       * A pasted log has to stand on its own: the version, the OS, the local
+       * clock offset (every timestamp in the log is local, every window in it
+       * is UTC) and the settings that shape the run were all things we had to
+       * ask for by hand before. `appVersion` is filled in at startup.
+       */
+      function _impLogEnvironment() {
+        const offset = -new Date().getTimezoneOffset()
+        const sign = offset < 0 ? "-" : "+"
+        const abs = Math.abs(offset)
+        _impLogLine(
+          `CAIDashboard ${appVersion || "?"} · ${navigator.platform || "?"} · log times are local (UTC${sign}${String(
+            Math.floor(abs / 60),
+          ).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")})`,
+        )
+        const cfg = analyticsConfig || {}
+        _impLogLine(
+          `Source ${_impSource} · culture ${cfg.culture || "?"} · environment ${
+            cfg.environment || "?"
+          } · activeSessionOnly ${!!cfg.activeSessionOnly} · retention ${dataRetentionDays}d · skip imported ${_impSkipExisting}`,
+        )
+        _impLogLine(
+          `Database ${convDbPath || "(none)"} · ${_impDbDays.size} day(s) already stored`,
+        )
+      }
+
+      /// The whole Details panel, for pasting into a bug report.
+      async function impCopyLog() {
+        const btn = document.getElementById("impCopyLogBtn")
+        try {
+          await navigator.clipboard.writeText(_impLog.join("\n"))
+          if (btn) {
+            btn.textContent = "Copied"
+            setTimeout(() => {
+              if (btn) btn.textContent = "Copy log"
+            }, 1500)
+          }
+        } catch (_) {
+          if (btn) btn.textContent = "Copy failed"
+        }
+      }
+
       async function impRetry() {
         // Resume at the first day that didn't complete, keeping everything
         // already imported.
@@ -19617,12 +20059,20 @@
         _impCalMonth = _impDefaultCalMonth()
       }
 
-      async function openImportModal() {
+      /// Prepare the Import tab. Split out of the open handler because the tab
+      /// can also be reached by clicking across from Stored data.
+      async function _impPrepareSetup() {
+        if (_impPhase === "running") return
         if (!convDbPath) {
-          openDbSetupModal()
+          // Reachable by clicking the tab, not only by opening the modal —
+          // there is nowhere to import *to* yet, and saying so beats an
+          // enabled Start button that would fail.
+          document.getElementById("convImportBody").innerHTML =
+            `<div class="import-summary"><strong>No database connected.</strong>
+             <div class="muted" style="margin-top:4px">Create or open one on the <strong>Database</strong> tab, then come back here.</div></div>`
+          _cdataRenderChrome()
           return
         }
-        if (convImporting) return
         _impPhase = "setup"
         _impOutcome = null
         _impQueue = []
@@ -19630,31 +20080,254 @@
         _impPickPhase = 0
         _impPickHover = ""
         if (!_impCalMonth) _impCalMonth = _impDefaultCalMonth()
-        document.getElementById("convImportModal").classList.add("open")
-        _impRenderModal()
+        // The calendar's green/orange coverage comes from two aggregate
+        // queries, and until they land it would render as "nothing imported"
+        // — a wrong answer, not a missing one. Show the wait instead, and
+        // keep Start disabled until the range it would queue is known.
+        document.getElementById("convImportBody").innerHTML = paneLoadingHtml(
+          "Reading what's already imported…",
+          "Checking which days and hours this database already covers.",
+        )
+        _cdataRenderChrome()
         // Sweep anything a previous crash left behind, then load the day
         // markers and re-render with them.
         window.electronAPI.cleanupAnalyticsTemp().catch(() => {})
         try {
           analyticsConfig = await window.electronAPI.getAnalyticsConfig()
         } catch (_) {}
-        await _impLoadDbState()
+        try {
+          await _impLoadDbState()
+        } catch (e) {
+          if (_impPhase === "setup" && _cdataTab === "import") {
+            document.getElementById("convImportBody").innerHTML =
+              `<div class="import-summary"><strong style="color:var(--red)">Could not read the database.</strong>
+               <div class="muted" style="margin-top:4px">${esc(String(e))}</div></div>`
+            _cdataRenderChrome()
+          }
+          return
+        }
         if (!_impFromDate) _impApplyDefaultRange()
-        if (_impPhase === "setup") _impRenderModal()
+        // A tab switch or a started import while this was in flight owns the
+        // panel now; painting the setup form over it would be a regression to
+        // whatever the user just did.
+        if (_impPhase === "setup" && _cdataTab === "import")
+          _cdataResize(() => _impRenderModal())
+      }
+
+      // ── Conversation data modal (Import · Stored data · Database) ────
+      //
+      // The three tabs are three views of one database, so they share a
+      // header, a footer and a close path. Which tab a click lands on is the
+      // only thing the two old entry points really differed by.
+      let _cdataTab = "import"
+
+      const CDATA_TITLES = {
+        import: "Import interactions",
+        stored: "Stored data",
+        database: "Database",
+      }
+
+      /**
+       * Open the modal on a specific tab.
+       *
+       * With no database configured every tab is meaningless except Database,
+       * so that is where a first-run click lands — the modal itself says what
+       * to do rather than a toolbar hint that has to be there forever.
+       */
+      async function openConvDataModal(tab) {
+        if (convImporting && _impPhase !== "running") return
+        if (!convDbPath) tab = "database"
+        document.getElementById("convDataModal").classList.add("open")
+        _cdataSetTab(tab || (_impPhase === "running" ? "import" : "import"))
+      }
+
+      function closeConvDataModal() {
+        // An import in flight owns this modal: it is the only place its
+        // progress and its Cancel button exist.
+        if (_impPhase === "running") return
+        document.getElementById("convDataModal").classList.remove("open")
+      }
+
+      /// Kept so existing call sites (and the CSV path's `impClose()`) keep
+      /// working — they all mean "close the data modal".
+      function impClose() {
+        closeConvDataModal()
+      }
+      function closeManageDbModal() {
+        closeConvDataModal()
+      }
+
+      /**
+       * Run a DOM change that resizes the data modal, animating the box
+       * between the two heights.
+       *
+       * The three tabs are very different heights — two calendar months, a
+       * spinner, a column of settings — so switching snapped the whole dialog
+       * to a new size under the pointer, and the tab bar you just clicked
+       * jumped with it. Measuring around the mutation is what lets the box
+       * grow instead.
+       *
+       * Everything is synchronous between the two measurements, so the
+       * intermediate layout is never painted. `height: auto` before measuring
+       * `to` is what makes the box report its *natural* height while a
+       * previous animation may still have an explicit one set — and because
+       * `max-height: 88vh` still applies, an over-tall tab measures clamped,
+       * which is the height it will actually take.
+       */
+      function animateModalResize(box, mutate) {
+        const overlay = box && box.closest(".modal-overlay")
+        // Nothing to animate between if the modal isn't on screen, and no
+        // animation at all for anyone who asked not to have one.
+        if (
+          !box ||
+          !overlay ||
+          !overlay.classList.contains("open") ||
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          if (box) {
+            box.classList.remove("resizing")
+            box.style.height = ""
+          }
+          mutate()
+          return
+        }
+        const from = box.offsetHeight
+        mutate()
+        box.style.height = "auto"
+        const to = box.offsetHeight
+        if (from === to) {
+          box.style.height = ""
+          return
+        }
+        box.style.height = from + "px"
+        void box.offsetHeight // force the start height to take effect
+        box.classList.add("resizing")
+        box.style.height = to + "px"
+        clearTimeout(box._resizeTimer)
+        // Released on a timer rather than transitionend: a tab switched again
+        // mid-animation cancels the event, and a box stuck at a fixed height
+        // would then clip everything taller.
+        box._resizeTimer = setTimeout(() => {
+          box.classList.remove("resizing")
+          box.style.height = ""
+        }, MODAL_RESIZE_MS)
+      }
+
+      /// Kept in step with the `.modal-box.resizing` transition duration.
+      const MODAL_RESIZE_MS = 200
+
+      function _cdataResize(mutate) {
+        animateModalResize(
+          document.querySelector("#convDataModal .modal-box"),
+          mutate,
+        )
+      }
+
+      function _cdataSetTab(tab) {
+        _cdataTab = tab
+        _cdataResize(() => {
+          document.querySelectorAll("[data-cdata-tab]").forEach((b) => {
+            b.classList.toggle("active", b.dataset.cdataTab === tab)
+            // Deleting or swapping the database file underneath a running
+            // import is a footgun with no upside, and the import's progress
+            // lives on its own tab — so while it runs, that tab is the modal.
+            b.disabled =
+              _impPhase === "running" && b.dataset.cdataTab !== "import"
+            b.title = b.disabled ? "Available once the import finishes" : ""
+          })
+          document
+            .getElementById("cdata-panel-import")
+            .classList.toggle("active", tab === "import")
+          document
+            .getElementById("cdata-panel-stored")
+            .classList.toggle("active", tab === "stored")
+          document
+            .getElementById("cdata-panel-database")
+            .classList.toggle("active", tab === "database")
+          _cdataRenderChrome()
+          // Each tab's prepare paints its own loading state synchronously
+          // before awaiting, so it is part of the height this animates to
+          // rather than a second jump straight after.
+          if (tab === "import") _impPrepareSetup()
+          else if (tab === "stored") _cdataPrepareStored()
+          else _cdataPrepareDatabase()
+        })
+      }
+
+      /// Header subtitle + footer. Every tab re-renders these, so the modal
+      /// can never show one tab's buttons over another tab's body.
+      function _cdataRenderChrome() {
+        const title = document.getElementById("convDataTitle")
+        if (title) {
+          title.textContent =
+            _impPhase === "running" && _cdataTab === "import"
+              ? "Importing…"
+              : _impPhase === "finished" && _cdataTab === "import"
+                ? "Import finished"
+                : CDATA_TITLES[_cdataTab] || "Conversation data"
+        }
+        const label = document.getElementById("convDataDbLabel")
+        if (label) {
+          const name = convDbPath
+            ? convDbPath.replace(/\\/g, "/").split("/").pop()
+            : ""
+          label.textContent = name || "No database connected"
+          label.title = convDbPath || ""
+          label.classList.toggle("connected", !!convDbPath)
+        }
+        const footer = document.getElementById("convDataFooter")
+        if (!footer) return
+        if (_cdataTab === "import") {
+          footer.innerHTML =
+            _impPhase === "setup"
+              ? _impSetupFooterHtml()
+              : _impProgressFooterHtml()
+        } else if (_cdataTab === "stored") {
+          footer.innerHTML = `<button class="btn-secondary" onclick="closeConvDataModal()">Close</button>
+            <button class="btn-danger" id="manageDbDeleteBtn" disabled onclick="manageDbDeleteSelected()">Delete selected</button>`
+          _mdbSyncDeleteButton()
+        } else {
+          footer.innerHTML = `<button class="btn-secondary" onclick="closeConvDataModal()">Close</button>`
+        }
+      }
+
+      async function _cdataPrepareStored() {
+        if (!convDbPath) {
+          document.getElementById("manageDbBody").innerHTML =
+            `<div class="manage-db-empty">Connect a database on the <strong>Database</strong> tab first.</div>`
+          return
+        }
+        _manageDbConfirming = false
+        _mdbFrom = ""
+        _mdbTo = ""
+        _mdbPickPhase = 0
+        _mdbHover = ""
+        await refreshManageDbModal()
+      }
+
+      function _cdataPrepareDatabase() {
+        document.getElementById("setting-data-retention-days").value =
+          dataRetentionDays
+        updateConvDbStatus()
       }
 
       document
-        .getElementById("convImportBtn")
-        .addEventListener("click", openImportModal)
+        .getElementById("convDataBtn")
+        .addEventListener("click", () => openConvDataModal("import"))
       document
-        .getElementById("closeConvImportModal")
-        .addEventListener("click", impClose)
+        .getElementById("closeConvDataModal")
+        .addEventListener("click", closeConvDataModal)
       document
-        .getElementById("convImportModal")
+        .getElementById("convDataModal")
         .addEventListener("click", (e) => {
-          if (e.target === document.getElementById("convImportModal"))
-            impClose()
+          if (e.target === document.getElementById("convDataModal"))
+            closeConvDataModal()
         })
+      document.querySelectorAll("[data-cdata-tab]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (!btn.disabled) _cdataSetTab(btn.dataset.cdataTab)
+        })
+      })
 
       // ── Manage DB modal ─────────────────────────────────────────────
       // Cleanup is calendar-driven: the same two-month grid as the Import modal,
@@ -19676,43 +20349,9 @@
       let _mdbPickPhase = 0
       let _mdbHover = ""
 
+      /// Open the merged modal on Stored data — the old Manage DB entry point.
       function openManageDbModal() {
-        _manageDbConfirming = false
-        _mdbFrom = ""
-        _mdbTo = ""
-        _mdbPickPhase = 0
-        _mdbHover = ""
-        document.getElementById("setting-data-retention-days").value =
-          dataRetentionDays
-        document.getElementById("manageDbModal").classList.add("open")
-        mdbSetTab("data")
-        refreshManageDbModal()
-      }
-      function closeManageDbModal() {
-        document.getElementById("manageDbModal").classList.remove("open")
-      }
-      document
-        .getElementById("manageDbModal")
-        .addEventListener("click", (e) => {
-          if (e.target === document.getElementById("manageDbModal"))
-            closeManageDbModal()
-        })
-      document.querySelectorAll("[data-mdb-tab]").forEach((btn) => {
-        btn.addEventListener("click", () => mdbSetTab(btn.dataset.mdbTab))
-      })
-      function mdbSetTab(tab) {
-        document.querySelectorAll("[data-mdb-tab]").forEach((b) => {
-          b.classList.toggle("active", b.dataset.mdbTab === tab)
-        })
-        document
-          .getElementById("mdb-panel-data")
-          .classList.toggle("active", tab === "data")
-        document
-          .getElementById("mdb-panel-database")
-          .classList.toggle("active", tab !== "data")
-        // Delete only ever acts on the calendar selection, so hide it elsewhere.
-        document.getElementById("manageDbDeleteBtn").style.display =
-          tab === "data" ? "" : "none"
+        openConvDataModal("stored")
       }
 
       function _fmtBytes(n) {
@@ -19758,8 +20397,15 @@
       async function refreshManageDbModal() {
         const body = document.getElementById("manageDbBody")
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
-        body.innerHTML = `<div class="manage-db-empty">Loading…</div>`
-        deleteBtn.disabled = true
+        if (!body) return
+        // Two aggregates over the whole table, which on a large database is
+        // the slowest thing this modal does. A bare "Loading…" line read as a
+        // stuck panel; a spinner reads as work in progress.
+        body.innerHTML = paneLoadingHtml(
+          "Reading stored data…",
+          "Counting interactions per day across the database.",
+        )
+        if (deleteBtn) deleteBtn.disabled = true
         try {
           _manageDbStats = await window.electronAPI.getDbDailyStats()
         } catch (e) {
@@ -19788,7 +20434,9 @@
             1,
           )
         }
-        renderManageDbBody()
+        // The spinner and the calendar are very different heights; grow into
+        // it rather than snapping.
+        _cdataResize(() => renderManageDbBody())
       }
 
       // ── Manage DB: date helpers (UTC keys, no timezone maths) ─────────
@@ -19866,25 +20514,39 @@
         })
       }
 
+      /**
+       * Put the Delete button in the state the current selection implies.
+       *
+       * Split out because the button now lives in the *shared* footer, which
+       * is re-rendered whenever the modal chrome is — so it can be replaced by
+       * a fresh, disabled one without the body having changed at all.
+       */
+      function _mdbSyncDeleteButton() {
+        const deleteBtn = document.getElementById("manageDbDeleteBtn")
+        if (!deleteBtn) return
+        const stats = _manageDbStats
+        const selDays =
+          stats && stats.days && stats.days.length ? _mdbSelectedDays() : []
+        deleteBtn.disabled = selDays.length === 0 || _manageDbConfirming
+        deleteBtn.textContent = selDays.length
+          ? `Delete ${selDays.length} day${selDays.length !== 1 ? "s" : ""}…`
+          : "Delete selected"
+      }
+
       function renderManageDbBody() {
         const stats = _manageDbStats
         const body = document.getElementById("manageDbBody")
-        const deleteBtn = document.getElementById("manageDbDeleteBtn")
+        if (!body) return
+        _mdbSyncDeleteButton()
 
         if (!stats || stats.days.length === 0) {
-          body.innerHTML = `<div class="manage-db-empty">No data in the database yet.<br/>Use <strong>Import</strong> to add interaction logs.</div>`
-          deleteBtn.disabled = true
-          deleteBtn.textContent = "Delete selected"
+          body.innerHTML = `<div class="manage-db-empty">No data in the database yet.<br/>Use the <strong>Import</strong> tab to add interaction logs.</div>`
           return
         }
 
         const selDays = _mdbSelectedDays()
         const selRows = selDays.reduce((s, d) => s + d.count, 0)
         const { lo, hi } = _mdbRange()
-        deleteBtn.disabled = selDays.length === 0 || _manageDbConfirming
-        deleteBtn.textContent = selDays.length
-          ? `Delete ${selDays.length} day${selDays.length !== 1 ? "s" : ""}…`
-          : "Delete selected"
 
         const oldest = stats.days[stats.days.length - 1].date
         const newest = stats.days[0].date
@@ -20151,7 +20813,7 @@
         const dates = _mdbSelectedDays().map((d) => d.date)
         if (!dates.length) return
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
-        deleteBtn.disabled = true
+        if (deleteBtn) deleteBtn.disabled = true
         try {
           const res = await window.electronAPI.deleteInteractionsByDates(dates)
           const deleted = res?.deleted ?? 0
@@ -20172,6 +20834,7 @@
             .then(({ min, max }) => initDatePicker(min, max))
             .catch(() => {})
           contextOptionsLoaded = false
+          metadataOptionsLoaded = false
           if (convHasSearched) loadSessions()
           await refreshManageDbModal()
         } catch (e) {
@@ -20199,16 +20862,6 @@
             String(dataRetentionDays),
           )
         })
-
-      document
-        .getElementById("convManageDbBtn")
-        .addEventListener("click", openManageDbModal)
-
-      // Keep Manage DB button in sync with Import button on DB connect/disconnect
-      const _origUpdateConvDbStatus = updateConvDbStatus
-      updateConvDbStatus = function () {
-        _origUpdateConvDbStatus()
-      }
 
       // Drag-and-drop
       const convView = document.getElementById("view-conversations")
@@ -20265,6 +20918,8 @@
           dateTo: convDateTo || null,
           contextFilters:
             convContextFilters.length > 0 ? convContextFilters : null,
+          metadataFilters:
+            convMetadataFilters.length > 0 ? convMetadataFilters : null,
           lowRecogThreshold,
         }
       }
@@ -20315,14 +20970,12 @@
         const _submitBtn = document.getElementById("convSearchSubmit")
         _submitBtn.classList.add("loading")
         setConvDbBusy(true)
-        document
-          .getElementById("convSearchLoadingOverlay")
-          .classList.add("visible")
-        // Yield two animation frames so WebKit paints the loading state before
-        // the Tauri invoke occupies the IPC channel (macOS WKWebView paint fix).
-        await new Promise((r) =>
-          requestAnimationFrame(() => requestAnimationFrame(r)),
-        )
+        // Through setConvOverlay so the label is reset: opening a database
+        // leaves it reading "Opening database…".
+        setConvOverlay(true, "Searching…", true)
+        // Let WebKit paint the loading state before the invoke takes the IPC
+        // channel. Bounded — see yieldToPaint.
+        await yieldToPaint()
         const mySeq = ++convSearchSeq
         try {
           const res = await window.electronAPI.getSessions(args)
@@ -20333,17 +20986,13 @@
           lastConvSearchArgs = { ...args }
           _submitBtn.classList.remove("loading")
           setConvDbBusy(false)
-          document
-            .getElementById("convSearchLoadingOverlay")
-            .classList.remove("visible")
+          setConvOverlay(false)
           renderSessionList()
         } catch (e) {
           if (mySeq !== convSearchSeq) return
           _submitBtn.classList.remove("loading")
           setConvDbBusy(false)
-          document
-            .getElementById("convSearchLoadingOverlay")
-            .classList.remove("visible")
+          setConvOverlay(false)
           const _countEl = document.getElementById("convResultCount")
           if (_countEl) _countEl.textContent = ""
           document.getElementById(
@@ -20685,74 +21334,291 @@
         }
       }
 
+      /**
+       * Restore a JSON document CM stored with its newlines replaced by `_`.
+       *
+       * Mirrors `_unmarkJsonBreaks` in search-worker.js — see the comment
+       * there for why only `_` outside a quoted span is touched.
+       */
+      function _unmarkJsonBreaks(text) {
+        let out = ""
+        let inStr = false
+        let esc = false
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i]
+          if (inStr) {
+            out += ch
+            if (esc) esc = false
+            else if (ch === "\\") esc = true
+            else if (ch === '"') inStr = false
+            continue
+          }
+          if (ch === '"') {
+            inStr = true
+            out += ch
+            continue
+          }
+          if (ch === "_") {
+            while (text[i + 1] === "_") i++
+            out += " "
+            continue
+          }
+          out += ch
+        }
+        return out
+      }
+
+      const META_MAX_DEPTH = 3
+      const META_MAX_LEAVES = 24
+
+      /**
+       * Expand one metadata entry into the `name → value` pairs it filters by.
+       *
+       * **The worker's `flattenMetaEntry` must stay identical to this** — the
+       * chips come from here and the matching from there, so a difference
+       * makes a chip filter to a different set than its own count claims.
+       * `frontend/tests/metadata-filter.test.js` asserts every chip's count
+       * against the matcher over the real export, which is what catches drift.
+       *
+       * A JSON-object value becomes one pair per leaf, named `key.subkey`:
+       * `abortTransactionAction` holds
+       * `{"label":"Aanvraag stoppen","topicName":"Stoppen_Faciliteitenkaart"}`,
+       * which as a single chip is an unreadable blob nobody would click, and
+       * which arrives in three spellings — compact, `__`-line-broken, and with
+       * the keys in the other order — that would otherwise be three chips for
+       * one value.
+       */
+      function _flattenMetaEntry(key, value, out, depth) {
+        const name = String(key).trim()
+        if (!name || out.length >= META_MAX_LEAVES) return out
+        let v = value
+        if (typeof v === "string") {
+          const t = v.trim()
+          if (t.startsWith("{") && t.endsWith("}")) {
+            let parsed = null
+            try {
+              parsed = JSON.parse(t)
+            } catch (_) {
+              try {
+                parsed = JSON.parse(_unmarkJsonBreaks(t))
+              } catch (_) {}
+            }
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+              v = parsed
+          }
+        }
+        if (
+          v &&
+          typeof v === "object" &&
+          !Array.isArray(v) &&
+          depth < META_MAX_DEPTH
+        ) {
+          const keys = Object.keys(v)
+          if (!keys.length) {
+            out.push([name, ""])
+            return out
+          }
+          for (const sub of keys)
+            _flattenMetaEntry(name + "." + sub, v[sub], out, depth + 1)
+          return out
+        }
+        out.push([
+          name,
+          v === null || v === undefined
+            ? ""
+            : typeof v === "object"
+              ? JSON.stringify(v)
+              : String(v),
+        ])
+        return out
+      }
+
+      /**
+       * Every distinct `OutputMetaData` name/value across the loaded export,
+       * with the number of Articles + Dialogs carrying it.
+       *
+       * `escalationGroup` is deliberately excluded: it already has chips on
+       * the Context tab, where it belongs — it is a declared context variable
+       * with its own Id, and listing it twice would let a user set two filters
+       * that look independent but describe the same thing.
+       */
+      function buildContentMetadataOptions() {
+        const counts = new Map()
+        const addFrom = (metaSets) => {
+          const seen = new Set()
+          const seenNames = new Set()
+          for (const meta of metaSets) {
+            if (!meta || typeof meta !== "object") continue
+            for (const rawKey of Object.keys(meta)) {
+              for (const [name, value] of _flattenMetaEntry(
+                rawKey,
+                meta[rawKey],
+                [],
+                0,
+              )) {
+                // escalationGroup already has chips on the Context tab.
+                if (name === "escalationGroup") continue
+                seen.add(name + "|||" + value)
+                seenNames.add(name)
+              }
+            }
+          }
+          // Counted once per item, not once per answer, so a chip's number
+          // means "Articles and Dialogs you will see" — the same unit the
+          // Context chips use.
+          for (const k of seen) counts.set(k, (counts.get(k) || 0) + 1)
+          return seenNames
+        }
+
+        const withName = new Map() // name → items that set it at all
+        let total = 0
+        const note = (names2) => {
+          total++
+          for (const n of names2)
+            withName.set(n, (withName.get(n) || 0) + 1)
+        }
+        for (const a of allArticles) {
+          note(
+            addFrom(
+              (a.Outputs || [])
+                .filter((o) => o.Type === "Answer")
+                .map((o) => o.OutputMetaData),
+            ),
+          )
+        }
+        for (const d of allDialogsCombined) {
+          const metas = []
+          for (const node of d.nodes || [])
+            for (const item of (node.output && node.output.items) || [])
+              if (item.type === "Answer") metas.push(item.metadata)
+          note(addFrom(metas))
+        }
+
+        contentMetadataOptions = Array.from(counts.entries()).map(
+          ([key, count]) => {
+            const [name, value] = key.split("|||")
+            return { name, value, count }
+          },
+        )
+        // "not set" per key: items with at least one Answer that doesn't carry
+        // it. Any item that never sets the key qualifies, plus those that set
+        // it on some answers only — same rule the Context tab uses.
+        for (const [name, withIt] of withName) {
+          const count = total - withIt + _contentMetaPartialCount(name)
+          if (count > 0)
+            contentMetadataOptions.push({ name, value: "__not_set__", count })
+        }
+      }
+
+      /// The flattened names one answer's metadata contributes. `name in meta`
+      /// is not enough once values expand: a nested value's leaves are named
+      /// `key.subkey` and the raw object has no such key.
+      function _metaNamesOf(meta) {
+        const names = new Set()
+        if (!meta || typeof meta !== "object") return names
+        for (const rawKey of Object.keys(meta))
+          for (const [name] of _flattenMetaEntry(rawKey, meta[rawKey], [], 0))
+            names.add(name)
+        return names
+      }
+
+      /// Items that set `name` on some answers but not all — they satisfy both
+      /// a value filter and "not set", because the filter asks whether *an*
+      /// answer matches.
+      function _contentMetaPartialCount(name) {
+        let n = 0
+        const partial = (metas) => {
+          let withIt = 0
+          let total = 0
+          for (const m of metas) {
+            total++
+            if (_metaNamesOf(m).has(name)) withIt++
+          }
+          return total > 0 && withIt > 0 && withIt < total
+        }
+        for (const a of allArticles) {
+          if (
+            partial(
+              (a.Outputs || [])
+                .filter((o) => o.Type === "Answer")
+                .map((o) => o.OutputMetaData),
+            )
+          )
+            n++
+        }
+        for (const d of allDialogsCombined) {
+          const metas = []
+          for (const node of d.nodes || [])
+            for (const item of (node.output && node.output.items) || [])
+              if (item.type === "Answer") metas.push(item.metadata)
+          if (partial(metas)) n++
+        }
+        return n
+      }
+
+      /// Which tag set the Content popover is showing: "context" | "metadata".
+      let _contentCtxKind = "context"
+
+      const CONTENT_CTX_KINDS = {
+        context: {
+          options: () => contentContextOptions,
+          filters: () => contentContextFilters,
+          empty: "No context data found in content.",
+        },
+        metadata: {
+          options: () => contentMetadataOptions,
+          filters: () => contentMetadataFilters,
+          empty:
+            "No answer metadata found in content.<br>Only responses configured with metadata carry any.",
+        },
+      }
+
       function _updateContentCtxBadge() {
         const badge = document.getElementById("contentCtxFilterBadge")
-        const count = contentContextFilters.length
+        const count =
+          contentContextFilters.length + contentMetadataFilters.length
         badge.textContent = count
         badge.style.display = count > 0 ? "" : "none"
         document
           .getElementById("contentCtxToggle")
           .classList.toggle("has-filters", count > 0)
+        _setCtxKindCounts(
+          "contentCtxKindCount",
+          contentContextFilters.length,
+          contentMetadataFilters.length,
+        )
       }
 
-      function _buildContentCtxModalHtml(searchQ) {
-        if (!contentContextOptions.length) {
-          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No context data found in content.</div>'
-        }
-        const q = (searchQ || "").toLowerCase().trim()
-        const groups = {}
-        for (const o of contentContextOptions) {
-          const displayValue = o.value === "__not_set__" ? "not set" : o.value
-          if (
-            q &&
-            !o.name.toLowerCase().includes(q) &&
-            !displayValue.toLowerCase().includes(q)
-          )
-            continue
-          if (!groups[o.name]) groups[o.name] = []
-          groups[o.name].push(o)
-        }
-        if (!Object.keys(groups).length) {
-          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No matching contexts.</div>'
-        }
-        return Object.entries(groups)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([name, options]) => {
-            const chips = options
-              .map((o) => {
-                const active = contentContextFilters.some(
-                  (f) => f.name === o.name && f.value === o.value,
-                )
-                const isNotSet = o.value === "__not_set__"
-                const valClass = isNotSet
-                  ? " val-not-set"
-                  : o.value === "true"
-                  ? " val-true"
-                  : o.value === "false"
-                  ? " val-false"
-                  : ""
-                const label = isNotSet ? "not set" : o.value
-                return `<button class="ctx-chip${
-                  active ? " active" : ""
-                }${valClass}" data-ctx-name="${esc(
-                  o.name,
-                )}" data-ctx-value="${esc(o.value)}" title="${esc(
-                  o.count,
-                )} items">${esc(label)}</button>`
-              })
-              .join("")
-            return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
-              name,
-            )}">${esc(name)}</div><div class="ctx-chips">${chips}</div></div>`
-          })
-          .join("")
+      function setContentCtxKind(kind) {
+        if (!CONTENT_CTX_KINDS[kind]) return
+        _contentCtxKind = kind
+        _renderContentCtxModal()
       }
 
       function _renderContentCtxModal() {
+        const kind = CONTENT_CTX_KINDS[_contentCtxKind]
         document.getElementById("contentCtxModalBody").innerHTML =
-          _buildContentCtxModalHtml(_contentCtxSearchQuery)
+          _buildTagChipsHtml(
+            kind.options(),
+            kind.filters(),
+            _contentCtxSearchQuery,
+            {
+              attrPrefix: "ctx",
+              unit: "items",
+              empty: kind.empty,
+              noMatch: "No matching tags.",
+            },
+          )
         document.getElementById("contentCtxClearBtn").style.display =
-          contentContextFilters.length > 0 ? "" : "none"
+          contentContextFilters.length + contentMetadataFilters.length > 0
+            ? ""
+            : "none"
+        document.querySelectorAll("[data-content-ctx-kind]").forEach((b) => {
+          b.classList.toggle(
+            "active",
+            b.dataset.contentCtxKind === _contentCtxKind,
+          )
+        })
       }
 
       function toggleContentContextPanel() {
@@ -20794,11 +21660,10 @@
       }
 
       function toggleContentContextOption(name, value) {
-        const idx = contentContextFilters.findIndex(
-          (f) => f.name === name && f.value === value,
-        )
-        if (idx === -1) contentContextFilters.push({ name, value })
-        else contentContextFilters.splice(idx, 1)
+        const list = CONTENT_CTX_KINDS[_contentCtxKind].filters()
+        const idx = list.findIndex((f) => f.name === name && f.value === value)
+        if (idx === -1) list.push({ name, value })
+        else list.splice(idx, 1)
         _updateContentCtxBadge()
         _renderContentCtxModal()
         triggerSearch()
@@ -20806,6 +21671,7 @@
 
       function clearContentContextFilters() {
         contentContextFilters = []
+        contentMetadataFilters = []
         _updateContentCtxBadge()
         _renderContentCtxModal()
         triggerSearch()
@@ -20817,27 +21683,97 @@
           if (!btn) return
           toggleContentContextOption(btn.dataset.ctxName, btn.dataset.ctxValue)
         })
+      document
+        .getElementById("contentCtxKindTabs")
+        .addEventListener("click", (e) => {
+          const btn = e.target.closest("[data-content-ctx-kind]")
+          if (btn) setContentCtxKind(btn.dataset.contentCtxKind)
+        })
 
-      // ── Context filter modal ────────────────────────────────────────
+      // ── Tag filter modal (Context · Metadata) ───────────────────────
+      //
+      // Two tag sets, one popover. A session's *contexts* say what the user's
+      // session was in; its *OutputMetadata* says what the bot's answer was
+      // marked with (escalationGroup, entryType, nochat, transaction…). They
+      // are indexed the same way in SQLite and filter with identical
+      // semantics, so the only thing that varies here is which list is shown
+      // and which array a click lands in.
       let _ctxSearchQuery = ""
+      /// Which tag set the popover is showing: "context" | "metadata".
+      let _ctxKind = "context"
+
+      /// Everything that differs between the two tabs, in one place.
+      const CTX_KINDS = {
+        context: {
+          options: () => contextOptions,
+          setOptions: (v) => {
+            contextOptions = v
+          },
+          loaded: () => contextOptionsLoaded,
+          setLoaded: (v) => {
+            contextOptionsLoaded = v
+          },
+          load: () => window.electronAPI.getContextOptions(),
+          filters: () => convContextFilters,
+          empty:
+            "No context data found.<br>Import interaction data first.",
+        },
+        metadata: {
+          options: () => metadataOptions,
+          setOptions: (v) => {
+            metadataOptions = v
+          },
+          loaded: () => metadataOptionsLoaded,
+          setLoaded: (v) => {
+            metadataOptionsLoaded = v
+          },
+          load: () => window.electronAPI.getMetadataOptions(),
+          filters: () => convMetadataFilters,
+          empty:
+            "No answer metadata found.<br>Only answers configured with metadata carry any.",
+        },
+      }
 
       function _updateCtxFilterBadge() {
         const badge = document.getElementById("ctxFilterBadge")
-        const count = convContextFilters.length
+        // The button's badge is the total across both tabs — a filter left on
+        // in the tab you aren't looking at still narrows the results.
+        const count = convContextFilters.length + convMetadataFilters.length
         badge.textContent = count
         badge.style.display = count > 0 ? "" : "none"
         document
           .getElementById("convCtxToggle")
           .classList.toggle("has-filters", count > 0)
+        _setCtxKindCounts(
+          "ctxKindCount",
+          convContextFilters.length,
+          convMetadataFilters.length,
+        )
       }
 
-      function _buildCtxModalHtml(searchQ) {
-        if (!contextOptions.length) {
-          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No context data found.<br>Import interaction data first.</div>'
+      /// Per-tab counts, shared by both popovers.
+      function _setCtxKindCounts(prefix, contextCount, metadataCount) {
+        const c = document.getElementById(prefix + "Context")
+        const m = document.getElementById(prefix + "Metadata")
+        if (c) c.textContent = contextCount > 0 ? contextCount : ""
+        if (m) m.textContent = metadataCount > 0 ? metadataCount : ""
+      }
+
+      /**
+       * The grouped chip list for one tag set.
+       *
+       * Shared by the Conversations and Content popovers — they differ only in
+       * what a count means (sessions vs items), which is why `unit` is a
+       * parameter rather than two copies of this function.
+       */
+      function _buildTagChipsHtml(options, activeFilters, searchQ, opts) {
+        const { attrPrefix, unit, empty, noMatch } = opts
+        if (!options.length) {
+          return `<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">${empty}</div>`
         }
         const q = (searchQ || "").toLowerCase().trim()
         const groups = {}
-        for (const o of contextOptions) {
+        for (const o of options) {
           const displayValue = o.value === "__not_set__" ? "not set" : o.value
           if (
             q &&
@@ -20849,32 +21785,45 @@
           groups[o.name].push(o)
         }
         if (!Object.keys(groups).length) {
-          return '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">No matching contexts.</div>'
+          return `<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">${noMatch}</div>`
         }
         return Object.entries(groups)
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([name, options]) => {
-            const chips = options
+          .map(([name, opts2]) => {
+            const chips = opts2
               .map((o) => {
-                const active = convContextFilters.some(
+                const active = activeFilters.some(
                   (f) => f.name === o.name && f.value === o.value,
                 )
                 const isNotSet = o.value === "__not_set__"
                 const valClass = isNotSet
                   ? " val-not-set"
                   : o.value === "true"
-                  ? " val-true"
-                  : o.value === "false"
-                  ? " val-false"
-                  : ""
-                const label = isNotSet ? "not set" : o.value
+                    ? " val-true"
+                    : o.value === "false"
+                      ? " val-false"
+                      : ""
+                // An empty metadata value is a real, distinct state — the key
+                // was set with no value — so it must not render as a blank
+                // chip nobody can click.
+                const label = isNotSet
+                  ? "not set"
+                  : o.value === ""
+                    ? "(empty)"
+                    : o.value
+                // The chip clamps to one line, so the tooltip carries the full
+                // value as well as the count — otherwise a truncated chip is
+                // unreadable with no way to see what it says.
+                const title = isNotSet
+                  ? `${o.count} ${unit}`
+                  : `${o.value}\n${o.count} ${unit}`
                 return `<button class="ctx-chip${
                   active ? " active" : ""
-                }${valClass}" data-ctx-name="${esc(
+                }${valClass}" data-${attrPrefix}-name="${esc(
                   o.name,
-                )}" data-ctx-value="${esc(o.value)}" title="${esc(
-                  o.count,
-                )} sessions">${esc(label)}</button>`
+                )}" data-${attrPrefix}-value="${esc(o.value)}" title="${esc(
+                  title,
+                )}">${esc(label)}</button>`
               })
               .join("")
             return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
@@ -20885,10 +21834,48 @@
       }
 
       function _renderCtxModal() {
-        document.getElementById("ctxModalBody").innerHTML =
-          _buildCtxModalHtml(_ctxSearchQuery)
+        const kind = CTX_KINDS[_ctxKind]
+        document.getElementById("ctxModalBody").innerHTML = _buildTagChipsHtml(
+          kind.options(),
+          kind.filters(),
+          _ctxSearchQuery,
+          {
+            attrPrefix: "ctx",
+            unit: "sessions",
+            empty: kind.empty,
+            noMatch: "No matching tags.",
+          },
+        )
+        // Clear all clears both sets, so it shows whenever either is active.
         document.getElementById("ctxClearBtn").style.display =
-          convContextFilters.length > 0 ? "" : "none"
+          convContextFilters.length + convMetadataFilters.length > 0
+            ? ""
+            : "none"
+        document.querySelectorAll("[data-ctx-kind]").forEach((b) => {
+          b.classList.toggle("active", b.dataset.ctxKind === _ctxKind)
+        })
+      }
+
+      async function setCtxKind(kind) {
+        if (!CTX_KINDS[kind]) return
+        _ctxKind = kind
+        await _ctxEnsureOptions()
+        _renderCtxModal()
+      }
+
+      /// Fetch the active tab's options once. Each tab loads on first view, so
+      /// opening the popover never pays for a list you don't look at.
+      async function _ctxEnsureOptions() {
+        const kind = CTX_KINDS[_ctxKind]
+        if (kind.loaded()) return
+        document.getElementById("ctxModalBody").innerHTML =
+          '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">Loading…</div>'
+        try {
+          kind.setOptions(await kind.load())
+          kind.setLoaded(true)
+        } catch (e) {
+          kind.setOptions([])
+        }
       }
 
       async function toggleContextPanel() {
@@ -20918,16 +21905,7 @@
         document.getElementById("ctxSearch").value = ""
         _ctxSearchQuery = ""
 
-        if (!contextOptionsLoaded) {
-          document.getElementById("ctxModalBody").innerHTML =
-            '<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">Loading\u2026</div>'
-          try {
-            contextOptions = await window.electronAPI.getContextOptions()
-            contextOptionsLoaded = true
-          } catch (e) {
-            contextOptions = []
-          }
-        }
+        await _ctxEnsureOptions()
         _renderCtxModal()
         document.getElementById("ctxSearch").focus()
       }
@@ -20941,19 +21919,22 @@
         _renderCtxModal()
       }
 
+      /// Toggle a chip in whichever tag set the popover is showing.
       function toggleContextOption(name, value) {
-        const idx = convContextFilters.findIndex(
-          (f) => f.name === name && f.value === value,
-        )
-        if (idx === -1) convContextFilters.push({ name, value })
-        else convContextFilters.splice(idx, 1)
+        const list = CTX_KINDS[_ctxKind].filters()
+        const idx = list.findIndex((f) => f.name === name && f.value === value)
+        if (idx === -1) list.push({ name, value })
+        else list.splice(idx, 1)
         _updateCtxFilterBadge()
         _renderCtxModal()
         convPage = 1
       }
 
+      /// Clears both sets — the button says "Clear all" and the badge counts
+      /// both, so clearing only the visible tab would leave the badge lit.
       function clearContextFilters() {
         convContextFilters = []
+        convMetadataFilters = []
         _updateCtxFilterBadge()
         _renderCtxModal()
         convPage = 1
@@ -20962,6 +21943,10 @@
         const btn = e.target.closest(".ctx-chip")
         if (!btn) return
         toggleContextOption(btn.dataset.ctxName, btn.dataset.ctxValue)
+      })
+      document.getElementById("ctxKindTabs").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-ctx-kind]")
+        if (btn) setCtxKind(btn.dataset.ctxKind)
       })
 
       // ── Session context detail modal ────────────────────────────────
@@ -21533,9 +22518,7 @@
             .getElementById("convSearchSubmit")
             .classList.remove("loading")
           setConvDbBusy(false)
-          document
-            .getElementById("convSearchLoadingOverlay")
-            .classList.remove("visible")
+          setConvOverlay(false)
         })
 
       // Dialog and Node share one pill: a node is always written as part of the
@@ -22050,11 +23033,23 @@
         const _existingPrompt = document.getElementById("flagNotePromptRow")
         if (_existingPrompt) _existingPrompt.remove()
         document.getElementById("chatFilterRow").style.display = ""
-        // Load interactions
+        // Load interactions.
+        //
+        // The thread keeps showing the *previous* conversation until this
+        // resolves, which on a large database is seconds of looking at the
+        // wrong chat with the new card already highlighted. Clear it to a
+        // spinner first, and disable the controls that act on a conversation
+        // that isn't loaded yet.
+        const chatControls = ["chatFilterRow", "chatSearch", "chatOptRegex"]
+        setPaneLoading("chatThread", "Loading conversation…")
+        setBusy(chatControls, true)
         try {
           activeInteractions = await window.electronAPI.getSessionInteractions(
             uuid,
           )
+          // A second click while the first was in flight: the later selection
+          // wins, and this one must not paint over it.
+          if (activeSessionUuid !== uuid) return
           resetChatRenderCaches()
           renderChatThread()
           // Update header
@@ -22091,11 +23086,16 @@
             `
           }
         } catch (e) {
-          document.getElementById(
-            "chatThread",
-          ).innerHTML = `<div class="chat-empty error">Error loading conversation:<br>${esc(
-            String(e),
-          )}</div>`
+          if (activeSessionUuid === uuid)
+            document.getElementById(
+              "chatThread",
+            ).innerHTML = `<div class="chat-empty error">Error loading conversation:<br>${esc(
+              String(e),
+            )}</div>`
+        } finally {
+          // Must run on every exit, including the superseded-selection return
+          // above — the newer call re-disables them on its own way in.
+          setBusy(chatControls, false)
         }
       }
 
