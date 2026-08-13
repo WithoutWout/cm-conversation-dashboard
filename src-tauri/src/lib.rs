@@ -1084,6 +1084,21 @@ CREATE TABLE IF NOT EXISTS context_index (
 );
 CREATE INDEX IF NOT EXISTS idx_ctx_session ON context_index(session_uuid);
 CREATE INDEX IF NOT EXISTS idx_ctx_name_session ON context_index(name, session_uuid);
+-- The bot-side counterpart of context_index: the `OutputMetadata` key/value
+-- pairs an answer carried, lifted out of the JSON at import time.
+--
+-- A separate table rather than a `kind` column on context_index: adding one
+-- would change that table's primary key on every existing database, and the
+-- two are read by different filters that must stay independently indexable.
+-- Same shape and same two indexes, because the queries are the same shape too.
+CREATE TABLE IF NOT EXISTS metadata_index (
+    name         TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    session_uuid TEXT NOT NULL,
+    PRIMARY KEY (name, value, session_uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_session ON metadata_index(session_uuid);
+CREATE INDEX IF NOT EXISTS idx_meta_name_session ON metadata_index(name, session_uuid);
 -- The entities the recognizer found in a user turn, lifted out of the
 -- `recognition_details` JSON so searching for one is a scan of a small narrow
 -- table instead of a JSON parse of every interaction in the database.
@@ -1180,6 +1195,7 @@ const META_PENDING_FINALIZE: &str = "pending_finalize";
 /// Set once `entity_index` has been backfilled from the `recognition_details`
 /// already in the database. Imports maintain it incrementally from then on.
 const META_ENTITY_INDEX_BUILT: &str = "entity_index_built";
+const META_METADATA_INDEX_BUILT: &str = "metadata_index_built";
 
 // ── Flagged DB schema ────────────────────────────────────────────────────────
 
@@ -1597,30 +1613,38 @@ fn ensure_session_summary(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// The two session-keyed tag tables. They orphan under exactly the same
+/// conditions, so every cleanup path walks both rather than remembering one.
+const TAG_TABLES: [&str; 2] = ["context_index", "metadata_index"];
+
 fn cleanup_orphan_contexts(conn: &Connection) {
-    let _ = conn.execute_batch(
-        "DELETE FROM context_index \
-         WHERE session_uuid NOT IN (SELECT DISTINCT session_uuid FROM interactions)",
-    );
+    for table in TAG_TABLES {
+        let _ = conn.execute_batch(&format!(
+            "DELETE FROM {table} \
+             WHERE session_uuid NOT IN (SELECT DISTINCT session_uuid FROM interactions)"
+        ));
+    }
 }
 
-/// Drop context rows whose session no longer has any interactions, limited to
-/// the sessions in [`TOUCHED_TABLE`].
+/// Drop context and metadata rows whose session no longer has any interactions,
+/// limited to the sessions in [`TOUCHED_TABLE`].
 ///
-/// Only deletions can orphan a context row, so a purge is the only thing in the
+/// Only deletions can orphan such a row, so a purge is the only thing in the
 /// import path that needs this — an import on its own strictly adds sessions and
 /// can never orphan anything.
 fn cleanup_orphan_contexts_touched(conn: &Connection) {
-    let _ = conn.execute(
-        &format!(
-            "DELETE FROM context_index \
-             WHERE session_uuid IN (SELECT session_uuid FROM {TOUCHED_TABLE}) \
-               AND NOT EXISTS ( \
-                   SELECT 1 FROM interactions i \
-                   WHERE i.session_uuid = context_index.session_uuid)"
-        ),
-        [],
-    );
+    for table in TAG_TABLES {
+        let _ = conn.execute(
+            &format!(
+                "DELETE FROM {table} \
+                 WHERE session_uuid IN (SELECT session_uuid FROM {TOUCHED_TABLE}) \
+                   AND NOT EXISTS ( \
+                       SELECT 1 FROM interactions i \
+                       WHERE i.session_uuid = {table}.session_uuid)"
+            ),
+            [],
+        );
+    }
 }
 
 /// Bring the FTS index in step with `interactions`, migrating its schema first
@@ -1680,6 +1704,48 @@ fn repair_fts_index(conn: &Connection) -> bool {
     false
 }
 
+/// Populate `metadata_index` from every interaction already stored.
+///
+/// One transaction, streamed rather than collected: a mature database holds
+/// hundreds of thousands of rows and the pairs are written as they are read.
+/// Returns the number of rows inserted.
+fn backfill_metadata_index(conn: &Connection) -> Result<i64, rusqlite::Error> {
+    let mut rows = 0i64;
+    conn.execute_batch("BEGIN")?;
+    let result = (|| -> Result<(), rusqlite::Error> {
+        let mut read = conn.prepare(
+            "SELECT session_uuid, output_metadata FROM interactions \
+             WHERE output_metadata IS NOT NULL AND output_metadata != '' \
+               AND output_metadata != '[]' AND output_metadata != 'null'",
+        )?;
+        let mut write = conn.prepare(
+            "INSERT OR IGNORE INTO metadata_index(name, value, session_uuid) VALUES (?1, ?2, ?3)",
+        )?;
+        let mut cursor = read.query([])?;
+        while let Some(row) = cursor.next()? {
+            let session: String = row.get(0)?;
+            if session.is_empty() {
+                continue;
+            }
+            let meta: String = row.get(1)?;
+            for (name, value) in metadata_index_rows(&meta) {
+                rows += write.execute(params![name, value, session])? as i64;
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(rows)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 fn open_db(path: &str) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Cannot open DB: {e}"))?;
     // PRAGMA journal_mode returns a result row, so it must be run via query_row.
@@ -1717,6 +1783,37 @@ fn open_db(path: &str) -> Result<Connection, String> {
                AND json_extract(c.value, '$.name') != ''",
         )
         .ok();
+    }
+
+    // Backfill metadata_index from existing interactions (one-time migration).
+    //
+    // Gated on a meta flag for the same reason as the entity backfill below: a
+    // database whose answers carried no metadata would otherwise re-run this
+    // whole-table scan on every launch.
+    //
+    // **Deliberately a Rust pass, not one SQL statement** like the entity
+    // backfill beside it. A metadata value can itself be a JSON object, which
+    // is expanded into one row per leaf (see `flatten_metadata_entry`), and
+    // that is not expressible in SQL with `json_each` — the sub-keys are not
+    // known in advance. Routing the migration through the same function the
+    // import path uses is also stronger than asserting two implementations
+    // agree: there is only one implementation.
+    if !meta_flag_set(&conn, META_METADATA_INDEX_BUILT) {
+        let started = Instant::now();
+        let built = backfill_metadata_index(&conn);
+        match built {
+            Ok(rows) => {
+                log::info!(
+                    target: "import",
+                    "indexed {rows} output metadata pairs in {}ms",
+                    started.elapsed().as_millis()
+                );
+                set_meta_flag(&conn, META_METADATA_INDEX_BUILT);
+            }
+            Err(e) => {
+                log::warn!(target: "import", "metadata backfill failed, will retry on next open: {e}");
+            }
+        }
     }
 
     // Backfill entity_index from existing interactions (one-time migration).
@@ -2323,6 +2420,164 @@ struct CsvContext<'a> {
     value: Option<std::borrow::Cow<'a, str>>,
 }
 
+/// One `{key, value}` pair from the `OutputMetadata` column.
+///
+/// Note the shape: an **array of key/value objects**, not an object. The
+/// content export spells the same information as a plain object
+/// (`OutputMetaData: {escalationGroup: "…"}`), so the two sides look alike in
+/// the UI and are parsed differently underneath.
+#[derive(Deserialize)]
+struct CsvMetadataPair<'a> {
+    #[serde(borrow, default)]
+    key: Option<std::borrow::Cow<'a, str>>,
+    #[serde(borrow, default)]
+    value: Option<std::borrow::Cow<'a, str>>,
+}
+
+/// The `(name, value)` pairs [`metadata_index`] is built from.
+///
+/// Values are kept verbatim (only trimmed) rather than lowercased, unlike
+/// `entity_index`: a metadata value is a configured constant the user reads
+/// back in the filter chips, and `Polles Keuken` should not become
+/// `polles keuken` there. Pairs with an empty key are dropped — they would
+/// index a row nobody can find.
+fn metadata_index_rows(output_metadata: &str) -> Vec<(String, String)> {
+    let trimmed = output_metadata.trim();
+    // Cheap gate: an empty or absent column is the common case, and the
+    // serde error path is far more expensive than this check.
+    if trimmed.is_empty() || trimmed == "[]" || trimmed == "null" {
+        return Vec::new();
+    }
+    let Ok(pairs) = serde_json::from_str::<Vec<CsvMetadataPair>>(trimmed) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for p in &pairs {
+        let Some(key) = p.key.as_deref() else { continue };
+        let value = serde_json::Value::String(p.value.as_deref().unwrap_or("").to_string());
+        flatten_metadata_entry(key, &value, 0, &mut out);
+    }
+    out
+}
+
+/// How deep a nested metadata value is flattened, and how many leaves one
+/// value may contribute. Bounds exist so a large embedded document can't turn
+/// one answer into hundreds of index rows.
+const META_MAX_DEPTH: usize = 3;
+const META_MAX_LEAVES: usize = 24;
+
+/// Restore a JSON document CM stored with its newlines replaced by `_`.
+///
+/// `_` is CM's line-break marker (see `## Chat rendering`), so a value
+/// authored across several lines arrives as
+/// `{__  "label": "…",__  "topicName": "…"__}` — the same object as the
+/// compact spelling, but not parseable, and therefore a second index entry for
+/// the same thing.
+///
+/// Only `_` outside a double-quoted span is touched, which is safe by
+/// construction: `_` is not valid JSON syntax there, so it can only be the
+/// marker. Inside a string it is left alone — `Stoppen_TD_Algemeen` is a real
+/// value and must survive intact.
+fn unmark_json_breaks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_str = false;
+    let mut esc = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if in_str {
+            out.push(ch);
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_str = true;
+                out.push(ch);
+            }
+            '_' => {
+                // Collapse a run to one space, matching what it replaced.
+                while chars.peek() == Some(&'_') {
+                    chars.next();
+                }
+                out.push(' ');
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Expand one metadata entry into the `(name, value)` pairs it filters by.
+///
+/// A JSON-object value becomes one pair per leaf, named `key.subkey`.
+/// `abortTransactionAction` holds
+/// `{"label":"Aanvraag stoppen","topicName":"Stoppen_Faciliteitenkaart"}`,
+/// which as a single value is an unreadable blob nobody would filter on, and
+/// which arrives in three spellings — compact, `__`-line-broken, and with the
+/// keys in the other order — that would otherwise be three distinct entries
+/// for one value. Split, they all converge.
+///
+/// Anything else, including a JSON *array* (no stable member names), stays a
+/// single pair. Kept in step with `flattenMetaEntry` in `search-worker.js` and
+/// `_flattenMetaEntry` in `index.html`, which do the same for the content side.
+fn flatten_metadata_entry(
+    key: &str,
+    value: &serde_json::Value,
+    depth: usize,
+    out: &mut Vec<(String, String)>,
+) {
+    let name = key.trim();
+    if name.is_empty() || out.len() >= META_MAX_LEAVES {
+        return;
+    }
+    // A nested object arrives as text here — the column is an array of
+    // {key, value} pairs whose values are strings.
+    let parsed;
+    let value = if let Some(s) = value.as_str() {
+        let t = s.trim();
+        if t.starts_with('{') && t.ends_with('}') {
+            parsed = serde_json::from_str::<serde_json::Value>(t)
+                .or_else(|_| serde_json::from_str::<serde_json::Value>(&unmark_json_breaks(t)))
+                .ok();
+            match parsed.as_ref() {
+                Some(v) if v.is_object() => v,
+                _ => value,
+            }
+        } else {
+            value
+        }
+    } else {
+        value
+    };
+
+    if depth < META_MAX_DEPTH {
+        if let Some(map) = value.as_object() {
+            // An object with no keys carries nothing to filter by; keep the
+            // key so "not set" still distinguishes it from absent.
+            if map.is_empty() {
+                out.push((name.to_string(), String::new()));
+                return;
+            }
+            for (sub, v) in map {
+                flatten_metadata_entry(&format!("{name}.{sub}"), v, depth + 1, out);
+            }
+            return;
+        }
+    }
+    let text = match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(s) => s.trim().to_string(),
+        other => other.to_string(),
+    };
+    out.push((name.to_string(), text));
+}
+
 /// One entity the recognizer matched in a user turn, as it appears inside the
 /// `RecognitionDetails` column's `entityMatches` array.
 #[derive(Deserialize)]
@@ -2532,6 +2787,12 @@ fn import_csv_into(
             Ok(s) => s,
             Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
         };
+        let mut meta_stmt = match tx.prepare_cached(
+            "INSERT OR IGNORE INTO metadata_index(name, value, session_uuid) VALUES (?1, ?2, ?3)",
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
         let mut ent_stmt = match tx.prepare_cached(
             "INSERT OR IGNORE INTO entity_index(log_id, session_uuid, entity_id, name, matched) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -2631,6 +2892,12 @@ fn import_csv_into(
                             }
                         }
                     }
+                    // Index the answer's own metadata pairs, the bot-side
+                    // counterpart of the contexts above — same reason, same
+                    // shape of lookup.
+                    for (name, value) in metadata_index_rows(get_r(c_output_meta)) {
+                        let _ = meta_stmt.execute(params![name, value, session_id]);
+                    }
                     // Index the entities this turn triggered, so an entity
                     // search never has to parse recognition_details at query
                     // time. Only on a genuine insert: a duplicate row's
@@ -2666,6 +2933,7 @@ fn import_csv_into(
         drop(ins_stmt);
         drop(fts_stmt);
         drop(ctx_stmt);
+        drop(meta_stmt);
         drop(ent_stmt);
         drop(backfill_stmt);
         drop(touched_stmt);
@@ -2806,6 +3074,7 @@ struct GetSessionsArgs {
     query_id_type: Option<String>, // "article" | "dialog" — "dialog" accepts "<dialog>-<node>"
     low_recog_threshold: Option<i64>, // threshold for "low recognition" filter (default 60, range 1–99)
     context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
+    metadata_filters: Option<Vec<ContextFilter>>, // same shape, against OutputMetadata pairs
 }
 
 /// The quoted strings inside a flat JSON array or object, without parsing it.
@@ -3029,48 +3298,60 @@ fn build_session_filter_query(
         }
     }
 
-    if let Some(ref ctx_filters) = args.context_filters {
-        if !ctx_filters.is_empty() {
-            let mut groups: HashMap<String, Vec<String>> = HashMap::new();
-            for f in ctx_filters {
-                groups
-                    .entry(f.name.clone())
-                    .or_default()
-                    .push(f.value.clone());
+    // Context and metadata filter identically — same table shape, same
+    // "__not_set__" convention, same AND-across-names / OR-within-a-name
+    // semantics — so they share one builder instead of two copies that drift.
+    for (filters, table) in [
+        (&args.context_filters, "context_index"),
+        (&args.metadata_filters, "metadata_index"),
+    ] {
+        let Some(filters) = filters else { continue };
+        if filters.is_empty() {
+            continue;
+        }
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        for f in filters {
+            groups
+                .entry(f.name.clone())
+                .or_default()
+                .push(f.value.clone());
+        }
+        // HashMap iteration order is unspecified; sorting keeps the generated
+        // SQL stable so the statement cache isn't defeated by name order.
+        let mut groups: Vec<_> = groups.into_iter().collect();
+        groups.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, values) in groups {
+            let has_not_set = values.iter().any(|v| v == "__not_set__");
+            let regular_values: Vec<String> =
+                values.into_iter().filter(|v| v != "__not_set__").collect();
+            let mut subclauses = Vec::new();
+            if has_not_set {
+                let pn = next_param(&mut param_idx);
+                param_values.push(Box::new(name.clone()));
+                subclauses.push(format!(
+                    "NOT EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn})"
+                ));
             }
-            for (name, values) in groups {
-                let has_not_set = values.iter().any(|v| v == "__not_set__");
-                let regular_values: Vec<String> =
-                    values.into_iter().filter(|v| v != "__not_set__").collect();
-                let mut subclauses = Vec::new();
-                if has_not_set {
-                    let pn = next_param(&mut param_idx);
-                    param_values.push(Box::new(name.clone()));
-                    subclauses.push(format!(
-                        "NOT EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn})"
-                    ));
-                }
-                if !regular_values.is_empty() {
-                    let pn = next_param(&mut param_idx);
-                    param_values.push(Box::new(name.clone()));
-                    let value_placeholders = regular_values
-                        .iter()
-                        .map(|v| {
-                            let pv = next_param(&mut param_idx);
-                            param_values.push(Box::new(v.clone()));
-                            pv
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    subclauses.push(format!(
-                        "EXISTS (SELECT 1 FROM context_index ci WHERE ci.session_uuid = s.session_uuid AND ci.name = {pn} AND ci.value IN ({value_placeholders}))"
-                    ));
-                }
-                if subclauses.len() == 1 {
-                    base_conditions.push(subclauses.remove(0));
-                } else if !subclauses.is_empty() {
-                    base_conditions.push(format!("({})", subclauses.join(" OR ")));
-                }
+            if !regular_values.is_empty() {
+                let pn = next_param(&mut param_idx);
+                param_values.push(Box::new(name.clone()));
+                let value_placeholders = regular_values
+                    .iter()
+                    .map(|v| {
+                        let pv = next_param(&mut param_idx);
+                        param_values.push(Box::new(v.clone()));
+                        pv
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                subclauses.push(format!(
+                    "EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn} AND ti.value IN ({value_placeholders}))"
+                ));
+            }
+            if subclauses.len() == 1 {
+                base_conditions.push(subclauses.remove(0));
+            } else if !subclauses.is_empty() {
+                base_conditions.push(format!("({})", subclauses.join(" OR ")));
             }
         }
     }
@@ -4311,6 +4592,7 @@ async fn export_conversations_for_ai(
         "dateFrom": args.date_from.clone(),
         "dateTo": args.date_to.clone(),
         "contextFilters": args.context_filters.clone(),
+        "metadataFilters": args.metadata_filters.clone(),
         "lowRecogThreshold": args.low_recog_threshold.unwrap_or(60).clamp(1, 99),
     });
     let query_text = args.query.clone().unwrap_or_default();
@@ -4658,6 +4940,27 @@ fn write_ai_export(
 async fn get_context_options(
     db_state: State<'_, SharedDbState>,
 ) -> Result<Vec<ContextOption>, String> {
+    tag_options(db_state, "context_index").await
+}
+
+/// The same aggregate over `metadata_index`, feeding the Metadata filter.
+#[tauri::command]
+async fn get_metadata_options(
+    db_state: State<'_, SharedDbState>,
+) -> Result<Vec<ContextOption>, String> {
+    tag_options(db_state, "metadata_index").await
+}
+
+/// Distinct `name × value` pairs with session counts, plus a synthetic
+/// `__not_set__` value per name.
+///
+/// `table` is never user-supplied — the two commands above pass a literal, so
+/// interpolating it into the SQL is safe. Shared because the Context and
+/// Metadata filters are the same aggregate over two identically shaped tables.
+async fn tag_options(
+    db_state: State<'_, SharedDbState>,
+    table: &'static str,
+) -> Result<Vec<ContextOption>, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
     let state = db.lock().map_err(|e| e.to_string())?;
@@ -4665,13 +4968,13 @@ async fn get_context_options(
 
     // Regular options: name × value with per-value session counts
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT name, value, COUNT(DISTINCT session_uuid) as session_count \
-             FROM context_index \
+             FROM {table} \
              GROUP BY name, value \
              ORDER BY name ASC, value ASC \
              LIMIT 500",
-        )
+        ))
         .map_err(|e| format!("Prepare error: {e}"))?;
 
     let mut opts: Vec<ContextOption> = stmt
@@ -4699,14 +5002,14 @@ async fn get_context_options(
         )
         .unwrap_or(0);
     let mut stmt2 = conn
-        .prepare(
-            "SELECT ci.name, \
-              ?1 - COUNT(DISTINCT ci.session_uuid) \
-             FROM context_index ci \
-             GROUP BY ci.name \
-             HAVING ?1 - COUNT(DISTINCT ci.session_uuid) > 0 \
-             ORDER BY ci.name ASC",
-        )
+        .prepare(&format!(
+            "SELECT ti.name, \
+              ?1 - COUNT(DISTINCT ti.session_uuid) \
+             FROM {table} ti \
+             GROUP BY ti.name \
+             HAVING ?1 - COUNT(DISTINCT ti.session_uuid) > 0 \
+             ORDER BY ti.name ASC",
+        ))
         .map_err(|e| format!("Prepare error: {e}"))?;
 
     let not_set_opts: Vec<ContextOption> = stmt2
@@ -5443,6 +5746,9 @@ async fn import_settings_backup(
 struct ConnectionTestResult {
     ok: bool,
     message: String,
+    /// The token exchange's own step-by-step account, so a failing "Test
+    /// connection" says *which* step failed rather than only that it did.
+    trace: Vec<String>,
 }
 
 #[tauri::command]
@@ -5456,19 +5762,25 @@ async fn test_analytics_connection(
         return Ok(ConnectionTestResult {
             ok: false,
             message: "Fill in every field before testing the connection.".into(),
+            trace: Vec::new(),
         });
     }
     let state = analytics.inner().clone();
     // Force a real round-trip rather than reporting on a cached token.
     state.clear_token();
-    match state.token(&cfg).await {
+    let mut trace = analytics_api::Trace::default();
+    let result = state.token(&cfg, &mut trace).await;
+    let trace = trace.take();
+    match result {
         Ok(_) => Ok(ConnectionTestResult {
             ok: true,
             message: "Connected — access token received.".into(),
+            trace,
         }),
         Err(e) => Ok(ConnectionTestResult {
             ok: false,
             message: e.message,
+            trace,
         }),
     }
 }
@@ -5486,20 +5798,15 @@ async fn fetch_analytics_window(
     analytics: State<'_, SharedAnalytics>,
     args: FetchWindowArgs,
 ) -> Result<FetchOutcome, FetchError> {
-    let dir = analytics_data_dir(&app).map_err(|e| {
-        FetchError {
-            kind: analytics_api::FetchErrorKind::Config,
-            message: e,
-            retryable: false,
-            retry_after_secs: None,
-        }
-    })?;
-    let cache = analytics_cache_dir(&app).map_err(|e| FetchError {
+    let config_error = |e: String| FetchError {
         kind: analytics_api::FetchErrorKind::Config,
         message: e,
         retryable: false,
         retry_after_secs: None,
-    })?;
+        trace: Vec::new(),
+    };
+    let dir = analytics_data_dir(&app).map_err(config_error)?;
+    let cache = analytics_cache_dir(&app).map_err(config_error)?;
     let cfg = analytics_api::load_config(&dir);
     let state = analytics.inner().clone();
     state
@@ -6039,6 +6346,7 @@ pub fn run() {
             get_session_interactions,
             get_date_range,
             get_context_options,
+            get_metadata_options,
             get_db_daily_stats,
             get_db_hour_coverage,
             record_imported_window,
@@ -8521,6 +8829,230 @@ mod conv_search {
         assert_eq!(backfilled, imported);
         // The empty displayName falls back to the internal name, in both paths.
         assert!(imported.iter().any(|r| r.contains("|dienst|service")));
+    }
+
+    /// A database written before `metadata_index` existed is backfilled on
+    /// open, while every later import goes through `metadata_index_rows`. Both
+    /// now call the same function, and this pins that they stay that way — an
+    /// old database that filtered differently from a freshly imported one is
+    /// the failure this guards.
+    #[test]
+    fn the_metadata_backfill_matches_what_an_import_would_have_indexed() {
+        // Real shapes: a normal pair, a padded key, an empty value, a key that
+        // is only whitespace (dropped), and a JSON-object value (expanded).
+        let meta = r#"[
+            {"key": "escalationGroup", "value": "attractiepark"},
+            {"key": "  entryType  ", "value": "choice_prompt"},
+            {"key": "nochat", "value": ""},
+            {"key": "   ", "value": "ignored"},
+            {"key": "abortTransactionAction", "value": "{\"label\":\"Aanvraag stoppen\",\"topicName\":\"Stoppen_TD_Algemeen\"}"}
+        ]"#;
+        let conn = Connection::open_in_memory().expect("mem db");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             output_metadata, imported_at) VALUES (1,'u','s','2026-06-01T09:00:00',?1,0)",
+            params![meta],
+        )
+        .expect("insert");
+        backfill_metadata_index(&conn).expect("backfill");
+
+        let mut backfilled: Vec<String> = conn
+            .prepare("SELECT name || '=' || value FROM metadata_index")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        backfilled.sort();
+
+        let mut imported: Vec<String> = metadata_index_rows(meta)
+            .into_iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect();
+        imported.sort();
+
+        assert_eq!(backfilled, imported);
+        // The whitespace-only key is dropped rather than indexed as "".
+        assert_eq!(imported.len(), 5, "got {imported:?}");
+        assert!(imported.contains(&"entryType=choice_prompt".to_string()));
+        // An empty value is a real answer — it is what "not set" is measured
+        // against — so the pair is kept.
+        assert!(imported.contains(&"nochat=".to_string()));
+        // The JSON value is split into its leaves rather than indexed whole.
+        assert!(imported.contains(&"abortTransactionAction.label=Aanvraag stoppen".to_string()));
+        assert!(
+            imported.contains(&"abortTransactionAction.topicName=Stoppen_TD_Algemeen".to_string())
+        );
+        assert!(
+            !imported.iter().any(|r| r.contains('{')),
+            "no raw JSON should survive: {imported:?}"
+        );
+    }
+
+    /// Three spellings of one `abortTransactionAction` value occur in real
+    /// data — compact, `__`-line-broken (CM replaces newlines with its break
+    /// marker), and the same object with its keys swapped. Left whole they are
+    /// three chips for one thing; flattened they must collapse to one set.
+    #[test]
+    fn the_spellings_of_one_nested_value_collapse_to_the_same_pairs() {
+        let of = |value: &str| {
+            let mut rows = metadata_index_rows(&format!(
+                r#"[{{"key":"abortTransactionAction","value":{}}}]"#,
+                serde_json::to_string(value).unwrap()
+            ));
+            rows.sort();
+            rows
+        };
+
+        let compact = of(r#"{"label":"Ik wil geen medewerker spreken","topicName":"Stoppen_TD_Algemeen"}"#);
+        let broken = of("{__  \"label\": \"Ik wil geen medewerker spreken\",__  \"topicName\": \"Stoppen_TD_Algemeen\"__}");
+        let swapped = of("{__  \"topicName\": \"Stoppen_TD_Algemeen\",__  \"label\": \"Ik wil geen medewerker spreken\"__}");
+
+        assert_eq!(compact, broken, "the __ spelling must parse to the same pairs");
+        assert_eq!(compact, swapped, "key order must not matter");
+        assert_eq!(
+            compact,
+            vec![
+                (
+                    "abortTransactionAction.label".to_string(),
+                    "Ik wil geen medewerker spreken".to_string()
+                ),
+                (
+                    "abortTransactionAction.topicName".to_string(),
+                    "Stoppen_TD_Algemeen".to_string()
+                ),
+            ]
+        );
+        // The underscore inside a value is part of the value, not a marker.
+        assert!(compact[1].1.contains('_'));
+    }
+
+    /// The `_` restoration must only touch `_` outside a quoted span, or every
+    /// `Stoppen_TD_Algemeen` in the data would silently become
+    /// `Stoppen TD Algemeen`.
+    #[test]
+    fn restoring_line_breaks_never_edits_inside_a_string() {
+        assert_eq!(
+            unmark_json_breaks(r#"{__"a": "x_y"__}"#),
+            r#"{ "a": "x_y" }"#
+        );
+        // An escaped quote must not end the string early.
+        assert_eq!(
+            unmark_json_breaks(r#"{"a": "say \"x_y\" now"}"#),
+            r#"{"a": "say \"x_y\" now"}"#
+        );
+        // Nothing to do is a no-op, not a rewrite.
+        let plain = r#"{"a":"b"}"#;
+        assert_eq!(unmark_json_breaks(plain), plain);
+    }
+
+    /// A value that is not a JSON object stays one pair. An array has no
+    /// stable member names, so splitting it would invent filter keys.
+    #[test]
+    fn only_objects_are_expanded() {
+        let rows = |v: &str| {
+            metadata_index_rows(&format!(
+                r#"[{{"key":"k","value":{}}}]"#,
+                serde_json::to_string(v).unwrap()
+            ))
+        };
+        assert_eq!(rows("[1,2,3]"), vec![("k".into(), "[1,2,3]".to_string())]);
+        assert_eq!(rows("plain"), vec![("k".into(), "plain".to_string())]);
+        assert_eq!(rows("{not json}"), vec![("k".into(), "{not json}".to_string())]);
+        // An empty object keeps its key so "not set" still means something.
+        assert_eq!(rows("{}"), vec![("k".into(), String::new())]);
+    }
+
+    /// The column can hold an object, a bare string, or nothing at all. None of
+    /// those is the documented array shape, and none may panic or half-index.
+    #[test]
+    fn metadata_that_is_not_the_expected_array_indexes_nothing() {
+        for junk in [
+            "",
+            "   ",
+            "[]",
+            "null",
+            "not json at all",
+            r#"{"escalationGroup":"attractiepark"}"#,
+            r#"["bare","strings"]"#,
+        ] {
+            assert!(
+                metadata_index_rows(junk).is_empty(),
+                "{junk:?} should index nothing"
+            );
+        }
+    }
+
+    /// Both filters resolve to the same shape of EXISTS/NOT EXISTS subquery,
+    /// each against its own table. A filter that silently matched every session
+    /// reads as "the filter does nothing" rather than as a bug.
+    #[test]
+    fn a_metadata_filter_narrows_to_its_own_table() {
+        let conn = search_conn();
+        add(
+            &conn,
+            Turn {
+                log_id: 1,
+                session: "s1",
+                user: "hallo",
+                ..Default::default()
+            },
+        );
+        add(
+            &conn,
+            Turn {
+                log_id: 2,
+                session: "s2",
+                user: "hallo",
+                ..Default::default()
+            },
+        );
+        conn.execute_batch(
+            "INSERT INTO metadata_index(name, value, session_uuid) VALUES ('nochat','true','s1'); \
+             INSERT INTO context_index(name, value, session_uuid) VALUES ('park','efteling','s2');",
+        )
+        .expect("tags");
+        rebuild_session_summary(&conn).expect("summary");
+
+        let sessions_for = |args: &GetSessionsArgs| found(&conn, args);
+
+        let filter = |name: &str, value: &str| {
+            Some(vec![ContextFilter {
+                name: name.into(),
+                value: value.into(),
+            }])
+        };
+
+        assert_eq!(sessions_for(&GetSessionsArgs::default()), vec!["s1", "s2"]);
+
+        // A metadata filter must not consult context_index, and vice versa.
+        let meta = GetSessionsArgs {
+            metadata_filters: filter("nochat", "true"),
+            ..Default::default()
+        };
+        assert_eq!(sessions_for(&meta), vec!["s1"]);
+
+        let ctx = GetSessionsArgs {
+            context_filters: filter("park", "efteling"),
+            ..Default::default()
+        };
+        assert_eq!(sessions_for(&ctx), vec!["s2"]);
+
+        // Both at once are ANDed, so a session satisfying only one is excluded.
+        let both = GetSessionsArgs {
+            metadata_filters: filter("nochat", "true"),
+            context_filters: filter("park", "efteling"),
+            ..Default::default()
+        };
+        assert!(sessions_for(&both).is_empty());
+
+        // "__not_set__" is per table too: s2 carries no `nochat` metadata.
+        let unset = GetSessionsArgs {
+            metadata_filters: filter("nochat", "__not_set__"),
+            ..Default::default()
+        };
+        assert_eq!(sessions_for(&unset), vec!["s2"]);
     }
 }
 

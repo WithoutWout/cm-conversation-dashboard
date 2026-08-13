@@ -32,6 +32,10 @@ let searchRegex = false
 let searchContent = true
 let searchExcludeNonDefault = false
 let contentContextFilters = [] // [{name, value}] — active content context filters
+// The OutputMetaData tags an Answer carries (escalationGroup, entryType,
+// nochat, transaction, attractionIdentifier…). Filtered exactly like context,
+// against `_metaSets` instead of `_ctxSets`.
+let contentMetadataFilters = []
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 // Parse a query into OR groups of AND terms.
@@ -181,6 +185,149 @@ function sortBy(arr, sort, idFn, nameFn) {
   return s
 }
 
+/**
+ * Restore a JSON document CM stored with its newlines replaced by `_`.
+ *
+ * `_` is CM's line-break marker (see the `parseCmOutput` rules), and a value
+ * authored across several lines comes back as
+ * `{__  "label": "…",__  "topicName": "…"__}` — the same object as the
+ * single-line spelling, but not parseable and therefore a *second* chip for
+ * the same thing.
+ *
+ * Only `_` outside a double-quoted span is touched, which is safe by
+ * construction: `_` is not valid JSON syntax there, so it can only be the
+ * marker. Inside a string it is left alone — `Stoppen_TD_Algemeen` is a real
+ * value and must survive intact.
+ */
+function _unmarkJsonBreaks(text) {
+  let out = ""
+  let inStr = false
+  let esc = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inStr) {
+      out += ch
+      if (esc) esc = false
+      else if (ch === "\\") esc = true
+      else if (ch === '"') inStr = false
+      continue
+    }
+    if (ch === '"') {
+      inStr = true
+      out += ch
+      continue
+    }
+    if (ch === "_") {
+      // Collapse a run to one space, matching the whitespace it replaced.
+      while (text[i + 1] === "_") i++
+      out += " "
+      continue
+    }
+    out += ch
+  }
+  return out
+}
+
+/// How deep a nested metadata value is flattened, and how many leaves one
+/// value may contribute. Bounds exist so a large embedded document can't turn
+/// one answer into hundreds of filter chips.
+const META_MAX_DEPTH = 3
+const META_MAX_LEAVES = 24
+
+/**
+ * Expand one metadata entry into the `name → value` pairs it should filter by.
+ *
+ * A value that is a JSON object becomes one pair per leaf, named
+ * `key.subkey` — `abortTransactionAction` holds
+ * `{"label":"Aanvraag stoppen","topicName":"Stoppen_Faciliteitenkaart"}`, and
+ * as a single chip that is an unreadable blob nobody would click. Split, it
+ * becomes `abortTransactionAction.topicName = Stoppen_Faciliteitenkaart`,
+ * which is a filter someone actually wants. It also collapses three spellings
+ * of one value into one chip: the compact form, the `__`-broken form, and the
+ * same object with its keys in the other order.
+ *
+ * Anything else — including a JSON *array*, which has no stable member names —
+ * stays a single pair with its value stringified.
+ */
+function flattenMetaEntry(key, value, out, depth) {
+  const name = String(key).trim()
+  if (!name || out.length >= META_MAX_LEAVES) return out
+  let v = value
+  // A nested object may arrive already parsed (the content export) or as text
+  // (everywhere else). Both take the same path from here.
+  if (typeof v === "string") {
+    const t = v.trim()
+    if (t.startsWith("{") && t.endsWith("}")) {
+      let parsed = null
+      try {
+        parsed = JSON.parse(t)
+      } catch (_) {
+        try {
+          parsed = JSON.parse(_unmarkJsonBreaks(t))
+        } catch (_) {}
+      }
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        v = parsed
+    }
+  }
+  if (
+    v &&
+    typeof v === "object" &&
+    !Array.isArray(v) &&
+    depth < META_MAX_DEPTH
+  ) {
+    const keys = Object.keys(v)
+    // An object with no keys carries nothing to filter by; keep the key itself
+    // so "not set" still distinguishes it from absent.
+    if (!keys.length) {
+      out.push([name, ""])
+      return out
+    }
+    for (const sub of keys) flattenMetaEntry(name + "." + sub, v[sub], out, depth + 1)
+    return out
+  }
+  out.push([
+    name,
+    v === null || v === undefined
+      ? ""
+      : typeof v === "object"
+        ? JSON.stringify(v)
+        : String(v),
+  ])
+  return out
+}
+
+/**
+ * One Answer output's metadata, as `{name: [value]}`.
+ *
+ * The content export spells this as a plain object (`OutputMetaData` on an
+ * Article output, `metadata` on a dialog output item) while the interaction
+ * log spells it as an array of `{key, value}` pairs — same information, two
+ * encodings, so only this side needs to know about the object form.
+ *
+ * Values are stringified because the export mixes `"true"` with `true`, and a
+ * chip the user clicks is a string either way. `null`/`undefined` become `""`,
+ * which is the same "set but empty" state the conversations side records.
+ *
+ * **`buildContentMetadataOptions` in index.html must expand values the same
+ * way**, or a chip would filter to a different set than its own count claims.
+ * `frontend/tests/metadata-filter.test.js` asserts the two against each other
+ * over the real export.
+ */
+function metaSetOf(meta) {
+  const out = {}
+  if (!meta || typeof meta !== "object") return out
+  for (const key of Object.keys(meta)) {
+    for (const [name, value] of flattenMetaEntry(key, meta[key], [], 0)) {
+      // Repeated names can only come from an object with duplicate-ish leaves;
+      // keep every distinct value so a filter on any of them matches.
+      if (!out[name]) out[name] = []
+      if (!out[name].includes(value)) out[name].push(value)
+    }
+  }
+  return out
+}
+
 // ── Article helpers ───────────────────────────────────────────────────────────
 function aKind(a) {
   return a._aKind // pre-computed on init
@@ -237,6 +384,15 @@ function precomputeArticle(a) {
       if (vals.length) ctxSet[name] = vals
     }
     if (Object.keys(ctxSet).length) a._ctxSets.push(ctxSet)
+  }
+
+  // One metadata map per Answer output, in output order. Values are arrays so
+  // the filter reads identically to the context one, even though a metadata
+  // key only ever holds a single value.
+  a._metaSets = []
+  for (const o of a.Outputs) {
+    if (o.Type !== "Answer") continue
+    a._metaSets.push(metaSetOf(o.OutputMetaData))
   }
 
   // Add aggregate escalation group ctxSet so the escalationGroup filter works.
@@ -402,6 +558,16 @@ function precomputeDialog(item) {
     }
   }
 
+  // One metadata map per Answer item across every node, matching the Article
+  // side. A dialog's answers live one level deeper, but nothing else differs.
+  item._metaSets = []
+  for (const n of nodes) {
+    for (const oi of (n.output && n.output.items) || []) {
+      if (oi.type !== "Answer") continue
+      item._metaSets.push(metaSetOf(oi.metadata))
+    }
+  }
+
   // Add aggregate escalation group ctxSet so the escalationGroup filter works.
   const _dEscGroups = []
   for (const n of nodes) {
@@ -495,6 +661,35 @@ function matchesContentContext(item) {
     varFilters.every((f) => {
       if (f.value === "__not_set__") return !ctxSet[f.name]
       const vals = ctxSet[f.name]
+      return vals && vals.includes(f.value)
+    }),
+  )
+}
+
+/**
+ * Whether an item has an Answer whose metadata satisfies every active filter.
+ *
+ * Deliberately simpler than `matchesContentContext`: metadata has no
+ * escalationGroup special case (that tag is reachable through the Context tab,
+ * where it has always lived) and no implicit default-answer set, because an
+ * answer with no metadata is a real entry in `_metaSets` — an empty map — and
+ * so already satisfies `__not_set__` on its own.
+ *
+ * Filters on different keys must be satisfied by *one* answer, matching how
+ * context works: an item whose answer A is `nochat=true` and whose answer B is
+ * `entryType=choice_prompt` does not match a filter asking for both.
+ */
+function matchesContentMetadata(item) {
+  if (!contentMetadataFilters.length) return true
+  const sets = item._metaSets || []
+  if (!sets.length) {
+    // Nothing to satisfy a positive filter, but "not set" is trivially true.
+    return contentMetadataFilters.every((f) => f.value === "__not_set__")
+  }
+  return sets.some((set) =>
+    contentMetadataFilters.every((f) => {
+      if (f.value === "__not_set__") return !set[f.name]
+      const vals = set[f.name]
       return vals && vals.includes(f.value)
     }),
   )
@@ -691,6 +886,7 @@ self.onmessage = function (e) {
     searchContent = msg.searchContent
     searchExcludeNonDefault = msg.searchExcludeNonDefault
     contentContextFilters = msg.contentContextFilters || []
+    contentMetadataFilters = msg.contentMetadataFilters || []
 
     const q = query
 
@@ -766,11 +962,18 @@ self.onmessage = function (e) {
     // Short-circuit: no query and no filter → return everything
     const noQuery = !q || !hasValidQuery
     const hasCtxFilter = contentContextFilters.length > 0
+    const hasMetaFilter = contentMetadataFilters.length > 0
 
     // ── Match pass: compute each item's match result once ─────────────────
     // Stored as _mc (match+context) so the per-tab filter passes can reuse it
     // without re-running expensive match functions on the same data.
-    const needsMatch = !noQuery || hasCtxFilter
+    //
+    // Metadata is ANDed at the item level rather than being folded into the
+    // combined text+context path. That path exists so a text query and a
+    // context condition must be satisfied by the *same* answer; metadata is a
+    // tag on the answer, not a condition on reaching it, so requiring the hit
+    // and the tag to coincide would exclude items the user is looking for.
+    const needsMatch = !noQuery || hasCtxFilter || hasMetaFilter
     if (needsMatch) {
       for (const item of allItems) {
         if (noQuery) {
@@ -783,6 +986,7 @@ self.onmessage = function (e) {
           item._mc = matchesContentContext(item) &&
             (item._kind === "article" ? matchArticle(item) : matchDialog(item))
         }
+        if (item._mc && hasMetaFilter) item._mc = matchesContentMetadata(item)
       }
     }
 
