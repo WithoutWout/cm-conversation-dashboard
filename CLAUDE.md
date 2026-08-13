@@ -472,6 +472,26 @@ Where they are wired, and why each one mattered:
   - **`panel-in` is added by `impSetSource` after the render, never baked into the markup.** `_impRenderModal` also runs on every time-input change, every calendar click and the skip checkbox; a class in the HTML would replay the animation on all of them. No cleanup is needed because the next render replaces the element outright.
   - Clicking the already-active source returns early — it used to re-render for nothing.
 
+### Entrance motion
+
+Everything under `/* Shared entrance motion */` animates an **arrival** — something that previously appeared between one frame and the next. The rule is that none of it may gate a click, a render or a request: the element is laid out and interactive on the first frame and the animation only softens how it lands. Anything that would make the user wait for motion to finish does not belong here.
+
+Three keyframes carry all of it, alongside the existing `tab-panel-in`:
+
+| | Used for |
+| --- | --- |
+| `fade-in` | main tabs, the Content/Conversations/Flagged switch, loading affordances, the copy confirmation |
+| `pop-in` | the tag filter and Add to Collection popovers — scale + rise, so a menu grows out of the control that opened it |
+| `toast-out` | the exit that `toast-in` never had |
+
+- **The big containers get opacity only, never a transform.** A `.panel` can hold thousands of nodes, and a transform would additionally make it the containing block for anything `position: fixed` inside it. `pop-in` is fine on a popover because both `.ctx-modal-box` call sites compute their position from the *button's* rect and write it inline **before** the box is shown, so the transform has nothing to disturb.
+- **The animations restart because the elements are `display: none` in between**, not because anything re-adds a class. That is what keeps a search, a sort or a pagination click from replaying the panel fade — `.active` never leaves. Verified by `getAnimations()`: no animation on the hidden element, a fresh `running` one at `currentTime: 0` the moment it is shown.
+- **An expanded card body and the chips behind a "+N more" fade, but the box still snaps to its full height.** Animating the height would mean measuring content that is only sized once revealed, and the page would visibly settle afterwards. `.chip-overflow` is `display: contents`, so the animation has to go on `> *` — the parent has no box to animate.
+- **A toast only fades out when nothing is replacing it.** Every toast occupies the same corner, so animating one out while a successor appears leaves two messages stacked. `_dismissToast` removes the toast outright when another is already in the DOM, and `showImportToast` keeps removing its predecessor instantly; the fade is for the last toast on screen — the 6-second auto-dismiss and `clearProgressToast` when it stands alone. `TOAST_OUT_MS` must stay in step with `.import-toast.leaving`.
+- **`_showCopyFeedback` restarts its fade explicitly** (`classList.remove` → forced reflow → `add`). Copying the same thing twice in a row otherwise confirms itself silently, because the text does not change and a running animation does not replay.
+- **A fade on a loading affordance is not a delay.** `.pane-loading` and both overlays are in the DOM on exactly the frame they always were; the 140 ms only takes the flash off a fast read.
+- `prefers-reduced-motion` disables every one of these in the single media query at the end of the block — including `toast-in`, which predates it. `.import-toast.leaving` gets `opacity: 0` rather than nothing, because the timer that removes it does not know about the media query.
+
 ## The conversation data modal
 
 `#convDataModal` is the one place data enters or leaves the database. Three tabs — **Import**, **Stored data**, **Database** — behind a single toolbar button (`#convDataBtn`, labelled *Data*).

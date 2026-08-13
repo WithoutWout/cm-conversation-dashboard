@@ -6098,12 +6098,124 @@
       .import-source-panel.panel-in {
         animation: tab-panel-in 200ms ease;
       }
+
+      /* ── Shared entrance motion ──────────────────────────────────────
+         Everything below animates an *arrival* — something that used to
+         appear between one frame and the next. None of it gates a click, a
+         render or a request: the element is laid out and interactive from
+         the first frame, and the animation only softens how it lands. Keep
+         it that way. Anything that would make the user wait for the motion
+         to finish belongs somewhere else. */
+      @keyframes fade-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+      /* For menus that hang off the control that opened them, so they read
+         as growing out of it rather than being drawn on top of it. */
+      @keyframes pop-in {
+        from {
+          opacity: 0;
+          transform: scale(0.97) translateY(-3px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @keyframes toast-out {
+        to {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+      }
+
+      /* Main tabs, and the Content / Conversations / Flagged switch.
+         Opacity only, never transform: a panel can hold thousands of nodes,
+         and a transform would additionally make it the containing block for
+         anything fixed inside it. */
+      .panel.active,
+      #view-content:not(.hidden),
+      #view-conversations.active,
+      #view-flagged.active {
+        animation: fade-in 160ms ease;
+      }
+
+      /* An expanded card body and the chips behind a "+N more". The box
+         still snaps to its full height — it is the content that fades in,
+         so the page never has to wait to settle. */
+      .card.open .card-detail,
+      .chip-overflow.expanded > * {
+        animation: tab-panel-in 160ms ease;
+      }
+
+      /* The tag filter and Add to Collection popovers. Both were a bare
+         display toggle. Position is set inline from the *button's* rect
+         before either is shown, so the transform here can't disturb it. */
+      .ctx-modal-overlay.open .ctx-modal-box {
+        animation: pop-in 130ms cubic-bezier(0.2, 0.9, 0.3, 1);
+        /* With no room below, the popover is anchored by its bottom edge
+           instead — at a 3% scale the origin barely reads either way. */
+        transform-origin: top center;
+      }
+      .add-to-collection-menu.open {
+        animation: pop-in 130ms cubic-bezier(0.2, 0.9, 0.3, 1);
+        /* This one always opens upward: its bar sits at the bottom. */
+        transform-origin: bottom right;
+      }
+
+      /* Loading affordances. A fade takes the flash off a fast read without
+         holding anything back on a slow one — the spinner is still in the
+         DOM on the same frame it always was. */
+      .pane-loading,
+      .app-loading-overlay.open,
+      .conv-search-loading-overlay.visible {
+        animation: fade-in 140ms ease;
+      }
+      .is-busy {
+        transition: opacity 0.15s ease;
+      }
+      .copy-feedback.show {
+        animation: fade-in 180ms ease;
+      }
+
+      /* Toasts already animated in; this is the matching exit. Only ever
+         applied when nothing is taking the toast's place — see
+         `_dismissToast`, which removes it outright otherwise. */
+      .import-toast.leaving {
+        animation: toast-out 180ms ease forwards;
+        pointer-events: none;
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .settings-tab-panel.active,
-        .import-source-panel.panel-in {
+        .import-source-panel.panel-in,
+        .panel.active,
+        #view-content:not(.hidden),
+        #view-conversations.active,
+        #view-flagged.active,
+        .card.open .card-detail,
+        .chip-overflow.expanded > *,
+        .ctx-modal-overlay.open .ctx-modal-box,
+        .add-to-collection-menu.open,
+        .pane-loading,
+        .app-loading-overlay.open,
+        .conv-search-loading-overlay.visible,
+        .copy-feedback.show,
+        .import-toast {
           animation: none;
         }
-        .modal-box.resizing {
+        /* Still leaves, just without the travel — the timer that removes it
+           doesn't know about this media query. */
+        .import-toast.leaving {
+          animation: none;
+          opacity: 0;
+        }
+        .modal-box.resizing,
+        .is-busy {
           transition: none;
         }
       }
@@ -14470,8 +14582,16 @@
         const el = document.getElementById("copy-feedback")
         if (!el) return
         el.textContent = msg
+        // The class has to be off for a reflow before it can replay, or
+        // copying the same thing twice in a row confirms itself silently.
+        el.classList.remove("show")
+        void el.offsetWidth
+        el.classList.add("show")
         setTimeout(() => {
-          if (el.textContent === msg) el.textContent = ""
+          if (el.textContent === msg) {
+            el.textContent = ""
+            el.classList.remove("show")
+          }
         }, 2500)
       }
 
@@ -14921,7 +15041,9 @@
 
         _renderExportBody()
 
-        document.getElementById("copy-feedback").textContent = ""
+        const feedback = document.getElementById("copy-feedback")
+        feedback.textContent = ""
+        feedback.classList.remove("show")
         document.getElementById("exportModal").classList.add("open")
       }
 
@@ -18431,6 +18553,29 @@
 
       // ── Toast notifications ─────────────────────────────────────────
       let _toastTimer = null
+
+      /// Kept in step with the `.import-toast.leaving` animation.
+      const TOAST_OUT_MS = 180
+
+      /**
+       * Remove a toast, fading it out only when nothing is replacing it.
+       *
+       * Every toast occupies the same corner, so animating one out while a
+       * successor is being shown would leave two messages stacked on top of
+       * each other for the duration. A replacement therefore removes its
+       * predecessor outright and only the last toast on screen gets to fade.
+       */
+      function _dismissToast(el) {
+        if (!el || el.dataset.leaving) return
+        if (document.querySelectorAll(".import-toast").length > 1) {
+          el.remove()
+          return
+        }
+        el.dataset.leaving = "1"
+        el.classList.add("leaving")
+        setTimeout(() => el.remove(), TOAST_OUT_MS)
+      }
+
       function showImportToast(type, msg) {
         const old = document.querySelector(".import-toast")
         if (old) old.remove()
@@ -18447,7 +18592,7 @@
           el.appendChild(document.createElement("span")).textContent = msg
         } else {
           el.textContent = msg
-          _toastTimer = setTimeout(() => el.remove(), 6000)
+          _toastTimer = setTimeout(() => _dismissToast(el), 6000)
         }
         document.body.appendChild(el)
       }
@@ -18456,7 +18601,7 @@
       // `finally` that runs after the result toast has already been shown.
       function clearProgressToast() {
         const el = document.querySelector(".import-toast.progress")
-        if (el) el.remove()
+        if (el) _dismissToast(el)
       }
 
       // ── Loading affordances ─────────────────────────────────────────
