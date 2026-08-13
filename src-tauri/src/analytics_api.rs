@@ -19,7 +19,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TOKEN_URL: &str = "https://login.microsoftonline.com/digitalcx.onmicrosoft.com/oauth2/token";
@@ -41,8 +41,18 @@ const RETENTION_DAYS: i64 = 90;
 
 const TOKEN_TIMEOUT_SECS: u64 = 30;
 const FETCH_TIMEOUT_SECS: u64 = 300;
-/// Refresh a little before actual expiry so a long fetch can't outlive it.
-const TOKEN_SKEW_SECS: u64 = 120;
+/// Treat a token as expired this long before it actually is.
+///
+/// **It must exceed `FETCH_TIMEOUT_SECS`**, and that is the whole point. A
+/// request is authorised once, when it is sent; if the token dies while the
+/// server is still producing a multi-megabyte CSV, what comes back is not a
+/// clean `401` we could refresh and retry — it is a reset connection or a
+/// truncated body, which classifies as `Network` and is not retryable. The day
+/// then failed, and pressing Retry worked, because by then the token was stale
+/// enough to be replaced up front. The skew was 120s against a 300s request
+/// timeout, so any token with 121–300s left started a request it could not
+/// finish. See `a_token_is_never_handed_out_with_less_life_than_a_fetch_needs`.
+const TOKEN_SKEW_SECS: u64 = FETCH_TIMEOUT_SECS + 60;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -146,7 +156,12 @@ pub fn save_config(data_dir: &Path, cfg: &AnalyticsConfig) -> Result<(), String>
 #[derive(Default)]
 struct CachedToken {
     access_token: String,
+    /// Wall-clock second the server said the token dies.
     expires_at: u64,
+    /// Wall-clock second we stop handing it out — `expires_at` minus the skew,
+    /// floored so a short-lived token is still usable at all. Precomputed so
+    /// the read path is a comparison rather than a policy decision.
+    usable_until: u64,
 }
 
 pub struct AnalyticsState {
@@ -157,6 +172,11 @@ pub struct AnalyticsState {
     /// scheduler bug to produce concurrent calls.
     fetch_lock: tokio::sync::Semaphore,
     temp_counter: AtomicU64,
+    /// One client for the whole process, so TLS handshakes and connections are
+    /// reused across a 90-day import. Built once because `reqwest::Client`
+    /// *is* the connection pool — constructing a fresh one per request threw
+    /// the pool away every time and paid a full handshake per window.
+    client: OnceLock<reqwest::Client>,
 }
 
 impl Default for AnalyticsState {
@@ -165,6 +185,56 @@ impl Default for AnalyticsState {
             token: Mutex::new(CachedToken::default()),
             fetch_lock: tokio::sync::Semaphore::new(1),
             temp_counter: AtomicU64::new(0),
+            client: OnceLock::new(),
+        }
+    }
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────────
+
+/// A step-by-step account of one `fetch_window` call, returned to the renderer
+/// on success *and* on failure and appended verbatim to the import modal's
+/// Details log.
+///
+/// The Rust `log` output already records all of this, but it lands in a file
+/// most users will never find — and a failed overnight import on someone
+/// else's Windows machine is exactly the case that has to be diagnosable from
+/// what is on screen. Every line goes to both places.
+#[derive(Default)]
+pub struct Trace {
+    lines: Vec<String>,
+}
+
+impl Trace {
+    fn push(&mut self, line: impl Into<String>) {
+        let line = line.into();
+        log::info!(target: "analytics", "{line}");
+        self.lines.push(line);
+    }
+
+    fn warn(&mut self, line: impl Into<String>) {
+        let line = line.into();
+        log::warn!(target: "analytics", "{line}");
+        self.lines.push(line);
+    }
+
+    pub fn take(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.lines)
+    }
+}
+
+/// Show enough of a key to tell two projects apart, never enough to reuse one.
+/// Applied to the customer/project keys and the client id, which are the only
+/// credential-ish values a trace ever names — the secret is never traced at all.
+fn mask(v: &str) -> String {
+    let v = v.trim();
+    match v.chars().count() {
+        0 => "(empty)".into(),
+        n if n <= 4 => "*".repeat(n),
+        n => {
+            let head: String = v.chars().take(2).collect();
+            let tail: String = v.chars().skip(n - 2).collect();
+            format!("{head}{}{tail}", "*".repeat(n - 4))
         }
     }
 }
@@ -212,6 +282,10 @@ pub struct FetchError {
     /// Seconds the server asked us to wait, from a `Retry-After` header.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_secs: Option<u64>,
+    /// Everything that happened before this failed. Empty for errors raised
+    /// before a trace exists (bad arguments, missing config).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub trace: Vec<String>,
 }
 
 impl FetchError {
@@ -221,11 +295,19 @@ impl FetchError {
             message: message.into(),
             retryable: kind.is_retryable(),
             retry_after_secs: None,
+            trace: Vec::new(),
         }
     }
 
     fn with_retry_after(mut self, secs: Option<u64>) -> Self {
         self.retry_after_secs = secs;
+        self
+    }
+
+    /// Attach the trace collected so far. Called at the single exit point in
+    /// `fetch_window` so no error can escape without its own history.
+    fn with_trace(mut self, trace: &mut Trace) -> Self {
+        self.trace = trace.take();
         self
     }
 }
@@ -393,23 +475,52 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 
 // ── Token ────────────────────────────────────────────────────────────────────
 
-fn http_client(timeout_secs: u64) -> Result<reqwest::Client, FetchError> {
-    reqwest::Client::builder()
-        .user_agent("cm-conversation-dashboard")
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| FetchError::new(FetchErrorKind::Network, format!("HTTP client error: {e}")))
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// How long a freshly issued token may actually be handed out for.
+///
+/// Normally `lifetime - TOKEN_SKEW_SECS`, but never less than half its life:
+/// a server that issued a token shorter than the skew would otherwise make
+/// every cached token instantly unusable and turn one import into two requests
+/// per window forever.
+fn usable_lifetime(expires_in: u64) -> u64 {
+    expires_in
+        .saturating_sub(TOKEN_SKEW_SECS)
+        .max(expires_in / 2)
 }
 
 impl AnalyticsState {
-    fn cached_token(&self) -> Option<String> {
+    /// The process-wide HTTP client. No global timeout — the two call sites
+    /// want very different ones and set them per request.
+    fn client(&self) -> Result<&reqwest::Client, FetchError> {
+        if let Some(c) = self.client.get() {
+            return Ok(c);
+        }
+        let built = reqwest::Client::builder()
+            .user_agent("cm-conversation-dashboard")
+            .pool_idle_timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| {
+                FetchError::new(FetchErrorKind::Network, format!("HTTP client error: {e}"))
+            })?;
+        // A racing initialiser already winning is fine — either client works.
+        let _ = self.client.set(built);
+        Ok(self.client.get().expect("client just set"))
+    }
+
+    fn cached_token(&self) -> Option<(String, u64)> {
         let cache = self.token.lock().ok()?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        if !cache.access_token.is_empty() && now + TOKEN_SKEW_SECS < cache.expires_at {
-            Some(cache.access_token.clone())
+        let now = now_secs();
+        if !cache.access_token.is_empty() && now < cache.usable_until {
+            Some((
+                cache.access_token.clone(),
+                cache.expires_at.saturating_sub(now),
+            ))
         } else {
             None
         }
@@ -417,12 +528,10 @@ impl AnalyticsState {
 
     fn store_token(&self, access_token: String, expires_in: u64) {
         if let Ok(mut cache) = self.token.lock() {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let now = now_secs();
             cache.access_token = access_token;
             cache.expires_at = now + expires_in;
+            cache.usable_until = now + usable_lifetime(expires_in);
         }
     }
 
@@ -433,15 +542,27 @@ impl AnalyticsState {
     }
 
     /// Return a valid bearer token, requesting a new one only when the cached
-    /// one is missing or close to expiry (SOP: tokens last 24h, reuse them).
-    pub async fn token(&self, cfg: &AnalyticsConfig) -> Result<String, FetchError> {
-        if let Some(t) = self.cached_token() {
+    /// one is missing or too close to expiry to outlive a full-length fetch.
+    pub async fn token(
+        &self,
+        cfg: &AnalyticsConfig,
+        trace: &mut Trace,
+    ) -> Result<String, FetchError> {
+        if let Some((t, remaining)) = self.cached_token() {
+            trace.push(format!(
+                "token: reusing cached token ({remaining}s of life left, {TOKEN_SKEW_SECS}s reserved for the request)"
+            ));
             return Ok(t);
         }
-        log::info!(target: "analytics", "requesting a new OAuth2 access token");
-        let client = http_client(TOKEN_TIMEOUT_SECS)?;
-        let resp = client
+        trace.push(format!(
+            "token: requesting a new OAuth2 access token (client_id {}, resource {TOKEN_RESOURCE})",
+            mask(&cfg.client_id)
+        ));
+        let started = SystemTime::now();
+        let resp = self
+            .client()?
             .post(TOKEN_URL)
+            .timeout(Duration::from_secs(TOKEN_TIMEOUT_SECS))
             .form(&[
                 ("grant_type", "client_credentials"),
                 ("client_id", cfg.client_id.trim()),
@@ -450,12 +571,22 @@ impl AnalyticsState {
             ])
             .send()
             .await
-            .map_err(|e| classify_reqwest_error(&e, "token request"))?;
+            .map_err(|e| {
+                let err = classify_reqwest_error(&e, "token request");
+                trace.warn(format!("token: {}", err.message));
+                err
+            })?;
 
         let status = resp.status();
+        let elapsed = started.elapsed().map(|d| d.as_millis()).unwrap_or(0);
         let body = resp.text().await.unwrap_or_default();
+        trace.push(format!(
+            "token: {TOKEN_URL} responded {status} in {elapsed}ms ({} bytes)",
+            body.len()
+        ));
         if !status.is_success() {
             let detail = extract_oauth_error(&body);
+            trace.warn(format!("token: rejected — {detail}"));
             return Err(FetchError::new(
                 if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::BAD_REQUEST {
                     FetchErrorKind::Unauthorized
@@ -488,7 +619,10 @@ impl AnalyticsState {
             .and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| v.as_u64()))
             .unwrap_or(3600);
         self.store_token(access_token.clone(), expires_in);
-        log::info!(target: "analytics", "access token acquired, expires in {expires_in}s");
+        trace.push(format!(
+            "token: acquired — valid {expires_in}s, reused for the next {}s",
+            usable_lifetime(expires_in)
+        ));
         Ok(access_token)
     }
 }
@@ -507,19 +641,56 @@ fn extract_oauth_error(body: &str) -> String {
     body.chars().take(200).collect()
 }
 
+fn elapsed_ms(since: &SystemTime) -> u128 {
+    since.elapsed().map(|d| d.as_millis()).unwrap_or(0)
+}
+
+/// Flatten an error and everything underneath it.
+///
+/// `reqwest::Error`'s own `Display` is almost always the useless outer layer
+/// (`error sending request for url (…)`); the sentence that names the actual
+/// problem — a TLS failure, a refused connection, a proxy rejection, a reset
+/// mid-body — is two or three `source()` hops down. On Windows, where these
+/// failures are the ones we cannot reproduce locally, that chain *is* the
+/// diagnosis.
+fn error_chain(e: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![e.to_string()];
+    let mut src = e.source();
+    // Bounded: a cyclic `source()` chain would otherwise hang here.
+    while let Some(s) = src {
+        let text = s.to_string();
+        if !parts.contains(&text) {
+            parts.push(text);
+        }
+        if parts.len() >= 6 {
+            break;
+        }
+        src = s.source();
+    }
+    parts.join(" ← ")
+}
+
 fn classify_reqwest_error(e: &reqwest::Error, context: &str) -> FetchError {
+    // Every branch carries the flattened chain: the outer Display alone reads
+    // the same for a DNS failure, a TLS rejection and a corporate proxy.
+    let detail = error_chain(e);
     if e.is_timeout() {
         FetchError::new(
             FetchErrorKind::Timeout,
-            format!("{context} timed out — the window may be too large"),
+            format!("{context} timed out after {FETCH_TIMEOUT_SECS}s — the window may be too large ({detail})"),
         )
     } else if e.is_connect() {
         FetchError::new(
             FetchErrorKind::Network,
-            format!("{context} could not connect: {e}"),
+            format!("{context} could not connect: {detail}"),
+        )
+    } else if e.is_request() {
+        FetchError::new(
+            FetchErrorKind::Network,
+            format!("{context} could not be sent: {detail}"),
         )
     } else {
-        FetchError::new(FetchErrorKind::Network, format!("{context} failed: {e}"))
+        FetchError::new(FetchErrorKind::Network, format!("{context} failed: {detail}"))
     }
 }
 
@@ -533,6 +704,10 @@ pub struct FetchOutcome {
     pub row_count: i64,
     pub bytes: u64,
     pub duration_ms: u64,
+    /// The same step-by-step account a failure carries. Surfaced in the import
+    /// modal's Details log so a *successful* run still shows what it did —
+    /// which is what makes the next failure comparable against a good one.
+    pub trace: Vec<String>,
 }
 
 impl AnalyticsState {
@@ -546,6 +721,29 @@ impl AnalyticsState {
         start_utc: &str,
         end_utc: &str,
     ) -> Result<FetchOutcome, FetchError> {
+        let mut trace = Trace::default();
+        match self
+            .fetch_window_traced(cfg, cache_dir, start_utc, end_utc, &mut trace)
+            .await
+        {
+            Ok(mut outcome) => {
+                outcome.trace = trace.take();
+                Ok(outcome)
+            }
+            // The single exit point for failures, so no error can reach the
+            // renderer without the history that explains it.
+            Err(e) => Err(e.with_trace(&mut trace)),
+        }
+    }
+
+    async fn fetch_window_traced(
+        &self,
+        cfg: &AnalyticsConfig,
+        cache_dir: &Path,
+        start_utc: &str,
+        end_utc: &str,
+        trace: &mut Trace,
+    ) -> Result<FetchOutcome, FetchError> {
         if !cfg.is_complete() {
             return Err(FetchError::new(
                 FetchErrorKind::Config,
@@ -554,41 +752,77 @@ impl AnalyticsState {
         }
         validate_window(start_utc, end_utc)?;
 
+        trace.push(format!(
+            "window {start_utc} → {end_utc} — customer {}, project {}, culture {}, environment {}, activeSessionOnly {}",
+            mask(&cfg.customer_key),
+            mask(&cfg.project_key),
+            cfg.culture.trim(),
+            cfg.environment.trim(),
+            cfg.active_session_only
+        ));
+
+        let queue_started = SystemTime::now();
         let _permit = self.fetch_lock.acquire().await.map_err(|_| {
             FetchError::new(FetchErrorKind::Network, "Analytics client is shutting down")
         })?;
+        let waited = queue_started.elapsed().map(|d| d.as_millis()).unwrap_or(0);
+        if waited > 50 {
+            trace.push(format!("waited {waited}ms for the previous request to finish"));
+        }
 
         let started = SystemTime::now();
-        log::info!(target: "analytics", "GET interactions {start_utc} → {end_utc}");
 
-        let mut token = self.token(cfg).await?;
-        let mut body = match self.request_csv(cfg, &token, start_utc, end_utc).await {
+        let mut token = self.token(cfg, trace).await?;
+        let mut body = match self.request_csv(cfg, &token, start_utc, end_utc, trace).await {
             Ok(b) => b,
             Err(e) if e.kind == FetchErrorKind::Unauthorized => {
-                // SOP: a 401 means the token expired or was never sent. Drop the
-                // cached token and try once more before giving up.
-                log::warn!(target: "analytics", "401 from interactions endpoint — refreshing token and retrying once");
+                // A 401 means the token expired or was never sent. Drop the
+                // cached token and try once more before giving up. With the
+                // skew now larger than the request timeout this should be
+                // unreachable in practice — if it fires, the trace says so.
+                trace.warn("401 from the interactions endpoint — discarding the cached token and retrying once");
                 self.clear_token();
-                token = self.token(cfg).await?;
-                self.request_csv(cfg, &token, start_utc, end_utc).await?
+                token = self.token(cfg, trace).await?;
+                self.request_csv(cfg, &token, start_utc, end_utc, trace)
+                    .await?
+            }
+            Err(e) if e.kind == FetchErrorKind::Network => {
+                // One retry for a connection-level failure. The client is
+                // pooled now, and a keep-alive connection the server closed
+                // while idle fails on first use and succeeds immediately after.
+                trace.warn(format!(
+                    "{} — retrying once on a fresh connection",
+                    e.message
+                ));
+                self.request_csv(cfg, &token, start_utc, end_utc, trace)
+                    .await?
             }
             Err(e) => return Err(e),
         };
 
-        let delimiter = validate_csv_header(&body)?;
+        let delimiter = validate_csv_header(&body).inspect_err(|e| {
+            let preview: String = body.chars().take(300).collect();
+            trace.warn(format!("response rejected: {}", e.message));
+            trace.warn(format!("first 300 characters: {preview}"));
+        })?;
         // Strip a leading BOM so the csv reader sees a clean first column name.
         if body.starts_with('\u{feff}') {
             body = body.trim_start_matches('\u{feff}').to_string();
         }
         let row_count = body.lines().filter(|l| !l.trim().is_empty()).count() as i64 - 1;
         let bytes = body.len() as u64;
+        trace.push(format!(
+            "response is CSV, delimiter {delimiter:?}, {row_count} data rows, {bytes} bytes"
+        ));
 
-        let temp_path = self.write_temp_csv(cache_dir, &body)?;
+        let temp_path = self.write_temp_csv(cache_dir, &body).inspect_err(|e| {
+            trace.warn(format!("could not stage the download: {}", e.message));
+        })?;
         let duration_ms = started.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
-        log::info!(
-            target: "analytics",
-            "downloaded {start_utc} → {end_utc}: {row_count} rows, {bytes} bytes in {duration_ms}ms"
-        );
+        trace.push(format!(
+            "staged at {} — {row_count} rows in {duration_ms}ms",
+            temp_path.display()
+        ));
 
         Ok(FetchOutcome {
             temp_path: temp_path.to_string_lossy().into_owned(),
@@ -596,6 +830,7 @@ impl AnalyticsState {
             row_count: row_count.max(0),
             bytes,
             duration_ms,
+            trace: Vec::new(),
         })
     }
 
@@ -605,8 +840,9 @@ impl AnalyticsState {
         token: &str,
         start_utc: &str,
         end_utc: &str,
+        trace: &mut Trace,
     ) -> Result<String, FetchError> {
-        let client = http_client(FETCH_TIMEOUT_SECS)?;
+        let client = self.client()?;
         let url = format!(
             "{API_BASE}/{}/projects/{}/interactions",
             cfg.customer_key.trim(),
@@ -624,26 +860,50 @@ impl AnalyticsState {
         // `paginateData` is deliberately not sent: the SOP requires confirming
         // the pagination mechanism before implementing it.
 
+        trace.push(format!(
+            "GET {url}?{}",
+            query
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("&")
+        ));
+
+        let sent = SystemTime::now();
         let resp = client
             .get(&url)
             .bearer_auth(token)
             .header(reqwest::header::ACCEPT, "text/csv")
+            .timeout(Duration::from_secs(FETCH_TIMEOUT_SECS))
             .query(&query)
             .send()
             .await
-            .map_err(|e| classify_reqwest_error(&e, "Interaction log request"))?;
+            .map_err(|e| {
+                let err = classify_reqwest_error(&e, "Interaction log request");
+                // The chain is where the actual cause lives — reqwest's own
+                // Display is usually just "error sending request for url".
+                trace.warn(format!("request failed after {}ms: {}", elapsed_ms(&sent), error_chain(&e)));
+                err
+            })?;
 
         let status = resp.status();
-        if let Some(marker) = detect_pagination(resp.headers()) {
-            return Err(FetchError::new(
-                FetchErrorKind::InvalidResponse,
-                format!(
-                    "Response appears paginated ({marker}); pagination is not implemented, \
-                     so {start_utc} → {end_utc} was not imported"
-                ),
-            ));
-        }
+        let header_of = |name: &str| {
+            resp.headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("-")
+                .to_string()
+        };
+        trace.push(format!(
+            "HTTP {status} in {}ms — content-type {}, content-length {}",
+            elapsed_ms(&sent),
+            header_of("content-type"),
+            header_of("content-length")
+        ));
 
+        // Status first. A pagination header on an *error* response used to be
+        // reported as "the response appears paginated", hiding the real HTTP
+        // failure behind a message about a feature that isn't implemented.
         if !status.is_success() {
             // Read Retry-After before consuming the response body.
             let retry_after = parse_retry_after(resp.headers());
@@ -659,11 +919,19 @@ impl AnalyticsState {
                 500 | 502 | 503 => FetchErrorKind::ServerError,
                 _ => FetchErrorKind::Http,
             };
-            let hint = if status.as_u16() == 400 {
-                " (a 400 is usually a missing or invalid parameter — check culture)"
-            } else {
-                ""
+            let hint = match status.as_u16() {
+                400 => " (a 400 is usually a missing or invalid parameter — check culture)",
+                403 => " (a 403 means the credentials are valid but not entitled to this customer/project)",
+                404 => " (a 404 usually means the customer key or project key is wrong)",
+                _ => "",
             };
+            trace.warn(format!(
+                "error body ({} bytes): {preview}",
+                body.len()
+            ));
+            if let Some(secs) = retry_after {
+                trace.push(format!("server asked us to wait {secs}s (Retry-After)"));
+            }
             return Err(FetchError::new(
                 kind,
                 format!("Analytics API returned {status}{hint}: {preview}"),
@@ -671,7 +939,25 @@ impl AnalyticsState {
             .with_retry_after(retry_after));
         }
 
+        if let Some(marker) = detect_pagination(resp.headers()) {
+            trace.warn(format!("pagination marker present: {marker}"));
+            return Err(FetchError::new(
+                FetchErrorKind::InvalidResponse,
+                format!(
+                    "Response appears paginated ({marker}); pagination is not implemented, \
+                     so {start_utc} → {end_utc} was not imported"
+                ),
+            ));
+        }
+
         resp.text().await.map_err(|e| {
+            // A body that dies mid-transfer is the classic long-download
+            // failure, and it is *not* the same thing as never connecting.
+            trace.warn(format!(
+                "the response body stopped after {}ms: {}",
+                elapsed_ms(&sent),
+                error_chain(&e)
+            ));
             FetchError::new(
                 FetchErrorKind::Network,
                 format!("Could not read the response body: {e}"),
@@ -796,6 +1082,123 @@ mod tests {
         assert!(!json.contains("retryAfterSecs"), "got {json}");
     }
 
+    /// The bug behind "the first download fails, the retry works".
+    ///
+    /// A request is authorised once, when it is sent. If the token dies while
+    /// the server is still producing the CSV, the failure is a reset or a
+    /// truncated body — `Network`, not retryable — so the day failed; pressing
+    /// Retry then worked because the token had by then aged past the skew and
+    /// was replaced up front. A cached token must never be handed out with
+    /// less life left than a request is allowed to take.
+    #[test]
+    fn a_token_is_never_handed_out_with_less_life_than_a_fetch_needs() {
+        assert!(
+            TOKEN_SKEW_SECS > FETCH_TIMEOUT_SECS,
+            "a token reused with {TOKEN_SKEW_SECS}s of reserve can expire during a {FETCH_TIMEOUT_SECS}s request"
+        );
+
+        let state = AnalyticsState::default();
+        // A token issued for an hour is reused, and always with more than a
+        // full request's worth of life left.
+        state.store_token("t".into(), 3600);
+        let (_, remaining) = state.cached_token().expect("fresh token is usable");
+        assert!(
+            remaining > FETCH_TIMEOUT_SECS,
+            "{remaining}s left is not enough for a {FETCH_TIMEOUT_SECS}s request"
+        );
+
+        // A token with only the skew left is refused rather than reused.
+        state.store_token("t".into(), TOKEN_SKEW_SECS);
+        state
+            .token
+            .lock()
+            .map(|mut c| c.usable_until = now_secs())
+            .unwrap();
+        assert!(state.cached_token().is_none());
+
+        state.clear_token();
+        assert!(state.cached_token().is_none());
+    }
+
+    /// The floor exists so a server issuing tokens shorter than the skew can't
+    /// make every cached token instantly unusable — that would turn one import
+    /// into two requests per window, forever.
+    #[test]
+    fn a_short_lived_token_is_still_worth_caching() {
+        assert_eq!(usable_lifetime(3600), 3600 - TOKEN_SKEW_SECS);
+        assert_eq!(usable_lifetime(60), 30);
+        assert_eq!(usable_lifetime(0), 0);
+
+        let state = AnalyticsState::default();
+        state.store_token("t".into(), 60);
+        assert!(
+            state.cached_token().is_some(),
+            "a 60s token must still be reusable for its first half"
+        );
+    }
+
+    /// Masking is applied to every key a trace names. It must never be
+    /// reversible, and must never leak a short value whole.
+    #[test]
+    fn masked_keys_never_show_more_than_their_ends() {
+        assert_eq!(mask(""), "(empty)");
+        assert_eq!(mask("abcd"), "****");
+        assert_eq!(mask("EFTELING"), "EF****NG");
+        // The client secret is never traced at all — nothing calls mask on it.
+        assert!(!mask("supersecretvalue").contains("secret"));
+    }
+
+    /// `reqwest`'s own Display is the outer wrapper; the sentence naming the
+    /// real cause is a `source()` hop or two down, and that is what a Windows
+    /// failure we cannot reproduce locally has to arrive with.
+    #[test]
+    fn the_error_chain_reaches_past_the_outer_message() {
+        #[derive(Debug)]
+        struct Inner;
+        impl std::fmt::Display for Inner {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "certificate has expired")
+            }
+        }
+        impl std::error::Error for Inner {}
+
+        #[derive(Debug)]
+        struct Outer(Inner);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "error sending request")
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let text = error_chain(&Outer(Inner));
+        assert!(text.contains("error sending request"), "got {text}");
+        assert!(text.contains("certificate has expired"), "got {text}");
+    }
+
+    /// A trace must reach the renderer with the error, or a failed overnight
+    /// import is diagnosable only from a log file on a machine we don't have.
+    #[test]
+    fn an_error_carries_its_trace_to_the_renderer() {
+        let mut trace = Trace::default();
+        trace.push("token: reusing cached token");
+        trace.warn("HTTP 504 in 300012ms");
+        let err = FetchError::new(FetchErrorKind::Timeout, "timed out").with_trace(&mut trace);
+        assert_eq!(err.trace.len(), 2);
+        // Taken, not copied: a second exit point can't re-emit the same lines.
+        assert!(trace.take().is_empty());
+
+        let json = serde_json::to_string(&err).expect("serialize");
+        assert!(json.contains(r#""trace":["#), "got {json}");
+        // An empty trace is omitted rather than sent as [].
+        let bare = serde_json::to_string(&FetchError::new(FetchErrorKind::Config, "x")).unwrap();
+        assert!(!bare.contains("trace"), "got {bare}");
+    }
+
     #[test]
     fn retry_after_is_read_in_seconds_and_capped() {
         let mut h = reqwest::header::HeaderMap::new();
@@ -916,7 +1319,10 @@ mod tests {
 
     #[test]
     fn temp_path_guard_only_allows_csvs_in_the_temp_dir() {
-        let cache = std::env::temp_dir().join("cai-analytics-guard-test");
+        // Process-scoped, matching the tests in lib.rs: the fixed name meant
+        // two concurrent `cargo test` runs deleted each other's fixtures.
+        let cache = std::env::temp_dir()
+            .join(format!("cai-analytics-guard-test-{}", std::process::id()));
         let dir = temp_dir(&cache);
         std::fs::create_dir_all(&dir).unwrap();
 
