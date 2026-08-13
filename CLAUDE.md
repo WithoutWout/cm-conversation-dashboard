@@ -36,7 +36,7 @@ frontend/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
     conv-search.test.js, update-modal.test.js,
-    settings-backup.test.js                        — `npm run test:frontend`
+    settings-backup.test.js, metadata-filter.test.js  — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
@@ -75,8 +75,8 @@ Data files (read-only, never committed, placed in a user-selected folder):
 
 | `get_analytics_config`     | `getAnalyticsConfig()`            | Analytics API settings **without the client secret** — returns `hasSecret` only |
 | `save_analytics_config`    | `saveAnalyticsConfig(args)`       | Writes `analytics-api.json` to the app data dir (`0600`); a blank secret keeps the stored one |
-| `test_analytics_connection`| `testAnalyticsConnection()`       | Requests an OAuth2 token only, returns `{ ok, message }` |
-| `fetch_analytics_window`   | `fetchAnalyticsWindow(startUtc, endUtc)` | Downloads one window to a temp CSV, returns `{ tempPath, delimiter, rowCount, bytes, durationMs }`; rejects with `{ kind, message, retryable }` |
+| `test_analytics_connection`| `testAnalyticsConnection()`       | Requests an OAuth2 token only, returns `{ ok, message, trace }` |
+| `fetch_analytics_window`   | `fetchAnalyticsWindow(startUtc, endUtc)` | Downloads one window to a temp CSV, returns `{ tempPath, delimiter, rowCount, bytes, durationMs, trace }`; rejects with `{ kind, message, retryable, trace }`. The `trace` is a step-by-step account carried on both outcomes — see `### Diagnosing a failed import` |
 | `cleanup_analytics_temp`   | `cleanupAnalyticsTemp(paths?)`    | Deletes the given temp CSVs, or sweeps the whole temp dir when called with no argument |
 | `get_db_hour_coverage`     | `getDbHourCoverage(sinceDate?)`   | Per UTC day, a bitmask of the 24 hours the day is **covered** for — the union of hours holding interactions and hours an API window explicitly requested. Distinguishes a partially imported day from a complete one. `sinceDate` bounds an otherwise full-table aggregate against `idx_timestamp`; the Import modal passes the retention floor, Manage Database omits it because its calendar browses everything stored |
 | `record_imported_window`   | `recordImportedWindow(startUtc, endUtc)` | Marks every UTC hour a successfully imported API window covered. Called once per downloaded window, *after* its rows are in. See `## Coverage: asked-for vs present` |
@@ -84,7 +84,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `finalize_import_run`      | `finalizeImportRun(maxAgeDays)`   | Closes a run: purge, scoped summary rebuild, FTS merge, planner stats, WAL restore — once, instead of once per file. Safe no-op when no run is open |
 | `compact_database`         | `compactDatabase()`               | `VACUUM`s the database, returning pages freed by deletions and schema migrations to the filesystem. Returns `{ bytesBefore, bytesAfter, durationMs }` |
 
-There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context options, daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
+There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context and metadata options (`get_context_options` / `get_metadata_options`, both thin wrappers over `tag_options`), daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
 `import_interactions_csv(filePath, maxAgeDays, delimiter?, deferFinalize?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it. `deferFinalize` defaults to false; both real callers pass `true` and bracket their loop with `begin_import_run` / `finalize_import_run` — see `## Why import stays fast as the database grows`.
 
@@ -362,6 +362,32 @@ Three distinct search types:
 - Ranges are merged before insertion, longest-first at a given start: two terms can cover the same span, and `<mark>` nested in `<mark>` renders wrong. `opening | openingstijden` produces one mark, not `[opening][stijden]`.
 - Regex mode is deliberately **not** folded — the user wrote a pattern, and the backend's regex path does not fold either.
 
+### Metadata filtering (Context · Metadata)
+
+Both filter popovers — the Content one (`#contentCtxModalOverlay`) and the Conversations one (`#ctxModalOverlay`) — carry **two tabs**: Context and Metadata. Context says what the user's session was in; metadata (`OutputMetaData` / the `OutputMetadata` column) says what the bot's answer was *marked with* — `entryType`, `nochat`, `transaction`, `attractionIdentifier`, `restaurantName`. On the real export that is **40 distinct keys and 196 chips**.
+
+One button and one popover, not two funnels in an already-crowded toolbar: the two tag sets are indexed the same way and filter with identical semantics, so the only thing that varies is which list is shown and which array a click lands in. `CTX_KINDS` / `CONTENT_CTX_KINDS` hold everything that differs, and `_buildTagChipsHtml` renders both (its `unit` parameter is the only real difference — sessions vs items).
+
+- **The button's badge counts both tabs**, and each tab carries its own count, because a filter left on in the tab you are not looking at still narrows the results. **Clear all** clears both, or the badge would stay lit.
+- **`escalationGroup` is never offered as a metadata chip.** It already has chips on the Context tab, where it belongs — it is a declared context variable with its own `Id`. Listing it twice would let a user set two filters that look independent and describe the same thing. (This is the filtering side only; `## Collections` documents separately why the *tag* is not a reachability condition.)
+- **An empty value renders as `(empty)`, not as a blank chip.** "Set with no value" is a real state, distinct from `not set`, and a chip nobody can see is a chip nobody can click.
+- **A nested value is split into `key.subkey`, never rendered whole.** `abortTransactionAction` holds `{"label":"Aanvraag stoppen","topicName":"Stoppen_Faciliteitenkaart"}`; as one chip that is an unreadable blob wrapping over four lines, and it is not a filter anyone would click. Flattened it becomes `abortTransactionAction.topicName = Stoppen_Faciliteitenkaart`, which is a question someone actually asks. **It also collapses three spellings of one value into one chip** — the compact form, the form CM stored with its newlines replaced by `__` (its line-break marker, see `## Chat rendering`), and the same object with its keys in the other order. On the real export that turns `abortTransactionAction`'s blobs into two clean keys, and `Stoppen` correctly aggregates across four items instead of appearing four times.
+  - `unmark_json_breaks` / `_unmarkJsonBreaks` restore `__` **only outside a double-quoted span**, which is safe by construction: `_` is not valid JSON syntax there, so it can only be the marker. Inside a string it must survive — `Stoppen_TD_Algemeen` is a real value. `restoring_line_breaks_never_edits_inside_a_string` pins this.
+  - **Only objects expand.** A JSON *array* has no stable member names, so splitting it would invent filter keys; it stays one pair. An empty object keeps its key so `not set` still distinguishes it from absent.
+  - Bounded by `META_MAX_DEPTH` (3) and `META_MAX_LEAVES` (24) so a large embedded document can't turn one answer into hundreds of chips.
+  - **Three copies exist** — `flatten_metadata_entry` (lib.rs), `flattenMetaEntry` (search-worker.js), `_flattenMetaEntry` (index.html) — because there is no module boundary to share one across. The frontend test compares the renderer's and the worker's directly *and* compares every chip's count against the matcher; the Rust one is covered by the backfill test.
+- **`.ctx-chip` clamps to one line with the full value in its `title`.** A backstop for the merely-long, now that nested values are split before they get here.
+- **Two filters on different keys must be satisfied by one answer**, matching how context works — an item whose answer A is `nochat=true` and whose answer B is `entryType=choice_prompt` does not match a filter asking for both.
+- **Metadata is ANDed at the item level in the worker, not folded into `matchArticleCombined`/`matchDialogCombined`.** That path exists so a text query and a *context condition* are satisfied by the same answer; metadata is a tag on the answer, not a condition on reaching it, so requiring the text hit and the tag to coincide would exclude items the user is looking for.
+
+**Conversations:** `metadata_index (name, value, session_uuid)` is a separate table with the same shape and the same two indexes as `context_index` — separate rather than a `kind` column because adding one would change that table's primary key on every existing database. `build_session_filter_query` builds both filters from one loop over `[(context_filters, "context_index"), (metadata_filters, "metadata_index")]`, so they cannot drift. `get_context_options` and `get_metadata_options` are both thin wrappers over `tag_options(table)`. Deletion is already handled: `cleanup_orphan_contexts{,_touched}` walk `TAG_TABLES`.
+
+- The one-time backfill is gated on `META_METADATA_INDEX_BUILT`, not on "is the table empty?", for the same reason as `entity_index` — a database whose answers carried no metadata would re-run the whole-table scan on every launch.
+- **`backfill_metadata_index` is a Rust pass, not one SQL statement** like the entity backfill beside it. A value can itself be a JSON object expanded into one row per leaf, and the sub-keys are not known in advance, so `json_each` cannot express it. Routing the migration through the same `metadata_index_rows` the import path uses is also stronger than asserting two implementations agree: there is only one. It streams inside one transaction and logs its row count and timing, and a failure leaves the flag unset so the next open retries.
+- **The two sides encode the same information differently**, and only the parsers need to know: the content export spells it as a plain object (`OutputMetaData: {escalationGroup: "…"}`), the interaction log as an array of `{key, value}` pairs. `metadata_index_rows` reads the array; `metaSetOf` in the worker reads the object.
+- **Metadata values keep their case**, unlike entity names — a value is a configured constant the user reads back off a chip, and `Polles Keuken` should not become `polles keuken`.
+- Tests: `the_metadata_backfill_matches_what_an_import_would_have_indexed`, `the_spellings_of_one_nested_value_collapse_to_the_same_pairs`, `restoring_line_breaks_never_edits_inside_a_string`, `only_objects_are_expanded`, `a_metadata_filter_narrows_to_its_own_table`, and `frontend/tests/metadata-filter.test.js` — which asserts **every chip's count against the set the matcher returns**, over the real export when it is checked out beside the app (203 chips across 41 keys). A chip saying "9 items" that filters down to 4 is worse than no chip at all.
+
 ### Entity → Article / Dialog cross-references
 
 `getEntityForChip(phrase)` is the single source of truth for "which entity is this phrase?", and it resolves by entity name, then by an entity *word*, then by the longest token in the phrase. `entityRefIndex()` is the **exact inverse** of it, built in one pass over the export and cached until `loadData`.
@@ -418,9 +444,47 @@ The low/zero-recognition bubble highlighting already excluded GenAI rows the sam
 
 ---
 
+## Loading states
+
+**A blank pane is not a neutral state — it looks exactly like a finished, empty one.** On a small database the reads below flash by; on a large one they are real seconds, and every one of them used to show nothing at all. Each now paints a spinner *before* it awaits and marks the controls that act on the not-yet-loaded thing inert.
+
+- `paneLoadingHtml(label, note)` / `setPaneLoading(id, …)` render the shared `.pane-loading` block. The `note` line says *why* something is slow ("Counting interactions per day across the database"), which is the difference between waiting and wondering.
+- `setBusy(ids, on)` toggles `.is-busy` — `opacity` plus `pointer-events: none`. A class rather than `disabled` so it covers non-form elements (the chat filter row, the calendar) with one rule. A control that looks live but does nothing reads as a bug.
+- `setConvOverlay(visible, label, cancellable)` owns the sessions-pane overlay. It existed for search; opening a database reuses it with its own sentence and **no Cancel button**, because there is nothing safe to cancel halfway through a migration. Every caller goes through this function, so the label can't be left reading the previous operation's.
+
+Where they are wired, and why each one mattered:
+
+- **`selectSession`** — the thread kept showing the *previous* conversation until the interactions arrived, with the new card already highlighted. It now clears to a spinner first, and a second click while the first is in flight can't paint over the newer selection (`activeSessionUuid !== uuid` guard, with the busy flags released in a `finally` that covers that early return).
+- **`openDbAtPath`** — the longest call in the app and the one that said nothing: `set_db_path` applies schema migrations, repairs the FTS index if stale, and runs the one-time entity and metadata backfills.
+- **The data modal's Import and Stored data tabs** — both open on aggregate queries. The import calendar in particular would have rendered as "nothing imported", which is a *wrong* answer rather than a missing one.
+
+**`yieldToPaint()` is a race, and the timeout half is the point.** WebKit will not repaint between a class change and a Tauri `invoke` that occupies the IPC channel, so the loading state needs two frames before the call goes out. But `requestAnimationFrame` **does not fire in a window that isn't being composited** — minimised, occluded, or on another space — so awaiting it bare parks the caller forever behind a spinner that never resolves. On screen the frames win and the paint happens; off screen the timer wins after `PAINT_YIELD_MS` and the work proceeds without one, which is correct: nobody is watching. `loadSessions` awaited the bare frames before this, so a minimised window could hang it indefinitely.
+
+**`animateModalResize(box, mutate)`** grows a modal between two heights instead of snapping. The data modal's three tabs are a two-month calendar, a spinner and a column of settings — very different heights — so switching jerked the whole dialog under the pointer and took the tab bar with it.
+
+- Everything between the two measurements is synchronous, so the intermediate layout is never painted. `height: auto` before measuring the target is what makes the box report its *natural* height when a previous animation still has an explicit one set; `max-height: 88vh` still applies, so an over-tall tab measures already clamped.
+- **The explicit height is released on a timer, not `transitionend`.** A tab switched again mid-animation cancels the event, and a box left pinned would clip everything taller. `MODAL_RESIZE_MS` must stay in step with the `.modal-box.resizing` transition.
+- Each tab's prepare paints its loading state *synchronously* before awaiting, so it is part of the height being animated to rather than a second jump straight after; the later content render wraps its own `_cdataResize`.
+- `prefers-reduced-motion` skips the animation **and clears any height left pinned by an earlier one**, so the escape hatch can't strand the box.
+- The Settings modal uses the same helper. Its tab handler is scoped to `#settingsModal` — the data modal's panels carry the same `.settings-tab-panel` class, and the unscoped query was clearing their active state.
+
+## The conversation data modal
+
+`#convDataModal` is the one place data enters or leaves the database. Three tabs — **Import**, **Stored data**, **Database** — behind a single toolbar button (`#convDataBtn`, labelled *Data*).
+
+It replaced two modals reached from two adjacent toolbar buttons (*Import* and *Manage DB*). They already shared the 620px box, the two-month calendar and the day-coverage colours, and they answer neighbouring halves of one question — "what have I got, and what am I missing?" — so getting from one to the other meant closing a modal and hunting for another button.
+
+- **`_cdataSetTab(tab)` is the only way a tab changes**, and it re-renders the shared chrome (`_cdataRenderChrome`: title, the database subtitle, and the footer) before handing off to that tab's own prepare function. The footer is one element; each tab renders its own buttons into it, so the modal can never show one tab's actions over another tab's body.
+- **The default tab is Import, except with no database connected — then it is Database.** There is nothing to import *to* yet, so a first-run click lands where the user has to act. Clicking through to Import in that state says so rather than offering a Start button that would fail.
+- **While an import runs, the other two tabs are disabled** and the modal cannot be closed. Deleting or swapping the database file underneath a running import is a footgun with no upside, and the progress view lives on the Import tab — so for the duration, that tab *is* the modal.
+- `openManageDbModal()` and `impClose()` survive as thin aliases; every old call site means "open on Stored data" or "close the data modal".
+- **The `manageDbDeleteBtn` is created by the footer render**, not by the markup, so it can be replaced by a fresh disabled one without the body having changed. `_mdbSyncDeleteButton()` re-applies the state the current selection implies and is called from both `_cdataRenderChrome` and `renderManageDbBody`.
+
+**Which database is open is stated in three places, and the toolbar is not one of them.** It used to be a green line across the top of the Conversations view, above every search. It now appears in the data modal's header (`#convDataDbLabel`), on the Database tab's path line, and in Settings → Conversations (`#settingsConvDbPath`, with a button that opens the modal on the Database tab) — because it is a value you set once and then want to forget. `updateConvDbStatus()` is the single writer for all three.
+
 ## Analytics API import
 
-The Conversations toolbar's **Import** button opens `#convImportModal`, which offers two sources that both end at the same place: **Analytics API** (automated) and **CSV file** (the original manual `doImport()` path, unchanged). `CM_Analytics_API_SOP.md` is authoritative for anything about the API itself.
+The data modal's **Import** tab offers two sources that both end at the same place: **Analytics API** (automated) and **CSV file** (the original manual `doImport()` path, unchanged). `CM_Analytics_API_SOP.md` is authoritative for anything about the API itself.
 
 Responsibilities are split deliberately — keep them separate when extending this:
 
@@ -438,12 +502,27 @@ Responsibilities are split deliberately — keep them separate when extending th
 - **Windowing:** the picker is **UTC end to end** — the date fields, the time fields, **Now** (`getUTCHours`), the calendar cells, and the default range all are, matching the database and the request windows. `_impUtcDate(dateStr, timeStr)` is the only place a picked date becomes an instant, and it goes through `Date.UTC`. `buildImportQueue` then cuts the range at UTC midnights so each request maps 1:1 to a DB day; one picked day is exactly one request, in any host timezone. A full day is `00:00:00Z` → `23:59:59Z` — **strictly under 24h**. That is *our* invariant, not an API rule: the SOP says a full-day request frequently *times out*, not that it is rejected, and the rule exists so a window maps onto one UTC day the calendar and skip logic can reason about. `validate_window` in `analytics_api.rs` enforces it, along with the SOP's 90-day retention limit (which is real).
 - **Pipeline:** while day *N* imports, day *N+1* downloads. Only ever one API request is in flight — the JS scheduler serialises downloads and a `tokio::sync::Semaphore(1)` in `AnalyticsState` enforces it at the client layer regardless. **This cap is self-imposed politeness, not an API constraint** — the SOP documents no rate limit and no concurrency limit, despite earlier comments here and in `analytics_api.rs` claiming it did. Raising it is a legitimate option if downloads ever become the bottleneck; as of the run-scoped-finalize work they were not. `_impStartFetch` returns a promise that never rejects (`{ ok, parts | error }`) because a download is started one iteration before it is awaited.
 - **Timeout subdivision vs backoff — two failures, two opposite responses.** The SOP warns full-day requests often time out, so a `Timeout` (408/504) halves the window (12h → 6h → …), sequentially, bounded by `IMP_MAX_SPLIT_DEPTH` and a one-hour floor — split only while *both* halves stay at or above an hour. Worst case ~6 requests per day, not an exponential fan-out. A `RateLimited` (429) or `ServerError` (5xx) instead **waits and retries the same window unchanged**, honouring `Retry-After` and otherwise backing off exponentially with jitter (`IMP_MAX_BACKOFF_ATTEMPTS`, `IMP_MAX_BACKOFF_MS`). All three used to be one `Timeout` kind, which meant the app responded to "you are sending too many requests" by splitting the window and sending *more*. `rate_limiting_is_not_mistaken_for_a_timeout` pins the distinction.
+- **A token is never handed out with less life left than a request may take.** `TOKEN_SKEW_SECS` is `FETCH_TIMEOUT_SECS + 60`, and that relationship is the point — `a_token_is_never_handed_out_with_less_life_than_a_fetch_needs` asserts it. It was 120s against a 300s request timeout, so any cached token with 121–300s of life started a request it could not finish. **That is the "the first download fails, then the retry works" bug**: a request is authorised once, when it is sent, so a token dying mid-transfer does not come back as a clean `401` we could refresh and retry — it comes back as a reset connection or a truncated body, which classifies as `Network` and is not retryable. The day failed; pressing Retry worked because by then the token was stale enough to be replaced up front. `usable_lifetime` floors the reserve at half the token's life so a short-lived token is still worth caching.
+- **One `reqwest::Client` for the process, built once.** The client *is* the connection pool, so constructing a fresh one per request threw the pool away every time and paid a full TLS handshake per window. It carries no global timeout — the token and fetch call sites want very different ones and set them per request. The pool brings back one failure mode it did not have: a keep-alive connection the server closed while idle fails on first use, so a `Network` error from `request_csv` is retried **once** before it is reported.
+- **The status check comes before pagination detection.** A pagination header on an *error* response used to be reported as "the response appears paginated", hiding the real HTTP failure behind a message about a feature that isn't implemented.
 - **Cancel does not wait for the in-flight download.** With a 300 s request timeout, awaiting it held "Cancelling…" on screen for minutes; the leftover fetch is cleaned up fire-and-forget when it lands, with the temp-dir sweep on modal open as the backstop.
 - **`paginateData` is deliberately not sent.** The SOP requires confirming the pagination mechanism first, so instead the client fails loudly on anything paginated-looking rather than importing a partial day. Confirm the mechanism against the official spec before implementing it.
 - **Temp files** live in `app_cache_dir()/analytics-tmp` and are deleted the moment each part's import returns, in a `finally` so failure and cancellation clean up too. The dir is swept on app start and on modal open (crash recovery). `cleanup_analytics_temp` is path-confined to that directory.
 - **Credentials** live in `app_data_dir()/analytics-api.json` (`0600` on unix). The client secret never crosses the IPC bridge — `getAnalyticsConfig` returns `hasSecret` only, and saving with a blank secret keeps the stored one.
 - **Skipping is decided per hour, not per day** (`get_db_hour_coverage` → `_impWindowCovered`). A range can start or end mid-day — picking 12:00 → 18:00 leaves the rest of that day missing — so a day-level "has rows?" check would silently skip the other 18 hours. A chunk is skipped only when every UTC hour it touches is already covered. (This mattered far more when the picker was local time and *every* multi-day import left two partial days behind; it is still the correct rule.) The calendar shows this in three states: green outline = every hour imported, orange outline = partly imported (will be fetched again), no outline = nothing yet. Never regress this to a day-level check.
 - Skipped days stay in the queue marked `skipped` rather than being dropped, so the user can see what was left alone; they count toward overall progress.
+
+### Diagnosing a failed import
+
+A failed overnight import on someone else's Windows machine has to be diagnosable from what is on screen. The Rust `log` output records everything too, but it lands in a file most users will never find.
+
+- **`fetch_analytics_window` returns a `trace` on success *and* on failure**, and `_impLogTrace` appends it, indented, to the Details log. A `Trace` is collected through the whole call and attached at the single exit point in `fetch_window`, so no error can escape without the history that explains it. It carries: whether the cached token was reused and how much life it had left, the token endpoint's status and timing, the full request URL, the response status/content-type/content-length and timing, the flattened error chain, and the first 300 bytes of any unexpected body.
+- **`error_chain` is what makes a network failure readable.** `reqwest::Error`'s own `Display` is the outer wrapper (`error sending request for url (…)`); the sentence naming the actual cause — a TLS rejection, a refused connection, a proxy, a reset mid-body — is two or three `source()` hops down.
+- **Nothing sensitive is traced.** The client secret never appears; the client id and the customer/project keys go through `mask()`, which shows two characters at each end.
+- **`_impNormErr`'s fallback serialises what it got.** `String(e)` turned any object without a `message` into the literal `[object Object]` — precisely the "it gave errors" with nothing to act on.
+- The log opens with `_impLogEnvironment()`: version, platform, the local-clock offset (log times are local, every window in it is UTC), the source and settings for the run, and the database. A pasted log has to stand on its own. **Copy log** is in the Details `<summary>` so it is reachable while the panel is still closed.
+- Row-level parse failures are reported too. They don't fail the import, so without this a day could report "done" having silently dropped rows.
+- Settings → **Test connection** shows the token exchange's own trace on failure, so it is a real first diagnostic rather than a yes/no.
 
 ### Coverage: asked-for vs present
 
@@ -464,32 +543,32 @@ The Manage Database calendar still gates its outline on row count, so a fetched-
 
 `calMonthHtml(monthDate, isFirst, cfg)` renders one month grid and is the **only** place a calendar month is built. The Import modal (`_impMonthHtml`) and the Manage Database modal (`_mdbMonthHtml`) are both thin wrappers over it, so the two calendars cannot drift apart visually. Everything modal-specific arrives through `cfg`: `keyFor(y, m, day)` (which date a cell means — both modals pass the shared `_calDayKey`), `classify(key)` (its classes and tooltip), `clickFn`/`dataAttr`, and `prevFn`/`nextFn`. `_calRangeCls(key, lo, hi)` is the shared two-click range/hover-preview classifier.
 
-The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Manage DB modal adopted it) — including the green/orange coverage outlines, which are inset shadows rather than borders so marking a day never shifts the grid by a pixel. Both calendars also share the class-only hover update (`_impUpdateCalClasses` / `_mdbUpdateCalClasses`): a full re-render on every `mousemove` fights the pointer.
+The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Stored data calendar adopted it) — including the green/orange coverage outlines, which are inset shadows rather than borders so marking a day never shifts the grid by a pixel. Both calendars also share the class-only hover update (`_impUpdateCalClasses` / `_mdbUpdateCalClasses`): a full re-render on every `mousemove` fights the pointer.
 
-**Both calendars mean a UTC day**, via the shared `_calDayKey(y, m, day)` — plain string formatting, no `Date`, no timezone maths. The grid coordinates already *are* the calendar date, so there is nothing to convert; routing through a `Date` is what reintroduces the local offset. `_mdbKey` is a thin alias kept for readability at the Manage DB call sites. What still differs between the wrappers:
+**Both calendars mean a UTC day**, via the shared `_calDayKey(y, m, day)` — plain string formatting, no `Date`, no timezone maths. The grid coordinates already *are* the calendar date, so there is nothing to convert; routing through a `Date` is what reintroduces the local offset. `_mdbKey` is a thin alias kept for readability at the Stored data call sites. What still differs between the wrappers:
 
-| | Import | Manage Database |
+| | Import tab | Stored data tab |
 | --- | --- | --- |
 | Disabled | future, or older than the API's 90-day retention | future only — the DB may hold anything |
 | Range colour | accent | red (`.day-cal.danger`) |
 
-Both are UTC for the same reason: the data is. `DATE(timestamp_start)` is UTC, `delete_interactions_by_dates` matches on it, and the request windows the importer builds are UTC days — so in both modals the day you click is exactly the set of rows that appears or disappears. Don't "unify" either one to local time.
+Both are UTC for the same reason: the data is. `DATE(timestamp_start)` is UTC, `delete_interactions_by_dates` matches on it, and the request windows the importer builds are UTC days — so on both tabs the day you click is exactly the set of rows that appears or disappears. Don't "unify" either one to local time.
 
 The Import picker used to be local time. The mismatch showed up in two ways worth remembering, because each looks like its own separate bug:
 
 - **One picked day became two requests.** A local day spans two UTC days (at UTC+2, local 25 Mar is `24T22:00Z → 25T21:59Z`), so a contiguous selection always left two ragged UTC edges — the first day fetched only its tail, the last only its head. Both then rendered orange (partly imported) indefinitely and were re-fetched on the next run. Harmless thanks to `INSERT OR IGNORE`, but it read as the importer failing to finish.
 - **The outlines described a day you hadn't selected.** `keyFor` was local while `_impDbHours`/`_impDbDays` are keyed by the UTC date straight out of `get_db_hour_coverage`, so a cell's coverage colour and tooltip answered "is UTC day N complete?" while clicking it queued local day N. At UTC+2 the two overlap 22 of 24 hours, which is why it looked *almost* right rather than obviously wrong.
 
-### Manage Database modal
+### Stored data and Database tabs
 
-Two tabs: **Stored data** (calendar-driven cleanup) and **Database & retention** (file picker, retention setting, import help).
+**Stored data** is calendar-driven cleanup; **Database** is the file picker, the retention setting and compaction. (The CSV export help moved to the Import tab's CSV panel, next to the button it explains, and its trigger is an inline `onclick` because that panel is rebuilt on every render.)
 
 - **Selection is a date range, not a checkbox per day.** Click a start, click an end (click one day twice for a single day); `_mdbFrom`/`_mdbTo`/`_mdbPickPhase`/`_mdbHover` mirror the import picker's state exactly. Ranges are what cleanup actually needs ("everything before March", "that bad import week") and they stay usable at hundreds of days, where the old checkbox list did not.
 - **Only days that hold data are ever sent to `delete_interactions_by_dates`.** `_mdbSelectedDays()` intersects the range with `get_db_daily_stats`, so an empty day inside a wide drag contributes nothing and cannot inflate the reported day count. The readout says so explicitly ("plus 3 days with no data") — a wide drag must not look like it will delete more than it will.
 - **Nothing is deleted without a full statement of what goes.** The readout gives interactions + day count + range, the list under it names every affected day with its row count (scrolls rather than truncating — hiding a tail before a delete is exactly wrong), and `manageDbDeleteSelected` then arms a separate confirm zone.
 - `_mdbDaySpan(lo, hi)` counts calendar days in **UTC**. Subtracting two local midnights across a DST change is an hour short, which turned the day count into `4.958…` — if you touch day arithmetic here, keep it in UTC.
 - **Older than retention (Nd)** applies the retention window on demand. `conv-data-retention-days` otherwise only takes effect during an import (`purge_old`), so this is what makes the setting usable as maintenance. It is disabled when nothing is older than the cutoff.
-- The Delete button is hidden on the Database tab — it only ever acts on the calendar selection, and leaving it visible next to unrelated settings invites a misclick.
+- The Delete button exists only on the Stored data tab — it only ever acts on the calendar selection, and leaving it visible next to unrelated settings invites a misclick.
 
 ### Why import stays fast as the database grows
 
@@ -509,12 +588,12 @@ Import cost must be proportional to the size of the import, never to the size of
 - A scoped rebuild must leave `ensure_session_summary`'s two invariants intact (session count, and `MAX(last_log_id)` matching `MAX(log_id)`), or the app would do a full rebuild on every launch.
 - **The import path does not sweep orphaned contexts.** An import only ever adds sessions, so it cannot orphan a `context_index` row. Only deletion can — `purge_old` handles it via `cleanup_orphan_contexts_touched`, scoped to the sessions it stripped.
 - **`purge_old` does not rebuild the summary itself.** It adds the sessions it purged to the same `TOUCHED_TABLE` and lets the caller do one scoped rebuild covering both the import and the purge. It previously ran a full rebuild *and* the caller ran another.
-- **The FTS `'optimize'` call is deliberately kept** — but it now runs once per *run*, not per file. It costs ~1.1 s and grows with the index, and measurement showed dropping it made the real `get_sessions` search query slower by an amount smaller than run-to-run noise. Don't delete it: `purge_old` and the Manage DB deletions leave tombstones that only go away on merge.
+- **The FTS `'optimize'` call is deliberately kept** — but it now runs once per *run*, not per file. It costs ~1.1 s and grows with the index, and measurement showed dropping it made the real `get_sessions` search query slower by an amount smaller than run-to-run noise. Don't delete it: `purge_old` and the Stored data deletions leave tombstones that only go away on merge.
 - **The FTS index is contentless (`content = ''`, `contentless_delete = 1`).** The old standalone table kept a full second copy of `interaction_value`/`output_text`/`article_ids`/`dialog_paths` in `interactions_fts_content` — written on every imported row and *never read back*, because every use in this crate is a `MATCH` plus a rowid join and there is no `snippet()`/`highlight()`/`bm25()` anywhere. Measured on 200k rows: **23% faster to insert, 37% smaller on disk, and search equal or slightly faster** — including immediately after deleting 20% of rows, the tombstone case that was the reason to check. `perf::contentless_vs_standalone` is that gate; re-run it before changing the FTS shape again.
   - **A duplicate rowid no longer raises — it silently double-indexes.** That makes the `Ok(1)` gate in the import loop load-bearing for index correctness, not just for speed, and the FTS insert is wrapped in `let _ =` which would swallow the error anyway. `a_duplicate_row_is_never_indexed_twice` pins it.
   - `content = 'interactions'` (external content) was rejected: `COUNT(*)` would then scan the content table and always equal `COUNT(*) FROM interactions`, making `repair_fts_index`'s staleness check structurally incapable of firing, and a `DELETE … WHERE rowid IN (…)` after the content row is gone becomes a silent no-op. `fts_semantics::contentless_supports_count_delete_and_column_filters` verifies the four behaviours we depend on against the bundled SQLite.
   - `repair_fts_index` detects a pre-migration table via `sqlite_master.sql NOT LIKE '%contentless_delete%'`, drops it, and lets the existing count mismatch reindex. One-time cost measured at 0.3 s / 100k rows and 2.2 s / 500k — brief enough not to need its own progress UI.
-  - **Dropping the old table frees pages but does not shrink the file.** Only `VACUUM` does, which is what the **Compact database** button in Manage Database → Database & retention (`compact_database`) is for. It needs ~2× the file size in temp space, so it stays a deliberate user action.
+  - **Dropping the old table frees pages but does not shrink the file.** Only `VACUUM` does, which is what the **Compact database** button in Data → Database (`compact_database`) is for. It needs ~2× the file size in temp space, so it stays a deliberate user action.
 - **Three indexes on `interactions` were removed** (`idx_feedback`, `idx_session_uuid`, `idx_type`), each of which cost a b-tree write per imported row and bought nothing. Verified with `EXPLAIN QUERY PLAN` against the real queries first: every feedback filter is a leading-wildcard `LIKE` (unindexable, and its key was the whole JSON blob); `idx_session_uuid` is a strict prefix of `idx_session_ts`/`idx_session_log`; the only `main_interaction_type` equality is ORed with a `LIKE '%…%'`. `DROP_DEAD_INDEXES` runs in `open_db` because `CREATE INDEX IF NOT EXISTS` means removing the schema lines alone would never help an existing database. `dropping_the_dead_indexes_leaves_session_lookups_indexed` asserts a bare `session_uuid = ?` is still not a `SCAN`.
 - **`PRAGMA analysis_limit = 400` is set for the whole connection** in `apply_perf_pragmas`. It defaults to 0 (unlimited), so every post-import `PRAGMA optimize` on a database that already had `sqlite_stat1` was fully scanning every index on `interactions`.
 - **The `recognition_details` backfill is probed once per import, not per row.** `SELECT EXISTS(… recognition_details IS NULL OR = '')` decides whether the duplicate-row `UPDATE` can do anything at all; on a mature database it can't, and every duplicate row was paying an indexed seek to rediscover that. Sound because the probe reads pre-import state: a row inserted by this import carries its value in the INSERT. Don't fold this into `ON CONFLICT DO UPDATE` — `changes()` returns 1 for both branches, destroying the `Ok(1)`/`Ok(_)` distinction that gates the FTS insert, the touched-session insert, the context index and both counters.
@@ -630,7 +709,7 @@ The detail header states the collection in one line (`N items · N export rows �
   brand | file tags | Export IDs button | Collections button | Settings button (gear)
 
 <div.global-search-bar>
-  search input | [Aa] [\b] [.*] [¬T] [ND] | context filter button
+  search input | [Aa] [\b] [.*] [¬T] [ND] | tag filter button (Context · Metadata)
 
 <div.tab-bar>
   All Results (sub-stats: art · dlg · t.dlg)
@@ -660,13 +739,14 @@ The detail header states the collection in one line (`N items · N export rows �
 <div.conv-sidebar-header>
   [#ID] | search input | search submit | [.*] | [U] [B] [E]
   "Search by:" pills, only in #ID mode: Article ID | Dialog / Node ID
-  date range button | context filter button
+  date range button | tag filter button (Context · Metadata)
   filter pills (GenAI / feedback / Low % / Zero %)
 
 <div#settingsModal>
   header: Settings | Backup… (opens #settingsBackupModal) | ✕
   Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)
-  Conversations tab: Halo Studio URL, low recognition threshold, chat copy format,
+  Conversations tab: connected database + "Manage database…",
+                     Halo Studio URL, low recognition threshold, chat copy format,
                      Analytics API (client ID / secret / customer key / project key /
                      culture / environment / activeSessionOnly / Test connection)
 
@@ -675,28 +755,30 @@ The detail header states the collection in one line (`N items · N export rows �
   amber warning: the file holds live credentials, treat it as a password
   Export settings / Import settings | status line
 
-<div#convImportModal>
-  Source tabs (Analytics API / CSV file)
-  Setup:   From + To date fields (click to choose which end you're picking) and
-           time inputs | Now shortcut — all UTC, as the legend states
-           always-visible two-month calendar — green outline = fully imported,
-           orange outline = partly imported
-           summary (N days · M fully imported · K to download, UTC request window)
-           "Skip days already imported in full" checkbox
-  Running: current operation | progress bar | "N of M days completed"
-           per-day list with status chips | collapsible Details log
-           Cancel import — or, when stopped, Retry/Resume from <date>
-
-<div#manageDbModal>
-  Stored data / Database & retention tabs
+<div#convDataModal>
+  header: "Conversation data" | connected database filename (green) | ✕
+  Import / Stored data / Database tabs
+    — the last two are disabled while an import is running
+  Import:  Source tabs (Analytics API / CSV file)
+    Setup:   From + To date fields (click to choose which end you're picking) and
+             time inputs | Now shortcut — all UTC, as the legend states
+             always-visible two-month calendar — green outline = fully imported,
+             orange outline = partly imported
+             summary (N days · M fully imported · K to download, UTC request window)
+             "Skip days already imported in full" checkbox
+    Running: current operation | progress bar | "N of M days completed"
+             per-day list with status chips
+             collapsible Details log with a Copy log button
+             Cancel import — or, when stopped, Retry/Resume from <date>
+    CSV:     what an Interaction Log CSV is | How to export the Interaction Log?
   Stored data: interactions · days stored · date range
-               legend | same two-month calendar as Import, range picked in red
-               quick actions (Older than retention Nd / Everything stored /
-                              Clear / Jump to latest data)
-               readout of exactly what Delete removes
-               scrolling list of the affected days | confirm zone
-  Database & retention: Create new / Open existing | retention days |
-                        Compact database (VACUUM) | import help
+             legend | same two-month calendar as Import, range picked in red
+             quick actions (Older than retention Nd / Everything stored /
+                            Clear / Jump to latest data)
+             readout of exactly what Delete removes
+             scrolling list of the affected days | confirm zone
+  Database:  Create new / Open existing | path | retention days |
+             Compact database (VACUUM)
 
 <div#exportModal>
   header: "N items from <tab>" | query chip | amber chip when no CM.com URL set
