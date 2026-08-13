@@ -91,40 +91,64 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Windows: v0.13.1 never arrived
+            ### Imports that failed on the first try now just work
 
-            The v0.13.1 release only finished building for Mac, so Windows had
-            no download and no update to offer — the app kept reporting itself
-            up to date because, as far as it could tell, it was. Fixed, and the
-            release now refuses to publish at all unless both platforms are
-            complete, rather than going out half-built.
+            If an import stopped on a day and then went through when you pressed
+            Retry, that was a real bug, not bad luck. The access token could
+            expire *during* a download, and a download that loses its token
+            halfway doesn't fail cleanly — it comes back as a broken connection,
+            which the app treated as unrecoverable. Pressing Retry worked because
+            by then the token was old enough to be replaced up front.
 
-            If you are on Windows, everything below is new to you. On Mac you
-            already have it.
+            Tokens are now replaced before they can run out mid-download, and the
+            connection is reused between days instead of being rebuilt from
+            scratch for every one.
 
-            ### Every conversation opens in Halo Studio
+            ### Import problems now say what went wrong
 
-            The **Open in Halo Studio** button used to appear only on
-            conversations that contained an AI answer, so most conversations had
-            no way through. It is now on every conversation, as soon as the Halo
-            Studio URL is filled in under **Settings → Conversations**. Flagged
-            conversations have it too, which they never did.
+            The **Details** log under an import used to show little more than
+            "failed". It now records every step — which token was used and how
+            much life it had left, the exact request, the response and how long
+            it took, and the real reason underneath a network error — with a
+            **Copy log** button so the whole thing can be pasted into a message.
+            Errors that used to appear as `[object Object]` now say what they
+            are, and rows that could not be read are listed instead of silently
+            dropped.
 
-            ### Tidier conversation list
+            **Settings → Test connection** shows the same detail when it fails.
 
-            The language tag (`nl`, `en`, `de`, …) in the search results is now
-            the same size on every row, instead of changing width with the code
-            it happens to show and shifting when a row carried a feedback icon.
+            ### Import and Manage DB are now one screen
 
-            ### One download per platform
+            Two buttons and two windows have become one **Data** button with
+            three tabs: **Import**, **Stored data** and **Database**. They always
+            described two halves of the same question — what you have, and what
+            you're missing — so getting between them no longer means closing one
+            window and finding another button.
 
-            Windows no longer has two downloads to choose between. The installer
-            has been dropped and the portable version is now the only one — it
-            updates itself, needs no administrator rights, and works in places
-            where installers are blocked. Pick Windows or Mac and you're done.
+            Which database you're connected to has moved out of the green line
+            above every search and into **Settings → Conversations**, where you
+            set it, plus the header of the Data screen.
 
-            Nothing changes if you already run the portable version, which is
-            everyone.
+            ### Filter by answer metadata
+
+            The filter button next to the search box now has two tabs: **Context**
+            as before, and **Metadata** — the tags on the bot's answers
+            (`entryType`, `nochat`, `transaction`, `escalation`, and the rest).
+            Both the Content and Conversations views have it.
+
+            Metadata that holds more than one value is split into its parts, so
+            you filter on `abortTransactionAction.topicName` rather than on an
+            unreadable line of raw data.
+
+            ### You can see when it's working
+
+            Opening a conversation, opening a database, and opening the Data
+            screen all used to show nothing at all while they worked — which on a
+            large database looked exactly like nothing happening. Each now shows
+            what it is doing, and the buttons that aren't ready yet are greyed
+            out rather than quietly doing nothing.
+
+            Switching tabs inside a window also no longer jumps.
 
             ---
 
