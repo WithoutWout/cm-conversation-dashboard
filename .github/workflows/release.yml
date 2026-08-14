@@ -91,38 +91,54 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            A polish release on top of v0.14.0.
+            If imports have been failing at the office, this release is the fix.
 
-            ### One "files updated" message per export, not a stream of them
+            ### Importing works on a corporate network
 
-            When new export files appeared in the watched folder, the app asked
-            you to reload — and then asked again, and again, every second or so
-            until the files finished being written. A drop is several files and
-            each one is written in several steps, so a single export could put
-            the same dialog in front of you half a dozen times.
+            On a company network that inspects secure traffic, every import
+            failed immediately with a certificate error — while the same site
+            opened perfectly in Chrome on the same machine.
 
-            It now waits for the folder to go quiet and asks once. Two separate
-            updates are still two messages.
+            The app was checking certificates against its own built-in list
+            instead of asking Windows. It now uses Windows itself, so any
+            certificate your machine already trusts is trusted here too. Nothing
+            to install, export or keep up to date, and it keeps working when
+            those certificates are replaced.
 
-            ### Things no longer appear out of nowhere
+            ### Filtering on feedback no longer hangs
 
-            Switching tabs, opening a filter menu, expanding a card, and the
-            "working on it" indicators all used to appear from one frame to the
-            next. They now fade in. Nothing waits for an animation to finish —
-            everything is on screen and clickable exactly as early as it was
-            before, it just arrives less abruptly.
+            Combining the **feedback** filter with a search term could leave the
+            conversation list loading forever. The filter on its own was always
+            fine, which is why it looked random. Fixed, and the other filters
+            were checked for the same problem — they don't have it.
 
-            If you have reduced motion turned on in your system settings, none of
-            it animates.
+            ### Filters you can actually use
 
-            ### No more sideways jump while a window resizes
+            A lot of metadata keys — `entryLimit`, `testCase`, `transaction`,
+            `wheelchair` and others — showed only "not set" with none of their
+            real values. One key with thousands of unique values (the
+            conversation id) was quietly using up the whole list, and everything
+            alphabetically after it was cut off.
 
-            A scrollbar appearing part-way through an animation shifted
-            everything next to it and then shifted it back. Result lists, the
-            conversation list, filter menus and the Data and Settings windows
-            all stay put now.
+            Conversation ids and timestamps are no longer offered as filters at
+            all; they are unique per conversation or per message, so as filters
+            they only ever matched one thing. Values that showed as unreadable
+            blocks of raw data are now split into readable parts — existing
+            databases repair themselves the first time you open them.
 
-            Most visible on Windows, where scrollbars take up real space.
+            Every key now also offers **any**, the opposite of "not set", for
+            asking "was this set at all?" without picking every value by hand.
+
+            ### See the metadata on a single message
+
+            Bot messages that carry metadata now have a small tag button. It
+            opens a clean list of everything attached to that message, including
+            the conversation id and timestamp that are no longer useful as
+            filters but are often exactly what you want to read.
+
+            And when a metadata filter is on, the message that matched it is
+            highlighted, so you can see *why* a conversation is in your results
+            instead of hunting for it.
 
             ---
 
