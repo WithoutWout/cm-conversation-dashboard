@@ -3481,9 +3481,22 @@ fn build_session_filter_query(
         }
         _ => "",
     };
+    // `MATERIALIZED` is load-bearing, not a hint that might help.
+    //
+    // This relation is a constant — nothing in it correlates with the query
+    // that joins to it — but SQLite is free to inline a CTE, and with a search
+    // term present it did: the plan drove from `SCAN interactions_fts` and
+    // recomputed the *whole* feedback-origin relation once per matching row,
+    // JSON-parsing scalar function and correlated subquery included. A term
+    // matching n rows against m feedback sessions therefore cost n × m instead
+    // of n + m, which on a real database is not slow, it is unfinishable — the
+    // conversations list simply never came back.
+    //
+    // Without a search term the planner already chose to materialize it, which
+    // is why the pill alone was fast and the pill *plus* a query hung.
     let feedback_origins_cte = if is_feedback_filter {
         format!(
-            ", feedback_origins AS (\
+            ", feedback_origins AS MATERIALIZED (\
                 SELECT \
                     fb.session_uuid, \
                     COALESCE(origin.log_id, (\
@@ -3526,25 +3539,44 @@ fn build_session_filter_query(
     // message text and the entities that text triggered — and what lets an OR
     // group that needs an exact re-check carry its own WHERE clause.
     let mut match_selects: Vec<String> = Vec::new();
+    // With a feedback filter the search is deliberately narrowed to the rows the
+    // feedback was *about* — "thumbs-down on answers mentioning X" — and that
+    // narrowing used to be a JOIN against the `feedback_origins` CTE.
+    //
+    // A JOIN made the restriction the *inner loop* of the search: the plan drove
+    // from the FTS match and did a full `SCAN fo` for each row it produced, so a
+    // term matching n rows against m feedback origins cost n × m. As an `IN`,
+    // SQLite builds one ephemeral index over the origins and probes it per row,
+    // which is n log m — and the join order stops mattering.
+    //
+    // Collapsing duplicates is a bonus rather than a change: two thumbs on the
+    // same answer used to emit that row twice, and `GROUP BY session_uuid` threw
+    // the second one away again.
+    const FEEDBACK_ORIGIN_ROWS: &str =
+        " AND i.log_id IN (SELECT match_log_id FROM feedback_origins)";
+    const FEEDBACK_ORIGIN_ENTITY_ROWS: &str =
+        " AND e.log_id IN (SELECT match_log_id FROM feedback_origins)";
     let row_filter = if is_feedback_filter {
-        ""
+        FEEDBACK_ORIGIN_ROWS
     } else {
         search_row_filter
     };
+    // `feedback_origins` is already restricted to base_sessions, so the rows the
+    // `IN` admits carry that restriction with them.
     let interactions_from = if is_feedback_filter {
-        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id"
+        "interactions i"
     } else {
         "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
     };
     let fts_from = if is_feedback_filter {
-        "feedback_origins fo JOIN interactions i ON i.log_id = fo.match_log_id JOIN interactions_fts ON interactions_fts.rowid = i.log_id"
+        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid"
     } else {
         "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
     };
     // The entity table only carries a log_id, so a row-level filter (GenAI, low
     // recognition) needs the interaction row joined back in to be applied.
     let entity_from = if is_feedback_filter {
-        "entity_index e JOIN feedback_origins fo ON fo.match_log_id = e.log_id".to_string()
+        "entity_index e".to_string()
     } else if row_filter.is_empty() {
         "entity_index e JOIN base_sessions b ON b.session_uuid = e.session_uuid".to_string()
     } else {
@@ -3552,7 +3584,11 @@ fn build_session_filter_query(
          JOIN base_sessions b ON b.session_uuid = e.session_uuid"
             .to_string()
     };
-    let entity_row_filter = if is_feedback_filter { "" } else { row_filter };
+    let entity_row_filter = if is_feedback_filter {
+        FEEDBACK_ORIGIN_ENTITY_ROWS
+    } else {
+        row_filter
+    };
 
     fn table_exists(conn: &Connection, name: &str) -> bool {
         conn.query_row(
@@ -3926,35 +3962,16 @@ fn build_session_filter_query(
     })
 }
 
-#[tauri::command]
-async fn get_sessions(
-    db_state: State<'_, SharedDbState>,
-    args: GetSessionsArgs,
-) -> Result<SessionsPage, String> {
-    let db = db_state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let started = Instant::now();
-        let state = db.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("No database open.")?;
-
-        let page = args.page.unwrap_or(1).max(1);
-        let limit = 50i64;
-        let offset = (page - 1) * limit;
-
-        let mut filter_query = build_session_filter_query(conn, &args)?;
-
-        filter_query.param_values.push(Box::new(limit));
-        filter_query.param_values.push(Box::new(offset));
-        let p_limit = format!("?{}", filter_query.param_values.len() - 1);
-        let p_offset = format!("?{}", filter_query.param_values.len());
-        let params_ref: Vec<&dyn ToSql> = filter_query
-            .param_values
-            .iter()
-            .map(|b| b.as_ref())
-            .collect();
-
-        let sql = format!(
-            r#"WITH
+/// The one page of sessions the list actually renders, built on top of whatever
+/// [`build_session_filter_query`] resolved the filters and search to.
+///
+/// Split out of [`get_sessions`] so the perf harness can time the query the app
+/// really runs. Timing `SELECT COUNT(*) FROM filtered_sessions` instead is
+/// misleading by a wide margin: the count never has to sort, and it touches
+/// `filtered_sessions` once where this touches it twice.
+fn sessions_page_sql(fq: &SessionFilterQuery, p_limit: &str, p_offset: &str) -> String {
+    format!(
+        r#"WITH
 base_sessions AS (
     SELECT s.*
     FROM session_summary s
@@ -3999,12 +4016,39 @@ SELECT
 FROM total t
 LEFT JOIN page_rows p ON 1 = 1
 ORDER BY p.first_ts DESC"#,
-            base_where = filter_query.base_where.as_str(),
-            search_cte = filter_query.search_cte.as_str(),
-            filtered_from = filter_query.filtered_from.as_str(),
-            p_limit = p_limit,
-            p_offset = p_offset
-        );
+        base_where = fq.base_where.as_str(),
+        search_cte = fq.search_cte.as_str(),
+        filtered_from = fq.filtered_from.as_str(),
+    )
+}
+
+#[tauri::command]
+async fn get_sessions(
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+) -> Result<SessionsPage, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+
+        let page = args.page.unwrap_or(1).max(1);
+        let limit = 50i64;
+        let offset = (page - 1) * limit;
+
+        let mut filter_query = build_session_filter_query(conn, &args)?;
+
+        filter_query.param_values.push(Box::new(limit));
+        filter_query.param_values.push(Box::new(offset));
+        let p_limit = format!("?{}", filter_query.param_values.len() - 1);
+        let p_offset = format!("?{}", filter_query.param_values.len());
+        let params_ref: Vec<&dyn ToSql> = filter_query
+            .param_values
+            .iter()
+            .map(|b| b.as_ref())
+            .collect();
+        let sql = sessions_page_sql(&filter_query, &p_limit, &p_offset);
 
         // Cached: pagination and repeated searches with the same filter shape
         // reuse the already-compiled statement.
@@ -8333,6 +8377,161 @@ mod perf {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// Not an assertion — a measurement harness for the feedback pills. Run:
+    ///   cargo test --release perf::feedback_filter_cost -- --nocapture --ignored
+    ///
+    /// Feedback is a rare row in a large table, which is exactly the shape that
+    /// goes quadratic if the planner drives the wrong table first.
+    #[test]
+    #[ignore]
+    fn feedback_filter_cost() {
+        let (dir, db_path) = seed_feedback_db(120_000);
+        let conn = open_db(db_path.to_str().unwrap()).expect("open");
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
+            .unwrap_or(0);
+        let fb: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM interactions WHERE COALESCE(feedback_info,'') != ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let sessions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+            .unwrap_or(0);
+        let neg: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_summary WHERE has_neg_feedback = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        println!("{rows} interactions / {sessions} sessions, {fb} with feedback, {neg} negative\n");
+
+        let entities: i64 = conn
+            .query_row("SELECT COUNT(*) FROM entity_index", [], |r| r.get(0))
+            .unwrap_or(0);
+        println!("{entities} indexed entities\n");
+
+        // The default conversation scope is user text *and* entities, so the
+        // entity path is not an exotic case — it is what a plain search does.
+        let cases: Vec<(&str, &str, Option<&str>, bool)> = vec![
+            ("all, no query", "all", None, false),
+            ("feedback, no query", "neg_feedback", None, false),
+            ("feedback + text", "neg_feedback", Some("openingstijden"), false),
+            ("feedback + entities", "neg_feedback", Some("openingstijden"), true),
+            ("text, no feedback", "all", Some("openingstijden"), false),
+        ];
+        for (label, filter_kind, query, entities_on) in cases {
+            let args = GetSessionsArgs {
+                filter: Some(filter_kind.to_string()),
+                query: query.map(|q| q.to_string()),
+                query_entities: Some(entities_on),
+                ..Default::default()
+            };
+            let filter = label;
+            let mut fq = build_session_filter_query(&conn, &args).expect("build");
+            fq.param_values.push(Box::new(50i64));
+            fq.param_values.push(Box::new(0i64));
+            let p_limit = format!("?{}", fq.param_values.len() - 1);
+            let p_offset = format!("?{}", fq.param_values.len());
+            let sql = sessions_page_sql(&fq, &p_limit, &p_offset);
+            let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+            {
+                let mut plan = conn
+                    .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                    .expect("prepare plan");
+                let steps: Vec<String> = plan
+                    .query_map(params.as_slice(), |r| r.get::<_, String>(3))
+                    .expect("plan")
+                    .filter_map(|r| r.ok())
+                    .collect();
+                println!("── {filter} ──");
+                for step in steps {
+                    println!("   {step}");
+                }
+                use std::io::Write as _;
+                let _ = std::io::stdout().flush();
+            }
+            let started = Instant::now();
+            let mut stmt = conn.prepare(&sql).expect("prepare");
+            let mut rows = stmt.query(params.as_slice()).expect("run");
+            let mut hits = 0i64;
+            let mut page = 0i64;
+            while let Some(r) = rows.next().expect("row") {
+                hits = r.get::<_, i64>(10).unwrap_or(0);
+                page += 1;
+            }
+            println!(
+                "{filter:<22} {:>7} ms   {hits:>6} sessions   {page:>3} on the page",
+                started.elapsed().as_millis()
+            );
+            drop(rows);
+            drop(stmt);
+            if filter != "all, no query" {
+                let mut plan = conn
+                    .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                    .expect("prepare plan");
+                let steps: Vec<String> = plan
+                    .query_map(params.as_slice(), |r| r.get::<_, String>(3))
+                    .expect("plan")
+                    .filter_map(|r| r.ok())
+                    .collect();
+                for step in steps {
+                    println!("      {step}");
+                }
+                println!();
+            }
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A database where feedback is rare, references the answer it was about,
+    /// and is spread across sessions — the real shape.
+    fn seed_feedback_db(rows: i64) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("cai-fb-bench-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::create_dir_all(&dir);
+        let header = "LogId|InteractionUuid|SessionUuid|TimestampStart|TimestampEnd|Culture|\
+                      MainInteractionType|AllInteractionTypes|InteractionValue|OutputText|\
+                      ArticleIds|DialogPaths|RecognitionType|RecognitionQuality|\
+                      RecognitionDetails|Contexts|FeedbackInfo";
+        let mut s = String::with_capacity((rows as usize) * 300 + header.len());
+        s.push_str(header);
+        for id in 0..rows {
+            let sess = id / 9;
+            let day = 1 + (id % 28);
+            // Roughly one turn in forty gets a thumb, pointing at the answer
+            // immediately before it — which is what the origin join resolves.
+            let feedback = if id % 40 == 39 {
+                let score = if id % 80 == 39 { -1 } else { 1 };
+                format!("{{\"score\": {score}, \"originatingInteractionId\": \"u{}\"}}", id - 1)
+            } else {
+                String::new()
+            };
+            let kind = if feedback.is_empty() { "Question" } else { "Feedback" };
+            s.push('\n');
+            s.push_str(&format!(
+                "{id}|u{id}|s{sess}|03/{day:02}/2026 09:30:22|03/{day:02}/2026 09:30:25|nl|\
+                 {kind}|{kind}|wat zijn de openingstijden van het park {id}|\
+                 Het park is open van 10 tot 18 uur {id}|\
+                 12{id}|dn-4/node-9|Faq|88|\
+                 {{\"entityMatches\":[{{\"entityId\":5,\"displayName\":\"OPENINGSTIJDEN\",\
+                 \"name\":\"OPENINGSTIJDEN_1\",\"match\":\"openingstijden\"}}]}}|\
+                 [{{\"name\":\"lang\",\"value\":\"nl\"}}]|{feedback}"
+            ));
+        }
+        let csv = dir.join("seed.csv");
+        fs::write(&csv, s).expect("write csv");
+        let db_path = dir.join("fb.db");
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("open");
+        import_csv_into(&mut conn, csv.to_str().unwrap(), Some(36500), b'|', false)
+            .expect("import");
+        drop(conn);
+        (dir, db_path)
+    }
+
     // ── FTS shape: contentless vs the old content-storing table ──
 
     const STANDALONE: &str = "CREATE VIRTUAL TABLE interactions_fts USING fts5(\
@@ -8706,7 +8905,7 @@ mod conv_search {
              timestamp_end, culture, interaction_value, output_text, main_interaction_type, \
              all_interaction_types, article_ids, dialog_paths, recognition_details, \
              recognition_quality, imported_at) \
-             VALUES (?1,'u',?2,'2026-06-01T09:00:00','2026-06-01T09:00:00','nl',?3,?4,\
+             VALUES (?1,'u'||?1,?2,'2026-06-01T09:00:00','2026-06-01T09:00:00','nl',?3,?4,\
                      'Question','Question',?5,?6,?7,0.9,0)",
             params![
                 t.log_id,
@@ -8733,6 +8932,46 @@ mod conv_search {
             )
             .expect("index entity");
         }
+    }
+
+    /// A thumbs up/down row naming the interaction it was about, the way the
+    /// portal logs one.
+    fn add_feedback(conn: &Connection, log_id: i64, session: &str, score: i64, about: i64) {
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             timestamp_end, culture, interaction_value, output_text, main_interaction_type, \
+             all_interaction_types, feedback_info, recognition_quality, imported_at) \
+             VALUES (?1,'u'||?1,?2,'2026-06-01T09:00:00','2026-06-01T09:00:00','nl','',\
+                     '','Feedback','Feedback',?3,0,0)",
+            params![
+                log_id,
+                session,
+                format!(
+                    "{{\"score\": {score}, \"originatingInteractionId\": \"u{about}\"}}"
+                ),
+            ],
+        )
+        .expect("insert feedback");
+    }
+
+    /// The steps SQLite says it will take, one per line.
+    fn plan_for(conn: &Connection, args: &GetSessionsArgs) -> String {
+        let mut fq = build_session_filter_query(conn, args).expect("build query");
+        fq.param_values.push(Box::new(50i64));
+        fq.param_values.push(Box::new(0i64));
+        let p_limit = format!("?{}", fq.param_values.len() - 1);
+        let p_offset = format!("?{}", fq.param_values.len());
+        let sql = sessions_page_sql(&fq, &p_limit, &p_offset);
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .expect("prepare plan");
+        let steps: Vec<String> = stmt
+            .query_map(params.as_slice(), |r| r.get::<_, String>(3))
+            .expect("plan")
+            .filter_map(|r| r.ok())
+            .collect();
+        steps.join("\n")
     }
 
     /// The sessions a search returns, in a stable order.
@@ -8781,6 +9020,72 @@ mod conv_search {
             found(&conn, &text_args("parkeren | fietsen", "user")),
             vec!["user-said-it"],
             "every OR group must stay inside the scoped columns"
+        );
+    }
+
+    /// A feedback search looks at the answer the thumb was *about*, not at every
+    /// turn in the session. This is the semantics the performance fix had to
+    /// preserve — the restriction moved out of a JOIN and into an `IN`, and an
+    /// `IN` that admitted too much would silently widen the search instead.
+    #[test]
+    fn a_feedback_search_only_matches_the_answer_the_feedback_was_about() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "thumbed", user: "hoe laat open", bot: "wij openen om tien uur", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "thumbed", user: "en parkeren", bot: "parkeren kost acht euro", ..Default::default() });
+        add_feedback(&conn, 3, "thumbed", -1, 2);
+        // Same words, no feedback anywhere — must never come back.
+        add(&conn, Turn { log_id: 4, session: "unthumbed", user: "en parkeren", bot: "parkeren kost acht euro", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let feedback_args = |q: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            filter: Some("neg_feedback".to_string()),
+            ..Default::default()
+        };
+        // The answer the thumbs-down was about.
+        assert_eq!(found(&conn, &feedback_args("parkeren")), vec!["thumbed"]);
+        // A different turn in the same session is not what was rated.
+        assert!(
+            found(&conn, &feedback_args("openen")).is_empty(),
+            "a feedback search must not match turns the feedback was not about"
+        );
+    }
+
+    /// The hang. `feedback_origins` is a constant relation, but SQLite is free
+    /// to inline a CTE — and with a search term it did, recomputing the whole
+    /// thing (JSON-parsing scalar function and correlated subquery included)
+    /// once per row the search matched. Joining to it was just as bad from the
+    /// other side: a full `SCAN fo` per matching row.
+    ///
+    /// Measured on a 120k-row database, a term matching every row: the query
+    /// never finished at all, then 3.6 s once materialized, then 31 ms once the
+    /// join became an `IN`. Asserting the plan rather than a duration because a
+    /// timing threshold in a test is a flake waiting to happen.
+    #[test]
+    fn a_feedback_search_never_re_derives_its_origins_per_row() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "s", user: "en parkeren", bot: "parkeren kost acht euro", ..Default::default() });
+        add_feedback(&conn, 2, "s", -1, 1);
+        rebuild_session_summary(&conn).expect("summary");
+
+        let plan = plan_for(
+            &conn,
+            &GetSessionsArgs {
+                query: Some("parkeren".to_string()),
+                filter: Some("neg_feedback".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(
+            plan.contains("MATERIALIZE feedback_origins"),
+            "feedback_origins must be evaluated once, not inlined into the search loop:\n{plan}"
+        );
+        // Guards the other half against reintroduction: the `fo` alias only
+        // exists if the `IN` goes back to being a JOIN, and a scan of it is
+        // what made the materialized version still take 3.6 s.
+        assert!(
+            !plan.contains("SCAN fo"),
+            "the origins must be probed, never scanned per matching row:\n{plan}"
         );
     }
 
