@@ -8377,14 +8377,15 @@ mod perf {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    /// Not an assertion — a measurement harness for the feedback pills. Run:
-    ///   cargo test --release perf::feedback_filter_cost -- --nocapture --ignored
+    /// Not an assertion — a measurement harness for every conversations filter
+    /// pill, alone and combined with a search. Run:
+    ///   cargo test --release perf::conv_filter_cost -- --nocapture --ignored
     ///
     /// Feedback is a rare row in a large table, which is exactly the shape that
     /// goes quadratic if the planner drives the wrong table first.
     #[test]
     #[ignore]
-    fn feedback_filter_cost() {
+    fn conv_filter_cost() {
         let (dir, db_path) = seed_feedback_db(120_000);
         let conn = open_db(db_path.to_str().unwrap()).expect("open");
         let rows: i64 = conn
@@ -8416,12 +8417,37 @@ mod perf {
 
         // The default conversation scope is user text *and* entities, so the
         // entity path is not an exotic case — it is what a plain search does.
+        let q = Some("openingstijden");
         let cases: Vec<(&str, &str, Option<&str>, bool)> = vec![
             ("all, no query", "all", None, false),
-            ("feedback, no query", "neg_feedback", None, false),
-            ("feedback + text", "neg_feedback", Some("openingstijden"), false),
-            ("feedback + entities", "neg_feedback", Some("openingstijden"), true),
-            ("text, no feedback", "all", Some("openingstijden"), false),
+            ("all + text", "all", q, false),
+            ("neg_feedback", "neg_feedback", None, false),
+            ("neg_feedback + text", "neg_feedback", q, false),
+            ("neg_feedback + entities", "neg_feedback", q, true),
+            ("pos_feedback + text", "pos_feedback", q, false),
+            ("genai", "genai", None, false),
+            ("genai + text", "genai", q, false),
+            ("genai + entities", "genai", q, true),
+            ("low_recog", "low_recog", None, false),
+            ("low_recog + text", "low_recog", q, false),
+            ("low_recog + entities", "low_recog", q, true),
+            ("zero_recog", "zero_recog", None, false),
+            ("zero_recog + text", "zero_recog", q, false),
+            ("zero_recog + entities", "zero_recog", q, true),
+        ];
+        // Every filter combined with a search — the shape the feedback pill
+        // hung in — printed in full, so a bad join order is visible and not
+        // merely inferred from a duration.
+        let plans_wanted = [
+            "neg_feedback + text",
+            "genai + text",
+            "low_recog + text",
+            "zero_recog + text",
+            // The recognition pills are the only other filter with a CTE of
+            // their own, and it is used on the *no query* path — so that is
+            // where their plan is worth reading.
+            "low_recog",
+            "zero_recog",
         ];
         for (label, filter_kind, query, entities_on) in cases {
             let args = GetSessionsArgs {
@@ -8469,7 +8495,7 @@ mod perf {
             );
             drop(rows);
             drop(stmt);
-            if filter != "all, no query" {
+            if plans_wanted.contains(&filter) {
                 let mut plan = conn
                     .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
                     .expect("prepare plan");
@@ -8510,13 +8536,25 @@ mod perf {
             } else {
                 String::new()
             };
-            let kind = if feedback.is_empty() { "Question" } else { "Feedback" };
+            // Every filter pill needs rows it actually matches, or its timing is
+            // just measuring how fast an empty result set comes back.
+            let (kind, all_kinds, recog_type, quality) = if !feedback.is_empty() {
+                ("Feedback", "Feedback", "", 0)
+            } else if id % 17 == 0 {
+                ("GenerativeAI", "QA,GenerativeAI", "GenerativeAI", 0)
+            } else if id % 13 == 0 {
+                ("Question", "Question", "Faq", 35) // below the default 60
+            } else if id % 11 == 0 {
+                ("Question", "Question", "Faq", 0) // zero recognition
+            } else {
+                ("Question", "Question", "Faq", 88)
+            };
             s.push('\n');
             s.push_str(&format!(
                 "{id}|u{id}|s{sess}|03/{day:02}/2026 09:30:22|03/{day:02}/2026 09:30:25|nl|\
-                 {kind}|{kind}|wat zijn de openingstijden van het park {id}|\
+                 {kind}|{all_kinds}|wat zijn de openingstijden van het park {id}|\
                  Het park is open van 10 tot 18 uur {id}|\
-                 12{id}|dn-4/node-9|Faq|88|\
+                 12{id}|dn-4/node-9|{recog_type}|{quality}|\
                  {{\"entityMatches\":[{{\"entityId\":5,\"displayName\":\"OPENINGSTIJDEN\",\
                  \"name\":\"OPENINGSTIJDEN_1\",\"match\":\"openingstijden\"}}]}}|\
                  [{{\"name\":\"lang\",\"value\":\"nl\"}}]|{feedback}"
