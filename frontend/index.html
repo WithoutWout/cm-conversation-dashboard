@@ -24438,6 +24438,8 @@
       const MSG_META_TAIL_INSET = 16
       // In step with the `.msg-meta-overlay.closing` animation.
       const MSG_META_OUT_MS = 120
+      // One notch of a line-mode wheel, for forwarding a scroll on.
+      const WHEEL_LINE_PX = 16
 
       /// The tag button the open bubble belongs to, so it can be re-placed as
       /// the thread scrolls. Null whenever the bubble is closed.
@@ -24601,6 +24603,49 @@
         capture: true,
         passive: true,
       })
+
+      /**
+       * A wheel over the bubble scrolls the thread underneath it.
+       *
+       * Removing the backdrop made the thread scrollable again *around* the
+       * bubble, but the bubble itself is a fixed-position island: the wheel
+       * lands on it, its own list is usually short enough not to scroll, and
+       * because it is not a descendant of `.chat-thread` there is nothing for
+       * the scroll to chain into. So the one place the pointer naturally
+       * rests — the thing you just opened — was the one place scrolling died.
+       *
+       * Its own list still gets first refusal, and only while it can actually
+       * move; at either end the delta goes to the thread rather than stopping
+       * dead, which is what makes a long value list feel continuous with the
+       * conversation behind it.
+       */
+      document.getElementById("msgMetaPop").addEventListener(
+        "wheel",
+        (e) => {
+          const thread = _msgMetaAnchor && _msgMetaAnchor.closest(".chat-thread")
+          if (!thread) return
+          const body = document.getElementById("msgMetaBody")
+          if (body.contains(e.target)) {
+            const room =
+              e.deltaY < 0
+                ? body.scrollTop
+                : body.scrollHeight - body.clientHeight - body.scrollTop
+            if (room > 0.5) return
+          }
+          // `deltaMode` is pixels in every engine this ships on, but a wheel
+          // reporting lines or pages would otherwise move the thread by three
+          // pixels a notch.
+          const dy =
+            e.deltaMode === 1
+              ? e.deltaY * WHEEL_LINE_PX
+              : e.deltaMode === 2
+                ? e.deltaY * thread.clientHeight
+                : e.deltaY
+          thread.scrollTop += dy
+          e.preventDefault()
+        },
+        { passive: false },
+      )
       // A resize moves the button out from under the bubble the same way.
       window.addEventListener("resize", _msgMetaOnScroll)
 
