@@ -5670,17 +5670,51 @@
         text-overflow: ellipsis;
         opacity: 0.85;
       }
-      /* Bubble detail expansion */
+      /* Bubble detail expansion.
+
+         It used to be `display: none` ↔ `block`, so the bubble jumped to its
+         new height between one frame and the next and the thread under it
+         jumped with it. This is the 0fr → 1fr grid trick: it animates to the
+         content's natural height without anyone measuring it, which matters
+         here because the detail is built per row and there is nothing sensible
+         to hard-code. `min-height: 0` on the item is what lets 0fr actually
+         collapse it, and the clip is what hides the content on the way.
+
+         **The animated item carries no padding or border**, and that is not a
+         style preference. `min-height: 0` zeroes an item's *content* box, but
+         padding and border sit outside it, so the row's automatic minimum stays
+         at their total — a collapsed detail kept 23px of height and every
+         bubble in the thread grew by that much. They live on the container and
+         animate alongside the row, which also gives the separator something to
+         wipe in on instead of appearing at full strength. */
       .bubble-detail {
-        display: none;
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        display: grid;
+        grid-template-rows: 0fr;
+        overflow: hidden;
+        opacity: 0;
+        margin-top: 0;
+        padding-top: 0;
+        /* Clearance for the hint and tag button, which sit in the bubble's
+           bottom-right corner and hang over the detail once it is open. */
+        padding-bottom: 0;
+        border-top: 0 solid rgba(255, 255, 255, 0.1);
         font-size: 0.75rem;
         color: var(--muted);
+        transition: grid-template-rows 190ms ease, margin-top 190ms ease,
+          padding-top 190ms ease, padding-bottom 190ms ease,
+          border-top-width 190ms ease, opacity 130ms ease;
       }
       .bubble-detail.open {
-        display: block;
+        grid-template-rows: 1fr;
+        opacity: 1;
+        margin-top: 8px;
+        padding-top: 8px;
+        padding-bottom: 14px;
+        border-top-width: 1px;
+      }
+      .bubble-detail-inner {
+        min-height: 0;
+        overflow: hidden;
       }
       .bubble-detail-row {
         margin-bottom: 5px;
@@ -5721,6 +5755,39 @@
         color: var(--muted);
         opacity: 0.6;
         pointer-events: none;
+      }
+      /* Both controls are absolutely positioned in the bubble's bottom-right
+         corner. That corner is free space right up until the last line of the
+         answer reaches it — and then the text runs underneath them, which is
+         what the screenshot showed.
+
+         The fix is an inline spacer at the end of the text, as wide as the two
+         controls. While the last line has room for it, it sits on that line and
+         costs nothing; when it doesn't, it wraps and takes exactly one short
+         line with it, leaving the corner clear. So the bubble stays as compact
+         as it is today and only grows in the case that was broken.
+
+         Reserving it in the flow instead — a footer row, or padding on the
+         bubble — would have added that height to every message, including the
+         overwhelming majority that never needed it.
+
+         The widths are the controls' measured reach into the content box (36px
+         for the hint alone, 58px with the tag button beside it) plus a few
+         pixels so the text stops short of them rather than up against them. */
+      .bubble-gutter {
+        display: inline-block;
+        width: 40px;
+        height: 1px;
+      }
+      .bubble:has(.bubble-meta-btn) .bubble-gutter {
+        width: 62px;
+      }
+      /* With the details open the controls hang over the bottom of the expanded
+         block instead, which reserves the corner itself
+         (`.bubble-detail-inner`'s padding). A spacer stranded beside the text
+         would just be a hole in the middle of the bubble. */
+      .bubble:has(.bubble-detail.open) .bubble-gutter {
+        display: none;
       }
       /* The metadata button shares the bottom-right corner with the details
          hint rather than taking the opposite one: a one-line answer is short
@@ -5793,24 +5860,24 @@
          the screen severs it from the one thing that gives it meaning — you
          lose which bubble you were reading the moment it opens. Anchored, the
          answer stays next to the question. */
+      /* No backdrop, deliberately. One would catch outside clicks for free, but
+         it also swallows the wheel, and the thread has to stay scrollable with
+         the bubble riding along on its tag — see `_msgMetaOnScroll`. Outside
+         clicks are a document listener instead. `pointer-events: none` on the
+         layer so it cannot intercept anything it is not; the bubble itself
+         switches them back on. */
       .msg-meta-overlay {
         display: none;
         position: fixed;
         inset: 0;
         z-index: 400;
+        pointer-events: none;
       }
       .msg-meta-overlay.open {
         display: block;
       }
-      /* Catches every click outside the bubble. A real element rather than a
-         document listener, so nothing can slip past it — the same idiom as
-         `.ctx-modal-backdrop`. It also stops the thread scrolling underneath,
-         which is what keeps the bubble attached to its anchor. */
-      .msg-meta-backdrop {
-        position: absolute;
-        inset: 0;
-      }
       .msg-meta-pop {
+        pointer-events: auto;
         position: absolute;
         width: min(420px, calc(100vw - 20px));
         max-height: min(440px, 62vh);
@@ -6407,6 +6474,18 @@
           transform: none;
         }
       }
+      /* The exit `pop-in` never had. Deliberately a touch quicker than the
+         entrance: an arrival is worth watching, a dismissal is not. */
+      @keyframes pop-out {
+        from {
+          opacity: 1;
+          transform: none;
+        }
+        to {
+          opacity: 0;
+          transform: scale(0.97) translateY(-3px);
+        }
+      }
       @keyframes toast-out {
         to {
           opacity: 0;
@@ -6457,6 +6536,14 @@
       .msg-meta-overlay.open .msg-meta-pop.is-above {
         transform-origin: var(--tail-x, 50%) bottom;
       }
+      /* …and shrinks back into it. `pop-in` reversed rather than a fade: a
+         bubble that grew out of the tag and then simply vanished left you
+         wondering whether it had gone somewhere. `forwards` holds the end
+         frame, so nothing flashes back to full size before the class is
+         removed on the timer. */
+      .msg-meta-overlay.closing .msg-meta-pop {
+        animation: pop-out 120ms ease forwards;
+      }
 
       /* Loading affordances. A fade takes the flash off a fast read without
          holding anything back on a slow one — the spinner is still in the
@@ -6493,6 +6580,7 @@
         .ctx-modal-overlay.open .ctx-modal-box,
         .add-to-collection-menu.open,
         .msg-meta-overlay.open .msg-meta-pop,
+        .msg-meta-overlay.closing .msg-meta-pop,
         .pane-loading,
         .app-loading-overlay.open,
         .conv-search-loading-overlay.visible,
@@ -6507,8 +6595,16 @@
           opacity: 0;
         }
         .modal-box.resizing,
+        .bubble-detail,
         .is-busy {
           transition: none;
+        }
+        /* The exit is animation-driven, and the timer that takes the bubble
+           down does not know about this media query — so it still has to end
+           up hidden, just without the travel. */
+        .msg-meta-overlay.closing .msg-meta-pop {
+          animation: none;
+          opacity: 0;
         }
       }
       .bubble-ts {
@@ -8994,7 +9090,6 @@
       filters because their values are unique per conversation or per message.
     -->
     <div class="msg-meta-overlay" id="msgMetaModal">
-      <div class="msg-meta-backdrop" onclick="closeMessageMetadata()"></div>
       <div class="msg-meta-pop" id="msgMetaPop">
         <div class="msg-meta-tail"></div>
         <div class="msg-meta-header">
@@ -18646,10 +18741,10 @@
                   ? " meta-match-highlight"
                   : ""
                 inner += `<div class="bubble ${bubbleClass}${metaHitClass}" onclick="toggleBubbleDetail(${br.logId})">
-                  ${body}
+                  ${body}<span class="bubble-gutter"></span>
                   ${bubbleMetaButtonHtml(br)}
                   <span class="bubble-expand-hint">&#x25BE; details</span>
-                  <div class="bubble-detail" data-logid="${br.logId}">${detail}</div>
+                  <div class="bubble-detail" data-logid="${br.logId}"><div class="bubble-detail-inner">${detail}</div></div>
                 </div>${optionsHtml}${ctasHtml}`
               })
               const tsRow = turn.botRows[turn.botRows.length - 1]
@@ -24341,20 +24436,28 @@
       const MSG_META_GAP = 9
       const MSG_META_EDGE = 10
       const MSG_META_TAIL_INSET = 16
+      // In step with the `.msg-meta-overlay.closing` animation.
+      const MSG_META_OUT_MS = 120
 
-      /// The tag button the open bubble belongs to, so it can be re-placed on
-      /// resize. Null whenever the bubble is closed.
+      /// The tag button the open bubble belongs to, so it can be re-placed as
+      /// the thread scrolls. Null whenever the bubble is closed.
       let _msgMetaAnchor = null
+      let _msgMetaCloseTimer = null
 
       /**
        * Open the metadata bubble on a message's tag button.
        *
-       * There is no explicit toggle: while the bubble is open its backdrop
-       * covers the whole window, so a second click on the same button lands on
-       * the backdrop and closes it — which is the behaviour a toggle would have
-       * given, without a second code path that can disagree with the first.
+       * Clicking the same tag again closes it. The tag's own handler stops the
+       * click propagating (the bubble underneath toggles its details), so the
+       * outside-click listener never sees it and the toggle has to live here.
        */
       function openMessageMetadata(logId, btn) {
+        if (_msgMetaIsOpen() && _msgMetaAnchor === btn) {
+          closeMessageMetadata()
+          return
+        }
+        clearTimeout(_msgMetaCloseTimer)
+        document.getElementById("msgMetaModal").classList.remove("closing")
         const pairs = _msgMetaById.get(logId) || []
         const body = document.getElementById("msgMetaBody")
         body.innerHTML = pairs.length
@@ -24429,29 +24532,77 @@
         pop.style.setProperty("--tail-x", p.tailX + "px")
       }
 
+      /// Plays the exit, then takes the bubble down. `MSG_META_OUT_MS` must stay
+      /// in step with the `.msg-meta-overlay.closing` animation.
       function closeMessageMetadata() {
-        document.getElementById("msgMetaModal").classList.remove("open")
+        const overlay = document.getElementById("msgMetaModal")
+        if (!overlay.classList.contains("open")) return
         _msgMetaAnchor = null
+        overlay.classList.add("closing")
+        clearTimeout(_msgMetaCloseTimer)
+        _msgMetaCloseTimer = setTimeout(() => {
+          overlay.classList.remove("open", "closing")
+        }, MSG_META_OUT_MS)
       }
 
+      /// Open *and not on its way out* — a bubble mid-exit must not be treated
+      /// as something to re-place, toggle against or close again.
       function _msgMetaIsOpen() {
-        return document
-          .getElementById("msgMetaModal")
-          .classList.contains("open")
+        const cl = document.getElementById("msgMetaModal").classList
+        return cl.contains("open") && !cl.contains("closing")
       }
 
-      // Escape closes it, alongside the ✕ and a click on the backdrop. The
-      // listener is permanent and guards on the open state, matching how the
-      // confirm overlay does it.
+      // Escape closes it, alongside the ✕ and a click anywhere outside.
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && _msgMetaIsOpen()) closeMessageMetadata()
       })
-      // The bubble is pinned to a button in window coordinates, so a resize
-      // moves the button out from under it. The backdrop stops the thread
-      // scrolling, so that is the only way the two can come apart.
-      window.addEventListener("resize", () => {
-        if (_msgMetaIsOpen()) _msgMetaPlace()
+
+      // Outside click. There is no backdrop to catch it — one would block the
+      // thread's scrolling, and the bubble is supposed to travel with its tag.
+      // Clicks inside the bubble are obviously exempt; so are tag buttons,
+      // which own the toggle. (They stop propagation, so this is a belt to
+      // that brace rather than the only guard.)
+      document.addEventListener("click", (e) => {
+        if (!_msgMetaIsOpen()) return
+        if (e.target.closest("#msgMetaPop, .bubble-meta-btn")) return
+        closeMessageMetadata()
       })
+
+      /**
+       * Keep the bubble on its tag as the thread scrolls, and let go when the
+       * tag does.
+       *
+       * Capture phase, because a scrolling `.chat-thread` does not bubble its
+       * scroll event to the document. Passive, because this only reads layout.
+       *
+       * Closing once the anchor leaves its scroller is the part that matters:
+       * the tag scrolls under the chat header long before it leaves the window,
+       * and a bubble left pointing at the header points at nothing.
+       */
+      function _msgMetaOnScroll() {
+        if (!_msgMetaIsOpen()) return
+        const btn = _msgMetaAnchor
+        if (!btn || !btn.isConnected) {
+          closeMessageMetadata()
+          return
+        }
+        const r = btn.getBoundingClientRect()
+        const holder = btn.closest(".chat-thread")
+        const lo = holder
+          ? holder.getBoundingClientRect()
+          : { top: 0, bottom: window.innerHeight }
+        if (r.bottom <= lo.top || r.top >= lo.bottom) {
+          closeMessageMetadata()
+          return
+        }
+        _msgMetaPlace()
+      }
+      document.addEventListener("scroll", _msgMetaOnScroll, {
+        capture: true,
+        passive: true,
+      })
+      // A resize moves the button out from under the bubble the same way.
+      window.addEventListener("resize", _msgMetaOnScroll)
 
       /**
        * One metadata entry.
@@ -25018,10 +25169,10 @@
                 ? " meta-match-highlight"
                 : ""
               html += `<div class="bubble ${bubbleClass}${highlightClass}${feedbackOriginClass}${metaHitClass}" onclick="toggleBubbleDetail(${br.logId})">
-                ${body}
+                ${body}<span class="bubble-gutter"></span>
                 ${bubbleMetaButtonHtml(br)}
                 <span class="bubble-expand-hint">▾ details</span>
-                <div class="bubble-detail${detailOpenClass}" data-logid="${br.logId}">${detail}</div>
+                <div class="bubble-detail${detailOpenClass}" data-logid="${br.logId}"><div class="bubble-detail-inner">${detail}</div></div>
               </div>${optionsHtml}${ctasHtml}${asksHtml}`
             })
             const tsRow = turn.botRows[turn.botRows.length - 1]
