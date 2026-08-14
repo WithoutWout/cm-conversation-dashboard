@@ -449,6 +449,15 @@ The tag filter popover aggregates `OutputMetadata` across the whole database; `#
 - **Nothing is hidden.** `conversation_id` and `CURRENT_DATETIME` are excluded from the *filter index* because a chip matching one message is useless; on the message itself they are exactly what someone is looking for.
 - `_msgMetaById` is keyed by `logId` and filled during render rather than read off a data attribute, because the two chat paths hold their rows differently (`activeInteractions` for the main view, a local array for Flagged) and a JSON blob per bubble would bloat the DOM of a long conversation.
 
+**With a tag filter on, the chat says which message carries it.** `chatMetaFilters` mirrors the applied metadata filters into the opened chat exactly as `chatMatchEntities` mirrors the E toggle, and the matching bubble gets `.meta-match-highlight`, its tag button turns accent and stops being quiet, and the popover marks the value that did it. Without this a tag filter was the one filter whose reason was invisible: the conversation was in the list and nothing in it said why.
+
+- **Read from `lastConvSearchArgs`, not the live popover state.** `convMetadataFilters` changes as soon as a chip is clicked, so the chat would mark messages against a filter that had not been searched with yet.
+- **`__not_set__` is dropped, and that is the point.** It matched the session because *no* message carries the key, so there is no message to point at; marking every message would be noise dressed up as an answer. `setChatMetaFilters` filters it out rather than every call site remembering to.
+- **Any one filter is enough to mark a message.** The backend ANDs across names at the *session* level, so two different messages can legitimately satisfy two different names.
+- **Marked at leaf level in the popover.** A nested value's sub-keys are separate filters, so `abortTransactionAction.topicName` highlights that sub-row and not the whole `abortTransactionAction` block.
+- The accent is deliberate: `<mark>`, the entity `.is-hit` chips and this all mean "here is your match", where the recognition and feedback highlights use their own colours for their own meanings.
+- `rowMetaSet` caches on the row like `rowEntityFields` does — a long chat re-renders on every filter change and this parses JSON per message. Safe to cache because the set is derived from the row alone, never from the filters.
+
 ### `{{variable}}` is a redacted bot value
 
 The bot side of the same story as `#Variable#` below: the answer was personalised for the user, but the log keeps the template (`Hoi {{name}}!`, `{{attraction\_name}}`, `{{emailAddress}}`, `{{opening_hours_from}}`). `templateVarChip(name)` renders each one as an inline `.tpl-var` chip instead of raw braces, and normalises the export's escaped `\_` back to `_`.

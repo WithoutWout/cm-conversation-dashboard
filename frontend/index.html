@@ -5757,6 +5757,35 @@
         color: var(--accent);
         background: rgba(124, 106, 247, 0.14);
       }
+      /* The message that satisfies an active tag filter. Accent, like <mark>
+         and the entity chips, so "this is your match" reads as one idea however
+         the match was made — and unlike the recognition and feedback
+         highlights, which use their own colours for their own meanings. */
+      .bubble.meta-match-highlight {
+        border-color: rgba(124, 106, 247, 0.65) !important;
+        background: rgba(124, 106, 247, 0.07) !important;
+        box-shadow: 0 0 0 1px rgba(124, 106, 247, 0.35);
+      }
+      /* Its button stops being quiet — the highlight says "this one", and the
+         button is where you go to see what it carries. */
+      .bubble-meta-btn.is-hit {
+        opacity: 1;
+        color: var(--accent);
+      }
+      /* …and inside the dialog, which value did it. Marked at leaf level: a
+         nested value's sub-keys are separate filters, so highlighting the whole
+         block would point at the wrong half. */
+      .msg-meta-row.is-hit,
+      .msg-meta-sub.is-hit {
+        background: rgba(124, 106, 247, 0.16);
+        border-radius: 5px;
+        padding-left: 6px;
+        padding-right: 6px;
+      }
+      .msg-meta-row.is-hit .msg-meta-key,
+      .msg-meta-sub.is-hit .msg-meta-subkey {
+        color: var(--accent);
+      }
       /* Metadata popover for one message */
       .msg-meta-modal-box {
         width: min(560px, 94vw);
@@ -18493,7 +18522,10 @@
                       .join("")}</div>`
                   : ""
                 const detail = renderBubbleDetail(br)
-                inner += `<div class="bubble ${bubbleClass}" onclick="toggleBubbleDetail(${br.logId})">
+                const metaHitClass = rowMatchesMetaFilters(br)
+                  ? " meta-match-highlight"
+                  : ""
+                inner += `<div class="bubble ${bubbleClass}${metaHitClass}" onclick="toggleBubbleDetail(${br.logId})">
                   ${body}
                   ${bubbleMetaButtonHtml(br)}
                   <span class="bubble-expand-hint">&#x25BE; details</span>
@@ -23422,6 +23454,12 @@
         // …and the entity scope with it, so the turns the chat shows as matched
         // are the same turns that put this conversation in the result list.
         chatMatchEntities = !convSearchIds && !!convSearchEntities
+        // …and the metadata filters, for the same reason: a tag filter is a
+        // reason this conversation is in the list, so the chat has to be able
+        // to say which message carries it.
+        setChatMetaFilters(
+          lastConvSearchArgs && lastConvSearchArgs.metadataFilters,
+        )
         document
           .getElementById("chatOptRegex")
           .classList.toggle("on", chatSearchRegex)
@@ -24095,11 +24133,72 @@
       function bubbleMetaButtonHtml(row) {
         if (!rememberMessageMeta(row)) return ""
         const n = _msgMetaById.get(row.logId).length
-        return `<button class="bubble-meta-btn" title="${n} metadata ${
-          n === 1 ? "value" : "values"
-        } on this message" onclick="event.stopPropagation();openMessageMetadata(${
+        // When a tag filter is on, the button on the message that satisfies it
+        // stops being quiet: the highlight says "this one", and the button is
+        // where you go to see what it actually carries.
+        const hit = rowMatchesMetaFilters(row)
+        const label = hit
+          ? "Matches your metadata filter"
+          : `${n} metadata ${n === 1 ? "value" : "values"} on this message`
+        return `<button class="bubble-meta-btn${
+          hit ? " is-hit" : ""
+        }" title="${esc(
+          label,
+        )}" onclick="event.stopPropagation();openMessageMetadata(${
           row.logId
         })"><svg class=ui-icon><use href=#i-tag /></svg></button>`
+      }
+
+      /**
+       * The metadata filters that produced the current result set.
+       *
+       * Mirrored into the chat when a session is opened, the way
+       * `chatMatchEntities` mirrors the E toggle, so the messages the chat marks
+       * are the ones that put this conversation in the list — read from
+       * `lastConvSearchArgs` rather than the live popover state, which the user
+       * can change without re-running the search.
+       *
+       * Only *positive* filters are kept. `__not_set__` matched the session
+       * because no message carries the key, so there is no message to point at;
+       * marking every message would be noise dressed up as an answer.
+       */
+      let chatMetaFilters = []
+
+      function setChatMetaFilters(filters) {
+        chatMetaFilters = (filters || []).filter(
+          (f) => f.value !== "__not_set__",
+        )
+      }
+
+      /// A message's metadata as the `{name: [values]}` shape the filter
+      /// predicate expects. Cached on the row — a long conversation re-renders
+      /// on every filter change, and this parses JSON per message.
+      function rowMetaSet(row) {
+        if (row._metaSet) return row._metaSet
+        const set = {}
+        for (const pair of parseMessageMeta(row.outputMetadata)) {
+          for (const [name, value] of _flattenMetaEntry(
+            pair.key,
+            pair.value,
+            [],
+            0,
+          )) {
+            ;(set[name] ||= []).push(String(value))
+          }
+        }
+        row._metaSet = set
+        return set
+      }
+
+      /// Is this message a reason the conversation matched?
+      ///
+      /// Any one filter is enough: the backend ANDs across names at the
+      /// *session* level, so two different messages can satisfy two different
+      /// names and both are legitimately the reason.
+      function rowMatchesMetaFilters(row) {
+        if (!chatMetaFilters.length) return false
+        const set = rowMetaSet(row)
+        return chatMetaFilters.some((f) => _tagFilterMatches(set, f))
       }
 
       /// The `[{key, value}]` array the interaction log stores, as pairs.
@@ -24142,9 +24241,23 @@
         const nested =
           leaves.length > 1 ||
           (leaves.length === 1 && leaves[0][0] !== pair.key)
+        // Which leaf is the filter's doing. Marked at leaf level, because a
+        // nested value's sub-keys are separate filters and highlighting the
+        // whole block would point at the wrong half.
+        const isHit = (name, value) =>
+          chatMetaFilters.some(
+            (f) =>
+              f.name === name &&
+              (f.value === "__any__" || f.value === String(value)),
+          )
+            ? " is-hit"
+            : ""
         if (!nested) {
           const v = leaves.length ? leaves[0][1] : String(pair.value ?? "")
-          return `<div class="msg-meta-row"><span class="msg-meta-key">${esc(
+          return `<div class="msg-meta-row${isHit(
+            pair.key,
+            v,
+          )}"><span class="msg-meta-key">${esc(
             pair.key,
           )}</span>${_msgMetaValueHtml(v)}</div>`
         }
@@ -24154,7 +24267,10 @@
             const short = name.startsWith(pair.key + ".")
               ? name.slice(pair.key.length + 1)
               : name
-            return `<div class="msg-meta-sub"><span class="msg-meta-subkey">${esc(
+            return `<div class="msg-meta-sub${isHit(
+              name,
+              value,
+            )}"><span class="msg-meta-subkey">${esc(
               short,
             )}</span>${_msgMetaValueHtml(value)}</div>`
           })
@@ -24673,7 +24789,10 @@
                 (lowRecogActive && isBrLowRecog)
                   ? " open"
                   : ""
-              html += `<div class="bubble ${bubbleClass}${highlightClass}${feedbackOriginClass}" onclick="toggleBubbleDetail(${br.logId})">
+              const metaHitClass = rowMatchesMetaFilters(br)
+                ? " meta-match-highlight"
+                : ""
+              html += `<div class="bubble ${bubbleClass}${highlightClass}${feedbackOriginClass}${metaHitClass}" onclick="toggleBubbleDetail(${br.logId})">
                 ${body}
                 ${bubbleMetaButtonHtml(br)}
                 <span class="bubble-expand-hint">▾ details</span>
@@ -24697,6 +24816,18 @@
             convSessionFilter === "low_recog" ||
             convSessionFilter === "neg_feedback" ||
             convSessionFilter === "pos_feedback"
+          // A tag filter is a filter too, and its match can be anywhere in a
+          // long conversation. Handled before the pill filters and independently
+          // of them, since the two can be on at once.
+          if (chatMetaFilters.length) {
+            requestAnimationFrame(() => {
+              if (renderSeq !== chatRenderSeq) return
+              const hit = thread.querySelector(".meta-match-highlight")
+              if (hit)
+                hit.scrollIntoView({ behavior: "smooth", block: "center" })
+            })
+            return
+          }
           if (!isFilterScroll) return
           const isFeedbackFilter =
             convSessionFilter === "neg_feedback" ||
