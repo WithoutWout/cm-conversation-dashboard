@@ -1310,7 +1310,9 @@ const META_METADATA_INDEX_BUILT: &str = "metadata_index_built";
 ///
 /// 1. initial
 /// 2. nested values flattened to `key.subkey`; `conversation_id` excluded
-const METADATA_INDEX_RULES_VERSION: i64 = 2;
+/// 3. `CURRENT_DATETIME` excluded — one value per message, so every chip
+///    matched exactly one message
+const METADATA_INDEX_RULES_VERSION: i64 = 3;
 
 // ── Flagged DB schema ────────────────────────────────────────────────────────
 
@@ -2588,21 +2590,33 @@ struct CsvMetadataPair<'a> {
 /// back in the filter chips, and `Polles Keuken` should not become
 /// `polles keuken` there. Pairs with an empty key are dropped — they would
 /// index a row nobody can find.
-/// Metadata keys that identify the conversation rather than describe the answer.
+/// Metadata keys whose value is unique or near-unique per conversation, and so
+/// cannot be a filter.
 ///
-/// `conversation_id` is unique per session, so as a filter it is one chip per
-/// conversation, each matching exactly that one conversation — no question
-/// anyone asks. It is also actively harmful: the options query used to take the
-/// first 500 name/value pairs in name order, and thousands of unique ids ate the
-/// whole budget, leaving every key that sorts after `conversation_id`
+/// `conversation_id` is one value per session and `CURRENT_DATETIME` one per
+/// message: as chips they are thousands of entries each matching a single thing,
+/// which is not a question anyone asks. They were also actively harmful — the
+/// options query used to take the first 500 name/value pairs in name order, so
+/// these consumed the whole budget and left every key sorting after them
 /// (`entryLimit`, `testCase`, `transaction`, `wheelchair`…) showing nothing but
-/// "not set". The per-name cap in `tag_options` is the general fix; this is the
-/// specific one, and it also keeps the index from carrying a row per session for
-/// nothing.
+/// "not set". The per-name cap in `tag_option_rows` is the general fix; this is
+/// the specific one, and it also keeps the index from carrying a row per message
+/// for nothing.
 ///
-/// Matched case-insensitively so `conversationId` and `Conversation_Id` are the
-/// same key.
-const META_EXCLUDED_KEYS: [&str; 3] = ["conversation_id", "conversationid", "session_id"];
+/// This is about *filtering* only. The value is still on the message and still
+/// shown by the per-message metadata popover — it is a fact about that message,
+/// just not a way to select messages.
+///
+/// Matched case-insensitively, so `conversationId` and `current_datetime` are
+/// the same keys.
+const META_EXCLUDED_KEYS: [&str; 6] = [
+    "conversation_id",
+    "conversationid",
+    "session_id",
+    "current_datetime",
+    "currentdatetime",
+    "currentdatetimeutc",
+];
 
 fn is_excluded_metadata_key(name: &str) -> bool {
     let lower = name.trim().to_ascii_lowercase();
@@ -9870,6 +9884,7 @@ mod conv_search {
         let rows = metadata_index_rows(
             r#"[{"key":"conversation_id","value":"abc-123"},
                 {"key":"conversationId","value":"abc-123"},
+                {"key":"CURRENT_DATETIME","value":"2026-08-14T09:30:22"},
                 {"key":"entryLimit","value":"true"}]"#,
         );
         assert_eq!(rows, vec![("entryLimit".to_string(), "true".to_string())]);

@@ -5722,6 +5722,108 @@
         opacity: 0.6;
         pointer-events: none;
       }
+      /* The metadata button shares the bottom-right corner with the details
+         hint rather than taking the opposite one: a one-line answer is short
+         enough that top-right and bottom-right are the same place, and the two
+         overlapped. Side by side they cannot, at any bubble height — the hint
+         moves left by exactly the button's width when there is one.
+
+         Quiet until hovered: it is on most bot messages, and at full strength
+         it would compete with the answer for attention. */
+      .bubble:has(.bubble-meta-btn) .bubble-expand-hint {
+        right: 32px;
+      }
+      .bubble-meta-btn {
+        position: absolute;
+        bottom: 3px;
+        right: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3px;
+        border: none;
+        border-radius: 5px;
+        background: none;
+        color: var(--muted);
+        opacity: 0.35;
+        cursor: pointer;
+        transition: opacity 0.12s, color 0.12s, background 0.12s;
+      }
+      .bubble:hover .bubble-meta-btn {
+        opacity: 0.75;
+      }
+      .bubble-meta-btn:hover {
+        opacity: 1;
+        color: var(--accent);
+        background: rgba(124, 106, 247, 0.14);
+      }
+      /* Metadata popover for one message */
+      .msg-meta-modal-box {
+        width: min(560px, 94vw);
+        max-height: min(760px, 86vh);
+        display: flex;
+        flex-direction: column;
+      }
+      .msg-meta-modal-box .modal-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .msg-meta-row {
+        display: grid;
+        grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+        gap: 10px;
+        padding: 7px 4px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+        align-items: baseline;
+      }
+      .msg-meta-row:last-child {
+        border-bottom: none;
+      }
+      /* A nested value stacks instead: its sub-rows need the full width, and a
+         second column of keys inside the value column reads as a table with a
+         hole in it. */
+      .msg-meta-row.is-nested {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 5px;
+      }
+      .msg-meta-key {
+        color: var(--muted);
+        font-weight: 600;
+        word-break: break-word;
+      }
+      .msg-meta-subs {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding-left: 12px;
+        border-left: 2px solid var(--border);
+      }
+      .msg-meta-sub {
+        display: grid;
+        grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+        gap: 10px;
+        align-items: baseline;
+      }
+      .msg-meta-subkey {
+        color: var(--muted);
+        opacity: 0.85;
+        word-break: break-word;
+      }
+      .msg-meta-value {
+        color: var(--text);
+        word-break: break-word;
+        white-space: pre-wrap;
+      }
+      .msg-meta-value.is-empty {
+        color: var(--muted);
+        font-style: italic;
+      }
       /* Low-recognition highlight when filter is active */
       .bubble.low-recog-highlight {
         border-color: rgba(251, 146, 60, 0.6) !important;
@@ -8735,6 +8837,37 @@
     </div>
 
     <!-- DATA CHANGED MODAL -->
+    <!--
+      What one answer was marked with. The tag filter popover aggregates
+      OutputMetadata across the whole database; this is the same data on a
+      single message, including the keys that are deliberately not offered as
+      filters because their values are unique per conversation or per message.
+    -->
+    <div class="modal-overlay" id="msgMetaModal">
+      <div class="modal-box msg-meta-modal-box">
+        <div class="modal-header">
+          <svg class=ui-icon><use href=#i-tag /></svg>
+          <h3>Message metadata</h3>
+          <button class="close-btn" onclick="closeMessageMetadata()">
+            &#x2715;
+          </button>
+        </div>
+        <div class="modal-body" id="msgMetaBody"></div>
+        <div class="modal-footer">
+          <button
+            class="btn-secondary"
+            id="msgMetaCopyBtn"
+            onclick="copyMessageMetadata()"
+          >
+            Copy
+          </button>
+          <button class="btn-primary" onclick="closeMessageMetadata()">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="dataChangedModal">
       <div class="modal-box">
         <div class="modal-header">
@@ -18362,6 +18495,7 @@
                 const detail = renderBubbleDetail(br)
                 inner += `<div class="bubble ${bubbleClass}" onclick="toggleBubbleDetail(${br.logId})">
                   ${body}
+                  ${bubbleMetaButtonHtml(br)}
                   <span class="bubble-expand-hint">&#x25BE; details</span>
                   <div class="bubble-detail" data-logid="${br.logId}">${detail}</div>
                 </div>${optionsHtml}${ctasHtml}`
@@ -23927,6 +24061,140 @@
         return html
       }
 
+      // ── Per-message metadata ────────────────────────────────────────
+      //
+      // `OutputMetadata` is what the bot's answer was *marked with*. The filter
+      // popover aggregates it across the database; this shows the actual values
+      // on one message, which is the other half of the same question — "why is
+      // this conversation in my results?" against "what does this answer carry?".
+      //
+      // Keyed by logId and filled by whichever thread rendered, because the two
+      // chat paths hold their rows differently (`activeInteractions` for the
+      // main view, a local array for Flagged) and an inline data attribute per
+      // bubble would put a JSON blob in the DOM for every message.
+      let _msgMetaById = new Map()
+
+      /// Remember a row's metadata if it has any, and say whether it did — the
+      /// button is only rendered when there is something to show.
+      function rememberMessageMeta(row) {
+        const pairs = parseMessageMeta(row && row.outputMetadata)
+        if (!pairs.length) return false
+        _msgMetaById.set(row.logId, pairs)
+        return true
+      }
+
+      /**
+       * The tiny button on a bubble that opens its metadata, or nothing.
+       *
+       * Rendered only when the message actually carries metadata — a button
+       * that opens an empty dialog on most messages is worse than no button,
+       * and on this data most answers carry something while plenty carry
+       * nothing. `stopPropagation` because the bubble itself toggles its
+       * details on click.
+       */
+      function bubbleMetaButtonHtml(row) {
+        if (!rememberMessageMeta(row)) return ""
+        const n = _msgMetaById.get(row.logId).length
+        return `<button class="bubble-meta-btn" title="${n} metadata ${
+          n === 1 ? "value" : "values"
+        } on this message" onclick="event.stopPropagation();openMessageMetadata(${
+          row.logId
+        })"><svg class=ui-icon><use href=#i-tag /></svg></button>`
+      }
+
+      /// The `[{key, value}]` array the interaction log stores, as pairs.
+      ///
+      /// Note this is the *raw* list: `conversation_id` and `CURRENT_DATETIME`
+      /// are excluded from the filter index because one value per conversation
+      /// or per message makes a useless chip, but on the message itself they are
+      /// facts worth reading, so nothing is hidden here.
+      function parseMessageMeta(raw) {
+        const parsed = parseJsonSafe(raw || "")
+        if (!Array.isArray(parsed)) return []
+        return parsed
+          .filter((p) => p && typeof p === "object" && p.key)
+          .map((p) => ({ key: String(p.key), value: p.value ?? "" }))
+      }
+
+      function openMessageMetadata(logId) {
+        const pairs = _msgMetaById.get(logId) || []
+        const box = document.getElementById("msgMetaBody")
+        box.innerHTML = pairs.length
+          ? pairs.map(_msgMetaRowHtml).join("")
+          : `<div class="chat-empty">This message carries no metadata.</div>`
+        document.getElementById("msgMetaModal").classList.add("open")
+      }
+
+      function closeMessageMetadata() {
+        document.getElementById("msgMetaModal").classList.remove("open")
+      }
+
+      /**
+       * One metadata entry.
+       *
+       * A nested value is split into its leaves and shown as sub-rows, matching
+       * how the filter chips name them (`key.subkey`) — an unexpanded blob here
+       * would be the same unreadable line the chips used to be. `__` is CM's
+       * line-break marker and has to be undone before the JSON will parse.
+       */
+      function _msgMetaRowHtml(pair) {
+        const leaves = _flattenMetaEntry(pair.key, pair.value, [], 0)
+        const nested =
+          leaves.length > 1 ||
+          (leaves.length === 1 && leaves[0][0] !== pair.key)
+        if (!nested) {
+          const v = leaves.length ? leaves[0][1] : String(pair.value ?? "")
+          return `<div class="msg-meta-row"><span class="msg-meta-key">${esc(
+            pair.key,
+          )}</span>${_msgMetaValueHtml(v)}</div>`
+        }
+        const subs = leaves
+          .map(([name, value]) => {
+            // The leaves are named `key.subkey`; the key is already the heading.
+            const short = name.startsWith(pair.key + ".")
+              ? name.slice(pair.key.length + 1)
+              : name
+            return `<div class="msg-meta-sub"><span class="msg-meta-subkey">${esc(
+              short,
+            )}</span>${_msgMetaValueHtml(value)}</div>`
+          })
+          .join("")
+        return `<div class="msg-meta-row is-nested"><span class="msg-meta-key">${esc(
+          pair.key,
+        )}</span><div class="msg-meta-subs">${subs}</div></div>`
+      }
+
+      /// An empty value is a real state — the key was set with nothing in it —
+      /// and must read as that rather than as a blank line.
+      function _msgMetaValueHtml(value) {
+        const text = String(value ?? "").trim()
+        if (!text)
+          return `<span class="msg-meta-value is-empty">(empty)</span>`
+        return `<span class="msg-meta-value">${esc(text)}</span>`
+      }
+
+      function copyMessageMetadata() {
+        const rows = [...document.querySelectorAll("#msgMetaBody .msg-meta-row")]
+        const text = rows
+          .map((row) => {
+            const key = row.querySelector(".msg-meta-key").textContent
+            const subs = [...row.querySelectorAll(".msg-meta-sub")]
+            if (!subs.length)
+              return `${key}: ${row.querySelector(".msg-meta-value").textContent}`
+            return subs
+              .map(
+                (s) =>
+                  `${key}.${s.querySelector(".msg-meta-subkey").textContent}: ${
+                    s.querySelector(".msg-meta-value").textContent
+                  }`,
+              )
+              .join("\n")
+          })
+          .join("\n")
+        navigator.clipboard.writeText(text)
+        _setBtnCopied(document.getElementById("msgMetaCopyBtn"), "Copied!")
+      }
+
       function toggleBubbleDetail(logId) {
         const detail = document.querySelector(
           `.bubble-detail[data-logid="${logId}"]`,
@@ -24407,6 +24675,7 @@
                   : ""
               html += `<div class="bubble ${bubbleClass}${highlightClass}${feedbackOriginClass}" onclick="toggleBubbleDetail(${br.logId})">
                 ${body}
+                ${bubbleMetaButtonHtml(br)}
                 <span class="bubble-expand-hint">▾ details</span>
                 <div class="bubble-detail${detailOpenClass}" data-logid="${br.logId}">${detail}</div>
               </div>${optionsHtml}${ctasHtml}${asksHtml}`
