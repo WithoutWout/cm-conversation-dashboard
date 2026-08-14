@@ -61,7 +61,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 
 ## Tauri commands (Rust → JS)
 
-| Command               | JS call via `window.electronAPI` | Description |
+| Command               | JS call via `window.backend` | Description |
 | --------------------- | -------------------------------- | ----------- |
 | `get_data`            | `getData(selectedFolder)`        | Returns content data: articles, dialogs, tDialogs, entities, conversation/context vars, files, sourceFiles, dataSource |
 | `open_url`            | `openUrl(url)`                   | Opens a URL with `opener::open_url` (https/http only) |
@@ -85,7 +85,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `finalize_import_run`      | `finalizeImportRun(maxAgeDays)`   | Closes a run: purge, scoped summary rebuild, FTS merge, planner stats, WAL restore — once, instead of once per file. Safe no-op when no run is open |
 | `compact_database`         | `compactDatabase()`               | `VACUUM`s the database, returning pages freed by deletions and schema migrations to the filesystem. Returns `{ bytesBefore, bytesAfter, durationMs }` |
 
-There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context and metadata options (`get_context_options` / `get_metadata_options`, both thin wrappers over `tag_options`), daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
+There are also Conversations DB commands exposed through `window.backend` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context and metadata options (`get_context_options` / `get_metadata_options`, both thin wrappers over `tag_options`), daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
 `import_interactions_csv(filePath, maxAgeDays, delimiter?, deferFinalize?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it. `deferFinalize` defaults to false; both real callers pass `true` and bracket their loop with `begin_import_run` / `finalize_import_run` — see `## Why import stays fast as the database grows`.
 
@@ -133,12 +133,12 @@ The renderer answers `data-folder-updated` by opening a modal, so every extra ev
 
 ## Frontend bridge (`index.html`)
 
-The renderer uses `window.electronAPI` as its sole interface to the backend. At startup, a shim in `index.html` wraps Tauri's `invoke` behind `window.electronAPI`:
+`window.backend` is the renderer's sole interface to Rust. At startup, a shim in `index.html` wraps Tauri's `invoke` behind it:
 
 ```js
 const invoke = window.__TAURI__?.core?.invoke
 const listen = window.__TAURI__?.event?.listen
-window.electronAPI = {
+window.backend = {
   getData: (selectedFolder) =>
     invoke("get_data", { args: { selected_folder: selectedFolder || null } }),
   openUrl: (url) => invoke("open_url", { url }),
@@ -153,7 +153,7 @@ window.electronAPI = {
   fetchAnalyticsWindow: (startUtc, endUtc) =>
     invoke("fetch_analytics_window", { args: { startUtc, endUtc } }),
   // Conversations DB and Analytics API commands are also mapped here; keep them behind
-  // window.electronAPI rather than adding direct renderer filesystem access.
+  // window.backend rather than adding direct renderer filesystem access.
 }
 ```
 
@@ -302,7 +302,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 
 ### Rendering pipeline
 
-1. Data loads via `window.electronAPI.getData(dataFolderPath)`
+1. Data loads via `window.backend.getData(dataFolderPath)`
 2. Maps (`dialogMap`, `tDialogMap`) populated
 3. Combined item arrays assembled (each item gets `._kind = "article" | "dialog" | "tdialog"`)
 4. Data is posted to `search-worker.js`, which precomputes indexed answer/node/entity search fields
@@ -1194,7 +1194,7 @@ launches without the SmartScreen prompt that a manually downloaded one shows.
 - Use `querySelector` / `getElementById` for DOM access; event delegation where multiple dynamic elements share a handler.
 - `buildSearchRegex` is the single source of truth for search logic — do not duplicate regex construction elsewhere.
 - Inline `onclick="..."` attributes are used intentionally for dynamically rendered cards (no event listener cleanup needed in this app).
-- Rust commands use `snake_case`; the JS shim maps them to `camelCase` on `window.electronAPI`.
+- Rust commands use `snake_case`; the JS shim maps them to `camelCase` on `window.backend`.
 
 ### Icons
 

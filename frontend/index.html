@@ -9753,14 +9753,17 @@
       // the same two rows before the Response gets pushed off screen.
       const MODAL_ENTITY_PREVIEW = 12
 
-      // ── Tauri / Electron API bridge ─────────────────────────────────
-      // Wraps Tauri invoke() behind the same window.electronAPI surface
-      // so all existing call sites work without modification.
+      // ── Backend bridge ──────────────────────────────────────────────
+      // Wraps Tauri invoke() behind window.backend, the renderer's sole
+      // interface to Rust. Every call site goes through this object.
       ;(function () {
         const invoke = window.__TAURI__?.core?.invoke
         const listen = window.__TAURI__?.event?.listen
-        if (!invoke) return // Electron path: preload already set window.electronAPI
-        window.electronAPI = {
+        // Outside Tauri there is no bridge at all; leaving window.backend
+        // undefined is what makes that obvious at the first call site
+        // rather than silently half-working.
+        if (!invoke) return
+        window.backend = {
           getData: (selectedFolder) =>
             invoke("get_data", {
               args: { selected_folder: selectedFolder || null },
@@ -9876,43 +9879,43 @@
         } catch (_) {}
       })()
 
-      if (!window.electronAPI.selectDataFolder) {
-        window.electronAPI.selectDataFolder = () =>
+      if (!window.backend.selectDataFolder) {
+        window.backend.selectDataFolder = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
       }
-      if (!window.electronAPI.onDataFolderUpdated) {
-        window.electronAPI.onDataFolderUpdated = () => Promise.resolve(() => {})
+      if (!window.backend.onDataFolderUpdated) {
+        window.backend.onDataFolderUpdated = () => Promise.resolve(() => {})
       }
-      if (!window.electronAPI.saveCollectionExport)
-        window.electronAPI.saveCollectionExport = () =>
+      if (!window.backend.saveCollectionExport)
+        window.backend.saveCollectionExport = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
       // Stub out conversation commands when running outside Tauri (dev preview)
       const _convStub = () => Promise.resolve(null)
-      if (!window.electronAPI.setDbPath)
-        window.electronAPI.setDbPath = _convStub
-      if (!window.electronAPI.getDbPath)
-        window.electronAPI.getDbPath = _convStub
-      if (!window.electronAPI.selectCsvFiles)
-        window.electronAPI.selectCsvFiles = () =>
+      if (!window.backend.setDbPath)
+        window.backend.setDbPath = _convStub
+      if (!window.backend.getDbPath)
+        window.backend.getDbPath = _convStub
+      if (!window.backend.selectCsvFiles)
+        window.backend.selectCsvFiles = () =>
           Promise.resolve({ ok: false, canceled: true, paths: [] })
-      if (!window.electronAPI.selectDbSavePath)
-        window.electronAPI.selectDbSavePath = () =>
+      if (!window.backend.selectDbSavePath)
+        window.backend.selectDbSavePath = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
-      if (!window.electronAPI.selectDbOpenPath)
-        window.electronAPI.selectDbOpenPath = () =>
+      if (!window.backend.selectDbOpenPath)
+        window.backend.selectDbOpenPath = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
-      if (!window.electronAPI.importInteractionsCsv)
-        window.electronAPI.importInteractionsCsv = _convStub
+      if (!window.backend.importInteractionsCsv)
+        window.backend.importInteractionsCsv = _convStub
       // Run bracketing is an optimisation, so the stubs resolve rather than
       // reject — an older backend still imports, just with the per-file tail.
-      if (!window.electronAPI.beginImportRun)
-        window.electronAPI.beginImportRun = () => Promise.resolve()
-      if (!window.electronAPI.finalizeImportRun)
-        window.electronAPI.finalizeImportRun = () => Promise.resolve({ purged: 0 })
-      if (!window.electronAPI.compactDatabase)
-        window.electronAPI.compactDatabase = _convStub
-      if (!window.electronAPI.getAnalyticsConfig)
-        window.electronAPI.getAnalyticsConfig = () =>
+      if (!window.backend.beginImportRun)
+        window.backend.beginImportRun = () => Promise.resolve()
+      if (!window.backend.finalizeImportRun)
+        window.backend.finalizeImportRun = () => Promise.resolve({ purged: 0 })
+      if (!window.backend.compactDatabase)
+        window.backend.compactDatabase = _convStub
+      if (!window.backend.getAnalyticsConfig)
+        window.backend.getAnalyticsConfig = () =>
           Promise.resolve({
             configured: false,
             hasSecret: false,
@@ -9923,25 +9926,25 @@
             environment: "Production",
             activeSessionOnly: false,
           })
-      if (!window.electronAPI.saveAnalyticsConfig)
-        window.electronAPI.saveAnalyticsConfig = _convStub
-      if (!window.electronAPI.testAnalyticsConnection)
-        window.electronAPI.testAnalyticsConnection = () =>
+      if (!window.backend.saveAnalyticsConfig)
+        window.backend.saveAnalyticsConfig = _convStub
+      if (!window.backend.testAnalyticsConnection)
+        window.backend.testAnalyticsConnection = () =>
           Promise.resolve({ ok: false, message: "Not running in Tauri." })
-      if (!window.electronAPI.fetchAnalyticsWindow)
-        window.electronAPI.fetchAnalyticsWindow = () =>
+      if (!window.backend.fetchAnalyticsWindow)
+        window.backend.fetchAnalyticsWindow = () =>
           Promise.reject({
             kind: "config",
             message: "Not running in Tauri.",
             retryable: false,
           })
-      if (!window.electronAPI.cleanupAnalyticsTemp)
-        window.electronAPI.cleanupAnalyticsTemp = () => Promise.resolve(0)
-      if (!window.electronAPI.getSessions)
-        window.electronAPI.getSessions = () =>
+      if (!window.backend.cleanupAnalyticsTemp)
+        window.backend.cleanupAnalyticsTemp = () => Promise.resolve(0)
+      if (!window.backend.getSessions)
+        window.backend.getSessions = () =>
           Promise.resolve({ sessions: [], total: 0, page: 1 })
-      if (!window.electronAPI.exportConversationsForAi)
-        window.electronAPI.exportConversationsForAi = () =>
+      if (!window.backend.exportConversationsForAi)
+        window.backend.exportConversationsForAi = () =>
           Promise.resolve({
             ok: false,
             canceled: true,
@@ -9952,48 +9955,48 @@
             bytes: 0,
             estimatedTokens: 0,
           })
-      if (!window.electronAPI.onAiExportProgress)
-        window.electronAPI.onAiExportProgress = () => Promise.resolve(() => {})
-      if (!window.electronAPI.cancelSessionSearch)
-        window.electronAPI.cancelSessionSearch = _convStub
-      if (!window.electronAPI.getSessionInteractions)
-        window.electronAPI.getSessionInteractions = () => Promise.resolve([])
-      if (!window.electronAPI.getContextOptions)
-        window.electronAPI.getContextOptions = () => Promise.resolve([])
-      if (!window.electronAPI.getMetadataOptions)
-        window.electronAPI.getMetadataOptions = () => Promise.resolve([])
-      if (!window.electronAPI.getDbDailyStats)
-        window.electronAPI.getDbDailyStats = () =>
+      if (!window.backend.onAiExportProgress)
+        window.backend.onAiExportProgress = () => Promise.resolve(() => {})
+      if (!window.backend.cancelSessionSearch)
+        window.backend.cancelSessionSearch = _convStub
+      if (!window.backend.getSessionInteractions)
+        window.backend.getSessionInteractions = () => Promise.resolve([])
+      if (!window.backend.getContextOptions)
+        window.backend.getContextOptions = () => Promise.resolve([])
+      if (!window.backend.getMetadataOptions)
+        window.backend.getMetadataOptions = () => Promise.resolve([])
+      if (!window.backend.getDbDailyStats)
+        window.backend.getDbDailyStats = () =>
           Promise.resolve({ total: 0, days: [] })
-      if (!window.electronAPI.getDbHourCoverage)
-        window.electronAPI.getDbHourCoverage = (_sinceDate) => Promise.resolve([])
+      if (!window.backend.getDbHourCoverage)
+        window.backend.getDbHourCoverage = (_sinceDate) => Promise.resolve([])
       // Resolves rather than rejects: an older backend still imports correctly,
       // it just falls back to inferring coverage from row presence.
-      if (!window.electronAPI.recordImportedWindow)
-        window.electronAPI.recordImportedWindow = () => Promise.resolve()
-      if (!window.electronAPI.deleteInteractionsByDates)
-        window.electronAPI.deleteInteractionsByDates = _convStub
-      if (!window.electronAPI.flagSession)
-        window.electronAPI.flagSession = _convStub
-      if (!window.electronAPI.getFlaggedSessions)
-        window.electronAPI.getFlaggedSessions = () => Promise.resolve([])
-      if (!window.electronAPI.getFlaggedSessionInteractions)
-        window.electronAPI.getFlaggedSessionInteractions = () =>
+      if (!window.backend.recordImportedWindow)
+        window.backend.recordImportedWindow = () => Promise.resolve()
+      if (!window.backend.deleteInteractionsByDates)
+        window.backend.deleteInteractionsByDates = _convStub
+      if (!window.backend.flagSession)
+        window.backend.flagSession = _convStub
+      if (!window.backend.getFlaggedSessions)
+        window.backend.getFlaggedSessions = () => Promise.resolve([])
+      if (!window.backend.getFlaggedSessionInteractions)
+        window.backend.getFlaggedSessionInteractions = () =>
           Promise.resolve([])
-      if (!window.electronAPI.unflagSession)
-        window.electronAPI.unflagSession = _convStub
-      if (!window.electronAPI.saveFlaggedNote)
-        window.electronAPI.saveFlaggedNote = _convStub
-      if (!window.electronAPI.getFlaggedFolders)
-        window.electronAPI.getFlaggedFolders = () => Promise.resolve([])
-      if (!window.electronAPI.createFlaggedFolder)
-        window.electronAPI.createFlaggedFolder = _convStub
-      if (!window.electronAPI.renameFlaggedFolder)
-        window.electronAPI.renameFlaggedFolder = _convStub
-      if (!window.electronAPI.deleteFlaggedFolder)
-        window.electronAPI.deleteFlaggedFolder = _convStub
-      if (!window.electronAPI.moveToFlaggedFolder)
-        window.electronAPI.moveToFlaggedFolder = _convStub
+      if (!window.backend.unflagSession)
+        window.backend.unflagSession = _convStub
+      if (!window.backend.saveFlaggedNote)
+        window.backend.saveFlaggedNote = _convStub
+      if (!window.backend.getFlaggedFolders)
+        window.backend.getFlaggedFolders = () => Promise.resolve([])
+      if (!window.backend.createFlaggedFolder)
+        window.backend.createFlaggedFolder = _convStub
+      if (!window.backend.renameFlaggedFolder)
+        window.backend.renameFlaggedFolder = _convStub
+      if (!window.backend.deleteFlaggedFolder)
+        window.backend.deleteFlaggedFolder = _convStub
+      if (!window.backend.moveToFlaggedFolder)
+        window.backend.moveToFlaggedFolder = _convStub
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -10671,7 +10674,7 @@
       }
       async function ensureDataFolderWatcher() {
         if (dataFolderUnlisten) return
-        dataFolderUnlisten = await window.electronAPI.onDataFolderUpdated(
+        dataFolderUnlisten = await window.backend.onDataFolderUpdated(
           (event) => {
             pendingDataChangedFolder =
               (event && event.payload && event.payload.folder) ||
@@ -16630,7 +16633,7 @@
           const defaultName =
             (c.name || "collection").replace(/[\\/:*?"<>|]/g, "_") + ".json"
           try {
-            const res = await window.electronAPI.saveCollectionExport(
+            const res = await window.backend.saveCollectionExport(
               defaultName,
               JSON.stringify(rows, null, 2),
             )
@@ -16793,7 +16796,7 @@
         const status = document.getElementById("analyticsTestStatus")
         if (status) status.textContent = ""
         try {
-          analyticsConfig = await window.electronAPI.getAnalyticsConfig()
+          analyticsConfig = await window.backend.getAnalyticsConfig()
         } catch (e) {
           analyticsConfig = null
         }
@@ -16847,7 +16850,7 @@
 
       async function saveAnalyticsConfigFromSettings() {
         try {
-          analyticsConfig = await window.electronAPI.saveAnalyticsConfig(
+          analyticsConfig = await window.backend.saveAnalyticsConfig(
             readAnalyticsConfigFromSettings(),
           )
           return true
@@ -16878,7 +16881,7 @@
             return
           }
           try {
-            const res = await window.electronAPI.testAnalyticsConnection()
+            const res = await window.backend.testAnalyticsConnection()
             status.style.color = res.ok ? "var(--green)" : "var(--red)"
             // A failure needs the steps, not just the verdict — the same
             // trace the import log carries, so "Test connection" is a real
@@ -16986,8 +16989,8 @@
       /// Tauri command that does exactly the same thing would be worse than the
       /// slightly odd name.
       async function _saveJsonFile(defaultName, content) {
-        if (window.__TAURI__?.core?.invoke && window.electronAPI.saveCollectionExport) {
-          return window.electronAPI.saveCollectionExport(defaultName, content)
+        if (window.__TAURI__?.core?.invoke && window.backend.saveCollectionExport) {
+          return window.backend.saveCollectionExport(defaultName, content)
         }
         const url = URL.createObjectURL(
           new Blob([content], { type: "application/json" }),
@@ -17014,7 +17017,7 @@
         }
         let version = "unknown"
         try {
-          version = await window.electronAPI.getVersion()
+          version = await window.backend.getVersion()
         } catch (_) {}
         const payload = {
           app: "cm-conversation-dashboard",
@@ -17035,8 +17038,8 @@
           // Analytics API credentials — which have never been readable from
           // here and still aren't. The web build has no such config and falls
           // back to the plain save.
-          const res = window.electronAPI.exportSettingsBackup
-            ? await window.electronAPI.exportSettingsBackup(name, body)
+          const res = window.backend.exportSettingsBackup
+            ? await window.backend.exportSettingsBackup(name, body)
             : await _saveJsonFile(name, body)
           if (res && res.canceled) return _settingsIoStatus("")
           _settingsIoStatus(
@@ -17104,7 +17107,7 @@
           return
         let res
         try {
-          res = await window.electronAPI.importSettingsBackup()
+          res = await window.backend.importSettingsBackup()
         } catch (e) {
           return _settingsIoStatus(`Import failed: ${e.message || e}`, "error")
         }
@@ -17176,7 +17179,7 @@
       document.getElementById("settingsImportBtn").addEventListener("click", () => {
         // Rust owns the file dialog on the desktop because it also has to
         // restore the client secret, which never reaches this side.
-        if (window.electronAPI.importSettingsBackup) return importSettingsViaBackend()
+        if (window.backend.importSettingsBackup) return importSettingsViaBackend()
         document.getElementById("settingsImportFile").click()
       })
       document
@@ -17267,7 +17270,7 @@
           btn.disabled = true
           btn.textContent = "Checking\u2026"
           el.textContent = ""
-          const res = await window.electronAPI.checkForUpdates()
+          const res = await window.backend.checkForUpdates()
           btn.disabled = false
           btn.textContent = "Check for updates"
           if (res.status === "available") {
@@ -17280,7 +17283,7 @@
               .getElementById("settingsUpdateAction")
               .addEventListener("click", () => {
                 closeSettings()
-                window.electronAPI
+                window.backend
                   .getVersion()
                   .then((current) => openUpdateModal(res, current))
               })
@@ -17301,7 +17304,7 @@
         if (!a || !a.href) return
         e.preventDefault()
         if (a.classList.contains("btn-open-url")) {
-          window.electronAPI.openUrl(a.href)
+          window.backend.openUrl(a.href)
         } else {
           openLink(a.href)
         }
@@ -17319,7 +17322,7 @@
         setRefreshControls(true)
         try {
           await waitForNextPaint()
-          const data = await window.electronAPI.getData(dataFolderPath || null)
+          const data = await window.backend.getData(dataFolderPath || null)
           dataSourceInfo = data.dataSource || null
           dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
           tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
@@ -17545,7 +17548,7 @@
       async function handleSelectDataFolder() {
         const previousFeedback = { ...dataFolderFeedback }
         setDataFolderFeedback("Opening folder picker…")
-        const result = await window.electronAPI.selectDataFolder()
+        const result = await window.backend.selectDataFolder()
         if (!result || result.canceled) {
           setDataFolderFeedback(previousFeedback.text, previousFeedback.color)
           return
@@ -17583,7 +17586,7 @@
 
       loadData()
 
-      window.electronAPI.getVersion().then((v) => {
+      window.backend.getVersion().then((v) => {
         appVersion = v
         const el = document.querySelector(".brand-sub")
         if (el) el.textContent = `Content Dashboard \u00b7 v${v}`
@@ -17668,7 +17671,7 @@
         document.getElementById("updateModalProgressText").textContent =
           "Starting download…"
         try {
-          await window.electronAPI.installUpdate()
+          await window.backend.installUpdate()
           install.innerHTML = `<span class="import-spinner"></span> Restarting…`
           document.getElementById("updateModalProgressText").textContent =
             "Restarting into the new version…"
@@ -17686,7 +17689,7 @@
         }
       }
 
-      window.electronAPI.onUpdateProgress((evt) => {
+      window.backend.onUpdateProgress((evt) => {
         const p = evt && evt.payload
         if (!p) return
         const fill = document.getElementById("updateModalProgressFill")
@@ -17740,7 +17743,7 @@
         .getElementById("updateModalDownloadBtn")
         .addEventListener("click", (e) => {
           e.preventDefault()
-          window.electronAPI.openUrl(UPDATE_RELEASES_URL)
+          window.backend.openUrl(UPDATE_RELEASES_URL)
           closeUpdateModal()
         })
       document
@@ -17770,7 +17773,7 @@
           }
         })
 
-      window.electronAPI
+      window.backend
         .checkForUpdates()
         .then((res) => {
           if (res.status !== "available") return
@@ -17787,14 +17790,14 @@
           document
             .getElementById("updateBannerAction")
             .addEventListener("click", () => {
-              window.electronAPI
+              window.backend
                 .getVersion()
                 .then((current) => openUpdateModal(res, current))
             })
           banner.classList.add("visible")
           // Modal — skip if user already dismissed this version
           if (dismissedVersion !== res.version) {
-            window.electronAPI.getVersion().then((current) => {
+            window.backend.getVersion().then((current) => {
               openUpdateModal(res, current)
             })
           }
@@ -17836,7 +17839,7 @@
         const notes = ta.value.trim()
         btn.disabled = true
         try {
-          await window.electronAPI.saveFlaggedNote(activeFlagId, notes)
+          await window.backend.saveFlaggedNote(activeFlagId, notes)
           // Update in-memory record
           const s = flaggedSessions.find((x) => x.flagId === activeFlagId)
           if (s) s.notes = notes
@@ -17881,8 +17884,8 @@
       async function loadFlaggedSessions() {
         try {
           ;[flaggedSessions, flaggedFolders] = await Promise.all([
-            window.electronAPI.getFlaggedSessions(),
-            window.electronAPI.getFlaggedFolders(),
+            window.backend.getFlaggedSessions(),
+            window.backend.getFlaggedFolders(),
           ])
         } catch (e) {
           console.error("getFlaggedSessions error:", e)
@@ -18156,7 +18159,7 @@
 
         try {
           const interactions =
-            await window.electronAPI.getFlaggedSessionInteractions(flagId)
+            await window.backend.getFlaggedSessionInteractions(flagId)
 
           // Collect unique contexts across all interactions
           const seenCtxKey = new Set()
@@ -18343,7 +18346,7 @@
       function removeFlaggedConversation(flagId) {
         _showConfirm("Remove this flagged conversation?", async () => {
           try {
-            await window.electronAPI.unflagSession(flagId)
+            await window.backend.unflagSession(flagId)
             activeFlagId = null
             _flaggedViewContexts = []
             document.getElementById("flaggedChatHeader").innerHTML =
@@ -18392,7 +18395,7 @@
         event.stopPropagation()
         _showConfirm("Remove this flagged conversation?", async () => {
           try {
-            await window.electronAPI.unflagSession(flagId)
+            await window.backend.unflagSession(flagId)
             if (activeFlagId === flagId) {
               activeFlagId = null
               document.getElementById(
@@ -18556,7 +18559,7 @@
       function createFlaggedFolderPrompt() {
         _showFolderPrompt("New Folder", "", async (name) => {
           try {
-            await window.electronAPI.createFlaggedFolder(name)
+            await window.backend.createFlaggedFolder(name)
             await loadFlaggedSessions()
           } catch (e) {
             console.error("createFlaggedFolder error:", e)
@@ -18569,7 +18572,7 @@
         const folder = flaggedFolders.find((f) => f.folderId === folderId)
         _showFolderPrompt("Rename Folder", folder?.name ?? "", async (name) => {
           try {
-            await window.electronAPI.renameFlaggedFolder(folderId, name)
+            await window.backend.renameFlaggedFolder(folderId, name)
             await loadFlaggedSessions()
           } catch (e) {
             console.error("renameFlaggedFolder error:", e)
@@ -18580,7 +18583,7 @@
       async function deleteFlaggedFolderConfirm(folderId, event) {
         event.stopPropagation()
         try {
-          await window.electronAPI.deleteFlaggedFolder(folderId)
+          await window.backend.deleteFlaggedFolder(folderId)
           if (activeFolderFilter === folderId) activeFolderFilter = "all"
           await loadFlaggedSessions()
         } catch (e) {
@@ -18590,7 +18593,7 @@
 
       async function moveToFlaggedFolderById(flagId, folderId) {
         try {
-          await window.electronAPI.moveToFlaggedFolder(flagId, folderId)
+          await window.backend.moveToFlaggedFolder(flagId, folderId)
           await loadFlaggedSessions()
           // Re-select active session if it matches to keep the thread visible
           if (activeFlagId === flagId) {
@@ -18851,7 +18854,7 @@
         // reason: this must not hang if the window isn't being composited.
         await yieldToPaint()
         try {
-          await window.electronAPI.setDbPath(path)
+          await window.backend.setDbPath(path)
           convDbPath = path
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
           updateConvDbStatus()
@@ -18859,7 +18862,7 @@
           metadataOptionsLoaded = false
           convDatePickerInited = false // re-initialise picker defaults for new DB
           // Fetch available date range to constrain the calendar picker
-          window.electronAPI
+          window.backend
             .getDateRange()
             .then(({ min, max }) => initDatePicker(min, max))
             .catch(() => {})
@@ -18891,8 +18894,8 @@
         // If a path is saved, try to open it
         if (convDbPath) {
           try {
-            await window.electronAPI.setDbPath(convDbPath)
-            window.electronAPI
+            await window.backend.setDbPath(convDbPath)
+            window.backend
               .getDateRange()
               .then(({ min, max }) => initDatePicker(min, max))
               .catch(() => {})
@@ -18929,7 +18932,7 @@
       })
 
       async function handleDbCreate() {
-        const res = await window.electronAPI.selectDbSavePath()
+        const res = await window.backend.selectDbSavePath()
         if (!res || !res.ok || !res.path) return
         let p = res.path
         if (!p.endsWith(".db")) p += ".db"
@@ -18937,7 +18940,7 @@
         await openDbAtPath(p)
       }
       async function handleDbOpen() {
-        const res = await window.electronAPI.selectDbOpenPath()
+        const res = await window.backend.selectDbOpenPath()
         if (!res || !res.ok || !res.path) return
         closeDbSetupModal()
         await openDbAtPath(res.path)
@@ -19136,16 +19139,16 @@
           if (finalized) return
           finalized = true
           try {
-            const f = await window.electronAPI.finalizeImportRun(dataRetentionDays)
+            const f = await window.backend.finalizeImportRun(dataRetentionDays)
             if (f) totalPurged += f.purged || 0
           } catch (_) {}
         }
         try {
-          await window.electronAPI.beginImportRun()
+          await window.backend.beginImportRun()
           for (const fp of filePaths) {
             const fileName = fp.replace(/\\/g, "/").split("/").pop()
             setImportOverlay(true, fileName)
-            const res = await window.electronAPI.importInteractionsCsv(
+            const res = await window.backend.importInteractionsCsv(
               fp,
               dataRetentionDays,
               null,
@@ -19169,7 +19172,7 @@
           contextOptionsLoaded = false // refresh context options on next panel open
           metadataOptionsLoaded = false
           // Refresh date picker bounds without resetting user's selection
-          window.electronAPI
+          window.backend
             .getDateRange()
             .then(({ min, max }) => initDatePicker(min, max))
             .catch(() => {})
@@ -19426,7 +19429,7 @@
       async function _impCleanup(paths) {
         if (!paths || !paths.length) return
         try {
-          await window.electronAPI.cleanupAnalyticsTemp(paths)
+          await window.backend.cleanupAnalyticsTemp(paths)
         } catch (_) {}
       }
 
@@ -19469,7 +19472,7 @@
               depth ? ` (split depth ${depth})` : ""
             }${attempt ? ` (attempt ${attempt + 1})` : ""}`,
           )
-          const res = await window.electronAPI.fetchAnalyticsWindow(
+          const res = await window.backend.fetchAnalyticsWindow(
             startUtc,
             endUtc,
           )
@@ -19576,7 +19579,7 @@
             )
             let res
             try {
-              res = await window.electronAPI.importInteractionsCsv(
+              res = await window.backend.importInteractionsCsv(
                 p.tempPath,
                 dataRetentionDays,
                 p.delimiter,
@@ -19602,7 +19605,7 @@
             // actually stored.
             if (p.startUtc && p.endUtc) {
               try {
-                await window.electronAPI.recordImportedWindow(
+                await window.backend.recordImportedWindow(
                   p.startUtc,
                   p.endUtc,
                 )
@@ -19706,7 +19709,7 @@
           // Purge, summary rebuild and the FTS merge used to run once per
           // downloaded window — 90 times for a 90-day import, each costing the
           // size of the whole database. Bracket the run so they happen once.
-          await window.electronAPI.beginImportRun()
+          await window.backend.beginImportRun()
           // Guarded rather than an early return: the outcome block below must
           // still run so the modal leaves the "running" phase.
           for (let k = 0; k < todo.length; k++) {
@@ -19769,7 +19772,7 @@
           // _impAfterImport reloads the list as soon as this returns.
           try {
             _impSetOp("Finishing up…", "Updating summaries and search index")
-            const f = await window.electronAPI.finalizeImportRun(dataRetentionDays)
+            const f = await window.backend.finalizeImportRun(dataRetentionDays)
             if (f) {
               totals.purged += f.purged || 0
               const t = f.timings
@@ -19819,7 +19822,7 @@
         if (totals.inserted > 0 || totals.days > 0) {
           contextOptionsLoaded = false
           metadataOptionsLoaded = false
-          window.electronAPI
+          window.backend
             .getDateRange()
             .then(({ min, max }) => initDatePicker(min, max))
             .catch(() => {})
@@ -19863,8 +19866,8 @@
           Date.now() - (IMP_RETENTION_DAYS + 2) * IMP_DAY_MS,
         )
         const [stats, coverage] = await Promise.all([
-          window.electronAPI.getDbDailyStats().catch(() => null),
-          window.electronAPI.getDbHourCoverage(since).catch(() => null),
+          window.backend.getDbDailyStats().catch(() => null),
+          window.backend.getDbHourCoverage(since).catch(() => null),
         ])
         for (const d of (stats && stats.days) || []) days.set(d.date, d.count)
         for (const d of coverage || []) {
@@ -20508,7 +20511,7 @@
         _impRenderModal()
       }
       async function impPickCsv() {
-        const res = await window.electronAPI.selectCsvFiles()
+        const res = await window.backend.selectCsvFiles()
         if (res && res.ok && res.paths && res.paths.length) {
           impClose()
           await doImport(res.paths)
@@ -20682,9 +20685,9 @@
         _cdataRenderChrome()
         // Sweep anything a previous crash left behind, then load the day
         // markers and re-render with them.
-        window.electronAPI.cleanupAnalyticsTemp().catch(() => {})
+        window.backend.cleanupAnalyticsTemp().catch(() => {})
         try {
-          analyticsConfig = await window.electronAPI.getAnalyticsConfig()
+          analyticsConfig = await window.backend.getAnalyticsConfig()
         } catch (_) {}
         try {
           await _impLoadDbState()
@@ -20968,7 +20971,7 @@
         btn.textContent = "Compacting…"
         status.textContent = "This can take a while on a large database."
         try {
-          const r = await window.electronAPI.compactDatabase()
+          const r = await window.backend.compactDatabase()
           const saved = (r.bytesBefore || 0) - (r.bytesAfter || 0)
           status.textContent =
             saved > 0
@@ -20998,7 +21001,7 @@
         )
         if (deleteBtn) deleteBtn.disabled = true
         try {
-          _manageDbStats = await window.electronAPI.getDbDailyStats()
+          _manageDbStats = await window.backend.getDbDailyStats()
         } catch (e) {
           body.innerHTML = `<div class="manage-db-empty" style="color:var(--red)">Error loading stats: ${esc(
             String(e),
@@ -21012,7 +21015,7 @@
         // partly imported reads the same in both places.
         _mdbDayHours = new Map()
         try {
-          for (const d of (await window.electronAPI.getDbHourCoverage()) || [])
+          for (const d of (await window.backend.getDbHourCoverage()) || [])
             _mdbDayHours.set(d.date, d.hours)
         } catch (_) {}
         // Open on the newest data so the calendar lands where the data is.
@@ -21406,7 +21409,7 @@
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
         if (deleteBtn) deleteBtn.disabled = true
         try {
-          const res = await window.electronAPI.deleteInteractionsByDates(dates)
+          const res = await window.backend.deleteInteractionsByDates(dates)
           const deleted = res?.deleted ?? 0
           showImportToast(
             "success",
@@ -21420,7 +21423,7 @@
           _mdbHover = ""
           _manageDbConfirming = false
           // Re-apply date range and reload sessions
-          window.electronAPI
+          window.backend
             .getDateRange()
             .then(({ min, max }) => initDatePicker(min, max))
             .catch(() => {})
@@ -21569,7 +21572,7 @@
         await yieldToPaint()
         const mySeq = ++convSearchSeq
         try {
-          const res = await window.electronAPI.getSessions(args)
+          const res = await window.backend.getSessions(args)
           // Discard if a newer search was started or the user cancelled
           if (mySeq !== convSearchSeq) return
           convSessions = res.sessions || []
@@ -21615,7 +21618,7 @@
         // at that point nothing is being processed yet.
         let unlistenProgress = null
         try {
-          unlistenProgress = await window.electronAPI.onAiExportProgress(
+          unlistenProgress = await window.backend.onAiExportProgress(
             (ev) => {
               const p = (ev && ev.payload) || {}
               if (p.phase === "querying") {
@@ -21636,7 +21639,7 @@
           unlistenProgress = null
         }
         try {
-          const res = await window.electronAPI.exportConversationsForAi(args)
+          const res = await window.backend.exportConversationsForAi(args)
           if (!res || res.canceled) return
           if (!res.ok) {
             showImportToast("error", "Export canceled or failed.")
@@ -22336,7 +22339,7 @@
           setLoaded: (v) => {
             contextOptionsLoaded = v
           },
-          load: () => window.electronAPI.getContextOptions(),
+          load: () => window.backend.getContextOptions(),
           filters: () => convContextFilters,
           empty:
             "No context data found.<br>Import interaction data first.",
@@ -22350,7 +22353,7 @@
           setLoaded: (v) => {
             metadataOptionsLoaded = v
           },
-          load: () => window.electronAPI.getMetadataOptions(),
+          load: () => window.backend.getMetadataOptions(),
           filters: () => convMetadataFilters,
           empty:
             "No answer metadata found.<br>Only answers configured with metadata carry any.",
@@ -22817,7 +22820,7 @@
             const notes = input.value.trim()
             if (notes) {
               try {
-                await window.electronAPI.saveFlaggedNote(flagId, notes)
+                await window.backend.saveFlaggedNote(flagId, notes)
                 const s = flaggedSessions.find((x) => x.flagId === flagId)
                 if (s) s.notes = notes
               } catch (e) {
@@ -22855,7 +22858,7 @@
           btn.innerHTML = "Unflagging…"
           try {
             for (const flagId of uniqueFlagIds) {
-              await window.electronAPI.unflagSession(flagId)
+              await window.backend.unflagSession(flagId)
             }
             selected.forEach((id) => chatFlaggedTurnMap.delete(id))
             btn.innerHTML = "&#x2713; Unflagged"
@@ -22882,7 +22885,7 @@
         btn.disabled = true
         btn.innerHTML = "Flagging…"
         try {
-          const flagId = await window.electronAPI.flagSession(
+          const flagId = await window.backend.flagSession(
             activeSessionUuid,
             flaggedLogIds,
             convDbPath || "",
@@ -23038,9 +23041,9 @@
       function previewUrl(url) {
         if (!/^https?:\/\//i.test(url)) return
         if (otherOpenMode === "browser") {
-          window.electronAPI.openUrl(url)
+          window.backend.openUrl(url)
         } else {
-          window.electronAPI.openPreviewWindow(url)
+          window.backend.openPreviewWindow(url)
         }
       }
 
@@ -23060,9 +23063,9 @@
       function openLink(url) {
         if (!url || !/^https?:\/\//i.test(url)) return
         if (openMode === "browser") {
-          window.electronAPI.openUrl(url)
+          window.backend.openUrl(url)
         } else {
-          window.electronAPI.openPreviewWindow(url)
+          window.backend.openPreviewWindow(url)
         }
       }
 
@@ -23161,7 +23164,7 @@
         .addEventListener("click", () => {
           // Bump seq so the in-flight getSessions result is discarded on arrival
           convSearchSeq++
-          window.electronAPI.cancelSessionSearch().catch(() => {})
+          window.backend.cancelSessionSearch().catch(() => {})
           document
             .getElementById("convSearchSubmit")
             .classList.remove("loading")
@@ -23698,7 +23701,7 @@
         setPaneLoading("chatThread", "Loading conversation…")
         setBusy(chatControls, true)
         try {
-          activeInteractions = await window.electronAPI.getSessionInteractions(
+          activeInteractions = await window.backend.getSessionInteractions(
             uuid,
           )
           // A second click while the first was in flight: the later selection
@@ -25434,7 +25437,7 @@
 
       // ── Init DB on load if path is stored ───────────────────────────
       if (convDbPath) {
-        window.electronAPI.setDbPath(convDbPath).catch(() => {
+        window.backend.setDbPath(convDbPath).catch(() => {
           convDbPath = ""
           localStorage.removeItem(CONV_DB_STORAGE_KEY)
         })

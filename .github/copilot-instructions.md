@@ -47,7 +47,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 
 ## Tauri commands (Rust → JS)
 
-| Command              | JS call via `window.electronAPI` | Description                                                                     |
+| Command              | JS call via `window.backend` | Description                                                                     |
 | -------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
 | `get_data`           | `getData(selectedFolder)`        | Returns content data: articles, dialogs, tDialogs, entities, conversation/context vars, files, sourceFiles, dataSource |
 | `open_url`           | `openUrl(url)`                   | Opens a URL with `opener::open_url` (https/http only)                           |
@@ -56,7 +56,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `check_for_updates`  | `checkForUpdates()`              | Fetches GitHub releases API, returns `{ status, version, message }`             |
 | `get_version`        | `getVersion()`                   | Returns the app version string from `package_info()`                            |
 
-There are also Conversations DB commands exposed through `window.electronAPI` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context options, daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
+There are also Conversations DB commands exposed through `window.backend` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context options, daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
 ## Events (Rust → renderer)
 
@@ -68,13 +68,13 @@ There are also Conversations DB commands exposed through `window.electronAPI` fo
 
 ## Frontend bridge (`index.html`)
 
-The renderer uses `window.electronAPI` as its sole interface to the backend. At startup, a shim in `index.html` wraps Tauri's `invoke` behind `window.electronAPI`:
+`window.backend` is the renderer's sole interface to Rust. At startup, a shim in `index.html` wraps Tauri's `invoke` behind it:
 
 ```js
-// Wraps Tauri invoke() behind the window.electronAPI surface
+// Wraps Tauri invoke() behind the window.backend surface
 const invoke = window.__TAURI__?.core?.invoke
 const listen = window.__TAURI__?.event?.listen
-window.electronAPI = {
+window.backend = {
   getData: (selectedFolder) =>
     invoke("get_data", { args: { selected_folder: selectedFolder || null } }),
   openUrl: (url) => invoke("open_url", { url }),
@@ -85,7 +85,7 @@ window.electronAPI = {
   checkForUpdates: () => invoke("check_for_updates"),
   getVersion: () => invoke("get_version"),
   // Conversations DB commands are also mapped here; keep them behind
-  // window.electronAPI rather than adding direct renderer filesystem access.
+  // window.backend rather than adding direct renderer filesystem access.
 }
 ```
 
@@ -222,7 +222,7 @@ let otherOpenMode // "popup" | "browser"
 
 ### Rendering pipeline
 
-1. Data loads via `window.electronAPI.getData(dataFolderPath)`
+1. Data loads via `window.backend.getData(dataFolderPath)`
 2. Maps (`dialogMap`, `tDialogMap`) populated
 3. Combined item arrays assembled (each item gets `._kind = "article" | "dialog" | "tdialog"`)
 4. Data is posted to `search-worker.js`, which precomputes indexed answer/node/entity search fields
@@ -368,4 +368,4 @@ Release URL pattern: `https://github.com/WithoutWout/cm-conversation-dashboard/r
 - Use `querySelector` / `getElementById` for DOM access; event delegation where multiple dynamic elements share a handler.
 - `buildSearchRegex` is the single source of truth for search logic — do not duplicate regex construction elsewhere.
 - Inline `onclick="..."` attributes are used intentionally for dynamically rendered cards (no event listener cleanup needed in this app).
-- Rust commands use `snake_case`; the JS shim maps them to `camelCase` on `window.electronAPI`.
+- Rust commands use `snake_case`; the JS shim maps them to `camelCase` on `window.backend`.

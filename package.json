@@ -3,63 +3,14 @@
   "version": "0.15.0",
   "description": "Desktop dashboard for inspecting CM.com Conversational AI Cloud content exports",
   "author": "Wout van Os",
-  "main": "main.js",
   "scripts": {
-    "start": "electron .",
     "tauri": "tauri",
     "test:frontend": "node frontend/tests/collections.test.js && node frontend/tests/export-integrity.test.js && node frontend/tests/conv-search.test.js && node frontend/tests/update-modal.test.js && node frontend/tests/settings-backup.test.js && node frontend/tests/metadata-filter.test.js && node frontend/tests/msg-meta-place.test.js",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build": "electron-builder --mac --win",
-    "publish:mac": "electron-builder --mac --publish always",
-    "publish:win": "electron-builder --win --publish always"
-  },
-  "build": {
-    "appId": "com.cm.conversation-dashboard",
-    "productName": "Conversational AI Dashboard",
-    "icon": "build/icon.png",
-    "files": [
-      "main.js",
-      "preload.js",
-      "frontend/index.html",
-      "package.json"
-    ],
-    "publish": {
-      "provider": "github",
-      "owner": "WithoutWout",
-      "repo": "cm-conversation-dashboard"
-    },
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": {
-        "target": "dmg",
-        "arch": [
-          "arm64"
-        ]
-      }
-    },
-    "win": {
-      "target": {
-        "target": "nsis",
-        "arch": [
-          "x64"
-        ]
-      }
-    },
-    "nsis": {
-      "perMachine": false,
-      "allowElevation": false
-    },
-    "dmg": {
-      "shrink": true
-    }
+    "tauri:build": "tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1",
-    "electron": "latest",
-    "electron-builder": "^26.8.1",
     "vis-network": "^10.0.2"
   },
   "dependencies": {
