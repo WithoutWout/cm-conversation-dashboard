@@ -17,6 +17,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
 
+[dev-dependencies]
+# Only so the network-gated TLS test can be an `#[tokio::test]`. The runtime and
+# macros are already in the graph via tauri and reqwest; naming them here means
+# the test does not silently depend on another crate happening to enable them.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -25,7 +31,31 @@ tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# TLS goes through the operating system, not a bundled root list.
+#
+# This was `rustls-tls`, which in reqwest means `rustls-tls-webpki-roots`: a
+# copy of the Mozilla root program compiled into the binary. It has no knowledge
+# of the machine's certificate stores, so behind a TLS-inspecting corporate
+# firewall — where the server certificate is reissued by an enterprise CA that
+# *is* installed and trusted by Windows — every request failed with
+# `invalid peer certificate: UnknownIssuer`, while Chrome on the same machine
+# was perfectly happy.
+#
+# `native-tls` is SChannel on Windows and Security.framework on macOS: the same
+# stack, the same stores and the same policy the rest of the system uses. That
+# buys three things a bundled root list cannot:
+#   * enterprise and GPO-deployed CAs are trusted because the OS trusts them,
+#     with no export, import or maintenance by the user, and it keeps working
+#     through certificate rotations;
+#   * missing intermediates are fetched via AIA, so an inspection proxy that
+#     sends an incomplete chain still verifies;
+#   * revocation is checked according to Windows policy (soft-fail), rather
+#     than not at all.
+#
+# Neither platform gains a build dependency: Windows uses schannel and macOS
+# uses Security.framework, both already present. (Linux would want OpenSSL
+# headers, but this app ships Windows and macOS only.)
+reqwest = { version = "0.12", features = ["json", "native-tls"], default-features = false }
 tokio = { version = "1", features = ["sync"] }
 notify = "6.1"
 rusqlite = { version = "0.31", features = ["bundled", "functions"] }
@@ -39,4 +69,10 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 # install step is ours, so the portable .exe can update itself. See
 # `src/self_update.rs`. Not target-gated: this app is desktop-only, and the
 # `cfg(desktop)` noise it would take to gate it buys nothing.
-tauri-plugin-updater = "2"
+#
+# `native-tls` for the same reason as above, and it matters just as much here:
+# the update check and download run on the same corporate network as the import,
+# so leaving this on the default bundled-roots path would fix importing and
+# leave the app unable to update itself at the office. `zip` is the other half
+# of the default feature set and is still needed for the release artifacts.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "zip"] }

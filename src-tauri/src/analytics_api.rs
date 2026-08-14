@@ -653,6 +653,65 @@ fn elapsed_ms(since: &SystemTime) -> u128 {
 /// mid-body — is two or three `source()` hops down. On Windows, where these
 /// failures are the ones we cannot reproduce locally, that chain *is* the
 /// diagnosis.
+/// Which certificate store the TLS check consults on this platform, named for
+/// the error message so the reader knows where to look.
+const TRUST_STORE_NAME: &str = if cfg!(target_os = "windows") {
+    "the Windows certificate store"
+} else if cfg!(target_vendor = "apple") {
+    "the macOS keychain"
+} else {
+    "the system certificate store"
+};
+
+/// Is this flattened error chain a certificate rejection, and if so what should
+/// the user be told?
+///
+/// The substrings are drawn from what the platform stacks actually say —
+/// SChannel, Security.framework and (on a machine that somehow builds against
+/// it) OpenSSL each phrase this differently, and none of them is a `reqwest`
+/// error kind we can match on. Matching text is unlovely, but the alternative
+/// is reporting "could not connect" for a problem that has nothing to do with
+/// connectivity.
+fn certificate_failure_hint(detail: &str) -> Option<&'static str> {
+    let lower = detail.to_ascii_lowercase();
+    let is_cert_error = [
+        "certificate",
+        "unknownissuer",
+        "unknown issuer",
+        "certverifyclientchain",
+        "cert_chain",
+        "self signed",
+        "self-signed",
+        "untrusted",
+        "not trusted",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    if !is_cert_error {
+        return None;
+    }
+    // Revocation is its own answer: the chain was built and trusted, and only
+    // the freshness check failed. Windows soft-fails this by default, so
+    // reaching here means something stricter is configured — a policy question,
+    // not something the app should override.
+    if lower.contains("revocation") || lower.contains("revoked") || lower.contains("crl") {
+        return Some(concat!(
+            "the server certificate could not be checked for revocation using ",
+            "the system's own revocation settings"
+        ));
+    }
+    if cfg!(target_os = "windows") {
+        Some(concat!(
+            "the server certificate was rejected by the Windows certificate ",
+            "store. On a network that inspects TLS, the inspecting CA must be ",
+            "trusted by Windows itself — if a browser accepts this site but ",
+            "this app does not, the CA is trusted for the browser only"
+        ))
+    } else {
+        Some("the server certificate was rejected by the system certificate store")
+    }
+}
+
 fn error_chain(e: &(dyn std::error::Error + 'static)) -> String {
     let mut parts = vec![e.to_string()];
     let mut src = e.source();
@@ -674,6 +733,17 @@ fn classify_reqwest_error(e: &reqwest::Error, context: &str) -> FetchError {
     // Every branch carries the flattened chain: the outer Display alone reads
     // the same for a DNS failure, a TLS rejection and a corporate proxy.
     let detail = error_chain(e);
+    // A certificate failure is not a network failure, and reporting it as one
+    // sent people looking at firewalls and proxies for a trust problem. The
+    // wording names the store the check actually used, because that is the one
+    // thing that makes the next step obvious — the same certificate the browser
+    // accepts has to be trusted by the OS, not by the app.
+    if let Some(hint) = certificate_failure_hint(&detail) {
+        return FetchError::new(
+            FetchErrorKind::Network,
+            format!("{context} failed: {hint} ({detail})"),
+        );
+    }
     if e.is_timeout() {
         FetchError::new(
             FetchErrorKind::Timeout,
@@ -752,6 +822,10 @@ impl AnalyticsState {
         }
         validate_window(start_utc, end_utc)?;
 
+        // Recorded on every fetch: a pasted log from a machine behind a TLS
+        // inspection proxy has to state which trust store was consulted, or the
+        // reader cannot tell a trust problem from a connectivity one.
+        trace.push(format!("TLS verified against {TRUST_STORE_NAME}"));
         trace.push(format!(
             "window {start_utc} → {end_utc} — customer {}, project {}, culture {}, environment {}, activeSessionOnly {}",
             mask(&cfg.customer_key),
@@ -1050,6 +1124,95 @@ pub fn cleanup_temp(cache_dir: &Path, paths: &[String]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reported failure — `invalid peer certificate: UnknownIssuer` behind
+    /// a TLS-inspecting firewall — has to read as a trust problem, not as a
+    /// network one. It was reported as "could not connect", which sent people
+    /// looking at the firewall for something the certificate store explains.
+    #[test]
+    fn a_rejected_certificate_does_not_read_as_a_connection_failure() {
+        // What each platform stack actually says.
+        for chain in [
+            "error sending request ← invalid peer certificate: UnknownIssuer",
+            "the certificate was not trusted ← untrusted root",
+            "certificate verify failed ← self signed certificate in certificate chain",
+            "CertVerifyCertificateChainPolicy failed",
+        ] {
+            assert!(
+                certificate_failure_hint(chain).is_some(),
+                "should be recognised as a certificate failure: {chain}"
+            );
+        }
+        // …and an actual connectivity failure must not be dressed up as one.
+        for chain in [
+            "error sending request ← connection refused",
+            "operation timed out",
+            "dns error: failed to lookup address information",
+        ] {
+            assert!(
+                certificate_failure_hint(chain).is_none(),
+                "should not be mistaken for a certificate failure: {chain}"
+            );
+        }
+    }
+
+    /// Revocation gets its own sentence: the chain *was* built and trusted, and
+    /// only the freshness check failed. Windows soft-fails that by default, so
+    /// reaching it means stricter policy is configured — which the app must
+    /// report rather than override.
+    #[test]
+    fn a_revocation_failure_is_not_reported_as_an_untrusted_chain() {
+        let hint = certificate_failure_hint(
+            "the revocation function was unable to check revocation for the certificate",
+        )
+        .expect("recognised");
+        assert!(
+            hint.contains("revocation"),
+            "revocation needs its own answer, got: {hint}"
+        );
+    }
+
+    /// A real TLS handshake against both hosts the import talks to, through the
+    /// same client the app builds.
+    ///
+    /// `#[ignore]` because it needs the network, and run with:
+    ///   cargo test tls_handshake_reaches_the_real_endpoints -- --nocapture --ignored
+    ///
+    /// **What this does and does not prove.** It proves the client still
+    /// verifies ordinary public certificates after moving off the bundled root
+    /// list — the regression that would otherwise only show up in front of a
+    /// user. It proves nothing about a TLS-inspecting corporate proxy, because
+    /// there is no proxy on the network it runs on: the certificate it verifies
+    /// here is the real one, chaining to a public root that both the old and the
+    /// new configuration trust. Only running it inside the corporate network
+    /// exercises the enterprise-CA path this change exists for.
+    #[tokio::test]
+    #[ignore]
+    async fn tls_handshake_reaches_the_real_endpoints() {
+        let state = AnalyticsState::default();
+        let client = state.client().expect("build client");
+        for url in [API_BASE, TOKEN_URL] {
+            let started = std::time::Instant::now();
+            // A HEAD is enough: the handshake happens before any response, and
+            // whatever status comes back means the certificate was accepted.
+            let result = client
+                .head(url)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await;
+            match result {
+                Ok(resp) => println!(
+                    "{url} -> HTTP {} in {}ms (certificate accepted)",
+                    resp.status(),
+                    started.elapsed().as_millis()
+                ),
+                Err(e) => panic!(
+                    "connection failed for {url}: {}",
+                    error_chain(&e as &dyn std::error::Error)
+                ),
+            }
+        }
+    }
 
     /// A 429 used to be folded into `Timeout`, which made the scheduler respond
     /// to "you are sending too many requests" by splitting the window and
