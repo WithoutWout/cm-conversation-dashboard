@@ -5786,14 +5786,122 @@
       .msg-meta-sub.is-hit .msg-meta-subkey {
         color: var(--accent);
       }
-      /* Metadata popover for one message */
-      .msg-meta-modal-box {
-        width: min(560px, 94vw);
-        max-height: min(760px, 86vh);
+      /* Metadata popover for one message.
+
+         A speech bubble growing out of the tag button, not a centred dialog.
+         What it shows belongs to *that* message, and a modal in the middle of
+         the screen severs it from the one thing that gives it meaning — you
+         lose which bubble you were reading the moment it opens. Anchored, the
+         answer stays next to the question. */
+      .msg-meta-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 400;
+      }
+      .msg-meta-overlay.open {
+        display: block;
+      }
+      /* Catches every click outside the bubble. A real element rather than a
+         document listener, so nothing can slip past it — the same idiom as
+         `.ctx-modal-backdrop`. It also stops the thread scrolling underneath,
+         which is what keeps the bubble attached to its anchor. */
+      .msg-meta-backdrop {
+        position: absolute;
+        inset: 0;
+      }
+      .msg-meta-pop {
+        position: absolute;
+        width: min(420px, calc(100vw - 20px));
+        max-height: min(440px, 62vh);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 10px 34px rgba(0, 0, 0, 0.34);
         display: flex;
         flex-direction: column;
       }
-      .msg-meta-modal-box .modal-body {
+      /* The tail: a rotated square sharing the bubble's own fill and border,
+         with the two edges that fall inside the box dropped so the whole thing
+         reads as one continuous outline. `--tail-x` is written from the
+         anchor's centre, so it keeps pointing at the button after the box has
+         been clamped to the viewport.
+
+         The box deliberately has no `overflow: hidden` — that would clip the
+         tail off. The rounded corners still hold because only `.msg-meta-body`
+         can overflow, and its own `overflow-y: auto` clips it. */
+      .msg-meta-tail {
+        position: absolute;
+        width: 12px;
+        height: 12px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-right: none;
+        border-bottom: none;
+        transform: rotate(45deg);
+        left: var(--tail-x, 50%);
+        margin-left: -6px;
+        top: -7px;
+      }
+      /* Opening upward instead: the tail hangs off the bottom, and it is the
+         other two edges that are outside. */
+      .msg-meta-pop.is-above .msg-meta-tail {
+        top: auto;
+        bottom: -7px;
+        border: 1px solid var(--border);
+        border-left: none;
+        border-top: none;
+      }
+      .msg-meta-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 10px 8px 12px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .msg-meta-title {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-right: auto;
+      }
+      .msg-meta-count {
+        font-size: 0.66rem;
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .msg-meta-copy {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.7rem;
+        cursor: pointer;
+        padding: 3px 7px;
+        border-radius: 4px;
+      }
+      .msg-meta-copy:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
+      .msg-meta-close {
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 0.9rem;
+        cursor: pointer;
+        padding: 2px 5px;
+        border-radius: 3px;
+        line-height: 1;
+      }
+      .msg-meta-close:hover {
+        color: var(--text);
+        background: var(--surface2);
+      }
+      .msg-meta-body {
         flex: 1;
         min-height: 0;
         overflow-y: auto;
@@ -5801,6 +5909,8 @@
         display: flex;
         flex-direction: column;
         gap: 2px;
+        padding: 4px 12px 8px;
+        border-radius: 0 0 9px 9px;
       }
       .msg-meta-row {
         display: grid;
@@ -6337,6 +6447,16 @@
         /* This one always opens upward: its bar sits at the bottom. */
         transform-origin: bottom right;
       }
+      /* The message-metadata bubble grows out of the tag it belongs to, so its
+         origin follows the tail rather than being fixed — `--tail-x` is already
+         the anchor's centre in box coordinates. */
+      .msg-meta-overlay.open .msg-meta-pop {
+        animation: pop-in 130ms cubic-bezier(0.2, 0.9, 0.3, 1);
+        transform-origin: var(--tail-x, 50%) top;
+      }
+      .msg-meta-overlay.open .msg-meta-pop.is-above {
+        transform-origin: var(--tail-x, 50%) bottom;
+      }
 
       /* Loading affordances. A fade takes the flash off a fast read without
          holding anything back on a slow one — the spinner is still in the
@@ -6372,6 +6492,7 @@
         .chip-overflow.expanded > *,
         .ctx-modal-overlay.open .ctx-modal-box,
         .add-to-collection-menu.open,
+        .msg-meta-overlay.open .msg-meta-pop,
         .pane-loading,
         .app-loading-overlay.open,
         .conv-search-loading-overlay.visible,
@@ -8872,28 +8993,27 @@
       single message, including the keys that are deliberately not offered as
       filters because their values are unique per conversation or per message.
     -->
-    <div class="modal-overlay" id="msgMetaModal">
-      <div class="modal-box msg-meta-modal-box">
-        <div class="modal-header">
-          <svg class=ui-icon><use href=#i-tag /></svg>
-          <h3>Message metadata</h3>
-          <button class="close-btn" onclick="closeMessageMetadata()">
-            &#x2715;
-          </button>
-        </div>
-        <div class="modal-body" id="msgMetaBody"></div>
-        <div class="modal-footer">
+    <div class="msg-meta-overlay" id="msgMetaModal">
+      <div class="msg-meta-backdrop" onclick="closeMessageMetadata()"></div>
+      <div class="msg-meta-pop" id="msgMetaPop">
+        <div class="msg-meta-tail"></div>
+        <div class="msg-meta-header">
+          <span class="msg-meta-title">
+            <svg class=ui-icon><use href=#i-tag /></svg> Metadata
+            <span class="msg-meta-count" id="msgMetaCount"></span>
+          </span>
           <button
-            class="btn-secondary"
+            class="msg-meta-copy"
             id="msgMetaCopyBtn"
             onclick="copyMessageMetadata()"
           >
             Copy
           </button>
-          <button class="btn-primary" onclick="closeMessageMetadata()">
-            Close
+          <button class="msg-meta-close" onclick="closeMessageMetadata()">
+            &#x2715;
           </button>
         </div>
+        <div class="msg-meta-body" id="msgMetaBody"></div>
       </div>
     </div>
 
@@ -24146,7 +24266,7 @@
           label,
         )}" onclick="event.stopPropagation();openMessageMetadata(${
           row.logId
-        })"><svg class=ui-icon><use href=#i-tag /></svg></button>`
+        },this)"><svg class=ui-icon><use href=#i-tag /></svg></button>`
       }
 
       /**
@@ -24215,18 +24335,123 @@
           .map((p) => ({ key: String(p.key), value: p.value ?? "" }))
       }
 
-      function openMessageMetadata(logId) {
+      // Room for the tail between the button and the bubble, the margin the
+      // bubble keeps from the window edge when it has to be clamped, and how
+      // far the tail stays clear of the bubble's rounded corners.
+      const MSG_META_GAP = 9
+      const MSG_META_EDGE = 10
+      const MSG_META_TAIL_INSET = 16
+
+      /// The tag button the open bubble belongs to, so it can be re-placed on
+      /// resize. Null whenever the bubble is closed.
+      let _msgMetaAnchor = null
+
+      /**
+       * Open the metadata bubble on a message's tag button.
+       *
+       * There is no explicit toggle: while the bubble is open its backdrop
+       * covers the whole window, so a second click on the same button lands on
+       * the backdrop and closes it — which is the behaviour a toggle would have
+       * given, without a second code path that can disagree with the first.
+       */
+      function openMessageMetadata(logId, btn) {
         const pairs = _msgMetaById.get(logId) || []
-        const box = document.getElementById("msgMetaBody")
-        box.innerHTML = pairs.length
+        const body = document.getElementById("msgMetaBody")
+        body.innerHTML = pairs.length
           ? pairs.map(_msgMetaRowHtml).join("")
           : `<div class="chat-empty">This message carries no metadata.</div>`
-        document.getElementById("msgMetaModal").classList.add("open")
+        document.getElementById("msgMetaCount").textContent = pairs.length
+          ? `${pairs.length} ${pairs.length === 1 ? "value" : "values"}`
+          : ""
+        _msgMetaAnchor = btn || null
+        const overlay = document.getElementById("msgMetaModal")
+        const pop = document.getElementById("msgMetaPop")
+        // Placement needs the bubble's real size, which needs it laid out. Hide
+        // it, show the overlay, measure and place, then reveal — all in one
+        // synchronous run, so the intermediate position is never painted and
+        // the pop-in still plays from the right spot.
+        pop.style.visibility = "hidden"
+        overlay.classList.add("open")
+        _msgMetaPlace()
+        pop.style.visibility = ""
+        body.scrollTop = 0
+      }
+
+      /**
+       * Where the bubble goes for a given anchor, box and window.
+       *
+       * Below the button by default; above it when there isn't room below and
+       * there is more of it above. The box is then clamped to the window — and
+       * that clamp is the whole reason the tail is computed from the *anchor's*
+       * centre rather than from the middle of the box: a bubble pushed sideways
+       * by the window edge would otherwise point at nothing. The tail is also
+       * held off the rounded corners, where it would read as detached.
+       *
+       * Split out of `_msgMetaPlace` because this is pure arithmetic over four
+       * numbers and every interesting case (no room either way, an anchor near
+       * a corner, a box wider than the window) is one no manual pass reliably
+       * reaches. See `frontend/tests/msg-meta-place.test.js`.
+       */
+      function msgMetaPlacement(anchor, box, win) {
+        const below = win.height - anchor.bottom
+        const above =
+          below < box.height + MSG_META_GAP + MSG_META_EDGE &&
+          anchor.top > below
+        const top = above
+          ? Math.max(MSG_META_EDGE, anchor.top - MSG_META_GAP - box.height)
+          : anchor.bottom + MSG_META_GAP
+        const centre = anchor.left + anchor.width / 2
+        const left = Math.min(
+          Math.max(MSG_META_EDGE, centre - box.width / 2),
+          Math.max(MSG_META_EDGE, win.width - MSG_META_EDGE - box.width),
+        )
+        const corner = MSG_META_TAIL_INSET
+        const tailX = Math.min(
+          Math.max(centre - left, corner),
+          Math.max(corner, box.width - corner),
+        )
+        return { top, left, tailX, above }
+      }
+
+      /// Measure the anchor and the box, and apply the placement above.
+      function _msgMetaPlace() {
+        const btn = _msgMetaAnchor
+        const pop = document.getElementById("msgMetaPop")
+        if (!btn || !pop) return
+        const p = msgMetaPlacement(
+          btn.getBoundingClientRect(),
+          { width: pop.offsetWidth, height: pop.offsetHeight },
+          { width: window.innerWidth, height: window.innerHeight },
+        )
+        pop.classList.toggle("is-above", p.above)
+        pop.style.top = p.top + "px"
+        pop.style.left = p.left + "px"
+        pop.style.setProperty("--tail-x", p.tailX + "px")
       }
 
       function closeMessageMetadata() {
         document.getElementById("msgMetaModal").classList.remove("open")
+        _msgMetaAnchor = null
       }
+
+      function _msgMetaIsOpen() {
+        return document
+          .getElementById("msgMetaModal")
+          .classList.contains("open")
+      }
+
+      // Escape closes it, alongside the ✕ and a click on the backdrop. The
+      // listener is permanent and guards on the open state, matching how the
+      // confirm overlay does it.
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && _msgMetaIsOpen()) closeMessageMetadata()
+      })
+      // The bubble is pinned to a button in window coordinates, so a resize
+      // moves the button out from under it. The backdrop stops the thread
+      // scrolling, so that is the only way the two can come apart.
+      window.addEventListener("resize", () => {
+        if (_msgMetaIsOpen()) _msgMetaPlace()
+      })
 
       /**
        * One metadata entry.

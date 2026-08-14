@@ -36,7 +36,8 @@ frontend/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
     conv-search.test.js, update-modal.test.js,
-    settings-backup.test.js, metadata-filter.test.js  — `npm run test:frontend`
+    settings-backup.test.js, metadata-filter.test.js,
+    msg-meta-place.test.js                            — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
@@ -443,7 +444,13 @@ The chat view turns raw `interactions` rows into turns (`buildChatTurns`) and re
 
 The tag filter popover aggregates `OutputMetadata` across the whole database; `#msgMetaModal` shows the same data on a single message. They are the two halves of one question — "why is this conversation in my results?" against "what does this answer actually carry?" — and the second had no answer at all before: the column reached the renderer and nothing read it.
 
-- **The button is only rendered when the message has metadata** (`bubbleMetaButtonHtml`). Plenty of rows carry none, and a button that opens an empty dialog on half the messages is worse than no button. Its tooltip states the count, so the dialog is never a surprise.
+- **It is a speech bubble anchored to the tag button, not a centred dialog**, and that is about what the data means rather than about decoration. The values belong to *one message*; a modal in the middle of the screen severs them from the only thing that gives them meaning, and on a long thread you lose which bubble you were reading the moment it opens. Anchored, the answer stays beside the question. It closes on a click outside, on ✕, and on Escape — all three, because a popover with only one way out reads as stuck.
+  - **The backdrop is a real element** (`.msg-meta-backdrop`), the same idiom as `.ctx-modal-backdrop`, so no click can slip past a document listener. It also means there is **no explicit toggle**: while the bubble is open the backdrop covers its own button, so a second click there lands on the backdrop and closes it — the behaviour a toggle would have given, without a second code path that can disagree with the first. And because the backdrop stops the thread scrolling, a resize is the only way the bubble and its anchor can come apart, which is why that is the only reposition listener.
+  - **`msgMetaPlacement` is split out as pure arithmetic over three rects**, and `frontend/tests/msg-meta-place.test.js` is the reason: what goes wrong here is never "it fails to open", it is the bubble landing somewhere plausible with its tail pointing at nothing. Every case that produces it — a message at the bottom of the thread, an anchor against the window edge, a bubble too tall for either side — is one no manual pass reliably reaches.
+  - **The tail is positioned from the *anchor's* centre, never from the middle of the box.** The box is clamped to the window, so a bubble pushed sideways by the edge would otherwise point at empty space. It is held `MSG_META_TAIL_INSET` clear of the rounded corners, where it would read as detached.
+  - **`.msg-meta-pop` deliberately has no `overflow: hidden`** — it would clip the tail off. The rounded corners still hold because only `.msg-meta-body` can overflow and its own `overflow-y: auto` clips it.
+  - Placement needs the bubble's real size, so `openMessageMetadata` hides it, shows the overlay, measures, places, and reveals — all synchronously, so the intermediate position is never painted and `pop-in` still plays from the right spot. `transform-origin` follows `--tail-x`, so it grows out of the tag rather than out of its own middle.
+- **The button is only rendered when the message has metadata** (`bubbleMetaButtonHtml`). Plenty of rows carry none, and a button that opens an empty dialog on half the messages is worse than no button. Its tooltip states the count, so the bubble is never a surprise.
 - **It shares the bottom-right corner with the "▾ details" hint, not the opposite one.** A one-line answer is short enough that top-right and bottom-right are the same place, and the two overlapped — verified by rect, not by eye. `.bubble:has(.bubble-meta-btn)` shifts the hint left by exactly the button's width, so they cannot collide at any bubble height.
 - **Nested values are split into sub-rows** using the same `_flattenMetaEntry` the chips use, so a value reads the same way in both places and **Copy** produces the `key.subkey` names you would search for. An unexpanded blob here would be the same unreadable line the chips used to be.
 - **Nothing is hidden.** `conversation_id` and `CURRENT_DATETIME` are excluded from the *filter index* because a chip matching one message is useless; on the message itself they are exactly what someone is looking for.
