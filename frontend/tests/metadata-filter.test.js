@@ -66,7 +66,14 @@ vm.runInContext(
   let contentMetadataFilters = []
   const META_MAX_DEPTH = 3
   const META_MAX_LEAVES = 24
-  ${["_unmarkJsonBreaks", "flattenMetaEntry", "metaSetOf", "matchesContentMetadata"]
+  const EMPTY_TAG_SET = {}
+  ${[
+    "_unmarkJsonBreaks",
+    "flattenMetaEntry",
+    "metaSetOf",
+    "tagFilterMatches",
+    "matchesContentMetadata",
+  ]
     .map((n) => extractFrom(workerSrc, n))
     .join("\n")}
   function setFilters(f) { contentMetadataFilters = f }

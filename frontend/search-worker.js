@@ -606,6 +606,28 @@ function canUsePlainMatch() {
   return !searchRegex && !searchWord
 }
 
+/**
+ * Does one tag set satisfy one filter?
+ *
+ * The single place the three kinds of filter value are told apart, because the
+ * distinction was written out six times and adding `__any__` to five of them
+ * would have been a filter that worked on Context but not Metadata, or on cards
+ * but not in the modal.
+ *
+ * `__not_set__` passes when the key is absent and `__any__` when it is present
+ * with any value at all — exact complements, and the only two that ask about the
+ * key rather than about one of its values.
+ */
+function tagFilterMatches(set, f) {
+  const vals = set[f.name]
+  if (f.value === "__not_set__") return !vals
+  if (f.value === "__any__") return !!vals
+  return !!vals && vals.includes(f.value)
+}
+
+/** The tag set of an answer that carries nothing. */
+const EMPTY_TAG_SET = {}
+
 // Returns true if item passes the active content context filter set.
 // An item passes if it has at least one ctxSet satisfying ALL active filters.
 // For "not set" filters the implicit default answer ({}) is also considered.
@@ -645,24 +667,15 @@ function matchesContentContext(item) {
   if (hasNotSetFilter && item._hasDefaultAnswer) {
     return (
       varCtxSets.some((ctxSet) =>
-        varFilters.every((f) => {
-          if (f.value === "__not_set__") return !ctxSet[f.name]
-          const vals = ctxSet[f.name]
-          return vals && vals.includes(f.value)
-        }),
+        varFilters.every((f) => tagFilterMatches(ctxSet, f)),
       ) ||
-      varFilters.every((f) => {
-        if (f.value === "__not_set__") return true // default answer has nothing set
-        return false // regular filter can't be satisfied by empty ctxSet
-      })
+      // The default answer sets nothing, so it is the empty set: "not set"
+      // passes on it, "any" and a literal value cannot.
+      varFilters.every((f) => tagFilterMatches(EMPTY_TAG_SET, f))
     )
   }
   return varCtxSets.some((ctxSet) =>
-    varFilters.every((f) => {
-      if (f.value === "__not_set__") return !ctxSet[f.name]
-      const vals = ctxSet[f.name]
-      return vals && vals.includes(f.value)
-    }),
+    varFilters.every((f) => tagFilterMatches(ctxSet, f)),
   )
 }
 
@@ -683,27 +696,21 @@ function matchesContentMetadata(item) {
   if (!contentMetadataFilters.length) return true
   const sets = item._metaSets || []
   if (!sets.length) {
-    // Nothing to satisfy a positive filter, but "not set" is trivially true.
-    return contentMetadataFilters.every((f) => f.value === "__not_set__")
+    // No answer carries metadata, so the only filter that can pass is one
+    // asking for absence.
+    return contentMetadataFilters.every((f) =>
+      tagFilterMatches(EMPTY_TAG_SET, f),
+    )
   }
   return sets.some((set) =>
-    contentMetadataFilters.every((f) => {
-      if (f.value === "__not_set__") return !set[f.name]
-      const vals = set[f.name]
-      return vals && vals.includes(f.value)
-    }),
+    contentMetadataFilters.every((f) => tagFilterMatches(set, f)),
   )
 }
 
 // Check if a single answer's ctxSet satisfies all active content context filters.
-// Supports "__not_set__" sentinel: passes when the variable is absent from ctxSet.
 function ctxSetMatchesFilters(ctxSet) {
   if (!contentContextFilters.length) return true
-  return contentContextFilters.every((f) => {
-    if (f.value === "__not_set__") return !ctxSet[f.name]
-    const vals = ctxSet[f.name]
-    return vals && vals.includes(f.value)
-  })
+  return contentContextFilters.every((f) => tagFilterMatches(ctxSet, f))
 }
 
 // Check if a single answer item matches ALL terms in a single AND-group.

@@ -1284,8 +1284,33 @@ const META_PENDING_FINALIZE: &str = "pending_finalize";
 
 /// Set once `entity_index` has been backfilled from the `recognition_details`
 /// already in the database. Imports maintain it incrementally from then on.
+/// How many values one tag name may offer as chips.
+///
+/// Per name, never global — see `tag_options`. Generous enough that no real key
+/// is capped (the largest on the reference export is well under this), so the
+/// cap is a guard against a pathological key rather than a routine truncation.
+const TAG_VALUES_PER_NAME: i64 = 300;
+
 const META_ENTITY_INDEX_BUILT: &str = "entity_index_built";
 const META_METADATA_INDEX_BUILT: &str = "metadata_index_built";
+
+/// Which *rules* the stored `metadata_index` rows were built with.
+///
+/// This was a bare "have we built it?" flag, which meant the rows a database
+/// happened to be indexed with were the rows it kept forever. Two later changes
+/// to `metadata_index_rows` — flattening a nested value into `key.subkey`, and
+/// dropping `conversation_id` — therefore never reached a database that had
+/// already been indexed: it went on showing raw JSON blobs as chips, and went on
+/// letting thousands of unique ids crowd out every other key.
+///
+/// Bump this whenever `metadata_index_rows` starts producing different pairs for
+/// the same input. The rebuild clears the table first, because the backfill
+/// inserts with `OR IGNORE` and would otherwise leave the old rows in place
+/// beside the new ones.
+///
+/// 1. initial
+/// 2. nested values flattened to `key.subkey`; `conversation_id` excluded
+const METADATA_INDEX_RULES_VERSION: i64 = 2;
 
 // ── Flagged DB schema ────────────────────────────────────────────────────────
 
@@ -1520,6 +1545,29 @@ fn set_meta_flag(conn: &Connection, key: &str) {
 
 fn clear_meta_flag(conn: &Connection, key: &str) {
     let _ = conn.execute("DELETE FROM app_meta WHERE key = ?1", params![key]);
+}
+
+fn set_meta_version(conn: &Connection, key: &str, version: i64) {
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO app_meta(key, value) VALUES (?1, ?2)",
+        params![key, version.to_string()],
+    );
+}
+
+/// The rules version stored against a backfill flag.
+///
+/// 0 means never built. The original flag wrote the literal `'1'`, so a database
+/// from before versioning reads back as version 1 without needing a migration of
+/// its own — which is exactly the "built with the old rules" case.
+fn meta_flag_version(conn: &Connection, key: &str) -> i64 {
+    conn.query_row(
+        "SELECT value FROM app_meta WHERE key = ?1",
+        params![key],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|v| v.trim().parse::<i64>().ok())
+    .unwrap_or(0)
 }
 
 fn meta_flag_set(conn: &Connection, key: &str) -> bool {
@@ -1799,10 +1847,13 @@ fn repair_fts_index(conn: &Connection) -> bool {
 /// One transaction, streamed rather than collected: a mature database holds
 /// hundreds of thousands of rows and the pairs are written as they are read.
 /// Returns the number of rows inserted.
-fn backfill_metadata_index(conn: &Connection) -> Result<i64, rusqlite::Error> {
+fn backfill_metadata_index(conn: &Connection, rebuild: bool) -> Result<i64, rusqlite::Error> {
     let mut rows = 0i64;
     conn.execute_batch("BEGIN")?;
     let result = (|| -> Result<(), rusqlite::Error> {
+        if rebuild {
+            conn.execute("DELETE FROM metadata_index", [])?;
+        }
         let mut read = conn.prepare(
             "SELECT session_uuid, output_metadata FROM interactions \
              WHERE output_metadata IS NOT NULL AND output_metadata != '' \
@@ -1888,17 +1939,23 @@ fn open_db(path: &str) -> Result<Connection, String> {
     // known in advance. Routing the migration through the same function the
     // import path uses is also stronger than asserting two implementations
     // agree: there is only one implementation.
-    if !meta_flag_set(&conn, META_METADATA_INDEX_BUILT) {
+    let metadata_rules = meta_flag_version(&conn, META_METADATA_INDEX_BUILT);
+    if metadata_rules < METADATA_INDEX_RULES_VERSION {
         let started = Instant::now();
-        let built = backfill_metadata_index(&conn);
+        // A rebuild, not a top-up: the pairs an older version produced for a
+        // given row are not a subset of what this version produces, and the
+        // backfill inserts with OR IGNORE.
+        let rebuild = metadata_rules > 0;
+        let built = backfill_metadata_index(&conn, rebuild);
         match built {
             Ok(rows) => {
                 log::info!(
                     target: "import",
-                    "indexed {rows} output metadata pairs in {}ms",
-                    started.elapsed().as_millis()
+                    "indexed {rows} output metadata pairs in {}ms (rules v{metadata_rules} -> v{METADATA_INDEX_RULES_VERSION}{})",
+                    started.elapsed().as_millis(),
+                    if rebuild { ", rebuilt" } else { "" }
                 );
-                set_meta_flag(&conn, META_METADATA_INDEX_BUILT);
+                set_meta_version(&conn, META_METADATA_INDEX_BUILT, METADATA_INDEX_RULES_VERSION);
             }
             Err(e) => {
                 log::warn!(target: "import", "metadata backfill failed, will retry on next open: {e}");
@@ -2531,6 +2588,27 @@ struct CsvMetadataPair<'a> {
 /// back in the filter chips, and `Polles Keuken` should not become
 /// `polles keuken` there. Pairs with an empty key are dropped — they would
 /// index a row nobody can find.
+/// Metadata keys that identify the conversation rather than describe the answer.
+///
+/// `conversation_id` is unique per session, so as a filter it is one chip per
+/// conversation, each matching exactly that one conversation — no question
+/// anyone asks. It is also actively harmful: the options query used to take the
+/// first 500 name/value pairs in name order, and thousands of unique ids ate the
+/// whole budget, leaving every key that sorts after `conversation_id`
+/// (`entryLimit`, `testCase`, `transaction`, `wheelchair`…) showing nothing but
+/// "not set". The per-name cap in `tag_options` is the general fix; this is the
+/// specific one, and it also keeps the index from carrying a row per session for
+/// nothing.
+///
+/// Matched case-insensitively so `conversationId` and `Conversation_Id` are the
+/// same key.
+const META_EXCLUDED_KEYS: [&str; 3] = ["conversation_id", "conversationid", "session_id"];
+
+fn is_excluded_metadata_key(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    META_EXCLUDED_KEYS.contains(&lower.as_str())
+}
+
 fn metadata_index_rows(output_metadata: &str) -> Vec<(String, String)> {
     let trimmed = output_metadata.trim();
     // Cheap gate: an empty or absent column is the common case, and the
@@ -2544,6 +2622,9 @@ fn metadata_index_rows(output_metadata: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for p in &pairs {
         let Some(key) = p.key.as_deref() else { continue };
+        if is_excluded_metadata_key(key) {
+            continue;
+        }
         let value = serde_json::Value::String(p.value.as_deref().unwrap_or("").to_string());
         flatten_metadata_entry(key, &value, 0, &mut out);
     }
@@ -3412,8 +3493,11 @@ fn build_session_filter_query(
         groups.sort_by(|a, b| a.0.cmp(&b.0));
         for (name, values) in groups {
             let has_not_set = values.iter().any(|v| v == "__not_set__");
-            let regular_values: Vec<String> =
-                values.into_iter().filter(|v| v != "__not_set__").collect();
+            let has_any = values.iter().any(|v| v == "__any__");
+            let regular_values: Vec<String> = values
+                .into_iter()
+                .filter(|v| v != "__not_set__" && v != "__any__")
+                .collect();
             let mut subclauses = Vec::new();
             if has_not_set {
                 let pn = next_param(&mut param_idx);
@@ -3422,7 +3506,17 @@ fn build_session_filter_query(
                     "NOT EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn})"
                 ));
             }
-            if !regular_values.is_empty() {
+            // "any" is the same EXISTS as a value filter with the value test
+            // dropped, so it subsumes any individual values picked alongside it
+            // — they are left out rather than ORed in for nothing.
+            if has_any {
+                let pn = next_param(&mut param_idx);
+                param_values.push(Box::new(name.clone()));
+                subclauses.push(format!(
+                    "EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn})"
+                ));
+            }
+            if !regular_values.is_empty() && !has_any {
                 let pn = next_param(&mut param_idx);
                 param_values.push(Box::new(name.clone()));
                 let value_placeholders = regular_values
@@ -5097,17 +5191,40 @@ async fn tag_options(
 ) -> Result<Vec<ContextOption>, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-    let state = db.lock().map_err(|e| e.to_string())?;
-    let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        tag_option_rows(conn, table)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-    // Regular options: name × value with per-value session counts
+/// The chips one tag table offers, with their session counts.
+///
+/// Split out of [`tag_options`] so the two queries can be tested without a
+/// Tauri `State` — the per-name cap and the any/not-set pair are both rules
+/// that only show themselves in the rows that come back.
+fn tag_option_rows(conn: &Connection, table: &str) -> Result<Vec<ContextOption>, String> {
+    // Regular options: name × value with per-value session counts.
+    //
+    // The cap is **per name**, which is the whole point. It used to be one
+    // global `LIMIT 500` over `ORDER BY name, value`, so a single key with
+    // thousands of distinct values (`conversation_id`) consumed the entire
+    // budget and every key sorting after it came back with no values at all —
+    // visible in the UI as a long tail of keys offering only "not set". A
+    // per-name cap means no key can crowd out another, and ordering each name's
+    // values by count means a capped key keeps the ones worth filtering on.
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT name, value, COUNT(DISTINCT session_uuid) as session_count \
-             FROM {table} \
-             GROUP BY name, value \
-             ORDER BY name ASC, value ASC \
-             LIMIT 500",
+            "SELECT name, value, session_count FROM (\
+               SELECT name, value, COUNT(DISTINCT session_uuid) AS session_count, \
+                      ROW_NUMBER() OVER (\
+                        PARTITION BY name ORDER BY COUNT(DISTINCT session_uuid) DESC, value ASC\
+                      ) AS rank_in_name \
+               FROM {table} \
+               GROUP BY name, value\
+             ) WHERE rank_in_name <= {TAG_VALUES_PER_NAME} \
+             ORDER BY name ASC, value ASC",
         ))
         .map_err(|e| format!("Prepare error: {e}"))?;
 
@@ -5124,10 +5241,13 @@ async fn tag_options(
         .filter(|o| !o.name.is_empty())
         .collect();
 
-    // "Not set" options: for each known name, count sessions that have NO entry for that name.
-    // not_set_count = total_sessions - sessions_with_that_name
-    // Total computed once here instead of as a scalar subquery in both the
-    // SELECT and the HAVING clause.
+    // The two whole-key options, from one pass: "any" is the sessions that carry
+    // the key at all, "not set" is the rest.
+    //
+    // "any" exists because with a per-name cap — and, more often, with a key
+    // that simply has a lot of values — picking every chip by hand is not a
+    // realistic way to ask "was this set?". It is also the only way to express
+    // the complement of "not set" once a key has more values than are shown.
     let total_sessions: i64 = conn
         .query_row(
             "SELECT COUNT(DISTINCT session_uuid) FROM interactions",
@@ -5137,33 +5257,46 @@ async fn tag_options(
         .unwrap_or(0);
     let mut stmt2 = conn
         .prepare(&format!(
-            "SELECT ti.name, \
-              ?1 - COUNT(DISTINCT ti.session_uuid) \
+            "SELECT ti.name, COUNT(DISTINCT ti.session_uuid) \
              FROM {table} ti \
              GROUP BY ti.name \
-             HAVING ?1 - COUNT(DISTINCT ti.session_uuid) > 0 \
              ORDER BY ti.name ASC",
         ))
         .map_err(|e| format!("Prepare error: {e}"))?;
 
-    let not_set_opts: Vec<ContextOption> = stmt2
-        .query_map(params![total_sessions], |row| {
-            Ok(ContextOption {
-                name:  row.get(0)?,
-                value: "__not_set__".to_string(),
-                count: row.get(1)?,
-            })
+    let whole_key_opts: Vec<ContextOption> = stmt2
+        .query_map([], |row| {
+            let name: String = row.get(0)?;
+            let with_key: i64 = row.get(1)?;
+            Ok((name, with_key))
         })
         .map_err(|e| format!("Query error: {e}"))?
         .filter_map(|r| r.ok())
-        .filter(|o| !o.name.is_empty())
+        .filter(|(name, _)| !name.is_empty())
+        .flat_map(|(name, with_key)| {
+            let mut pair = Vec::with_capacity(2);
+            if with_key > 0 {
+                pair.push(ContextOption {
+                    name: name.clone(),
+                    value: "__any__".to_string(),
+                    count: with_key,
+                });
+            }
+            // Every session already carries the key — there is no "not set" to
+            // offer, and a chip reading 0 is worse than no chip.
+            if total_sessions - with_key > 0 {
+                pair.push(ContextOption {
+                    name,
+                    value: "__not_set__".to_string(),
+                    count: total_sessions - with_key,
+                });
+            }
+            pair
+        })
         .collect();
 
-    opts.extend(not_set_opts);
+    opts.extend(whole_key_opts);
     Ok(opts)
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -9404,7 +9537,7 @@ mod conv_search {
             params![meta],
         )
         .expect("insert");
-        backfill_metadata_index(&conn).expect("backfill");
+        backfill_metadata_index(&conn, false).expect("backfill");
 
         let mut backfilled: Vec<String> = conn
             .prepare("SELECT name || '=' || value FROM metadata_index")
@@ -9602,6 +9735,144 @@ mod conv_search {
             ..Default::default()
         };
         assert_eq!(sessions_for(&unset), vec!["s2"]);
+    }
+
+    /// "any" is the exact complement of "not set", which is the property that
+    /// makes it worth having: once a key has more values than anyone will click
+    /// through, it is the only way to ask "was this set?" at all.
+    #[test]
+    fn any_selects_every_session_not_set_rejects() {
+        let conn = search_conn();
+        for (log_id, session) in [(1, "has-true"), (2, "has-other"), (3, "has-none")] {
+            add(&conn, Turn { log_id, session, user: "hallo", ..Default::default() });
+        }
+        conn.execute_batch(
+            "INSERT INTO metadata_index(name, value, session_uuid) VALUES ('entryLimit','true','has-true'); \
+             INSERT INTO metadata_index(name, value, session_uuid) VALUES ('entryLimit','2','has-other');",
+        )
+        .expect("tags");
+        rebuild_session_summary(&conn).expect("summary");
+
+        let with = |value: &str| {
+            found(
+                &conn,
+                &GetSessionsArgs {
+                    metadata_filters: Some(vec![ContextFilter {
+                        name: "entryLimit".into(),
+                        value: value.into(),
+                    }]),
+                    ..Default::default()
+                },
+            )
+        };
+        assert_eq!(with("__any__"), vec!["has-other", "has-true"]);
+        assert_eq!(with("__not_set__"), vec!["has-none"]);
+        // Every session is in exactly one of the two halves.
+        assert_eq!(with("__any__").len() + with("__not_set__").len(), 3);
+        // A specific value still narrows further than "any".
+        assert_eq!(with("true"), vec!["has-true"]);
+    }
+
+    /// The reported symptom, reproduced against the query rather than the UI: a
+    /// key with thousands of distinct values used to consume a global `LIMIT
+    /// 500` taken in name order, so every key sorting after it came back with no
+    /// values at all and rendered as nothing but "not set".
+    #[test]
+    fn one_noisy_key_cannot_crowd_out_the_others() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "s", user: "hallo", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+        // "aaa_noisy" sorts before the rest, exactly like conversation_id did.
+        let mut sql = String::new();
+        for i in 0..2000 {
+            sql.push_str(&format!(
+                "INSERT INTO metadata_index(name, value, session_uuid) VALUES ('aaa_noisy','v{i}','s');"
+            ));
+        }
+        for name in ["entryLimit", "testCase", "transaction", "wheelchair"] {
+            sql.push_str(&format!(
+                "INSERT INTO metadata_index(name, value, session_uuid) VALUES ('{name}','true','s');"
+            ));
+        }
+        conn.execute_batch(&sql).expect("tags");
+
+        let offered = tag_option_rows(&conn, "metadata_index").expect("options");
+        for name in ["entryLimit", "testCase", "transaction", "wheelchair"] {
+            assert!(
+                offered.iter().any(|o| o.name == name && o.value == "true"),
+                "{name} must still offer its real value, not just not set / any"
+            );
+        }
+        // …and the noisy key is capped rather than unbounded.
+        let noisy = offered
+            .iter()
+            .filter(|o| o.name == "aaa_noisy" && o.value != "__any__" && o.value != "__not_set__")
+            .count();
+        assert_eq!(noisy as i64, TAG_VALUES_PER_NAME);
+    }
+
+    /// A database indexed by an older build keeps its rows unless something
+    /// tells it not to. The flag used to be a bare "built?", so the two later
+    /// changes to `metadata_index_rows` — flattening a nested value, dropping
+    /// `conversation_id` — never reached an already-indexed database: it went on
+    /// showing raw JSON blobs as chips forever.
+    #[test]
+    fn older_rules_are_rebuilt_not_left_in_place() {
+        let conn = search_conn();
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             output_metadata, imported_at) VALUES (1,'u','s','2026-06-01T09:00:00',?1,0)",
+            params![
+                r#"[{"key":"abortTransactionAction","value":"{\"label\":\"Stoppen\",\"topicName\":\"Stoppen_Badhuys\"}"},
+                    {"key":"conversation_id","value":"abc-123"}]"#
+            ],
+        )
+        .expect("insert");
+
+        // What the pre-flattening build left behind: the value as one raw blob,
+        // plus a conversation id.
+        conn.execute_batch(
+            "INSERT INTO metadata_index(name, value, session_uuid) \
+               VALUES ('abortTransactionAction','{\"label\":\"Stoppen\"}','s'); \
+             INSERT INTO metadata_index(name, value, session_uuid) \
+               VALUES ('conversation_id','abc-123','s');",
+        )
+        .expect("stale rows");
+        set_meta_flag(&conn, META_METADATA_INDEX_BUILT);
+        assert_eq!(meta_flag_version(&conn, META_METADATA_INDEX_BUILT), 1);
+
+        backfill_metadata_index(&conn, true).expect("rebuild");
+
+        let mut names: Vec<String> = conn
+            .prepare("SELECT name || '=' || value FROM metadata_index ORDER BY 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "abortTransactionAction.label=Stoppen".to_string(),
+                "abortTransactionAction.topicName=Stoppen_Badhuys".to_string(),
+            ],
+            "the rebuild must replace the raw blob and drop the id, not sit beside them"
+        );
+    }
+
+    /// `conversation_id` is unique per session, so as a chip it is one entry per
+    /// conversation matching that one conversation. It was also what made every
+    /// key sorting after it show nothing but "not set" — thousands of unique
+    /// values consumed the whole option budget.
+    #[test]
+    fn a_conversation_id_is_never_offered_as_a_tag() {
+        let rows = metadata_index_rows(
+            r#"[{"key":"conversation_id","value":"abc-123"},
+                {"key":"conversationId","value":"abc-123"},
+                {"key":"entryLimit","value":"true"}]"#,
+        );
+        assert_eq!(rows, vec![("entryLimit".to_string(), "true".to_string())]);
     }
 }
 

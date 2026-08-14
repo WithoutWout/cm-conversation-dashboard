@@ -4815,12 +4815,20 @@
       .ctx-chip.val-false {
         color: var(--muted);
       }
-      .ctx-chip.val-not-set {
+      /* "any" and "not set" describe the key, not a value it holds — dashed and
+         italic sets them apart from the literal values they sit beside. "any"
+         keeps the normal text colour because it selects conversations, where
+         "not set" selects their absence. */
+      .ctx-chip.val-not-set,
+      .ctx-chip.val-any {
         border-style: dashed;
-        color: var(--muted);
         font-style: italic;
       }
-      .ctx-chip.val-not-set.active {
+      .ctx-chip.val-not-set {
+        color: var(--muted);
+      }
+      .ctx-chip.val-not-set.active,
+      .ctx-chip.val-any.active {
         border-style: dashed;
         color: var(--accent);
       }
@@ -10376,11 +10384,7 @@
             if (vals.length) ctxSet[name] = vals
           }
         }
-        return contentContextFilters.every((f) => {
-          if (f.value === "__not_set__") return !ctxSet[f.name]
-          const vals = ctxSet[f.name]
-          return vals && vals.includes(f.value)
-        })
+        return contentContextFilters.every((f) => _tagFilterMatches(ctxSet, f))
       }
       // Build context-variable pills for display.
       // isArticle=true → {Id, Values[]}, false → {id, value}
@@ -10564,11 +10568,7 @@
             if (vals.length) ctxSet[name] = vals
           }
         }
-        return varFilters.every((f) => {
-          if (f.value === "__not_set__") return !ctxSet[f.name]
-          const vals = ctxSet[f.name]
-          return vals && vals.includes(f.value)
-        })
+        return varFilters.every((f) => _tagFilterMatches(ctxSet, f))
       }
 
       // ── Article helpers ─────────────────────────────────────────────
@@ -21476,39 +21476,63 @@
         const allNames = new Set(contentContextOptions.map((o) => o.name))
         for (const name of allNames) {
           if (name === "escalationGroup") continue
-          let count = 0
-          for (const a of allArticles) {
-            if (
-              a.Outputs.some((o) => {
-                if (o.Type !== "Answer") return false
-                const cvs = o.ContextVariables || []
-                return !cvs.some((cv) => {
-                  const cvName = ctxVarMap.get(cv.Id)
-                  return (
-                    cvName === name && cv.Values && !cv.Values.includes("any")
-                  )
-                })
-              })
-            )
-              count++
+          // Whether one Answer sets this variable. The two kinds store it
+          // differently — an Article has `Values[]`, a dialog node one comma
+          // string — and the "any" value is discounted on the Article side
+          // only, which is a pre-existing asymmetry this pass must not change.
+          const articleSets = (o) => {
+            if (o.Type !== "Answer") return null
+            const cvs = o.ContextVariables || []
+            return cvs.some((cv) => {
+              const cvName = ctxVarMap.get(cv.Id)
+              return cvName === name && cv.Values && !cv.Values.includes("any")
+            })
           }
+          const dialogSets = (item) => {
+            if (item.type !== "Answer") return null
+            const cvs = item.contextVariables || []
+            return cvs.some((cv) => {
+              const cvName = ctxVarMap.get(cv.id)
+              return cvName === name && cv.value
+            })
+          }
+          // Both halves in one pass. An item can count toward both: setting the
+          // variable on one answer and not on another is the common case, and
+          // the filter asks about an answer rather than about the item.
+          let notSetCount = 0
+          let anyCount = 0
+          const tally = (answers, sets) => {
+            let sawSet = false
+            let sawUnset = false
+            for (const answer of answers) {
+              const r = sets(answer)
+              if (r === null) continue
+              if (r) sawSet = true
+              else sawUnset = true
+            }
+            if (sawSet) anyCount++
+            if (sawUnset) notSetCount++
+          }
+          for (const a of allArticles) tally(a.Outputs, articleSets)
           for (const d of allDialogsCombined) {
-            if (
-              (d.nodes || []).some((node) =>
-                ((node.output && node.output.items) || []).some((item) => {
-                  if (item.type !== "Answer") return false
-                  const cvs = item.contextVariables || []
-                  return !cvs.some((cv) => {
-                    const cvName = ctxVarMap.get(cv.id)
-                    return cvName === name && cv.value
-                  })
-                }),
-              )
-            )
-              count++
+            const items = []
+            for (const node of d.nodes || [])
+              for (const item of (node.output && node.output.items) || [])
+                items.push(item)
+            tally(items, dialogSets)
           }
-          if (count > 0)
-            contentContextOptions.push({ name, value: "__not_set__", count })
+          if (anyCount > 0)
+            contentContextOptions.push({
+              name,
+              value: "__any__",
+              count: anyCount,
+            })
+          if (notSetCount > 0)
+            contentContextOptions.push({
+              name,
+              value: "__not_set__",
+              count: notSetCount,
+            })
         }
 
         // Add escalation group filter options from OutputMetaData/metadata.
@@ -21710,10 +21734,18 @@
             return { name, value, count }
           },
         )
-        // "not set" per key: items with at least one Answer that doesn't carry
-        // it. Any item that never sets the key qualifies, plus those that set
-        // it on some answers only — same rule the Context tab uses.
+        // The two whole-key options. "any" is items with an Answer that carries
+        // the key at all; "not set" is items with an Answer that doesn't —
+        // which is every item that never sets it, plus those that set it on
+        // some answers only. An item can be in both, because the filter asks
+        // about an answer rather than about the item.
         for (const [name, withIt] of withName) {
+          if (withIt > 0)
+            contentMetadataOptions.push({
+              name,
+              value: "__any__",
+              count: withIt,
+            })
           const count = total - withIt + _contentMetaPartialCount(name)
           if (count > 0)
             contentMetadataOptions.push({ name, value: "__not_set__", count })
@@ -21976,6 +22008,31 @@
        * what a count means (sessions vs items), which is why `unit` is a
        * parameter rather than two copies of this function.
        */
+      // The two options that describe a key rather than one of its values.
+      // `__any__` is the complement of `__not_set__`, and it is the only way to
+      // ask "was this set at all?" once a key has more values than anyone will
+      // click — which is most of them.
+      const TAG_SENTINEL_LABELS = {
+        __any__: "any",
+        __not_set__: "not set",
+      }
+      const TAG_SENTINEL_HINTS = {
+        __any__: "Set to any value",
+        __not_set__: "Never set",
+      }
+
+      /**
+       * Does one tag set satisfy one filter? The renderer's copy of the worker's
+       * `tagFilterMatches` — there is no module boundary to share one across, so
+       * the two must be kept in step. `metadata-filter.test.js` compares them.
+       */
+      function _tagFilterMatches(set, f) {
+        const vals = set[f.name]
+        if (f.value === "__not_set__") return !vals
+        if (f.value === "__any__") return !!vals
+        return !!vals && vals.includes(f.value)
+      }
+
       function _buildTagChipsHtml(options, activeFilters, searchQ, opts) {
         const { attrPrefix, unit, empty, noMatch } = opts
         if (!options.length) {
@@ -21984,7 +22041,7 @@
         const q = (searchQ || "").toLowerCase().trim()
         const groups = {}
         for (const o of options) {
-          const displayValue = o.value === "__not_set__" ? "not set" : o.value
+          const displayValue = TAG_SENTINEL_LABELS[o.value] ?? o.value
           if (
             q &&
             !o.name.toLowerCase().includes(q) &&
@@ -22005,9 +22062,13 @@
                 const active = activeFilters.some(
                   (f) => f.name === o.name && f.value === o.value,
                 )
-                const isNotSet = o.value === "__not_set__"
-                const valClass = isNotSet
-                  ? " val-not-set"
+                // "any" and "not set" describe the key rather than a value, so
+                // they share a look and carry no value in their tooltip.
+                const sentinel = TAG_SENTINEL_LABELS[o.value]
+                const valClass = sentinel
+                  ? o.value === "__any__"
+                    ? " val-any"
+                    : " val-not-set"
                   : o.value === "true"
                     ? " val-true"
                     : o.value === "false"
@@ -22016,16 +22077,12 @@
                 // An empty metadata value is a real, distinct state — the key
                 // was set with no value — so it must not render as a blank
                 // chip nobody can click.
-                const label = isNotSet
-                  ? "not set"
-                  : o.value === ""
-                    ? "(empty)"
-                    : o.value
+                const label = sentinel ?? (o.value === "" ? "(empty)" : o.value)
                 // The chip clamps to one line, so the tooltip carries the full
                 // value as well as the count — otherwise a truncated chip is
                 // unreadable with no way to see what it says.
-                const title = isNotSet
-                  ? `${o.count} ${unit}`
+                const title = sentinel
+                  ? `${TAG_SENTINEL_HINTS[o.value]}\n${o.count} ${unit}`
                   : `${o.value}\n${o.count} ${unit}`
                 return `<button class="ctx-chip${
                   active ? " active" : ""
