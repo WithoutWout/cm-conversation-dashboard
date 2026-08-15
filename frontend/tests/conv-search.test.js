@@ -27,6 +27,9 @@ vm.runInContext(
   `
   // Pure caches and plain state the extracted functions read. Nothing here
   // carries behaviour — anything that decides something is extracted above.
+  // \`extract\` pulls named function declarations only, so a module-level
+  // const the real source hoists out of a hot function has to be restated.
+  const _CHIP_TOKEN_SPLIT = /[\\s\\-_,;.!?]+/
   const _foldCache = new Map()
   let _chatPlanCache = { key: null, plan: null }
   let _chipEntityCache = new Map()

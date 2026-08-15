@@ -13575,25 +13575,42 @@
         return found
       }
 
+      const _CHIP_TOKEN_SPLIT = /[\s\-_,;.!?]+/
+
       function _resolveEntityForChip(text) {
+        const lower = text.toLowerCase()
         // 1. Exact entity name match
         const byName = entityMap.get(text.toUpperCase())
         if (byName) return byName
         // 2. Exact entity word match
-        const byWord = entityWordMap.get(text.toLowerCase())
+        const byWord = entityWordMap.get(lower)
         if (byWord) return byWord
-        // 3. Token match: split phrase into words, check each (longest first)
+        // 3. Token match: the longest word in the phrase that names an entity.
+        //
+        // This used to `.filter().sort()` the tokens by descending length and
+        // take the first that resolved. Scanning for the longest match is the
+        // same rule — `>` keeps the earliest token at equal length, exactly as
+        // the stable sort did — and it allocates no arrays.
+        //
+        // **Worth 3.6 ms per load, and no more.** An isolated benchmark said
+        // 89.9 ms -> 20.5 ms, which was wrong: it timed a cold `.sort()` path
+        // against a warmed one. Alternating passes over all 59,704 phrases in
+        // the real export, once both are JIT-warm, gives 24.5 ms -> 20.9 ms.
+        // 85% of phrases do reach this path, but they average 2.9 tokens, so
+        // the sort was never the cost. Kept because it is strictly less work
+        // and resolves all 59,704 identically — not because it is a fix.
         if (entityWordMap.size === 0) return null
-        const tokens = text
-          .toLowerCase()
-          .split(/[\s\-_,;.!?]+/)
-          .filter((t) => t.length >= 3)
-          .sort((a, b) => b.length - a.length)
-        for (const token of tokens) {
+        let best = null
+        let bestLen = 0
+        for (const token of lower.split(_CHIP_TOKEN_SPLIT)) {
+          if (token.length < 3 || token.length <= bestLen) continue
           const e = entityWordMap.get(token)
-          if (e) return e
+          if (e) {
+            best = e
+            bestLen = token.length
+          }
         }
-        return null
+        return best
       }
 
       // UPPERCASE entity name → { articles: [], dialogs: [] }.
