@@ -10,8 +10,7 @@
     "tauri:build": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.10.1",
-    "vis-network": "^10.0.2"
+    "@tauri-apps/cli": "^2.10.1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1"

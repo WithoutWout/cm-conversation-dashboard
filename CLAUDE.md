@@ -1153,6 +1153,20 @@ launches without the SmartScreen prompt that a manually downloaded one shows.
   the same key, verified by the same pubkey. `TAURI_SIGNING_PRIVATE_KEY` /
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are repo secrets; **losing that key means
   no further updates can ever be shipped**, to any installed copy.
+- **A local `tauri build` always ends non-zero, and that is expected.** The
+  bundles are finished first — a working `.app` and `.dmg` are on disk — and the
+  build then fails signing the updater artifacts, because `createUpdaterArtifacts`
+  plus the `pubkey` in `tauri.conf.json` require a private key that only CI has:
+  `A public key has been found, but no private key.` Nothing is wrong locally.
+  - **Do not read a `bundle_dmg.sh` failure as the cause.** Tauri swallows that
+    script's output and reports `failed to run bundle_dmg.sh` for any non-zero
+    exit, which points at DMG bundling when the real error is further down. Run
+    `npm run tauri build -- --verbose` to see what the script actually printed.
+  - The DMG step is separately a bit flaky: create-dmg drives Finder over
+    AppleScript to position the window icons, and interrupted runs leave
+    `rw.*.dmg` staging files behind. If it recurs, clear
+    `src-tauri/target/release/bundle/macos/rw.*.dmg` and check nothing is left
+    mounted under `/Volumes`.
 - Requires no new capability grant: the renderer goes through our own commands,
   not the plugin's JS API.
 - **`bundle.targets` must include `app`, and that is for the updater, not for
