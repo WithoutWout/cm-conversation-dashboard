@@ -10579,12 +10579,34 @@
         if (!overlay) return
         overlay.classList.toggle("open", isLoading)
       }
-      function waitForNextPaint() {
-        return new Promise((resolve) => {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(resolve)
-          })
-        })
+      /**
+       * Wait for the browser to paint, but never longer than `PAINT_YIELD_MS`.
+       *
+       * WebKit will not repaint between a class change and a Tauri `invoke`
+       * that occupies the IPC channel, so the loading state has to be given
+       * two frames before the call goes out or it never appears. The catch is
+       * that `requestAnimationFrame` **does not fire in a window that isn't
+       * being composited** — minimised, fully occluded, or on a background
+       * space. Awaiting it bare therefore parks the caller forever, leaving
+       * whatever it was doing frozen behind a spinner that never resolves.
+       *
+       * The race is the whole point: on screen the frames win and the paint
+       * happens; off screen the timer wins and the work proceeds without one,
+       * which is correct — there is nobody watching.
+       *
+       * It lives up here, above every other loading-state helper, because the
+       * bootstrap `loadData()` call runs during script evaluation and awaits
+       * it — a `const` declared further down would still be in its temporal
+       * dead zone at that point and take startup out with a ReferenceError.
+       */
+      const PAINT_YIELD_MS = 120
+      function yieldToPaint() {
+        return Promise.race([
+          new Promise((r) =>
+            requestAnimationFrame(() => requestAnimationFrame(r)),
+          ),
+          new Promise((r) => setTimeout(r, PAINT_YIELD_MS)),
+        ])
       }
       function renderDataFolderState() {
         const currentEl = document.getElementById("dataFolderCurrent")
@@ -14527,7 +14549,7 @@
         showSearchLoading(false)
 
         // Phase 2 — yield to browser so counts/spinner update paint before cards.
-        await waitForNextPaint()
+        await yieldToPaint()
 
         // A newer search may have arrived while we were yielding — bail out.
         if (myId !== searchSeq) return
@@ -17322,7 +17344,7 @@
         setAppLoadingState(true, loadingMessageForReason(reason))
         setRefreshControls(true)
         try {
-          await waitForNextPaint()
+          await yieldToPaint()
           const data = await window.backend.getData(dataFolderPath || null)
           dataSourceInfo = data.dataSource || null
           dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
@@ -19029,30 +19051,12 @@
       // they are the difference between "working" and "broken". A blank pane
       // is not a neutral state: it looks exactly like a finished, empty one.
 
-      /**
-       * Wait for the browser to paint, but never longer than `PAINT_YIELD_MS`.
-       *
-       * WebKit will not repaint between a class change and a Tauri `invoke`
-       * that occupies the IPC channel, so the loading state has to be given
-       * two frames before the call goes out or it never appears. The catch is
-       * that `requestAnimationFrame` **does not fire in a window that isn't
-       * being composited** — minimised, fully occluded, or on a background
-       * space. Awaiting it bare therefore parks the caller forever, leaving
-       * whatever it was doing frozen behind a spinner that never resolves.
-       *
-       * The race is the whole point: on screen the frames win and the paint
-       * happens; off screen the timer wins and the work proceeds without one,
-       * which is correct — there is nobody watching.
-       */
-      const PAINT_YIELD_MS = 120
-      function yieldToPaint() {
-        return Promise.race([
-          new Promise((r) =>
-            requestAnimationFrame(() => requestAnimationFrame(r)),
-          ),
-          new Promise((r) => setTimeout(r, PAINT_YIELD_MS)),
-        ])
-      }
+      // `yieldToPaint()` — the bounded wait every loading state below goes
+      // through — is defined beside `setAppLoadingState`, above, because the
+      // bootstrap `loadData()` awaits it during script evaluation. There is
+      // deliberately no second, unbounded "wait for a frame" helper: a bare
+      // double `requestAnimationFrame` never resolves in a window that isn't
+      // being composited, which is a hang rather than a missed animation.
 
       /// Fill a container with a centred spinner. `note` is the second line,
       /// for saying *why* something is slow rather than only that it is.
