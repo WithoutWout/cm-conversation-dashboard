@@ -91,54 +91,31 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            If imports have been failing at the office, this release is the fix.
+            ### The app no longer gets stuck on the loading screen
 
-            ### Importing works on a corporate network
+            If you started or refreshed the app while its window was minimised,
+            hidden behind another window, or on a different desktop, it could
+            sit on the loading screen forever and never show your data. The
+            refresh button then did nothing either, so the only way out was to
+            quit and start again. Fixed.
 
-            On a company network that inspects secure traffic, every import
-            failed immediately with a certificate error — while the same site
-            opened perfectly in Chrome on the same machine.
+            ### Message metadata now stays with the message
 
-            The app was checking certificates against its own built-in list
-            instead of asking Windows. It now uses Windows itself, so any
-            certificate your machine already trusts is trusted here too. Nothing
-            to install, export or keep up to date, and it keeps working when
-            those certificates are replaced.
+            The metadata panel added last release opened in the middle of the
+            screen, which meant losing track of which message you had opened it
+            for. It is now a bubble attached to the tag you clicked:
 
-            ### Filtering on feedback no longer hangs
+            - it follows its message as you scroll the conversation
+            - the mouse wheel scrolls the conversation underneath it
+            - it closes on **Escape**, the **✕**, or a click anywhere outside
 
-            Combining the **feedback** filter with a search term could leave the
-            conversation list loading forever. The filter on its own was always
-            fine, which is why it looked random. Fixed, and the other filters
-            were checked for the same problem — they don't have it.
+            ### Answers no longer run underneath the corner buttons
 
-            ### Filters you can actually use
-
-            A lot of metadata keys — `entryLimit`, `testCase`, `transaction`,
-            `wheelchair` and others — showed only "not set" with none of their
-            real values. One key with thousands of unique values (the
-            conversation id) was quietly using up the whole list, and everything
-            alphabetically after it was cut off.
-
-            Conversation ids and timestamps are no longer offered as filters at
-            all; they are unique per conversation or per message, so as filters
-            they only ever matched one thing. Values that showed as unreadable
-            blocks of raw data are now split into readable parts — existing
-            databases repair themselves the first time you open them.
-
-            Every key now also offers **any**, the opposite of "not set", for
-            asking "was this set at all?" without picking every value by hand.
-
-            ### See the metadata on a single message
-
-            Bot messages that carry metadata now have a small tag button. It
-            opens a clean list of everything attached to that message, including
-            the conversation id and timestamp that are no longer useful as
-            filters but are often exactly what you want to read.
-
-            And when a metadata filter is on, the message that matched it is
-            highlighted, so you can see *why* a conversation is in your results
-            instead of hunting for it.
+            On some messages the answer text disappeared behind the "details"
+            hint and the metadata tag in the bottom corner. Messages now keep
+            that corner clear, and almost all of them stay exactly as compact as
+            before. Opening and closing a message's details slides now instead
+            of jumping the conversation around.
 
             ---
 
