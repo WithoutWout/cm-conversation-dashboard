@@ -37,7 +37,7 @@ frontend/
     collections.test.js, export-integrity.test.js,
     conv-search.test.js, update-modal.test.js,
     settings-backup.test.js, metadata-filter.test.js,
-    msg-meta-place.test.js                            — `npm run test:frontend`
+    msg-meta-place.test.js, loading-gate.test.js      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 ```
 
@@ -512,6 +512,17 @@ The low/zero-recognition bubble highlighting already excluded GenAI rows the sam
 ## Loading states
 
 **A blank pane is not a neutral state — it looks exactly like a finished, empty one.** On a small database the reads below flash by; on a large one they are real seconds, and every one of them used to show nothing at all. Each now paints a spinner *before* it awaits and marks the controls that act on the not-yet-loaded thing inert.
+
+**Every indicator is gated behind `gateLoading`, and the flicker it prevents is the reason all of them exist in the first place.** Nearly every read here finishes in tens of milliseconds — a folder already cached, a small database, a worker search over an indexed export — and a spinner that appears and vanishes inside that window is not feedback. The eye registers that *something* happened without ever resolving what, which reads as the interface glitching rather than working. So an indicator is asked for the moment work starts and only shown if that work is still running `LOADING_SHOW_DELAY_MS` (500ms) later; anything faster never paints one.
+
+- **`LOADING_MIN_VISIBLE_MS` (300ms) is the other half, and without it the problem only moves.** Work finishing a little past the delay would put a spinner up and take it straight back down — the same flicker, rarer and harder to reproduce. It costs a short wait on results landing inside that window, which is the price of never flickering.
+- **`gateLoading(key, wanted, apply)` calls `apply` only when the answer actually changes**, so a caller may ask for the same state repeatedly at no cost, and the overwhelmingly common path — fast work — never touches the DOM at all.
+- **The constants live at the top of the script beside `yieldToPaint`**, for the same reason it does: the bootstrap `loadData()` runs during script evaluation and reaches `setAppLoadingState`, so a `const` further down would still be in its temporal dead zone.
+- **`fadeIndicator` exists because all four indicators are `display: none` when hidden**, so there is nothing for a transition to animate — the element leaves the layout on the same frame. The exit goes through `.leaving`, the idiom the toasts and the metadata bubble already use: keep it displayed, run `fade-out`, drop both classes on a timer. `LOADING_FADE_MS` must stay in step with those rules, and they are declared *after* the entrance rules so they win on equal specificity while both classes are briefly present.
+- **The two inline indicators restate `spin` alongside the fade** (`animation: spin …, fade-in …`). A second `animation` declaration replaces rather than adds, so omitting it freezes the spinner mid-fade — and under `prefers-reduced-motion` the rotation is kept while only the fade is dropped, because the rotation is what says "working".
+- **`setPaneLoading` is the one that needs pairing.** It replaces its container's contents and the caller writes the result into the same element, so it has no minimum visible time to enforce — but every call **must** be matched with `clearPaneLoading`, or a spinner scheduled while the read was still running lands on top of the finished result. Verified to actually happen, not merely feared.
+- **`setBusy` is deliberately *not* gated.** `.is-busy` is an input interlock (`pointer-events: none`), not an indicator; delaying it by half a second would leave controls live over data that hasn't loaded. Its existing `transition: opacity` already softens the visual half.
+- `frontend/tests/loading-gate.test.js` runs the real `gateLoading` against a virtual clock. The interesting cases are all unreachable by hand — work landing a millisecond either side of the threshold, a burst of fast reads, a second read starting before the first one's spinner was due — and "it looked fine" cannot tell a correctly suppressed spinner from one suppressed for the wrong reason.
 
 - `paneLoadingHtml(label, note)` / `setPaneLoading(id, …)` render the shared `.pane-loading` block. The `note` line says *why* something is slow ("Counting interactions per day across the database"), which is the difference between waiting and wondering.
 - `setBusy(ids, on)` toggles `.is-busy` — `opacity` plus `pointer-events: none`. A class rather than `disabled` so it covers non-form elements (the chat filter row, the calendar) with one rule. A control that looks live but does nothing reads as a bug.

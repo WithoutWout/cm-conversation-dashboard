@@ -6454,6 +6454,14 @@
          the first frame, and the animation only softens how it lands. Keep
          it that way. Anything that would make the user wait for the motion
          to finish belongs somewhere else. */
+      @keyframes fade-out {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0;
+        }
+      }
       @keyframes fade-in {
         from {
           opacity: 0;
@@ -6545,16 +6553,53 @@
         animation: pop-out 120ms ease forwards;
       }
 
-      /* Loading affordances. A fade takes the flash off a fast read without
-         holding anything back on a slow one — the spinner is still in the
-         DOM on the same frame it always was. */
+      /* Loading affordances. These no longer appear at all unless the work
+         outlasts `LOADING_SHOW_DELAY_MS` (see `gateLoading`), so by the time
+         one of them animates the wait is already real — the fade is about
+         arriving softly, not about hiding a flicker. */
       .pane-loading,
       .app-loading-overlay.open,
       .conv-search-loading-overlay.visible {
         animation: fade-in 140ms ease;
       }
+      /* The two inline ones keep spinning while they arrive and leave, so
+         `spin` has to be restated alongside the fade — a second `animation`
+         declaration would replace it outright and freeze the spinner. */
+      .search-spinner-inline.visible {
+        animation: spin 0.7s linear infinite, fade-in 140ms ease;
+      }
+      .search-cancel-btn.visible {
+        animation: fade-in 140ms ease;
+      }
       .is-busy {
         transition: opacity 0.15s ease;
+      }
+
+      /* Exits. Every one of these is `display: none` when hidden, so there
+         is nothing for a transition to animate — the element leaves the
+         layout on the same frame. `.leaving` keeps it displayed for exactly
+         as long as the fade, then `fadeIndicator`'s timer drops both
+         classes. Declared after the entrance rules above so it wins on
+         equal specificity while both classes are briefly present. */
+      .app-loading-overlay.leaving,
+      .conv-search-loading-overlay.leaving {
+        display: flex;
+      }
+      .search-spinner-inline.leaving {
+        display: block;
+      }
+      .search-cancel-btn.leaving {
+        display: flex;
+      }
+      .app-loading-overlay.leaving,
+      .conv-search-loading-overlay.leaving,
+      .search-cancel-btn.leaving {
+        animation: fade-out 130ms ease forwards;
+        pointer-events: none;
+      }
+      .search-spinner-inline.leaving {
+        animation: spin 0.7s linear infinite, fade-out 130ms ease forwards;
+        pointer-events: none;
       }
       .copy-feedback.show {
         animation: fade-in 180ms ease;
@@ -6584,9 +6629,24 @@
         .pane-loading,
         .app-loading-overlay.open,
         .conv-search-loading-overlay.visible,
+        .search-cancel-btn.visible,
         .copy-feedback.show,
         .import-toast {
           animation: none;
+        }
+        /* Keeps spinning — the rotation is what says "working", not motion
+           for its own sake, so only the fade is dropped. */
+        .search-spinner-inline.visible,
+        .search-spinner-inline.leaving {
+          animation: spin 0.7s linear infinite;
+        }
+        /* Still leave, just without the fade: the timer that drops these
+           classes does not know about this media query. */
+        .app-loading-overlay.leaving,
+        .conv-search-loading-overlay.leaving,
+        .search-cancel-btn.leaving {
+          animation: none;
+          opacity: 0;
         }
         /* Still leaves, just without the travel — the timer that removes it
            doesn't know about this media query. */
@@ -10545,6 +10605,101 @@
         el.style.color = color
         el.textContent = text
       }
+      // ── Loading indicators only appear when the wait is real ─────────
+      //
+      // Nearly every read in this app finishes in tens of milliseconds: a
+      // folder already in the page cache, a small database, a worker search
+      // over an export that is already indexed. A spinner that appears and
+      // vanishes inside that window is not feedback — the eye registers that
+      // *something* happened without ever resolving what, which reads as the
+      // interface glitching rather than working.
+      //
+      // So an indicator is asked for the moment the work starts and only
+      // shown if that work is still running `LOADING_SHOW_DELAY_MS` later.
+      // Anything faster than that never paints one at all.
+      //
+      // **`LOADING_MIN_VISIBLE_MS` is the other half, and without it the
+      // problem would just move.** An operation finishing a little past the
+      // delay would put a spinner up and take it straight back down — the
+      // same flicker, only rarer and harder to reproduce. Once an indicator
+      // is on screen it stays long enough to read as deliberate. That costs
+      // a short wait on results landing inside that window, which is the
+      // price of never flickering; both numbers are here to be tuned.
+      //
+      // These live up here, beside `yieldToPaint`, because the bootstrap
+      // `loadData()` runs during script evaluation and reaches
+      // `setAppLoadingState` — a `const` further down would still be in its
+      // temporal dead zone by then.
+      const LOADING_SHOW_DELAY_MS = 500
+      const LOADING_MIN_VISIBLE_MS = 300
+      const LOADING_FADE_MS = 130 // keep in step with the `.leaving` CSS
+      const _loadingGates = new Map()
+
+      /**
+       * Gate one indicator behind the delay/minimum pair.
+       *
+       * `key` names the indicator, `wanted` is the state the caller is
+       * asking for, and `apply` performs the DOM change. `apply` only runs
+       * when the answer actually changes, so a caller may ask for the same
+       * state repeatedly at no cost.
+       */
+      function gateLoading(key, wanted, apply) {
+        let g = _loadingGates.get(key)
+        if (!g) {
+          g = { timer: null, visible: false, shownAt: 0 }
+          _loadingGates.set(key, g)
+        }
+        clearTimeout(g.timer)
+        g.timer = null
+        if (wanted) {
+          if (g.visible) return
+          g.timer = setTimeout(() => {
+            g.timer = null
+            g.visible = true
+            g.shownAt = Date.now()
+            apply(true)
+          }, LOADING_SHOW_DELAY_MS)
+          return
+        }
+        // Never made it on screen, so there is nothing to take down. This is
+        // the path the great majority of reads take, and the whole point.
+        if (!g.visible) return
+        const held = Date.now() - g.shownAt
+        if (held >= LOADING_MIN_VISIBLE_MS) {
+          g.visible = false
+          apply(false)
+          return
+        }
+        g.timer = setTimeout(() => {
+          g.timer = null
+          g.visible = false
+          apply(false)
+        }, LOADING_MIN_VISIBLE_MS - held)
+      }
+
+      /**
+       * Show or hide an indicator that is `display: none` when hidden.
+       *
+       * A bare class toggle cannot fade out — the element leaves the layout
+       * on the same frame — so the exit goes through `.leaving`, the idiom
+       * the toasts and the metadata bubble already use: keep it displayed,
+       * run the fade, drop both classes on a timer.
+       */
+      function fadeIndicator(el, visible, cls) {
+        if (!el) return
+        clearTimeout(el._fadeTimer)
+        el.classList.remove("leaving")
+        if (visible) {
+          el.classList.add(cls)
+          return
+        }
+        if (!el.classList.contains(cls)) return
+        el.classList.add("leaving")
+        el._fadeTimer = setTimeout(() => {
+          el.classList.remove(cls, "leaving")
+        }, LOADING_FADE_MS)
+      }
+
       function setRefreshControls(isLoading) {
         const refreshBtn = document.getElementById("refreshBtn")
         const refreshDataBtn = document.getElementById("refreshDataBtn")
@@ -10577,7 +10732,12 @@
         if (message) currentLoadingMessage = message
         if (textEl) textEl.textContent = currentLoadingMessage
         if (!overlay) return
-        overlay.classList.toggle("open", isLoading)
+        gateLoading("app", isLoading, (on) => {
+          // Re-read the message as it paints rather than as it was asked
+          // for: a queued reload can change the reason during the delay.
+          if (on && textEl) textEl.textContent = currentLoadingMessage
+          fadeIndicator(overlay, on, "open")
+        })
       }
       /**
        * Wait for the browser to paint, but never longer than `PAINT_YIELD_MS`.
@@ -14406,12 +14566,12 @@
         btn.classList.toggle("err", bad)
       }
       function showSearchLoading(visible) {
-        document
-          .getElementById("searchSpinner")
-          .classList.toggle("visible", visible)
-        document
-          .getElementById("searchCancel")
-          .classList.toggle("visible", visible)
+        // The worker answers most searches in a few milliseconds, so this is
+        // the indicator that flickered most often.
+        gateLoading("search", visible, (on) => {
+          fadeIndicator(document.getElementById("searchSpinner"), on, "visible")
+          fadeIndicator(document.getElementById("searchCancel"), on, "visible")
+        })
       }
       function triggerSearch() {
         updateRegexIndicator()
@@ -19067,9 +19227,27 @@
           }</div>`
       }
 
+      /**
+       * Schedule a pane spinner, which appears only if the read outlasts
+       * `LOADING_SHOW_DELAY_MS`.
+       *
+       * Unlike the overlays this one *replaces* the container's contents,
+       * and the caller writes the real result straight into the same
+       * element — so it has no minimum visible time to enforce (the result
+       * simply takes the spinner's place), and every caller **must** pair it
+       * with `clearPaneLoading`, or a spinner scheduled while the read was
+       * still running will land on top of the finished result.
+       */
       function setPaneLoading(id, label, note) {
-        const el = document.getElementById(id)
-        if (el) el.innerHTML = paneLoadingHtml(label, note)
+        gateLoading("pane:" + id, true, () => {
+          const el = document.getElementById(id)
+          if (el) el.innerHTML = paneLoadingHtml(label, note)
+        })
+      }
+
+      /// Cancel a pending pane spinner, and stop tracking one already shown.
+      function clearPaneLoading(id) {
+        gateLoading("pane:" + id, false, () => {})
       }
 
       /// Mark controls inert while a read is in flight. Held as a class rather
@@ -19097,7 +19275,9 @@
         const cancel = document.getElementById("convSearchCancel")
         if (text && label) text.textContent = label
         if (cancel) cancel.style.display = cancellable === false ? "none" : ""
-        overlay.classList.toggle("visible", !!visible)
+        gateLoading("convOverlay", !!visible, (on) =>
+          fadeIndicator(overlay, on, "visible"),
+        )
       }
 
       // ── DB busy state (disables the data modal during search/import) ──
@@ -23758,6 +23938,9 @@
           // Must run on every exit, including the superseded-selection return
           // above — the newer call re-disables them on its own way in.
           setBusy(chatControls, false)
+          // Cancels the spinner if the read beat the delay, and stops a
+          // pending one from overwriting the thread we just rendered.
+          clearPaneLoading("chatThread")
         }
       }
 
