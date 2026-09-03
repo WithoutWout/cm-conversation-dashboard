@@ -2694,7 +2694,7 @@ const META_MAX_LEAVES: usize = 24;
 
 /// Restore a JSON document CM stored with its newlines replaced by `_`.
 ///
-/// `_` is CM's line-break marker (see `## Chat rendering`), so a value
+/// `_` is CM's line-break marker (see `docs/chat-rendering.md`), so a value
 /// authored across several lines arrives as
 /// `{__  "label": "…",__  "topicName": "…"__}` — the same object as the
 /// compact spelling, but not parseable, and therefore a second index entry for
