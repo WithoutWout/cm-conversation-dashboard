@@ -91,31 +91,56 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### The app no longer gets stuck on the loading screen
+            ### New: Insights — your search results as charts
 
-            If you started or refreshed the app while its window was minimised,
-            hidden behind another window, or on a different desktop, it could
-            sit on the loading screen forever and never show your data. The
-            refresh button then did nothing either, so the only way out was to
-            quit and start again. Fixed.
+            There is a new **Insights** button in the Conversations toolbar. It
+            takes whatever your current search matched and shows it as a
+            dashboard: when the conversations happened, how well the bot
+            recognised them, which Articles and Dialogs answered, which entities
+            fired, and how the context and metadata values are distributed.
 
-            ### Message metadata now stays with the message
+            It describes exactly the result set you are looking at — the number
+            at the top is the same number above the conversation list — so
+            narrowing the search narrows every chart with it.
 
-            The metadata panel added last release opened in the middle of the
-            screen, which meant losing track of which message you had opened it
-            for. It is now a bubble attached to the tag you clicked:
+            **Everything on it is made to be shared.** Each chart has its own
+            **Image** and **Data** buttons: *Image* puts a light-background
+            picture on the clipboard that you can paste straight into an email,
+            *Data* puts the numbers behind it there as a table you can paste
+            into Excel. **Copy dashboard** takes the whole thing at once.
 
-            - it follows its message as you scroll the conversation
-            - the mouse wheel scrolls the conversation underneath it
-            - it closes on **Escape**, the **✕**, or a click anywhere outside
+            ### Count conversations, or count the messages that matched
 
-            ### Answers no longer run underneath the corner buttons
+            A conversation is many messages and your search usually matched one
+            of them. The **Conversations / Interactions** switch at the top says
+            which of those you want counted.
 
-            On some messages the answer text disappeared behind the "details"
-            hint and the metadata tag in the bottom corner. Messages now keep
-            that corner clear, and almost all of them stay exactly as compact as
-            before. Opening and closing a message's details slides now instead
-            of jumping the conversation around.
+            Searching for "parkeren", a conversation that opened with a greeting
+            at 08:00 and asked about parking at 14:00 counts at 08:00 under
+            *Conversations* and at 14:00 under *Interactions* — the second is
+            usually the sharper answer to "when do people ask about this?".
+
+            ### Faster, and stoppable
+
+            Insights now shows its charts around **2× faster** on a normal
+            search and up to **7× faster** when counting interactions. The
+            Context and Metadata sections fill in a moment after the rest, so
+            you are reading the dashboard while they load.
+
+            If a search matched more than you meant it to, you no longer have to
+            wait it out: there is a **Cancel** button while it reads, the
+            Conversations / Interactions switch stays usable throughout, and
+            closing the window stops the work instead of leaving it running.
+
+            ### Easier to read
+
+            - Context and Metadata keys are now a **searchable list** behind one
+              button, instead of forty chips pushing the chart off the screen.
+              Each key shows how many conversations set it and how many
+              different values it has.
+            - The timezone is stated **once**, quietly, at the top — everything
+              on this screen is UTC, and it no longer says so on every chart.
+            - Section headings stay in view as you scroll.
 
             ---
 
