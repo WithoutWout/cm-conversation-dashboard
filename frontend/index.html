@@ -4517,6 +4517,26 @@
         max-width: 34ch;
         line-height: 1.5;
       }
+      /* Held back from the note, because a Cancel button beside the sentence
+         explaining the wait reads as cancelling the explanation. Quiet, in the
+         same language as the session search's own cancel: it is a way out, not
+         the thing to do. */
+      .pane-loading-action {
+        margin-top: 4px;
+      }
+      .pane-loading-action button {
+        padding: 3px 12px;
+        font-size: 0.72rem;
+        color: var(--muted);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .pane-loading-action button:hover {
+        color: var(--text);
+        border-color: var(--muted);
+      }
       /* Anything mid-read is inert rather than merely unresponsive: a control
          that looks live but does nothing reads as a bug. */
       .is-busy {
@@ -6626,6 +6646,7 @@
         .add-to-collection-menu.open,
         .msg-meta-overlay.open .msg-meta-pop,
         .msg-meta-overlay.closing .msg-meta-pop,
+        .ins-keypop,
         .pane-loading,
         .app-loading-overlay.open,
         .conv-search-loading-overlay.visible,
@@ -6650,6 +6671,7 @@
         }
         /* Still leaves, just without the travel — the timer that removes it
            doesn't know about this media query. */
+        .ins-keypop.leaving,
         .import-toast.leaving {
           animation: none;
           opacity: 0;
@@ -7231,6 +7253,513 @@
           max-width: calc(100vw - 20px) !important;
         }
       }
+      /* === INSIGHTS =================================================== */
+      /* The dashboard behind the Conversations toolbar's Insights button.
+         Chart marks carry no classes at all — every colour and size is an
+         attribute on the SVG element, because the same string has to render
+         identically inside an <img> when it is rasterised for the clipboard.
+         What is styled here is only the frame around them. */
+      .modal-box.ins-modal-box {
+        width: min(1360px, 95vw);
+        max-width: min(1360px, 95vw);
+        height: min(880px, 92vh);
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+      }
+      /* Two rows, each with its own job, rather than one row that wraps.
+         Wrapping made the hero and the actions move whenever the search chips
+         changed width — the layout answered to the least important thing on
+         it. */
+      .ins-header {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 14px 20px 10px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .ins-header-main {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      /* The slice being charted, on its own line so it can run as long as it
+         needs to without pushing anything. */
+      .ins-header-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 5px 10px;
+      }
+      /* Exactly one hero figure on the view, in the same sans as everything
+         else, with proportional figures — tabular-nums makes a number this
+         large look loose. Its sub-line now lives on the meta row, so the block
+         is just the number and what it counts and needs no width cap. */
+      .ins-hero {
+        display: flex;
+        flex-direction: column;
+        flex: 0 0 auto;
+        min-width: 0;
+      }
+      .ins-hero-count {
+        font-size: 2.2rem;
+        font-weight: 700;
+        line-height: 1.05;
+        color: var(--text);
+      }
+      .ins-hero-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+      }
+      .ins-hero-sub {
+        font-size: 0.72rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      /* The single timezone disclaimer. Quiet by construction — it states a
+         constant, and a constant restated loudly is noise. */
+      .ins-tz {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.66rem;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 7px;
+        cursor: help;
+        opacity: 0.8;
+      }
+      .ins-tz:hover {
+        opacity: 1;
+      }
+      /* What one bar counts. A segmented control rather than two loose pills,
+         because the two are exclusive readings of one result set — not two
+         filters that could both be on. It sits against the hero, which is the
+         number whose meaning it changes. */
+      .ins-unit {
+        display: flex;
+        flex-shrink: 0;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        overflow: hidden;
+      }
+      .ins-unit button {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 5px 12px;
+        transition: background 0.15s, color 0.15s;
+        white-space: nowrap;
+      }
+      .ins-unit button + button {
+        border-left: 1px solid var(--border);
+      }
+      .ins-unit button:hover:not(.active) {
+        color: var(--text);
+      }
+      .ins-unit button.active {
+        background: var(--accent);
+        color: #fff;
+      }
+      .ins-unit button:disabled {
+        cursor: default;
+        opacity: 0.5;
+      }
+
+      /* The slice the charts describe. Without it a percentage on this screen
+         means nothing — and it is the first thing that has to reach an email.
+         On its own row, so a chip is never compressed to `S…`, which states
+         nothing. */
+      .ins-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        min-width: 0;
+      }
+      .ins-chip {
+        flex: 0 0 auto;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        font-size: 0.68rem;
+        padding: 3px 8px;
+        max-width: 340px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ins-chip em {
+        color: var(--muted);
+        font-style: normal;
+        margin-right: 5px;
+      }
+      .ins-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+        margin-left: auto;
+      }
+      .ins-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        /* The card grid crosses the scrollable threshold as sections render;
+           reserving the gutter keeps every chart from shifting sideways. */
+        scrollbar-gutter: stable;
+        padding: 16px 20px 24px;
+      }
+      .ins-tiles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+      .ins-tile {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 14px;
+        min-width: 118px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .ins-tile.hero {
+        border-color: var(--accent);
+      }
+      .ins-tile-label {
+        font-size: 0.64rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+      }
+      .ins-tile-value {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .ins-tile.hero .ins-tile-value {
+        color: var(--accent);
+      }
+      .ins-tile-sub {
+        font-size: 0.65rem;
+        color: var(--muted);
+      }
+      .ins-section {
+        margin-bottom: 22px;
+      }
+      /* Sticky, so a section's name is still on screen at the bottom of its
+         charts — the body is one long canvas by design and sixteen charts is a
+         long way from the heading that says what they are about. Opaque, or
+         the cards scroll through it. */
+      .ins-section > h4 {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--surface);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+        border-bottom: 1px solid var(--border);
+        padding: 4px 0 5px;
+        margin-bottom: 10px;
+      }
+      /* auto-FILL, not auto-fit. Under auto-fit an empty track collapses, so a
+         section holding one card — Context and Metadata always do — stretched
+         it across the whole modal and the 640px chart inside scaled up to
+         double size, with 22px axis labels. Keeping the empty track keeps every
+         chart on this dashboard at the same scale. */
+      .ins-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+        gap: 14px;
+      }
+      .ins-card {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px 14px 10px;
+        min-width: 0;
+      }
+      .ins-card-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin-bottom: 8px;
+      }
+      .ins-card-titles {
+        flex: 1;
+        min-width: 0;
+      }
+      .ins-card-titles h5 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .ins-card-titles p {
+        font-size: 0.67rem;
+        color: var(--muted);
+        line-height: 1.4;
+        margin-top: 2px;
+      }
+      /* Always present, never revealed on hover: a copy action the reader has
+         to discover is one they will not find, and copying is what this view
+         is for. */
+      .ins-card-actions {
+        display: flex;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .ins-act {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.66rem;
+        padding: 3px 7px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transition: color 0.15s, border-color 0.15s;
+      }
+      .ins-act:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      /* The SVG carries its own width/height, so the viewBox scales it to the
+         card. `display:block` removes the inline-baseline gap under it. */
+      .ins-chart svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        /* The charts are drawn at 640px. Scaling one up much past that makes
+           its 11px labels bigger than the card title above them. */
+        max-width: 760px;
+      }
+      /* Which context or metadata key the section is showing.
+         One button and a popover, not a row of chips: a real export has around
+         forty keys of each, which as chips was four wrapped lines of buttons
+         standing between the section heading and its only chart. */
+      .ins-keybar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .ins-keypick {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 4px 9px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        max-width: 340px;
+        transition: border-color 0.15s;
+      }
+      .ins-keypick:hover,
+      .ins-keypick.open {
+        border-color: var(--accent);
+      }
+      .ins-keypick-name {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ins-keypick em {
+        font-style: normal;
+        color: var(--muted);
+        font-size: 0.66rem;
+      }
+      .ins-keypick-caret {
+        color: var(--muted);
+        font-size: 0.6rem;
+      }
+      .ins-keybar-note {
+        font-size: 0.67rem;
+        color: var(--muted);
+      }
+      /* Fixed and outside the scrolling body, like the tooltip, so it is never
+         clipped by the card it grew out of. Positioned from the button's rect
+         before it is shown. */
+      /* `display: flex` beats the `hidden` attribute's UA `display: none`, so
+         the popover has to be hidden explicitly or it floats over the charts
+         from the moment the modal opens. */
+      .ins-keypop[hidden] {
+        display: none;
+      }
+      .ins-keypop {
+        position: fixed;
+        z-index: 410;
+        width: 300px;
+        /* Overridden inline from the space actually available; this is only
+           the ceiling. */
+        max-height: 340px;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+        animation: pop-in 0.14s ease-out;
+      }
+      .ins-keypop.leaving {
+        animation: pop-out 0.1s ease-in forwards;
+      }
+      .ins-keypop-head {
+        padding: 8px;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .ins-keypop-head input {
+        width: 100%;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        font-size: 0.74rem;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .ins-keypop-head input:focus {
+        border-color: var(--accent);
+      }
+      .ins-keypop-list {
+        overflow-y: auto;
+        /* The list is filtered as you type, so it crosses the scrollable
+           threshold constantly; without the gutter every row shifts sideways
+           on each keystroke. */
+        scrollbar-gutter: stable;
+        padding: 5px;
+      }
+      .ins-keyrow {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        width: 100%;
+        background: none;
+        border: none;
+        border-radius: 5px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.73rem;
+        padding: 5px 7px;
+        text-align: left;
+      }
+      .ins-keyrow:hover {
+        background: var(--surface2);
+      }
+      .ins-keyrow.active {
+        background: var(--accent);
+        color: #fff;
+      }
+      .ins-keyrow-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ins-keyrow em {
+        font-style: normal;
+        font-size: 0.66rem;
+        color: var(--muted);
+        flex-shrink: 0;
+      }
+      .ins-keyrow.active em {
+        color: rgba(255, 255, 255, 0.75);
+      }
+      .ins-keypop-empty {
+        color: var(--muted);
+        font-size: 0.72rem;
+        padding: 14px 8px;
+        text-align: center;
+      }
+      /* The two tag sections keep their heading and their key bar even with no
+         chart, so this is what stands in for one. */
+      .ins-tag-pending {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 0.73rem;
+        padding: 18px 2px;
+      }
+      .ins-tag-pending .mini-spinner {
+        width: 13px;
+        height: 13px;
+        border-width: 2px;
+      }
+      .ins-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 60px 20px;
+        color: var(--muted);
+        text-align: center;
+        font-size: 0.8rem;
+      }
+      .ins-empty strong {
+        color: var(--text);
+        font-size: 0.9rem;
+      }
+      .ins-empty button {
+        margin-top: 6px;
+      }
+      .ins-foot {
+        font-size: 0.68rem;
+        color: var(--muted);
+        line-height: 1.55;
+        border-top: 1px solid var(--border);
+        padding-top: 10px;
+      }
+      /* Fixed, and outside the modal, so it is never clipped by the scrolling
+         body it is describing. */
+      .ins-tooltip {
+        position: fixed;
+        z-index: 400;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.7rem;
+        padding: 5px 8px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.1s;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+        max-width: 320px;
+      }
+      .ins-tooltip.visible {
+        opacity: 1;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ins-tooltip,
+        .ins-act,
+        .ins-key,
+        .ins-unit button {
+          transition: none;
+        }
+      }
+
     </style>
     <script src="vendor/vis-network.min.js"></script>
   </head>
@@ -7358,6 +7887,10 @@
         <symbol id="i-window" viewBox="0 0 16 16">
           <rect x="2.4" y="3.2" width="11.2" height="9.6" rx="1.4" />
           <path d="M2.4 6.1h11.2" />
+        </symbol>
+        <symbol id="i-clock" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="5.7" />
+          <path d="M8 4.6V8l2.4 1.5" />
         </symbol>
         <symbol id="i-info" viewBox="0 0 16 16">
           <circle cx="8" cy="8" r="5.7" />
@@ -8000,6 +8533,26 @@
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
           </svg>
           Data
+        </button>
+        <button
+          class="conv-toolbar-btn"
+          id="convInsightsBtn"
+          title="Chart the current search results — when they happened, what context and metadata they carry, how well they were recognised"
+          disabled
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <line x1="6" y1="20" x2="6" y2="13" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="18" y1="20" x2="18" y2="9" />
+          </svg>
+          Insights
         </button>
         <button
           class="conv-toolbar-btn"
@@ -9210,7 +9763,82 @@
       The header states the connected database, which is where the toolbar's
       green status line went; the tabs are ordered by how the work actually
       runs (bring data in → review it → maintain the file).
+    -->    <!--
+      INSIGHTS — the current conversation search result, read as distributions.
+
+      Same result set as the sidebar, from the same `GetSessionsArgs`, so the
+      headline count and the count above the session list are the same number
+      by construction. The body is one scrolling canvas rather than tabs
+      because "copy the whole thing into an email" has to mean something.
     -->
+    <div class="modal-overlay" id="insightsModal">
+      <div class="modal-box ins-modal-box">
+        <!--
+          Two rows, fixed, rather than one wrapping row. The header holds four
+          things of very different widths and the search chips are the one that
+          grows without bound; letting them share a line meant the hero, the
+          toggle and Copy dashboard all moved as the search changed.
+          Row 1 is what is being counted and what can be done with it; row 2 is
+          which slice this is.
+        -->
+        <div class="ins-header">
+          <div class="ins-header-main">
+            <div class="ins-hero">
+              <span class="ins-hero-count" id="insHeroCount">0</span>
+              <span class="ins-hero-label" id="insHeroLabel">Conversations</span>
+            </div>
+            <div class="ins-unit" id="insUnitToggle" role="group" aria-label="What to count">
+              <button data-ins-unit="conversations"
+                title="Count whole conversations — the same set the session list shows">
+                Conversations
+              </button>
+              <button data-ins-unit="interactions"
+                title="Count the individual interactions that matched, rather than the conversations holding them">
+                Interactions
+              </button>
+            </div>
+            <div class="ins-header-actions">
+              <button class="btn-primary" id="insCopyAllBtn" disabled
+                title="Put the whole dashboard on the clipboard as rich text — paste it straight into an email">
+                <svg class=ui-icon><use href=#i-clipboard /></svg> Copy dashboard
+              </button>
+              <button class="close-btn" id="insCloseBtn">&#x2715;</button>
+            </div>
+          </div>
+          <div class="ins-header-meta">
+            <span class="ins-hero-sub" id="insHeroSub"></span>
+            <div class="ins-chips" id="insSearchChips"></div>
+            <!--
+              The one timezone disclaimer. It used to be repeated on every card
+              note, both time axes, three tooltips and the footer — which is a
+              lot of words to say something that is true of the whole screen at
+              once and never varies.
+            -->
+            <span class="ins-tz"
+              title="The database stores every timestamp in UTC, and the conversation date filter reads it that way too — so days and hours here are UTC days and hours, not your local ones.">
+              <svg class=ui-icon><use href=#i-clock /></svg> UTC
+            </span>
+          </div>
+        </div>
+        <div class="ins-body" id="insBody"></div>
+      </div>
+
+      <!--
+        The Context / Metadata key picker.
+        A real export carries around forty keys of each; as a row of chips that
+        was four wrapped lines of buttons above a single chart, and the chart —
+        the thing the section exists for — started below the fold. One button
+        naming the current key, and a searchable list behind it.
+      -->
+      <div class="ins-keypop" id="insKeyPop" hidden>
+        <div class="ins-keypop-head">
+          <input type="text" id="insKeyPopSearch" placeholder="Filter keys…"
+            autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="ins-keypop-list" id="insKeyPopList"></div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="convDataModal">
       <div class="modal-box conv-data-modal-box">
         <div class="modal-header">
@@ -9876,13 +10504,22 @@
           getSessions: (args) => invoke("get_sessions", { args }),
           exportConversationsForAi: (args) =>
             invoke("export_conversations_for_ai", { args }),
+          getInsightTags: (args, unit, keys) =>
+            invoke("get_insight_tags", { args, unit, keys }),
+          getInsightTagValues: (args, unit, kind, name) =>
+            invoke("get_insight_tag_values", { args, unit, kind, name }),
+          getConversationInsights: (args, unit) =>
+            invoke("get_conversation_insights", { args, unit }),
           // The export is one long invoke with a save dialog, a full-result
           // query and a file write in it; these are the phase boundaries.
           onAiExportProgress: (handler) =>
             listen
               ? listen("ai-export-progress", handler)
               : Promise.resolve(() => {}),
-          cancelSessionSearch: () => invoke("cancel_session_search"),
+          // Interrupts whatever the conversations database is running — a
+          // session search or an Insights read, which cannot both be in flight
+          // because they share one connection behind one lock.
+          cancelDbQuery: () => invoke("cancel_db_query"),
           getSessionInteractions: (sessionUuid) =>
             invoke("get_session_interactions", { sessionUuid }),
           getDateRange: () => invoke("get_date_range"),
@@ -10003,6 +10640,14 @@
       if (!window.backend.getSessions)
         window.backend.getSessions = () =>
           Promise.resolve({ sessions: [], total: 0, page: 1 })
+      if (!window.backend.getConversationInsights)
+        window.backend.getConversationInsights = () =>
+          Promise.reject(new Error("Not running in Tauri."))
+      if (!window.backend.getInsightTags)
+        window.backend.getInsightTags = () =>
+          Promise.resolve({ contexts: [], metadata: [] })
+      if (!window.backend.getInsightTagValues)
+        window.backend.getInsightTagValues = () => Promise.resolve([])
       if (!window.backend.exportConversationsForAi)
         window.backend.exportConversationsForAi = () =>
           Promise.resolve({
@@ -10017,8 +10662,7 @@
           })
       if (!window.backend.onAiExportProgress)
         window.backend.onAiExportProgress = () => Promise.resolve(() => {})
-      if (!window.backend.cancelSessionSearch)
-        window.backend.cancelSessionSearch = _convStub
+      if (!window.backend.cancelDbQuery) window.backend.cancelDbQuery = _convStub
       if (!window.backend.getSessionInteractions)
         window.backend.getSessionInteractions = () => Promise.resolve([])
       if (!window.backend.getContextOptions)
@@ -19237,11 +19881,15 @@
 
       /// Fill a container with a centred spinner. `note` is the second line,
       /// for saying *why* something is slow rather than only that it is.
-      function paneLoadingHtml(label, note) {
+      /// `actionHtml` is trusted markup, not text — it is a button the caller
+      /// builds, and only a read the user can actually stop should pass one.
+      /// A Cancel button on a wait nothing can interrupt is worse than no
+      /// button, so this stays opt-in rather than becoming part of the block.
+      function paneLoadingHtml(label, note, actionHtml) {
         return `<div class="pane-loading"><div class="mini-spinner"></div>
           <div>${esc(label)}</div>${
             note ? `<div class="pane-loading-note">${esc(note)}</div>` : ""
-          }</div>`
+          }${actionHtml ? `<div class="pane-loading-action">${actionHtml}</div>` : ""}</div>`
       }
 
       /**
@@ -19255,10 +19903,10 @@
        * with `clearPaneLoading`, or a spinner scheduled while the read was
        * still running will land on top of the finished result.
        */
-      function setPaneLoading(id, label, note) {
+      function setPaneLoading(id, label, note, actionHtml) {
         gateLoading("pane:" + id, true, () => {
           const el = document.getElementById(id)
-          if (el) el.innerHTML = paneLoadingHtml(label, note)
+          if (el) el.innerHTML = paneLoadingHtml(label, note, actionHtml)
         })
       }
 
@@ -19306,9 +19954,11 @@
         const dataBtn = document.getElementById("convDataBtn")
         const exportBtn = document.getElementById("convAiExportBtn")
         if (dataBtn) dataBtn.disabled = busy && _impPhase !== "running"
-        if (exportBtn)
-          exportBtn.disabled =
-            busy || !convDbPath || !convHasSearched || convTotalSessions <= 0
+        const insightsBtn = document.getElementById("convInsightsBtn")
+        const noResult =
+            !convDbPath || !convHasSearched || convTotalSessions <= 0
+        if (exportBtn) exportBtn.disabled = busy || noResult
+        if (insightsBtn) insightsBtn.disabled = busy || noResult
       }
 
       // ── CSV Import ──────────────────────────────────────────────────
@@ -19400,6 +20050,2300 @@
       document
         .getElementById("convAiExportBtn")
         .addEventListener("click", exportConversationsForAi)
+
+      // ══ INSIGHTS ══════════════════════════════════════════════════════
+      //
+      // The Conversations view answers "which conversations match?", one page
+      // of fifty at a time. Insights answers "what is in all of them?" — the
+      // same result set read as distributions instead of as rows.
+      //
+      // It is driven by `lastConvSearchArgs`, the exact args the sidebar was
+      // last filled from, so there is no second notion of "the current results"
+      // that could drift from the one on screen. Export for AI already works
+      // this way; this is its visual counterpart.
+      //
+      // ── Why the charts are hand-built SVG ──
+      //
+      // Because the deliverable is a picture on someone's clipboard, not a
+      // picture on this screen. A charting library draws to a canvas or to DOM
+      // wired to a stylesheet; either way, getting a clean 2× PNG of it out
+      // means re-rendering it somewhere else and hoping it matches. An SVG
+      // string with every colour, size and font written into the attributes is
+      // already the export: rasterising it is `new Image()` plus `drawImage`,
+      // and the same builder can be asked for the *light* variant that an email
+      // actually wants without touching the one on screen. It also keeps the
+      // "vendored, works offline" rule trivially satisfied.
+
+      // The palettes. Two, not one flipped: a chart on this app's dark surface
+      // and a chart on a white email background need their own steps, and the
+      // export theme is the one that matters most — a dark-surfaced chart
+      // pasted into Gmail is a black box in the middle of a white message.
+      //
+      // Both are validated categorical/sequential steps: every mark clears 3:1
+      // on the surface it is drawn on, and the status four are the reserved
+      // good→critical scale, never used as series identity.
+      const INS_THEME_SCREEN = {
+        name: "screen",
+        surface: "#21253a",
+        ink: "#e2e8f0",
+        ink2: "#a4b0c4",
+        muted: "#8892a6",
+        grid: "#2f3448",
+        axis: "#3c4258",
+        series: "#3987e5",
+        // Sequential, one hue, low→high. The first step is a bare tint off the
+        // surface, not the surface itself: an hour with nothing in it has to
+        // read as empty *and* still be a cell, or the grid dissolves wherever
+        // the data is quiet and "no conversations" becomes indistinguishable
+        // from "no square here". It is deliberately un-blue, so it can never be
+        // mistaken for the bottom of the value scale.
+        ramp: [
+          "#282d45",
+          "#1b3357",
+          "#184f95",
+          "#256abf",
+          "#3987e5",
+          "#6da7ec",
+          "#9ec5f4",
+        ],
+        good: "#0ca30c",
+        warning: "#fab219",
+        serious: "#ec835a",
+        critical: "#d03b3b",
+        neutral: "#8892a6",
+      }
+      const INS_THEME_EXPORT = {
+        name: "export",
+        surface: "#ffffff",
+        ink: "#111827",
+        ink2: "#4b5563",
+        muted: "#6b7280",
+        grid: "#e8eaee",
+        axis: "#cbd0d8",
+        series: "#2a78d6",
+        ramp: [
+          "#f1f2f4",
+          "#e2eefc",
+          "#cde2fb",
+          "#9ec5f4",
+          "#6da7ec",
+          "#3987e5",
+          "#256abf",
+        ],
+        good: "#0ca30c",
+        warning: "#fab219",
+        serious: "#ec835a",
+        critical: "#d03b3b",
+        neutral: "#6b7280",
+      }
+
+      // Never the app's own `-apple-system` stack. An exported SVG is
+      // rasterised inside an <img>, where the font is resolved against whatever
+      // the renderer can see, and the pasted PNG then lands on machines that
+      // are not this one. Helvetica and Arial resolve everywhere.
+      const INS_FONT =
+        "'Segoe UI','Helvetica Neue',Helvetica,Arial,sans-serif"
+
+      // Roughly the average glyph width of the stack above, as a fraction of
+      // the font size. Used only to decide whether a label fits before it is
+      // drawn — the alternative is drawing it and letting it collide, which is
+      // the one thing a chart may never do.
+      const INS_CHAR_W = 0.55
+
+      function insTextWidth(text, size) {
+        return String(text).length * size * INS_CHAR_W
+      }
+
+      /// Shorten to what fits in `px`, with a real ellipsis rather than a clip.
+      ///
+      /// A clipped label loses its first or last characters silently, which is
+      /// worse than a shorter one — `Stoppen_Faciliteitenkaart` and
+      /// `Stoppen_Faciliteitenpas` are different answers and both end in the
+      /// part that gets cut.
+      function insFitText(text, px, size) {
+        const s = String(text == null ? "" : text)
+        if (insTextWidth(s, size) <= px) return s
+        const max = Math.floor(px / (size * INS_CHAR_W)) - 1
+        if (max <= 0) return ""
+        return s.slice(0, max) + "…"
+      }
+
+      function insNum(n) {
+        return Number(n || 0).toLocaleString()
+      }
+
+      /// 1,284 · 12.9K · 1.2M — for stat tiles, where the exact digit matters
+      /// less than the magnitude fitting on one line.
+      function insCompact(n) {
+        const v = Number(n || 0)
+        if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(1) + "M"
+        if (Math.abs(v) >= 10000) return (v / 1000).toFixed(1) + "K"
+        return v.toLocaleString()
+      }
+
+      /// "1 conversation", "4 conversations". Every tooltip on this dashboard
+      /// ends in a counted noun, and `1 conversations` reads as a bug in the
+      /// number rather than in the sentence.
+      function insPlural(n, unit) {
+        const word = Number(n) === 1 && unit.endsWith("s") ? unit.slice(0, -1) : unit
+        return insNum(n) + " " + word
+      }
+
+      function insPct(part, whole) {
+        if (!whole) return "0%"
+        const p = (Number(part || 0) / whole) * 100
+        if (p > 0 && p < 0.1) return "<0.1%"
+        return (p >= 10 ? Math.round(p) : Math.round(p * 10) / 10) + "%"
+      }
+
+      /// Axis ticks on 1 / 2 / 5 × 10ⁿ, so the reader gets 0 · 20 · 40 rather
+      /// than 0 · 17 · 34. Always includes 0 and always covers `max`.
+      function insNiceTicks(max, wanted) {
+        const target = wanted || 4
+        if (!(max > 0)) return [0, 1]
+        const rough = max / target
+        const mag = Math.pow(10, Math.floor(Math.log10(rough)))
+        const norm = rough / mag
+        const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag
+        const ticks = []
+        for (let v = 0; v <= max + step * 0.001; v += step) ticks.push(v)
+        if (ticks[ticks.length - 1] < max) ticks.push(ticks.length * step)
+        return ticks
+      }
+
+      // ── SVG primitives ───────────────────────────────────────────────
+      //
+      // Every attribute is written out. No classes, no stylesheet: the string
+      // these produce has to render identically inside an <img> on a machine
+      // that has never seen this app's CSS.
+
+      function insAttr(v) {
+        return esc(v)
+      }
+
+      function insRect(x, y, w, h, fill, extra) {
+        if (!(w > 0) || !(h > 0)) return ""
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(
+          2,
+        )}" height="${h.toFixed(2)}" fill="${insAttr(fill)}"${extra || ""}/>`
+      }
+
+      function insText(x, y, str, opts) {
+        const o = opts || {}
+        const anchor = o.anchor ? ` text-anchor="${insAttr(o.anchor)}"` : ""
+        const weight = o.weight ? ` font-weight="${insAttr(o.weight)}"` : ""
+        return `<text x="${x.toFixed(2)}" y="${y.toFixed(2)}" fill="${insAttr(
+          o.fill,
+        )}" font-family="${INS_FONT}" font-size="${o.size || 11}"${anchor}${weight}>${esc(
+          str,
+        )}</text>`
+      }
+
+      /// A hairline, always solid. A dashed gridline reads as a threshold or a
+      /// projection when it is only a grid.
+      function insLine(x1, y1, x2, y2, stroke) {
+        return `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(
+          2,
+        )}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(
+          2,
+        )}" stroke="${insAttr(stroke)}" stroke-width="1"/>`
+      }
+
+      /// The hover target for one mark.
+      ///
+      /// `data-tip` is read by one delegated listener on the chart container
+      /// (see `insBindTooltips`) rather than by a listener per mark — a heatmap
+      /// is 168 cells. The `<title>` beside it is what survives into the
+      /// exported SVG and what a screen reader reads; it costs nothing.
+      function insHit(x, y, w, h, tip) {
+        if (!(w > 0) || !(h > 0)) return ""
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(
+          2,
+        )}" height="${h.toFixed(
+          2,
+        )}" fill="transparent" data-tip="${insAttr(tip)}"><title>${esc(
+          tip,
+        )}</title></rect>`
+      }
+
+      function insOpen(w, h, theme) {
+        return (
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" ` +
+          `viewBox="0 0 ${w} ${h}" role="img">` +
+          insRect(0, 0, w, h, theme.surface)
+        )
+      }
+
+      // ── Chart types ──────────────────────────────────────────────────
+      //
+      // Each takes a spec and a theme and returns `{svg, width, height}`. They
+      // are pure string builders with no DOM access, which is what lets
+      // frontend/tests/insights.test.js run them under Node.
+
+      const INS_COL_W = 640
+      const INS_ROW_W = 640
+
+      /// Vertical columns: hour of day, conversation length, recognition bands.
+      ///
+      /// Labels its columns directly only while they are few enough to read;
+      /// past that the y-axis and the tooltip carry the values, which is the
+      /// difference between a chart and a wall of numbers.
+      function insColumnChart(spec, theme) {
+        const data = spec.data || []
+        const w = spec.width || INS_COL_W
+        const labelDirect = data.length <= 8
+        const padT = labelDirect ? 22 : 12
+        const padB = spec.rotateLabels ? 40 : 24
+        const padL = labelDirect ? 8 : 40
+        const padR = 8
+        const plotH = spec.plotHeight || 150
+        const h = padT + plotH + padB
+        const plotW = w - padL - padR
+        const max = Math.max(1, ...data.map((d) => d.value || 0))
+        const ticks = insNiceTicks(max, 4)
+        const scaleMax = Math.max(max, ticks[ticks.length - 1] || max)
+        const y0 = padT + plotH
+        let out = insOpen(w, h, theme)
+
+        if (!labelDirect) {
+          for (const t of ticks) {
+            const y = y0 - (t / scaleMax) * plotH
+            out += insLine(padL, y, padL + plotW, y, theme.grid)
+            out += insText(padL - 6, y + 3.5, insCompact(t), {
+              fill: theme.muted,
+              size: 10,
+              anchor: "end",
+            })
+          }
+        }
+        out += insLine(padL, y0, padL + plotW, y0, theme.axis)
+
+        const band = plotW / Math.max(1, data.length)
+        // Capped rather than filling the band: the leftover is the air that
+        // keeps a 24-column chart from reading as a solid block.
+        const barW = Math.min(24, band * 0.68)
+        const r = Math.min(4, barW / 2)
+        data.forEach((d, i) => {
+          const cx = padL + band * i + band / 2
+          const x = cx - barW / 2
+          const value = d.value || 0
+          const bh = (value / scaleMax) * plotH
+          const fill = d.color || theme.series
+          if (bh > 0) {
+            // Rounded at the data end, square at the baseline — the shape says
+            // which end is the value and which is the axis.
+            const rr = Math.min(r, bh)
+            out +=
+              `<path d="M${x.toFixed(2)} ${y0.toFixed(2)} L${x.toFixed(2)} ${(
+                y0 -
+                bh +
+                rr
+              ).toFixed(2)} Q${x.toFixed(2)} ${(y0 - bh).toFixed(2)} ${(
+                x + rr
+              ).toFixed(2)} ${(y0 - bh).toFixed(2)} L${(
+                x +
+                barW -
+                rr
+              ).toFixed(2)} ${(y0 - bh).toFixed(2)} Q${(x + barW).toFixed(
+                2,
+              )} ${(y0 - bh).toFixed(2)} ${(x + barW).toFixed(2)} ${(
+                y0 -
+                bh +
+                rr
+              ).toFixed(2)} L${(x + barW).toFixed(2)} ${y0.toFixed(2)} Z" ` +
+              `fill="${insAttr(fill)}"/>`
+          }
+          if (labelDirect && value > 0) {
+            out += insText(cx, y0 - bh - 7, insNum(value), {
+              fill: theme.ink,
+              size: 11,
+              anchor: "middle",
+              weight: "600",
+            })
+          }
+          const label =
+            spec.tickEvery && i % spec.tickEvery !== 0 ? "" : d.tick || d.label
+          if (label) {
+            if (spec.rotateLabels) {
+              out +=
+                `<text transform="translate(${cx.toFixed(2)},${(
+                  y0 + 12
+                ).toFixed(2)}) rotate(-40)" fill="${insAttr(
+                  theme.muted,
+                )}" font-family="${INS_FONT}" font-size="10" text-anchor="end">` +
+                `${esc(insFitText(label, padB * 1.6, 10))}</text>`
+            } else {
+              out += insText(cx, y0 + 14, insFitText(label, band + 6, 10), {
+                fill: theme.muted,
+                size: 10,
+                anchor: "middle",
+              })
+            }
+          }
+          out += insHit(
+            padL + band * i,
+            padT,
+            band,
+            plotH,
+            `${d.tip || d.label}: ${insPlural(value, spec.unit || "conversations")}`,
+          )
+        })
+        return { svg: out + "</svg>", width: w, height: h }
+      }
+
+      /// Horizontal bars, value at the tip, category in a left gutter.
+      ///
+      /// The form for every "top N" list here, because the categories are names
+      /// — entity names, `qa-` ids, context values — and names want a
+      /// horizontal baseline to be read along.
+      function insBarChart(spec, theme) {
+        const data = spec.data || []
+        const w = spec.width || INS_ROW_W
+        const rowH = 22
+        const padT = 4
+        const padB = 4
+        const h = padT + padB + Math.max(1, data.length) * rowH
+        // Enough for a real name, never more than a third of the chart: past
+        // that the bars have no room left to be compared.
+        const gutter = Math.min(200, Math.max(90, Math.round(w * 0.3)))
+        // Measured, not assumed. The tip label is a count and, where the chart
+        // has a denominator, a share as well — `3,140 · 50%` is half again as
+        // wide as `3,140`, and a fixed reservation put the longest one past the
+        // right edge where it was silently cut off by the viewBox.
+        const tips = data.map(
+          (d) =>
+            insNum(d.value || 0) +
+            (spec.total ? " · " + insPct(d.value, spec.total) : ""),
+        )
+        const valueW = Math.min(
+          w * 0.28,
+          Math.max(40, ...tips.map((t) => insTextWidth(t, 11))) + 10,
+        )
+        const plotW = w - gutter - valueW - 12
+        const max = Math.max(1, ...data.map((d) => d.value || 0))
+        let out = insOpen(w, h, theme)
+        data.forEach((d, i) => {
+          const y = padT + i * rowH
+          const cy = y + rowH / 2
+          const value = d.value || 0
+          const bw = (value / max) * plotW
+          const barH = 12
+          const by = cy - barH / 2
+          out += insText(gutter - 8, cy + 3.5, insFitText(d.label, gutter - 14, 11), {
+            fill: theme.ink2,
+            size: 11,
+            anchor: "end",
+          })
+          const rr = Math.min(4, bw / 2)
+          if (bw > 0) {
+            out +=
+              `<path d="M${gutter.toFixed(2)} ${by.toFixed(2)} L${(
+                gutter +
+                bw -
+                rr
+              ).toFixed(2)} ${by.toFixed(2)} Q${(gutter + bw).toFixed(
+                2,
+              )} ${by.toFixed(2)} ${(gutter + bw).toFixed(2)} ${(
+                by + rr
+              ).toFixed(2)} L${(gutter + bw).toFixed(2)} ${(
+                by +
+                barH -
+                rr
+              ).toFixed(2)} Q${(gutter + bw).toFixed(2)} ${(
+                by + barH
+              ).toFixed(2)} ${(gutter + bw - rr).toFixed(2)} ${(
+                by + barH
+              ).toFixed(2)} L${gutter.toFixed(2)} ${(by + barH).toFixed(
+                2,
+              )} Z" fill="${insAttr(d.color || theme.series)}"/>`
+          }
+          out += insText(gutter + bw + 7, cy + 3.5, tips[i], {
+            fill: theme.ink,
+            size: 11,
+            weight: "600",
+          })
+          out += insHit(
+            0,
+            y,
+            w,
+            rowH,
+            `${d.tip || d.label}: ${insPlural(value, spec.unit || "conversations")}${
+              spec.total ? " (" + insPct(value, spec.total) + ")" : ""
+            }`,
+          )
+        })
+        return { svg: out + "</svg>", width: w, height: h }
+      }
+
+      /// One 100% stacked bar plus a legend — part-to-whole for a handful of
+      /// segments, where a pie would be a 2-or-3-slice pie.
+      ///
+      /// A 2px gap in the surface colour separates the segments; a stroke
+      /// around them would add ink that is not data.
+      function insStackChart(spec, theme) {
+        const data = (spec.data || []).filter((d) => (d.value || 0) > 0)
+        const w = spec.width || INS_ROW_W
+        const barH = 26
+        const legendRows = data.length
+        const h = 6 + barH + 12 + legendRows * 18
+        const total =
+          spec.total || data.reduce((a, d) => a + (d.value || 0), 0) || 1
+        let out = insOpen(w, h, theme)
+        let x = 0
+        const gap = 2
+        data.forEach((d, i) => {
+          const raw = ((d.value || 0) / total) * w
+          const segW = Math.max(0, raw - (i < data.length - 1 ? gap : 0))
+          out += insRect(x, 6, segW, barH, d.color || theme.series)
+          // Only inside the segment when it genuinely fits, with padding on
+          // both sides. Otherwise the legend below carries it.
+          const label = insPct(d.value, total)
+          if (insTextWidth(label, 11) + 12 <= segW) {
+            out += insText(x + segW / 2, 6 + barH / 2 + 4, label, {
+              fill: d.onFill || "#ffffff",
+              size: 11,
+              anchor: "middle",
+              weight: "600",
+            })
+          }
+          out += insHit(
+            x,
+            6,
+            segW,
+            barH,
+            `${d.label}: ${insPlural(d.value, spec.unit || "conversations")} (${insPct(
+              d.value,
+              total,
+            )})`,
+          )
+          x += raw
+        })
+        data.forEach((d, i) => {
+          const y = 6 + barH + 22 + i * 18
+          out += insRect(0, y - 8, 10, 10, d.color || theme.series, ' rx="2"')
+          out += insText(16, y, d.label, { fill: theme.ink2, size: 11 })
+          out += insText(
+            w,
+            y,
+            insNum(d.value) + " · " + insPct(d.value, total),
+            { fill: theme.ink, size: 11, anchor: "end", weight: "600" },
+          )
+        })
+        return { svg: out + "</svg>", width: w, height: h }
+      }
+
+      /// Weekday × hour. Sequential one hue, because the cell means magnitude.
+      ///
+      /// The one chart here with no room for a value on every mark, so it ships
+      /// a scale legend and a per-cell tooltip, and its numbers are in the
+      /// copied table.
+      function insHeatmap(spec, theme) {
+        const grid = spec.grid || []
+        const w = spec.width || INS_ROW_W
+        const padL = 34
+        const padT = 16
+        const cellH = 20
+        const gap = 2
+        const cellW = (w - padL - 4 - 23 * gap) / 24
+        const h = padT + 7 * (cellH + gap) + 34
+        const max = Math.max(1, ...grid)
+        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        let out = insOpen(w, h, theme)
+        for (let hr = 0; hr < 24; hr += 3) {
+          out += insText(
+            padL + hr * (cellW + gap) + cellW / 2,
+            padT - 5,
+            String(hr).padStart(2, "0"),
+            { fill: theme.muted, size: 9, anchor: "middle" },
+          )
+        }
+        for (let d = 0; d < 7; d++) {
+          const y = padT + d * (cellH + gap)
+          out += insText(padL - 6, y + cellH / 2 + 3.5, days[d], {
+            fill: theme.muted,
+            size: 10,
+            anchor: "end",
+          })
+          for (let hr = 0; hr < 24; hr++) {
+            const v = grid[d * 24 + hr] || 0
+            const x = padL + hr * (cellW + gap)
+            out += insRect(x, y, cellW, cellH, insRampColor(v, max, theme), ' rx="2"')
+            out += insHit(
+              x,
+              y,
+              cellW,
+              cellH,
+              `${days[d]} ${String(hr).padStart(2, "0")}:00 — ${insPlural(
+                v,
+                "conversations",
+              )}`,
+            )
+          }
+        }
+        // Scale legend: without it the colours are a code with no key.
+        const ly = padT + 7 * (cellH + gap) + 16
+        out += insText(padL, ly + 8, "0", {
+          fill: theme.muted,
+          size: 9,
+          anchor: "end",
+        })
+        for (let s = 0; s < theme.ramp.length; s++) {
+          out += insRect(padL + 4 + s * 16, ly, 14, 9, theme.ramp[s], ' rx="2"')
+        }
+        out += insText(
+          padL + 4 + theme.ramp.length * 16 + 4,
+          ly + 8,
+          insNum(max) + " per hour",
+          { fill: theme.muted, size: 9 },
+        )
+        return { svg: out + "</svg>", width: w, height: h }
+      }
+
+      /// A value's step on the sequential ramp. Zero always takes step 0, which
+      /// is the surface — an empty hour must read as empty, not as "a little".
+      function insRampColor(v, max, theme) {
+        if (!(v > 0)) return theme.ramp[0]
+        const steps = theme.ramp.length - 1
+        const idx = Math.max(1, Math.ceil((v / max) * steps))
+        return theme.ramp[Math.min(steps, idx)]
+      }
+
+      /// Volume over time when there are more days than a column chart can
+      /// carry. A 2px line over a 10% wash of its own hue — the wash gives the
+      /// shape weight without becoming a saturated block.
+      function insAreaChart(spec, theme) {
+        const data = spec.data || []
+        const w = spec.width || INS_ROW_W
+        const padL = 40
+        const padR = 10
+        const padT = 12
+        const padB = 26
+        const plotH = spec.plotHeight || 150
+        const h = padT + plotH + padB
+        const plotW = w - padL - padR
+        const max = Math.max(1, ...data.map((d) => d.value || 0))
+        const ticks = insNiceTicks(max, 4)
+        const scaleMax = Math.max(max, ticks[ticks.length - 1] || max)
+        const y0 = padT + plotH
+        const xAt = (i) =>
+          padL + (data.length <= 1 ? plotW / 2 : (i / (data.length - 1)) * plotW)
+        const yAt = (v) => y0 - ((v || 0) / scaleMax) * plotH
+        let out = insOpen(w, h, theme)
+        for (const t of ticks) {
+          const y = y0 - (t / scaleMax) * plotH
+          out += insLine(padL, y, padL + plotW, y, theme.grid)
+          out += insText(padL - 6, y + 3.5, insCompact(t), {
+            fill: theme.muted,
+            size: 10,
+            anchor: "end",
+          })
+        }
+        out += insLine(padL, y0, padL + plotW, y0, theme.axis)
+        if (data.length) {
+          const pts = data.map((d, i) => `${xAt(i).toFixed(2)} ${yAt(d.value).toFixed(2)}`)
+          out +=
+            `<path d="M${xAt(0).toFixed(2)} ${y0.toFixed(2)} L${pts.join(
+              " L",
+            )} L${xAt(data.length - 1).toFixed(2)} ${y0.toFixed(
+              2,
+            )} Z" fill="${insAttr(theme.series)}" fill-opacity="0.1"/>`
+          out +=
+            `<path d="M${pts.join(" L")}" fill="none" stroke="${insAttr(
+              theme.series,
+            )}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+          // One direct label, on the extreme — the point the reader is looking
+          // for. A number on every day would be unreadable and go unread.
+          let peak = 0
+          data.forEach((d, i) => {
+            if ((d.value || 0) > (data[peak].value || 0)) peak = i
+          })
+          const px = xAt(peak)
+          const py = yAt(data[peak].value)
+          out += `<circle cx="${px.toFixed(2)}" cy="${py.toFixed(
+            2,
+          )}" r="4" fill="${insAttr(theme.series)}" stroke="${insAttr(
+            theme.surface,
+          )}" stroke-width="2"/>`
+          out += insText(
+            Math.min(w - padR, Math.max(padL, px)),
+            Math.max(10, py - 9),
+            insNum(data[peak].value),
+            {
+              fill: theme.ink,
+              size: 11,
+              anchor: px > w - 60 ? "end" : "middle",
+              weight: "600",
+            },
+          )
+          const every = Math.max(1, Math.ceil(data.length / 7))
+          data.forEach((d, i) => {
+            if (i % every === 0 || i === data.length - 1) {
+              out += insText(xAt(i), y0 + 15, d.tick || d.label, {
+                fill: theme.muted,
+                size: 9,
+                anchor: i === 0 ? "start" : i === data.length - 1 ? "end" : "middle",
+              })
+            }
+            const band = plotW / Math.max(1, data.length)
+            out += insHit(
+              xAt(i) - band / 2,
+              padT,
+              band,
+              plotH,
+              `${d.tip || d.label}: ${insPlural(d.value, "conversations")}`,
+            )
+          })
+        }
+        return { svg: out + "</svg>", width: w, height: h }
+      }
+
+      /// The one entry point a chart card renders through, so a card can be
+      /// asked for its screen form and its export form by changing one argument.
+      function insRenderChart(spec, theme) {
+        if (spec.kind === "bars") return insBarChart(spec, theme)
+        if (spec.kind === "stack") return insStackChart(spec, theme)
+        if (spec.kind === "heatmap") return insHeatmap(spec, theme)
+        if (spec.kind === "area") return insAreaChart(spec, theme)
+        return insColumnChart(spec, theme)
+      }
+
+      /// The numbers behind a chart, as tab-separated rows.
+      ///
+      /// Pastes into Excel or Sheets as cells, and is the WCAG-clean twin of
+      /// every chart here: no value on this dashboard is reachable only by
+      /// looking at a colour.
+      function insChartTsv(spec) {
+        const unit = spec.unit || "Conversations"
+        const head = (h) => h.charAt(0).toUpperCase() + h.slice(1)
+        if (spec.kind === "heatmap") {
+          const grid = spec.grid || []
+          const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+          const hours = []
+          for (let hr = 0; hr < 24; hr++) hours.push(String(hr).padStart(2, "0"))
+          const rows = ["Day\t" + hours.join("\t")]
+          days.forEach((d, i) => {
+            const cells = []
+            for (let hr = 0; hr < 24; hr++) cells.push(grid[i * 24 + hr] || 0)
+            rows.push(d + "\t" + cells.join("\t"))
+          })
+          return rows.join("\n")
+        }
+        const data = spec.data || []
+        const total =
+          spec.total || data.reduce((a, d) => a + (d.value || 0), 0) || 0
+        const rows = [
+          (spec.axisLabel || "Label") + "\t" + head(unit) + "\tShare",
+        ]
+        for (const d of data) {
+          rows.push(d.label + "\t" + (d.value || 0) + "\t" + insPct(d.value, total))
+        }
+        return rows.join("\n")
+      }
+
+      // ── Building the dashboard from one insights payload ──────────────
+
+      let insData = null
+      let insLoading = false
+      /// The card specs of the last render, by card id — the copy buttons read
+      /// this rather than re-deriving from the payload, so what lands on the
+      /// clipboard is provably the chart that was on screen.
+      let insSpecs = new Map()
+      /// Which context / metadata key the two tag sections are showing. Null
+      /// until the first render picks the most-covering key.
+      let insCtxKey = null
+      let insMetaKey = null
+      /// "conversations" | "interactions" — what one bar counts.
+      ///
+      /// Remembered, because someone who works in one reading works in it
+      /// habitually and the toggle would otherwise be a click on every open.
+      /// Safe to remember only because the unit is stated in the hero label,
+      /// in the toggle, in every card note and in both exports: there is no
+      /// way to be looking at one and reading it as the other.
+      /// Read behind a guard, unlike the other localStorage reads in this file,
+      /// because this one runs at the top level of the script: a store that is
+      /// disabled or full throws on `getItem`, and a throw here would take out
+      /// the whole renderer rather than one preference.
+      let insUnit = (() => {
+        try {
+          return localStorage.getItem("cm-insights-unit") === "interactions"
+            ? "interactions"
+            : "conversations"
+        } catch (e) {
+          return "conversations"
+        }
+      })()
+
+      const INS_CHART_W = 640
+
+      /// The nouns a payload is described in, derived once so a card, a tile,
+      /// a tooltip and a pasted report cannot disagree about what was counted.
+      ///
+      /// `subject` says "matching interactions" only when something actually
+      /// singled out particular turns. With no query and no pill every
+      /// interaction of every matched conversation is a match, and claiming
+      /// otherwise would be a lie about what the reader is looking at.
+      function insWords(d) {
+        const byTurn = d && d.unit === "interactions"
+        const narrowed = !!(d && d.matchesAreNarrowed)
+        return {
+          byTurn,
+          narrowed,
+          /// The plural noun tooltips and tables count in.
+          noun: byTurn ? "interactions" : "conversations",
+          /// The same, as the reader would name it in a sentence.
+          subject: byTurn
+            ? narrowed
+              ? "matching interactions"
+              : "interactions"
+            : "conversations",
+          /// How many of them there are — the denominator of every share.
+          total: byTurn ? d.matchedInteractions || 0 : (d && d.sessionCount) || 0,
+        }
+      }
+
+      /// Order the recognition bands as a scale, not by count.
+      ///
+      /// They are an ordered range — swapping two of them changes the meaning —
+      /// so the axis has to read left to right in that order however few
+      /// conversations land in each.
+      const INS_RECOG_ORDER = ["Zero", "Under 40%", "40–69%", "70–100%", "Not scored"]
+      const INS_LENGTH_ORDER = ["1", "2", "3–5", "6–10", "11–20", "21+"]
+
+      function insOrdered(buckets, order) {
+        const by = new Map((buckets || []).map((b) => [b.label, b.count]))
+        return order
+          .filter((label) => by.has(label))
+          .map((label) => ({ label, value: by.get(label) }))
+      }
+
+      function insToData(buckets) {
+        return (buckets || []).map((b) => ({ label: b.label, value: b.count }))
+      }
+
+      /// The band colours are the reserved status scale, because the band
+      /// *means* good-to-bad. They are never used for series identity anywhere
+      /// else on this dashboard, and every one of them carries its label.
+      function insRecogColor(label, theme) {
+        if (label === "Zero") return theme.critical
+        if (label === "Under 40%") return theme.serious
+        if (label === "40–69%") return theme.warning
+        if (label === "70–100%") return theme.good
+        return theme.neutral
+      }
+
+      /// A day series is a column chart while the columns are readable and a
+      /// line once they are not. 62 is where a 640px chart stops giving each
+      /// day enough width to be a mark rather than a hairline.
+      function insVolumeSpec(d) {
+        const filled = insFillDays(d.byDay || [])
+        // The axis says `06-01` where the whole series is inside one year: the
+        // repeated `2026-` is four characters of noise on every tick, and the
+        // year is already in the header, the tooltip and the copied table.
+        const oneYear =
+          filled.length > 0 &&
+          filled.every((b) => b.label.slice(0, 4) === filled[0].label.slice(0, 4))
+        const data = oneYear
+          ? filled.map((b) => ({ ...b, tick: b.label.slice(5) }))
+          : filled
+        return {
+          kind: filled.length > 62 ? "area" : "columns",
+          data,
+          unit: "conversations",
+          axisLabel: "Day",
+          rotateLabels: filled.length > 12 && filled.length <= 62,
+          tickEvery:
+            filled.length > 31 ? Math.ceil(filled.length / 16) : undefined,
+        }
+      }
+
+      /// Insert the days with nothing in them.
+      ///
+      /// The query only returns days that have conversations, so a quiet week
+      /// would otherwise close up and the series would read as continuous
+      /// activity at a steady rate. A gap in the data has to look like a gap.
+      function insFillDays(buckets) {
+        if (!buckets.length) return []
+        const out = []
+        const at = new Map(buckets.map((b) => [b.label, b.count]))
+        const toUtc = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10))
+        let cursor = toUtc(buckets[0].label)
+        const end = toUtc(buckets[buckets.length - 1].label)
+        if (!(cursor <= end)) return insToData(buckets)
+        // A range wider than this is a rendering problem rather than a series;
+        // fall back to the days that actually exist.
+        if ((end - cursor) / 86400000 > 1500) return insToData(buckets)
+        while (cursor <= end) {
+          const dt = new Date(cursor)
+          const key =
+            dt.getUTCFullYear() +
+            "-" +
+            String(dt.getUTCMonth() + 1).padStart(2, "0") +
+            "-" +
+            String(dt.getUTCDate()).padStart(2, "0")
+          out.push({ label: key, value: at.get(key) || 0 })
+          cursor += 86400000
+        }
+        return out
+      }
+
+      /// Thumbs up, thumbs down, both, and none — four disjoint groups.
+      ///
+      /// The two flags are independent, so `none` is `total − up − down + both`;
+      /// subtracting the two counts alone over-counts the conversations that
+      /// carry one of each and under-states how many were never rated.
+      function insFeedbackSpec(d, theme) {
+        const both = d.mixedFeedbackSessions || 0
+        const up = Math.max(0, (d.posFeedbackSessions || 0) - both)
+        const down = Math.max(0, (d.negFeedbackSessions || 0) - both)
+        const none = Math.max(0, (d.sessionCount || 0) - up - down - both)
+        return {
+          kind: "stack",
+          total: d.sessionCount || 0,
+          unit: "conversations",
+          axisLabel: "Feedback",
+          data: [
+            { label: "Thumbs up", value: up, color: theme.good },
+            { label: "Thumbs down", value: down, color: theme.critical },
+            { label: "Both", value: both, color: theme.warning },
+            {
+              label: "No feedback given",
+              value: none,
+              color: theme.neutral,
+              onFill: theme.surface,
+            },
+          ],
+        }
+      }
+
+      /// One tag key's values.
+      ///
+      /// The share is of the conversations that set the key at all, which the
+      /// note under the card states — against the whole result set, every value
+      /// of a rarely-set key reads as negligible, which says something about
+      /// the key rather than about the value.
+      ///
+      /// **There is deliberately no "Other" bar.** It looks like the obvious
+      /// completion of the chart and it cannot be computed: a conversation may
+      /// set one key to more than one value over its turns — the real export
+      /// has such keys — so `withKey − (the shown values)` is not the tail, it
+      /// is a number that goes *negative* the moment two values overlap. How
+      /// many values were folded away belongs in the note, where it can be
+      /// stated as what it is instead of drawn as a bar that is not there.
+      function insTagSpec(group, words) {
+        return {
+          kind: "bars",
+          data: insToData(group.values),
+          total: group.withKey,
+          unit: (words && words.noun) || "conversations",
+          axisLabel: group.name,
+        }
+      }
+
+      /// Every card on the dashboard, in reading order.
+      ///
+      /// One list, built once, so the on-screen render, the per-card copy and
+      /// the whole-dashboard copy cannot disagree about what the dashboard is.
+      function insBuildCards(d, theme) {
+        const w = insWords(d)
+        const cards = []
+        const push = (section, id, title, note, spec) => {
+          if (!spec) return
+          const empty =
+            spec.kind === "heatmap"
+              ? !(spec.grid || []).some((v) => v > 0)
+              : !(spec.data || []).some((v) => (v.value || 0) > 0)
+          if (empty) return
+          cards.push({ section, id, title, note, spec })
+        }
+        // Every chart counts what the toggle says, so `unit` and `total` are
+        // set once here rather than repeated — a card that kept the other
+        // unit's noun would mislabel its own tooltips and its copied table.
+        const counted = (extra) => ({
+          unit: w.noun,
+          total: w.total,
+          ...(extra || {}),
+        })
+
+        push(
+          "Volume",
+          "volume",
+          w.byTurn ? "Interactions per day" : "Conversations per day",
+          w.byTurn
+            ? "Counted on the day the interaction happened. Days with nothing in them are shown as gaps."
+            : "Counted on the day the conversation started. Days with nothing in them are shown as gaps.",
+          { ...insVolumeSpec(d), ...counted({ total: 0 }) },
+        )
+        push(
+          "Volume",
+          "hour",
+          "By hour of day",
+          w.byTurn
+            ? "The hour of day each " + insSingular(w.subject) + " happened."
+            : "The hour of day each conversation started.",
+          counted({
+            kind: "columns",
+            // The axis says `09`; the tooltip has room to say what that means.
+            data: insToData(d.byHour).map((b) => ({ ...b, tip: b.label + ":00" })),
+            axisLabel: "Hour (UTC)",
+            total: 0,
+          }),
+        )
+        push(
+          "Volume",
+          "heat",
+          "Day of week × hour",
+          "The same, laid out as a week. Darker is busier.",
+          { kind: "heatmap", grid: d.hourWeekday || [], unit: w.noun },
+        )
+        push(
+          "Volume",
+          "length",
+          w.byTurn ? "Matching interactions per conversation" : "Conversation length",
+          w.byTurn
+            ? "How many of a conversation's interactions matched. This is the one chart that counts conversations in both readings."
+            : "Interactions per conversation, binned.",
+          {
+            kind: "columns",
+            data: insOrdered(d.lengthBuckets, INS_LENGTH_ORDER),
+            total: d.sessionCount,
+            unit: "conversations",
+            axisLabel: w.byTurn ? "Matching interactions" : "Interactions",
+          },
+        )
+
+        push(
+          "Quality",
+          "recognition",
+          w.byTurn
+            ? "Recognition score per interaction"
+            : "Lowest recognition score per conversation",
+          w.byTurn
+            ? "The score on each matching interaction itself — there is no worst-of to take. GenAI answers are not scored."
+            : "The worst-scored turn in each conversation — the same measure the Low % and Zero % pills filter on. GenAI answers are not scored.",
+          counted({
+            kind: "columns",
+            data: insOrdered(d.recognitionBands, INS_RECOG_ORDER).map((b) => ({
+              ...b,
+              color: insRecogColor(b.label, theme),
+            })),
+            axisLabel: "Recognition",
+          }),
+        )
+        // Deliberately conversation-only: a thumb rates the conversation, not
+        // the turn that happened to match. Showing it here would invite exactly
+        // the misreading the interactions unit exists to prevent — "43% of my
+        // matching turns got a thumbs down" when it is 43% of their
+        // conversations. The body states the omission rather than hiding it.
+        if (!w.byTurn) {
+          push(
+            "Quality",
+            "feedback",
+            "Feedback",
+            "Whether anyone rated an answer in the conversation.",
+            insFeedbackSpec(d, theme),
+          )
+        }
+        push(
+          "Quality",
+          "recogType",
+          "How the answer was found",
+          w.byTurn
+            ? "Counted per matching interaction."
+            : "Counted per interaction, not per conversation.",
+          {
+            kind: "bars",
+            data: insToData(d.recognitionTypes),
+            unit: "interactions",
+            total: w.byTurn ? w.total : 0,
+            axisLabel: "Recognition type",
+          },
+        )
+        push(
+          "Quality",
+          "dialogStatus",
+          "Dialog outcome",
+          w.byTurn
+            ? "How the matching interactions left the Dialog they were in."
+            : "How conversations left the Dialog they were in.",
+          counted({ kind: "bars", data: insToData(d.dialogStatus), axisLabel: "Outcome" }),
+        )
+
+        const ctxGroup = insPickGroup(d.contexts, insCtxKey)
+        if (ctxGroup) {
+          push(
+            "Context",
+            "context",
+            "Context · " + ctxGroup.name,
+            insTagNote(ctxGroup, w),
+            insTagSpec(ctxGroup, w),
+          )
+        }
+        const metaGroup = insPickGroup(d.metadata, insMetaKey)
+        if (metaGroup) {
+          push(
+            "Metadata",
+            "metadata",
+            "Metadata · " + metaGroup.name,
+            insTagNote(metaGroup, w),
+            insTagSpec(metaGroup, w),
+          )
+        }
+
+        push(
+          "Content",
+          "entities",
+          "Entities recognised",
+          w.byTurn
+            ? "The entity the recognizer matched on the interaction itself, not the wording that triggered it."
+            : "The entity the recognizer matched, not the wording that triggered it.",
+          counted({ kind: "bars", data: insToData(d.entities), axisLabel: "Entity" }),
+        )
+        // Conversation-only for the same reason as feedback: the opening
+        // question is a fact about the conversation and has no per-turn reading.
+        if (!w.byTurn) {
+          push(
+            "Content",
+            "questions",
+            "Most common opening questions",
+            "The first real thing the user said, grouped case-insensitively.",
+            counted({
+              kind: "bars",
+              data: insToData(d.firstMessages),
+              axisLabel: "Opening question",
+            }),
+          )
+        }
+        push(
+          "Content",
+          "articles",
+          "Articles that answered",
+          w.byTurn
+            ? "Matching interactions this Article produced."
+            : "Conversations in which this Article produced an answer.",
+          counted({ kind: "bars", data: insToData(d.articles), axisLabel: "Article" }),
+        )
+        push(
+          "Content",
+          "dialogs",
+          "Dialogs walked through",
+          w.byTurn
+            ? "Matching interactions that passed through the Dialog, whether or not it answered."
+            : "Conversations that passed through the Dialog, whether or not it answered.",
+          counted({ kind: "bars", data: insToData(d.dialogs), axisLabel: "Dialog" }),
+        )
+        push(
+          "Content",
+          "dialogNodes",
+          "Dialog nodes that answered",
+          "The specific node an answer came from.",
+          counted({ kind: "bars", data: insToData(d.dialogNodes), axisLabel: "Dialog node" }),
+        )
+        // Only when there is a comparison to make: one culture is a fact about
+        // the database, not a distribution.
+        if ((d.cultures || []).length > 1) {
+          push("Content", "cultures", "Cultures", "", counted({
+            kind: "bars",
+            data: insToData(d.cultures),
+            axisLabel: "Culture",
+          }))
+        }
+        return cards
+      }
+
+      /// "interactions" → "interaction". Only ever applied to the nouns above.
+      function insSingular(word) {
+        return word.endsWith("s") ? word.slice(0, -1) : word
+      }
+
+      function insPickGroup(groups, wanted) {
+        const list = groups || []
+        if (!list.length) return null
+        return list.find((g) => g.name === wanted) || list[0]
+      }
+
+      function insTagNote(group, words) {
+        const w = words || { noun: "conversations", byTurn: false, total: 0 }
+        const notSet = Math.max(0, (w.total || 0) - (group.withKey || 0))
+        const values = group.values || []
+        const folded = Math.max(0, (group.distinctValues || 0) - values.length)
+        const shown = values.reduce((a, v) => a + v.count, 0)
+        let note =
+          "Share of the " + insNum(group.withKey) + " " + w.noun + " that set this key"
+        if (notSet) note += "; " + insNum(notSet) + " never set it"
+        note += "."
+        // Context and metadata are recorded per conversation, not per turn, so
+        // in interactions mode an interaction is counted under the key *its
+        // conversation* carried. There is no per-turn context to count instead;
+        // saying so is the difference between a caveat and a wrong number.
+        if (w.byTurn)
+          note +=
+            " Context and metadata are recorded per conversation, so each" +
+            " interaction is counted under the value its conversation carried."
+        if (folded)
+          note +=
+            " Showing the top " +
+            insNum(values.length) +
+            " of " +
+            insNum(group.distinctValues) +
+            " values."
+        // Said only where it is actually true of this key. A conversation whose
+        // context changed mid-way carries both values, so the bars can add up to
+        // more than the conversations that set the key — which reads as an
+        // arithmetic error unless the chart says otherwise.
+        if (shown > group.withKey)
+          note +=
+            " Some " +
+            w.noun +
+            " carried more than one value, so these add up to more than " +
+            insNum(group.withKey) +
+            "."
+        return note
+      }
+
+      /// The numbers that lead the dashboard.
+      ///
+      /// Stat tiles rather than charts, because each is one value: a one-bar
+      /// bar chart says nothing a number does not.
+      function insTiles(d) {
+        const w = insWords(d)
+        const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
+        // The hero is the number the unit names, and its label says which —
+        // the same figure means very different things in the two readings.
+        const tiles = [{ label: cap(w.subject), value: insNum(w.total), hero: true }]
+        if (w.byTurn) {
+          tiles.push({
+            label: "Conversations",
+            value: insNum(d.sessionCount),
+            sub: "they came from",
+          })
+          // Only worth a tile when something actually narrowed it: otherwise
+          // this is 100% by construction and says nothing.
+          if (w.narrowed) {
+            tiles.push({
+              label: "Of all interactions",
+              value: insPct(w.total, d.interactionCount),
+              sub: "in those conversations",
+            })
+          }
+        } else {
+          tiles.push({ label: "Interactions", value: insCompact(d.interactionCount) })
+          tiles.push({
+            label: "Median length",
+            value: insNum(d.medianInteractions),
+            sub: "interactions",
+          })
+        }
+        if (!w.total) return tiles
+        tiles.push({
+          label: "GenAI",
+          value: insPct(d.genaiSessions, w.total),
+          sub: insNum(d.genaiSessions) + " " + w.noun,
+        })
+        // Feedback is a property of a conversation, not of one turn — the same
+        // reason its chart is not built in interactions mode.
+        if (!w.byTurn) {
+          tiles.push({
+            label: "Thumbs down",
+            value: insPct(d.negFeedbackSessions, w.total),
+            sub: insNum(d.negFeedbackSessions) + " conversations",
+          })
+        }
+        tiles.push({
+          label: "Zero recognition",
+          value: insPct(d.zeroRecogSessions, w.total),
+          sub: insNum(d.zeroRecogSessions) + " " + w.noun,
+        })
+        tiles.push({
+          label: "Under " + d.lowRecogThreshold + "%",
+          value: insPct(d.lowRecogSessions, w.total),
+          sub: insNum(d.lowRecogSessions) + " " + w.noun,
+        })
+        return tiles
+      }
+
+      /// One sentence naming the reading, for the header and both exports.
+      ///
+      /// A pasted report that does not say whether "1,284" is conversations or
+      /// interactions is a number with two possible meanings, and the reader
+      /// has no way to tell which — so this is never omitted.
+      /// `short` omits the leading count, for the header — where the hero
+      /// figure is already directly above it and restating it reads as a
+      /// stutter. Everything else is identical, so the header and a pasted
+      /// report cannot describe the reading differently.
+      function insUnitLine(d, short) {
+        const w = insWords(d)
+        const lead = short ? "" : insNum(w.total) + " " + w.subject
+        if (!w.byTurn) {
+          const rest = insNum(d.interactionCount) + " interactions"
+          return short ? rest : lead + " · " + rest
+        }
+        const rest =
+          "in " +
+          insNum(d.sessionCount) +
+          " conversations" +
+          (w.narrowed
+            ? " · " +
+              insPct(w.total, d.interactionCount) +
+              " of their " +
+              insNum(d.interactionCount) +
+              " interactions"
+            : "")
+        return short ? rest : lead + " " + rest
+      }
+
+      /// What slice of the database this is, in words.
+      ///
+      /// The charts are meaningless without it — "43% thumbs down" is alarming
+      /// or unremarkable depending entirely on what was searched for — and it
+      /// is the first thing that has to survive into a pasted email.
+      function insSearchSummary(args) {
+        const a = args || {}
+        const out = []
+        if (a.query) {
+          const where = a.queryIdsOnly
+            ? a.queryIdType === "dialog"
+              ? "Dialog / node id"
+              : "Article id"
+            : [
+                a.queryScope === "user" || a.queryScope === "both" ? "user" : null,
+                a.queryScope === "bot" || a.queryScope === "both" ? "bot" : null,
+                a.queryEntities ? "entities" : null,
+              ]
+                .filter(Boolean)
+                .join(" + ") || "entities"
+          out.push({
+            label: a.queryRegex ? "Regex" : "Search",
+            value: a.query + " · " + where,
+          })
+        }
+        const FILTERS = {
+          genai: "GenAI answers only",
+          neg_feedback: "Thumbs down only",
+          low_recog: "Low recognition only",
+          zero_recog: "Zero recognition only",
+        }
+        if (FILTERS[a.filter]) out.push({ label: "Filter", value: FILTERS[a.filter] })
+        if (a.dateFrom || a.dateTo) {
+          out.push({
+            label: "Dates",
+            value: (a.dateFrom || "start") + " → " + (a.dateTo || "latest"),
+          })
+        }
+        for (const f of a.contextFilters || []) {
+          out.push({ label: "Context", value: insTagFilterText(f) })
+        }
+        for (const f of a.metadataFilters || []) {
+          out.push({ label: "Metadata", value: insTagFilterText(f) })
+        }
+        if (!out.length) out.push({ label: "Scope", value: "Everything in the database" })
+        return out
+      }
+
+      function insTagFilterText(f) {
+        if (!f) return ""
+        if (f.value === "__not_set__") return f.name + " not set"
+        if (f.value === "__any__") return f.name + " set"
+        return f.name + " = " + (f.value === "" ? "(empty)" : f.value)
+      }
+
+      // ── The Insights modal ───────────────────────────────────────────
+
+      /// The args the payload on screen was built from — held separately from
+      /// `lastConvSearchArgs`, which moves on as soon as the user searches
+      /// again behind the modal. A pasted report has to describe the slice it
+      /// was actually made from.
+      let insArgs = null
+
+      async function openConversationInsights() {
+        if (!convDbPath) {
+          openDbSetupModal()
+          return
+        }
+        if (!convHasSearched || convTotalSessions <= 0) return
+        const overlay = document.getElementById("insightsModal")
+        const args = { ...(lastConvSearchArgs || buildConvSessionArgs(convPage)) }
+        // Page is the only arg that does not describe the result *set*; leaving
+        // it in would suggest the charts describe one page of it.
+        delete args.page
+        insArgs = args
+        insCtxKey = null
+        insMetaKey = null
+        overlay.classList.add("open")
+        await insLoad()
+      }
+
+      /// Switch what the charts count and read the same result set again.
+      ///
+      /// A refetch, not a re-render: nearly every aggregate is a different
+      /// query in the other reading, and deriving one from the other in the
+      /// renderer is precisely how a chart and its own label come to disagree.
+      async function insSetUnit(unit) {
+        const wanted = unit === "interactions" ? "interactions" : "conversations"
+        if (wanted === insUnit || !insArgs) return
+        // Deliberately live mid-read. The whole point of being able to stop a
+        // read is to change your mind about it; a toggle that goes inert for
+        // the duration makes the user wait out the answer they no longer want.
+        // `insLoad` interrupts whatever is running before it starts.
+        insUnit = wanted
+        try {
+          localStorage.setItem("cm-insights-unit", insUnit)
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the switch */
+        }
+        // The selected tag keys carry over: the same key means the same thing
+        // in both readings, and losing your place on every toggle would make
+        // comparing the two readings of one key needlessly laborious.
+        await insLoad()
+      }
+
+      async function insLoad() {
+        const args = insArgs
+        if (!args) return
+        // A read already running is abandoned rather than queued behind: the
+        // only reason to start a second one is that the first is answering a
+        // question that is no longer being asked.
+        if (insLoading) insStopRead()
+        insData = null
+        insSpecs = new Map()
+        insCloseKeyPicker()
+        insRenderHeader()
+        document.getElementById("insBody").innerHTML = ""
+        insLoading = true
+        insSyncCopyAll()
+        insSyncUnitToggle()
+        // The counts are aggregates over every interaction in the result set,
+        // which on a wide search is genuinely seconds of work — so the wait
+        // carries a way out of it, not just an explanation of itself.
+        setPaneLoading(
+          "insBody",
+          "Reading the search results…",
+          "Counting interactions, contexts, entities and answers across every matching conversation",
+          `<button onclick="insCancelRead()">Cancel</button>`,
+        )
+        // Let WebKit paint before the invoke takes the IPC channel. Bounded —
+        // see yieldToPaint.
+        await yieldToPaint()
+        const mySeq = ++insLoadSeq
+        try {
+          const res = await window.backend.getConversationInsights(args, insUnit)
+          // A second toggle while the first read is in flight must not paint
+          // the older answer over the newer one.
+          if (mySeq !== insLoadSeq) return
+          clearPaneLoading("insBody")
+          // `null` is a cancelled read, which the backend reports as an outcome
+          // rather than as an error — see `get_conversation_insights`. Nothing
+          // to draw, and nothing has gone wrong; `insCancelRead` has already
+          // put the stopped state on screen.
+          if (!res) return
+          insData = res
+          insRenderHeader()
+          insRenderBody()
+          // The two tag sections follow, deliberately not awaited by the paint
+          // above — see `get_insight_tags` for why they are their own read.
+          insLoadTags(res, mySeq)
+        } catch (e) {
+          if (mySeq !== insLoadSeq) return
+          clearPaneLoading("insBody")
+          document.getElementById(
+            "insBody",
+          ).innerHTML = `<div class="ins-empty"><strong>Could not build the insights.</strong><span>${esc(
+            String(e),
+          )}</span></div>`
+        } finally {
+          if (mySeq === insLoadSeq) {
+            insLoading = false
+            insSyncCopyAll()
+            insSyncUnitToggle()
+          }
+        }
+      }
+
+      /// Fill the Context and Metadata sections, after the rest is on screen.
+      ///
+      /// A second read rather than part of the first: the two tag tables are
+      /// more than half of what an Insights read costs, and they draw two
+      /// charts below the fold — so charging the whole dashboard for them meant
+      /// nothing appeared at all until they were done. Both tables come back in
+      /// one call, so the result set is resolved once.
+      async function insLoadTags(d, seq) {
+        try {
+          const tags = await window.backend.getInsightTags(insArgs, insUnit, {
+            context: insCtxKey,
+            metadata: insMetaKey,
+          })
+          // A newer read, a cancellation (`null`), or a payload that has since
+          // been replaced: in all three the answer is no longer this screen's.
+          if (seq !== insLoadSeq || !tags || insData !== d) return
+          d.contexts = tags.contexts || []
+          d.metadata = tags.metadata || []
+          d.tagsLoaded = true
+        } catch (e) {
+          if (seq !== insLoadSeq || insData !== d) return
+          d.tagsError = String(e)
+        }
+        insRenderBody()
+      }
+
+      /// Stop the read in flight, without deciding what goes on screen next.
+      ///
+      /// Two things, and both are needed. The interrupt is what actually frees
+      /// the database — the query is inside a `spawn_blocking` holding the
+      /// connection lock, so nothing else can run until it returns. Bumping the
+      /// sequence is what stops its answer, whenever it lands, from painting
+      /// over whatever replaced it.
+      function insStopRead() {
+        insLoadSeq++
+        insLoading = false
+        clearPaneLoading("insBody")
+        window.backend.cancelDbQuery().catch(() => {})
+      }
+
+      /// Cancel from the loading pane's own button.
+      function insCancelRead() {
+        if (!insLoading) return
+        insStopRead()
+        insSyncCopyAll()
+        insSyncUnitToggle()
+        document.getElementById("insBody").innerHTML =
+          `<div class="ins-empty"><strong>Stopped.</strong>
+            <span>Nothing was read. Change the search or the unit and try again.</span>
+            <button class="btn-primary" onclick="insLoad()">Read again</button>
+          </div>`
+      }
+
+      let insLoadSeq = 0
+
+      /// The toggle reflects `insUnit`, and stays live while a read is running
+      /// — clicking it cancels that read and starts the other one.
+      function insSyncUnitToggle() {
+        for (const btn of document.querySelectorAll("#insUnitToggle button")) {
+          btn.classList.toggle("active", btn.dataset.insUnit === insUnit)
+          btn.disabled = false
+        }
+      }
+
+      function closeConversationInsights() {
+        // Unconditional, because the tag read runs after `insLoading` has gone
+        // false and holds the connection lock just the same — the next search
+        // would sit behind an answer nobody is going to look at. The interrupt
+        // is a no-op when nothing is running.
+        insStopRead()
+        document.getElementById("insightsModal").classList.remove("open")
+        insCloseKeyPicker()
+        insHideTooltip()
+      }
+
+      function insRenderHeader() {
+        const d = insData
+        const count = document.getElementById("insHeroCount")
+        const sub = document.getElementById("insHeroSub")
+        const chips = document.getElementById("insSearchChips")
+        const label = document.getElementById("insHeroLabel")
+        const w = insWords(d)
+        if (count) {
+          count.textContent = d ? insNum(w.total) : insNum(convTotalSessions)
+        }
+        if (label) {
+          label.textContent = d
+            ? w.subject
+            : insUnit === "interactions"
+            ? "interactions"
+            : "conversations"
+        }
+        if (sub) {
+          // The range the data actually covers, unless a date filter is already
+          // stating one two centimetres to the right — where they usually read
+          // as the same string twice.
+          const args = insArgs || {}
+          const span =
+            d && d.firstTs && d.lastTs && !args.dateFrom && !args.dateTo
+              ? " · " + d.firstTs.slice(0, 10) + " → " + d.lastTs.slice(0, 10)
+              : ""
+          sub.textContent = d ? insUnitLine(d, true) + span : "matching the current search"
+        }
+        if (chips) {
+          chips.innerHTML = insSearchSummary(insArgs)
+            .map(
+              (c) =>
+                `<span class="ins-chip"><em>${esc(c.label)}</em>${esc(c.value)}</span>`,
+            )
+            .join("")
+        }
+      }
+
+      function insSyncCopyAll() {
+        const btn = document.getElementById("insCopyAllBtn")
+        if (btn) btn.disabled = insLoading || !insData || !insData.sessionCount
+      }
+
+      function insRenderBody() {
+        const body = document.getElementById("insBody")
+        const d = insData
+        if (!body || !d) return
+        if (!insWords(d).total) {
+          body.innerHTML = `<div class="ins-empty"><strong>Nothing to chart in this result.</strong>
+            <span>${
+              d.unit === "interactions" && d.sessionCount
+                ? "The search matched conversations but no individual interaction — switch to Conversations."
+                : "Widen the search and open Insights again."
+            }</span></div>`
+          return
+        }
+        const cards = insBuildCards(d, INS_THEME_SCREEN)
+        insSpecs = new Map(cards.map((c) => [c.id, c]))
+
+        let html = `<div class="ins-tiles">${insTiles(d)
+          .map(
+            (t) => `<div class="ins-tile${t.hero ? " hero" : ""}">
+              <span class="ins-tile-label">${esc(t.label)}</span>
+              <span class="ins-tile-value">${esc(t.value)}</span>
+              <span class="ins-tile-sub">${esc(t.sub || "")}</span>
+            </div>`,
+          )
+          .join("")}</div>`
+
+        const sections = []
+        for (const card of cards) {
+          let s = sections.find((x) => x.name === card.section)
+          if (!s) sections.push((s = { name: card.section, cards: [] }))
+          s.cards.push(card)
+        }
+        // The two tag sections always render, card or not: their key bar is
+        // the control that gets a card back, so a section that disappears
+        // because its key is still loading takes the way out with it.
+        const tagSections = [
+          ["Context", "context", d.contexts, insCtxKey],
+          ["Metadata", "metadata", d.metadata, insMetaKey],
+        ]
+        for (const [name] of tagSections) {
+          if (!sections.some((s) => s.name === name)) sections.push({ name, cards: [] })
+        }
+        // …in the order the dashboard reads in, not the order they were added.
+        const order = ["Volume", "Quality", "Context", "Metadata", "Content"]
+        sections.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name))
+        for (const section of sections) {
+          html += `<div class="ins-section"><h4>${esc(section.name)}</h4>`
+          const tag = tagSections.find((t) => t[0] === section.name)
+          if (tag) html += insTagKeyBar(tag[1], tag[2], tag[3])
+          html += `<div class="ins-grid">${section.cards
+            .map((c) => insCardHtml(c))
+            .join("")}</div>`
+          if (tag && !section.cards.length) html += insTagPendingHtml(tag)
+          html += `</div>`
+        }
+        // The footer states only what is not visible from the screen itself.
+        // The timezone left it when the header took over saying that once; what
+        // remains is the reading, and — in the interactions reading only — the
+        // two cards that are deliberately absent, since a missing card is the
+        // one thing here nobody can ask a question about.
+        const w = insWords(d)
+        html += `<div class="ins-foot">Every chart counts <strong>${esc(
+          w.subject,
+        )}</strong> unless its note says otherwise.${
+          w.byTurn
+            ? ` <strong>Feedback</strong> and <strong>opening questions</strong> are properties
+               of a conversation rather than of one interaction, so those two cards appear only
+               when counting conversations.`
+            : ""
+        }</div>`
+        body.innerHTML = html
+      }
+
+      /// What a tag section shows while it has no chart.
+      ///
+      /// Three different situations that look identical from the outside and
+      /// need different words: the values are still being fetched, the fetch
+      /// failed, or the key genuinely has nothing to chart in this result.
+      function insTagPendingHtml([name, kind, groups, selected]) {
+        const d = insData
+        if (d && d.tagsError) {
+          return `<div class="ins-tag-pending">Could not read the
+            ${esc(kind)} keys. ${esc(d.tagsError)}</div>`
+        }
+        // "Still reading" and "read, and there is nothing" both arrive here as
+        // an empty list, and they need different words — the flag is the only
+        // thing that tells them apart.
+        if (!d || !d.tagsLoaded) {
+          return `<div class="ins-tag-pending"><span class="mini-spinner"></span>
+            Reading ${esc(kind)} keys…</div>`
+        }
+        const group = insPickGroup(groups || [], selected)
+        if (!group) {
+          return `<div class="ins-tag-pending">No ${esc(
+            kind,
+          )} was recorded on these conversations.</div>`
+        }
+        if (group.valuesError) {
+          return `<div class="ins-tag-pending">Could not read
+            <strong>${esc(group.name)}</strong>. ${esc(group.valuesError)}</div>`
+        }
+        if (!group.values || !group.values.length) {
+          return `<div class="ins-tag-pending"><span class="mini-spinner"></span>
+            Reading <strong>${esc(group.name)}</strong>…</div>`
+        }
+        return `<div class="ins-tag-pending">Nothing to chart for
+          <strong>${esc(group.name)}</strong> in this result.</div>`
+      }
+
+      function insCardHtml(card) {
+        const { svg } = insRenderChart(card.spec, INS_THEME_SCREEN)
+        return `<div class="ins-card">
+          <div class="ins-card-head">
+            <div class="ins-card-titles">
+              <h5>${esc(card.title)}</h5>
+              ${card.note ? `<p>${esc(card.note)}</p>` : ""}
+            </div>
+            <div class="ins-card-actions">
+              <button class="ins-act" onclick="insCopyImage('${esc(
+                card.id,
+              )}')" title="Copy this chart as an image, ready to paste into an email">
+                <svg class=ui-icon><use href=#i-copy /></svg> Image
+              </button>
+              <button class="ins-act" onclick="insCopyData('${esc(
+                card.id,
+              )}')" title="Copy the numbers behind this chart as a table">
+                <svg class=ui-icon><use href=#i-table /></svg> Data
+              </button>
+            </div>
+          </div>
+          <div class="ins-chart">${svg}</div>
+        </div>`
+      }
+
+      /// The key picker for the two tag sections.
+      ///
+      /// A real export carries around 40 context and metadata keys; forty
+      /// charts is not a dashboard, so one key is charted at a time. It used to
+      /// be a chip per key — four wrapped rows of buttons sitting between the
+      /// section heading and its single chart, which is the chart the section
+      /// exists for. Now it is one button naming the current key, with the
+      /// rest behind a searchable popover.
+      ///
+      /// The note beside it states how many keys there are, because a button
+      /// showing one name gives no hint that there are thirty-nine others.
+      function insTagKeyBar(kind, groups, selected) {
+        const list = groups || []
+        if (!list.length) return ""
+        const active = insPickGroup(list, selected)
+        const w = insWords(insData)
+        return `<div class="ins-keybar">
+          <button class="ins-keypick" id="insKeyBtn-${esc(kind)}"
+            onclick="insOpenKeyPicker('${esc(kind)}', this)"
+            title="Choose which ${esc(kind)} key to chart">
+            <span class="ins-keypick-name">${esc(active.name)}</span>
+            <em>${insPlural(active.withKey, w.noun)}</em>
+            <span class="ins-keypick-caret">&#9662;</span>
+          </button>
+          <span class="ins-keybar-note">${insPlural(
+            list.length,
+            kind === "context" ? "context keys" : "metadata keys",
+          )} recorded${
+            list.length > 1 ? " — most-set first" : ""
+          }</span>
+        </div>`
+      }
+
+      // ── The key popover ──────────────────────────────────────────────
+      //
+      // Fixed and outside the scrolling body, like the tooltip: the section it
+      // belongs to scrolls, and a popover clipped by its own card is worse than
+      // no popover. It closes on scroll rather than following the button —
+      // unlike the message-metadata bubble, this one is a menu rather than an
+      // annotation of the thing it points at, so there is nothing to keep it
+      // beside.
+
+      /// Which picker is open, or null. Also "is one open?" — the exit
+      /// animation clears it first, so a bubble mid-close is never toggled
+      /// against or closed twice.
+      let insKeyPopKind = null
+      let insKeyPopTimer = null
+      /// Must stay in step with `.ins-keypop.leaving`, which holds its last
+      /// frame with `forwards` while this runs.
+      const INS_KEYPOP_OUT_MS = 100
+      const INS_KEYPOP_MAX_H = 340
+      /// Below this the list is not worth flipping for — two rows and a
+      /// scrollbar is a worse menu than one that opens the other way.
+      const INS_KEYPOP_MIN_H = 180
+      const INS_KEYPOP_MARGIN = 6
+
+      function insOpenKeyPicker(kind, btn) {
+        if (insKeyPopKind === kind) {
+          insCloseKeyPicker()
+          return
+        }
+        insKeyPopKind = kind
+        const pop = document.getElementById("insKeyPop")
+        const search = document.getElementById("insKeyPopSearch")
+        clearTimeout(insKeyPopTimer)
+        pop.classList.remove("leaving")
+        search.value = ""
+        insRenderKeyPicker()
+        // Shown before it is measured, and placed before the frame ends, so
+        // the intermediate position is never painted.
+        //
+        // Bounded by the scrolling body, not by the window, and that is the
+        // rule rather than a refinement: at a fixed 340px the popover flipped
+        // above a button in the lower half of the modal and came down over the
+        // header — unreadable, and on top of Copy dashboard and the close
+        // button, which it must never cover. The body's own rect is the region
+        // the popover belongs to, and it is a real rect even in the moments
+        // when `window.innerHeight` reads 0.
+        pop.style.maxHeight = ""
+        pop.hidden = false
+        const r = btn.getBoundingClientRect()
+        let bounds = document.getElementById("insBody").getBoundingClientRect()
+        // A rect too small to hold a menu is not a bound, it is a measurement
+        // taken mid-layout — seen with the pane hidden, where it came back 39px
+        // tall and pinned the popover to a 39px band. Fall back to the window,
+        // which is the honest outer limit either way.
+        if (bounds.height < INS_KEYPOP_MIN_H) {
+          bounds = new DOMRect(0, 0, window.innerWidth, window.innerHeight)
+        }
+        const w = pop.offsetWidth
+        const below = bounds.bottom - r.bottom - INS_KEYPOP_MARGIN * 2
+        const above = r.top - bounds.top - INS_KEYPOP_MARGIN * 2
+        // Below unless there is meaningfully more room above — a menu that
+        // opens downward from the control it belongs to is the one people
+        // expect, so it takes an actual shortage of room to flip it.
+        const goBelow = below >= INS_KEYPOP_MIN_H || below >= above
+        const room = Math.max(INS_KEYPOP_MIN_H, goBelow ? below : above)
+        pop.style.maxHeight = Math.min(INS_KEYPOP_MAX_H, room) + "px"
+        const h = pop.offsetHeight
+        pop.style.left =
+          Math.max(
+            bounds.left,
+            Math.min(r.left, bounds.right - w - INS_KEYPOP_MARGIN),
+          ) + "px"
+        pop.style.top =
+          (goBelow
+            ? r.bottom + INS_KEYPOP_MARGIN
+            : Math.max(bounds.top, r.top - h - INS_KEYPOP_MARGIN)) + "px"
+        pop.style.transformOrigin = goBelow ? "top left" : "bottom left"
+        btn.classList.add("open")
+        search.focus()
+      }
+
+      function insCloseKeyPicker() {
+        if (!insKeyPopKind) return
+        const pop = document.getElementById("insKeyPop")
+        for (const b of document.querySelectorAll(".ins-keypick.open"))
+          b.classList.remove("open")
+        insKeyPopKind = null
+        pop.classList.add("leaving")
+        insKeyPopTimer = setTimeout(() => {
+          pop.hidden = true
+          pop.classList.remove("leaving")
+        }, INS_KEYPOP_OUT_MS)
+      }
+
+      /// The list, filtered by whatever is in the search box.
+      ///
+      /// Each row carries the key's coverage *and* how many distinct values it
+      /// has, because those are the two things that decide whether a key is
+      /// worth charting — one set on four conversations, or one with eight
+      /// hundred values, are both dead ends and neither is visible from a name.
+      function insRenderKeyPicker() {
+        const kind = insKeyPopKind
+        if (!kind) return
+        const d = insData
+        if (!d) return
+        const groups = (kind === "context" ? d.contexts : d.metadata) || []
+        const selected = insPickGroup(
+          groups,
+          kind === "context" ? insCtxKey : insMetaKey,
+        )
+        const q = (
+          document.getElementById("insKeyPopSearch").value || ""
+        ).trim().toLowerCase()
+        const shown = q
+          ? groups.filter((g) => g.name.toLowerCase().includes(q))
+          : groups
+        const w = insWords(d)
+        const list = document.getElementById("insKeyPopList")
+        if (!shown.length) {
+          list.innerHTML = `<div class="ins-keypop-empty">No key matches &ldquo;${esc(
+            q,
+          )}&rdquo;.</div>`
+          return
+        }
+        list.innerHTML = shown
+          .map(
+            (g) =>
+              `<button class="ins-keyrow${
+                g.name === selected.name ? " active" : ""
+              }" onclick="insSetTagKey('${esc(kind)}', '${insQuoted(g.name)}')">
+                <span class="ins-keyrow-name">${esc(g.name)}</span>
+                <em>${insNum(g.withKey)} ${esc(w.noun)} &middot; ${insPlural(
+                g.distinctValues || g.values.length,
+                "values",
+              )}</em>
+              </button>`,
+          )
+          .join("")
+      }
+
+      /// A value safe inside the single quotes of an inline `onclick`.
+      ///
+      /// Split/join rather than a regex literal: frontend/tests/extract.js is a
+      /// brace matcher that treats a quote as opening a string, and a `/'/g`
+      /// anywhere inside an extracted function sends its scan past the end.
+      function insQuoted(value) {
+        return esc(value).split("'").join("&#39;")
+      }
+
+      /// Choose which key a tag section charts, fetching its values if needed.
+      ///
+      /// The dashboard read only carries the selected key's values — see
+      /// `insight_tag_groups` — so a key nobody has looked at yet arrives with
+      /// an empty `values` and has to be asked for. What comes back is cached
+      /// on the group, so going back to a key is free.
+      async function insSetTagKey(kind, name) {
+        if (kind === "context") insCtxKey = name
+        else insMetaKey = name
+        insCloseKeyPicker()
+        const d = insData
+        const groups = (kind === "context" ? d && d.contexts : d && d.metadata) || []
+        const group = groups.find((g) => g.name === name)
+        // Draw immediately with whatever is known. On a key already visited
+        // that is the whole chart; on a new one it is the section's heading and
+        // its own loading line, which beats a frozen dashboard.
+        insRenderBody()
+        if (!group || (group.values && group.values.length)) return
+        const seq = ++insTagSeq
+        try {
+          const values = await window.backend.getInsightTagValues(
+            insArgs,
+            insUnit,
+            kind,
+            name,
+          )
+          // A third key picked while this was in flight, a unit switch, or a
+          // cancelled read: in all three cases this answer is no longer the
+          // one on screen. `null` is the cancellation.
+          if (seq !== insTagSeq || !values || insData !== d) return
+          group.values = values
+          insRenderBody()
+        } catch (e) {
+          if (seq !== insTagSeq || insData !== d) return
+          group.valuesError = String(e)
+          insRenderBody()
+        }
+      }
+
+      let insTagSeq = 0
+
+      // ── Tooltips ─────────────────────────────────────────────────────
+      //
+      // One delegated listener for the whole body rather than a handler per
+      // mark: the heatmap alone is 168 cells, and the chart HTML is replaced
+      // wholesale on every key change, so per-mark listeners would have to be
+      // rebound each time. The `<title>` beside each `data-tip` is what a
+      // screen reader reads and what survives into an exported SVG.
+
+      /// Bound **once**, against the container rather than the charts.
+      ///
+      /// `#insBody` survives every re-render — only its `innerHTML` changes —
+      /// so binding here from `insRenderBody` would add a fresh listener every
+      /// time a context key was clicked, and they would all still be running.
+      function insBindTooltips(root) {
+        root.addEventListener("mousemove", (e) => {
+          const hit = e.target.closest ? e.target.closest("[data-tip]") : null
+          if (!hit) {
+            insHideTooltip()
+            return
+          }
+          insShowTooltip(hit.getAttribute("data-tip"), e.clientX, e.clientY)
+        })
+        root.addEventListener("mouseleave", insHideTooltip)
+        root.addEventListener("scroll", insHideTooltip, true)
+      }
+
+      function insShowTooltip(text, x, y) {
+        let el = document.getElementById("insTooltip")
+        if (!el) {
+          el = document.createElement("div")
+          el.id = "insTooltip"
+          el.className = "ins-tooltip"
+          document.body.appendChild(el)
+        }
+        el.textContent = text
+        el.classList.add("visible")
+        // Measured, then clamped: near the right edge the tooltip flips to the
+        // other side of the pointer rather than being cut off by the window.
+        const w = el.offsetWidth
+        const h = el.offsetHeight
+        const left = Math.max(6, Math.min(window.innerWidth - w - 6, x + 14))
+        const top = y - h - 12 < 6 ? y + 18 : y - h - 12
+        el.style.left = left + "px"
+        el.style.top = top + "px"
+      }
+
+      function insHideTooltip() {
+        const el = document.getElementById("insTooltip")
+        if (el) el.classList.remove("visible")
+      }
+
+      // ── Getting a chart onto the clipboard ───────────────────────────
+      //
+      // This is the point of the feature, not a convenience on the end of it.
+      //
+      // Two things make it work. First, the exported chart is re-rendered in
+      // the **export** theme: a dark-surfaced chart pasted into a mail client
+      // is a black rectangle in the middle of a white message, so the picture
+      // that leaves is not the picture on screen. Second, `ClipboardItem` is
+      // handed a *promise* rather than a resolved blob — WebKit ties clipboard
+      // writes to the user gesture that started them, and rasterising an image
+      // takes longer than a gesture lasts. Constructing the item synchronously
+      // in the click handler and letting it resolve afterwards is the only form
+      // that works in both engines.
+
+      /// The intrinsic charts are 640px wide; 2× is what makes the paste look
+      /// right on a high-DPI screen without the file being pointlessly large.
+      const INS_EXPORT_SCALE = 2
+
+      function insRasterize(svgText, w, h, scale) {
+        return new Promise((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => {
+            try {
+              const canvas = document.createElement("canvas")
+              canvas.width = Math.round(w * scale)
+              canvas.height = Math.round(h * scale)
+              const ctx = canvas.getContext("2d")
+              // The SVG paints its own surface, but an email client may show a
+              // PNG over any background — an opaque white base means a
+              // transparent edge can never turn into a dark halo.
+              ctx.fillStyle = INS_THEME_EXPORT.surface
+              ctx.fillRect(0, 0, canvas.width, canvas.height)
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+              resolve(canvas)
+            } catch (e) {
+              reject(e)
+            }
+          }
+          img.onerror = () => reject(new Error("The chart could not be rendered as an image."))
+          // A data URI rather than a blob URL: same-origin by construction, so
+          // the canvas it is drawn into is never tainted and `toBlob` works.
+          img.src =
+            "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText)
+        })
+      }
+
+      function insCanvasBlob(canvas) {
+        return new Promise((resolve, reject) => {
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error("Could not encode the image."))),
+            "image/png",
+          )
+        })
+      }
+
+      function insChartCanvas(spec) {
+        const out = insRenderChart(spec, INS_THEME_EXPORT)
+        return insRasterize(out.svg, out.width, out.height, INS_EXPORT_SCALE)
+      }
+
+      /// Write to the clipboard, with one honest fallback and no silent failure.
+      ///
+      /// `entries` is `[[mime, Promise<Blob>|Blob], …]`, built synchronously by
+      /// the caller. If the structured write is refused — an older engine, a
+      /// denied permission — the plain-text entry is tried on its own, because
+      /// text always works and half a copy beats none. Only when that fails too
+      /// does the user hear about it.
+      function insWriteClipboard(entries, okMsg, plainFallback) {
+        const done = (msg) => showImportToast("success", msg)
+        const failed = (e) =>
+          showImportToast(
+            "error",
+            "Could not copy: " + (e && e.message ? e.message : String(e)),
+          )
+        let attempt
+        try {
+          const payload = {}
+          for (const [type, value] of entries) payload[type] = value
+          attempt = navigator.clipboard.write([new ClipboardItem(payload)])
+        } catch (e) {
+          attempt = Promise.reject(e)
+        }
+        attempt.then(
+          () => done(okMsg),
+          (e) => {
+            if (plainFallback == null) {
+              failed(e)
+              return
+            }
+            Promise.resolve(plainFallback).then(
+              (text) =>
+                insCopyText(text).then(
+                  () => done(okMsg + " (as text)"),
+                  failed,
+                ),
+              failed,
+            )
+          },
+        )
+      }
+
+      function insCopyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text)
+        }
+        // execCommand needs a real, selectable, on-screen element; off to the
+        // left keeps it out of sight without making it unselectable.
+        const ta = document.createElement("textarea")
+        ta.value = text
+        ta.style.cssText = "position:fixed;left:-9999px;top:0;"
+        document.body.appendChild(ta)
+        ta.select()
+        let ok = false
+        try {
+          ok = document.execCommand("copy")
+        } catch (e) {
+          ok = false
+        }
+        ta.remove()
+        return ok ? Promise.resolve() : Promise.reject(new Error("clipboard refused"))
+      }
+
+      function insCopyImage(id) {
+        const card = insSpecs.get(id)
+        if (!card) return
+        const png = insChartCanvas(card.spec).then(insCanvasBlob)
+        insWriteClipboard(
+          [["image/png", png]],
+          "“" + card.title + "” copied as an image",
+          // An image cannot degrade to text, but the numbers can — and they are
+          // what the reader was after.
+          card.title + "\n" + insChartTsv(card.spec),
+        )
+      }
+
+      function insCopyData(id) {
+        const card = insSpecs.get(id)
+        if (!card) return
+        insCopyText(insChartTsv(card.spec)).then(
+          () => showImportToast("success", "“" + card.title + "” data copied — paste into a spreadsheet"),
+          (e) => showImportToast("error", "Could not copy: " + String(e)),
+        )
+      }
+
+      // ── The whole dashboard, as one paste ────────────────────────────
+
+      /// Inline styles on every element, and a table for the tiles.
+      ///
+      /// Mail clients strip `<style>` blocks and classes, so anything not
+      /// written onto the element itself is lost. A table is the only layout
+      /// primitive they all agree on.
+      const INS_MAIL_FONT =
+        "font-family:'Segoe UI',Helvetica,Arial,sans-serif;"
+
+      async function insBuildReportHtml() {
+        const d = insData
+        const cards = Array.from(insSpecs.values())
+        let html =
+          `<div style="${INS_MAIL_FONT}color:#111827;max-width:680px">` +
+          `<div style="font-size:19px;font-weight:700;margin-bottom:2px">Conversation insights</div>` +
+          `<div style="font-size:13px;color:#4b5563;margin-bottom:12px">` +
+          `${esc(insUnitLine(d))}` +
+          (d.firstTs && d.lastTs
+            ? ` · ${esc(d.firstTs.slice(0, 10))} → ${esc(d.lastTs.slice(0, 10))} UTC`
+            : "") +
+          `</div>`
+
+        html +=
+          `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}font-size:12px;color:#4b5563;margin-bottom:14px;border-collapse:collapse">` +
+          insSearchSummary(insArgs)
+            .map(
+              (c) =>
+                `<tr><td style="padding:2px 10px 2px 0;color:#6b7280;white-space:nowrap">${esc(
+                  c.label,
+                )}</td><td style="padding:2px 0">${esc(c.value)}</td></tr>`,
+            )
+            .join("") +
+          `</table>`
+
+        html +=
+          `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}border-collapse:collapse;margin-bottom:18px"><tr>` +
+          insTiles(d)
+            .map(
+              (t) =>
+                `<td style="padding:8px 16px 8px 0;vertical-align:top">` +
+                `<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">${esc(
+                  t.label,
+                )}</div>` +
+                `<div style="font-size:${t.hero ? 26 : 19}px;font-weight:700;color:#111827">${esc(
+                  t.value,
+                )}</div>` +
+                (t.sub
+                  ? `<div style="font-size:11px;color:#6b7280">${esc(t.sub)}</div>`
+                  : "") +
+                `</td>`,
+            )
+            .join("") +
+          `</tr></table>`
+
+        let section = null
+        let done = 0
+        // Rasterising sixteen charts takes about a tenth of a second on a
+        // typical result, and a progress toast that appears and is replaced by
+        // the success toast inside that window is the flicker every other
+        // loading affordance in this file exists to avoid. It appears only once
+        // the work has genuinely been slow — the same rule, and the same
+        // threshold, as `gateLoading`.
+        const started = Date.now()
+        for (const card of cards) {
+          if (card.section !== section) {
+            section = card.section
+            html += `<div style="${INS_MAIL_FONT}font-size:15px;font-weight:700;color:#111827;margin:22px 0 8px">${esc(
+              section,
+            )}</div>`
+          }
+          const canvas = await insChartCanvas(card.spec)
+          done++
+          if (Date.now() - started > LOADING_SHOW_DELAY_MS) {
+            showImportToast(
+              "progress",
+              `Rendering charts… ${done} of ${cards.length}`,
+            )
+          }
+          html +=
+            `<div style="margin-bottom:18px">` +
+            `<div style="${INS_MAIL_FONT}font-size:13px;font-weight:600;color:#111827">${esc(
+              card.title,
+            )}</div>` +
+            (card.note
+              ? `<div style="${INS_MAIL_FONT}font-size:11px;color:#6b7280;margin-bottom:5px">${esc(
+                  card.note,
+                )}</div>`
+              : "") +
+            `<img src="${canvas.toDataURL("image/png")}" width="${
+              INS_CHART_W
+            }" style="display:block;width:100%;max-width:${INS_CHART_W}px;height:auto;border:1px solid #e8eaee;border-radius:6px" alt="${esc(
+              card.title,
+            )}">` +
+            `</div>`
+        }
+
+        html +=
+          `<div style="${INS_MAIL_FONT}font-size:11px;color:#9ca3af;border-top:1px solid #e8eaee;padding-top:8px;margin-top:16px">` +
+          `All times UTC. Charts count ${esc(
+            insWords(d).subject,
+          )} unless the note says otherwise. ` +
+          `Generated by CAI Dashboard${appVersion ? " v" + esc(appVersion) : ""}.` +
+          `</div></div>`
+        return html
+      }
+
+      /// The plain-text half of the same paste.
+      ///
+      /// Not a courtesy: it is what lands in Slack, in a plain-text mail, and
+      /// in anything that refuses HTML — and it carries every number, so the
+      /// report is never gated behind being able to see the pictures.
+      function insBuildReportText() {
+        const d = insData
+        const lines = [
+          "CONVERSATION INSIGHTS",
+          insUnitLine(d) +
+            (d.firstTs && d.lastTs
+              ? " · " + d.firstTs.slice(0, 10) + " → " + d.lastTs.slice(0, 10) + " UTC"
+              : ""),
+          "",
+        ]
+        for (const c of insSearchSummary(insArgs)) lines.push(c.label + ": " + c.value)
+        lines.push("")
+        for (const t of insTiles(d)) {
+          lines.push(t.label + "\t" + t.value + (t.sub ? "\t" + t.sub : ""))
+        }
+        let section = null
+        for (const card of insSpecs.values()) {
+          if (card.section !== section) {
+            section = card.section
+            lines.push("", "── " + section.toUpperCase() + " ──")
+          }
+          lines.push("", card.title)
+          if (card.note) lines.push(card.note)
+          lines.push(insChartTsv(card.spec))
+        }
+        return lines.join("\n")
+      }
+
+      function insCopyAll() {
+        if (!insData || !insData.sessionCount) return
+        const text = insBuildReportText()
+        const htmlBlob = insBuildReportHtml().then(
+          (html) => new Blob([html], { type: "text/html" }),
+        )
+        insWriteClipboard(
+          [
+            ["text/html", htmlBlob],
+            ["text/plain", new Blob([text], { type: "text/plain" })],
+          ],
+          "Dashboard copied — paste into an email",
+          text,
+        )
+        // The toast the write puts up replaces this one; clearing it here means
+        // a refused write does not leave a spinner behind either.
+        htmlBlob.catch(() => {}).then(() => clearProgressToast())
+      }
+
+      // ── Wiring ───────────────────────────────────────────────────────
+      document
+        .getElementById("convInsightsBtn")
+        .addEventListener("click", openConversationInsights)
+      document
+        .getElementById("insCloseBtn")
+        .addEventListener("click", closeConversationInsights)
+      document.getElementById("insCopyAllBtn").addEventListener("click", insCopyAll)
+      insBindTooltips(document.getElementById("insBody"))
+      for (const btn of document.querySelectorAll("#insUnitToggle button")) {
+        btn.addEventListener("click", () => insSetUnit(btn.dataset.insUnit))
+      }
+      insSyncUnitToggle()
+      document
+        .getElementById("insightsModal")
+        .addEventListener("click", (e) => {
+          if (e.target === document.getElementById("insightsModal"))
+            closeConversationInsights()
+        })
+      document.addEventListener("keydown", (e) => {
+        if (e.key !== "Escape") return
+        // The key picker sits on top of the modal, so Escape has to close it
+        // first — one press, one thing dismissed.
+        if (insKeyPopKind) {
+          insCloseKeyPicker()
+          return
+        }
+        if (document.getElementById("insightsModal").classList.contains("open")) {
+          closeConversationInsights()
+        }
+      })
+
+      // The picker has no backdrop of its own, so outside clicks come off the
+      // document. The button that opened it is exempt: it does its own
+      // toggling, and letting this close the popover first would make a second
+      // click on the button reopen it.
+      document.addEventListener("mousedown", (e) => {
+        if (!insKeyPopKind) return
+        if (e.target.closest("#insKeyPop") || e.target.closest(".ins-keypick")) return
+        insCloseKeyPicker()
+      })
+      document
+        .getElementById("insKeyPopSearch")
+        .addEventListener("input", insRenderKeyPicker)
+      // Enter on a filtered list takes the only thing it could mean.
+      document
+        .getElementById("insKeyPopSearch")
+        .addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return
+          const first = document.querySelector("#insKeyPopList .ins-keyrow")
+          if (first) first.click()
+        })
+      // A menu that scrolls away from its button is pointing at nothing; it
+      // closes rather than following, because it is a menu and not an
+      // annotation of the button.
+      document
+        .getElementById("insBody")
+        .addEventListener("scroll", () => insCloseKeyPicker(), true)
 
       // ── Import modal ────────────────────────────────────────────────
       // Two sources share one modal: the Analytics API (scheduled, automated)
@@ -23366,7 +26310,7 @@
         .addEventListener("click", () => {
           // Bump seq so the in-flight getSessions result is discarded on arrival
           convSearchSeq++
-          window.backend.cancelSessionSearch().catch(() => {})
+          window.backend.cancelDbQuery().catch(() => {})
           document
             .getElementById("convSearchSubmit")
             .classList.remove("loading")

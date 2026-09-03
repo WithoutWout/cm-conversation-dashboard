@@ -329,6 +329,20 @@ struct SessionFilterQuery {
     base_where: String,
     search_cte: String,
     filtered_from: String,
+    /// The relation producing `(session_uuid, match_log_id)` for **every**
+    /// matching interaction, before `search_sessions` collapses it to one row
+    /// per conversation with `MIN(match_log_id)`.
+    ///
+    /// Only Insights reads this, to count matching turns rather than the
+    /// conversations holding them. `None` means nothing narrowed the search to
+    /// particular interactions — no query and no pill — in which case every
+    /// interaction of every matched conversation is a match by default.
+    ///
+    /// It re-states SQL that `search_cte` already embeds, and deliberately
+    /// re-uses the same `?N` placeholders: a positional parameter may be
+    /// referenced any number of times, so the caller passes one unchanged
+    /// parameter list however many times the relation appears.
+    match_rows: Option<String>,
     param_values: Vec<Box<dyn ToSql>>,
     search_mode: String,
 }
@@ -2291,8 +2305,18 @@ fn get_db_path(db_state: State<SharedDbState>) -> Option<String> {
     db_state.lock().ok().and_then(|s| s.path.clone())
 }
 
+/// Interrupt whatever the conversations database is running.
+///
+/// One connection behind one mutex means at most one statement is ever in
+/// flight, so there is nothing to address: a session search and an Insights
+/// read cannot both be running. SQLite makes the call a no-op when nothing is
+/// running, which is what makes it safe to fire on a modal close without
+/// racing the query that just finished.
+///
+/// It does not take the database lock — it could not; the query holding it is
+/// the one being interrupted.
 #[tauri::command]
-fn cancel_session_search(search_interrupt: State<SharedSearchInterrupt>) -> Result<(), String> {
+fn cancel_db_query(search_interrupt: State<SharedSearchInterrupt>) -> Result<(), String> {
     if let Some(handle) = search_interrupt.lock().map_err(|e| e.to_string())?.as_ref() {
         handle.interrupt();
     }
@@ -4038,8 +4062,10 @@ fn build_session_filter_query(
         }
     }
 
+    let mut match_rows: Option<String> = None;
     if !match_selects.is_empty() {
         let union = match_selects.join(" UNION ALL ");
+        match_rows = Some(union.clone());
         search_cte = format!(
             "{feedback_origins_cte}, search_sessions AS (\
                 SELECT session_uuid, MIN(match_log_id) AS match_log_id \
@@ -4050,6 +4076,8 @@ fn build_session_filter_query(
         filtered_from =
             "SELECT b.*, ss.match_log_id FROM base_sessions b JOIN search_sessions ss ON ss.session_uuid = b.session_uuid".to_string();
     } else if is_feedback_filter {
+        // The answers the thumbs were about are exactly the matching turns.
+        match_rows = Some("SELECT session_uuid, match_log_id FROM feedback_origins".to_string());
         search_cte = format!(
             "{feedback_origins_cte}, feedback_sessions AS (\
                 SELECT session_uuid, MIN(match_log_id) AS match_log_id \
@@ -4060,6 +4088,8 @@ fn build_session_filter_query(
         filtered_from =
             "SELECT b.*, fs.match_log_id FROM base_sessions b JOIN feedback_sessions fs ON fs.session_uuid = b.session_uuid".to_string();
     } else if is_recognition_filter {
+        match_rows =
+            Some("SELECT session_uuid, match_log_id FROM recognition_matches".to_string());
         search_cte = format!(
             "{recognition_matches_cte}, recognition_sessions AS (\
                 SELECT session_uuid, MIN(match_log_id) AS match_log_id \
@@ -4075,6 +4105,7 @@ fn build_session_filter_query(
         base_where,
         search_cte,
         filtered_from,
+        match_rows,
         param_values,
         search_mode,
     })
@@ -4226,6 +4257,1269 @@ async fn get_sessions(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ── Insights: aggregates over the current conversation search result ───────
+//
+// The Conversations view answers "which conversations match?" one page at a
+// time. Insights answers "what is in all of them?" — the same result set, read
+// as distributions rather than as rows.
+//
+// It is the *same* `GetSessionsArgs` `get_sessions` takes, so what the charts
+// describe is exactly what the sidebar is listing; there is no second notion of
+// "the current results" that could drift from the one on screen.
+
+/// How many values one context/metadata key contributes before the tail is
+/// folded into "Other".
+///
+/// Deliberately smaller than `TAG_VALUES_PER_NAME` (which feeds a filter list
+/// the user scrolls): a chart with 40 bars communicates nothing, and the
+/// renderer needs a real "Other" slice to keep the percentages honest.
+const INSIGHT_TAG_VALUES_PER_NAME: i64 = 12;
+
+/// The cap on every "top N" list (entities, Articles, Dialogs, opening
+/// questions). One more than fits comfortably on screen, so the renderer can
+/// tell "this is the whole list" from "this is the head of a longer one".
+const INSIGHT_TOP_N: i64 = 15;
+
+/// One bar, slice or cell: a label and the number behind it.
+///
+/// `extra` carries a second number where a series legitimately has two — a
+/// context value's share is counted in sessions, but the day series is worth
+/// having interactions on as well. It is skipped when absent so the payload of
+/// a large `by_day` stays small.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct InsightBucket {
+    label: String,
+    count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<i64>,
+}
+
+impl InsightBucket {
+    fn new(label: impl Into<String>, count: i64) -> Self {
+        Self { label: label.into(), count, extra: None }
+    }
+}
+
+/// One context or metadata key, with the values it took across the result set.
+///
+/// `with_key` is what makes the percentages readable: a value's share is of the
+/// sessions that carry the key *at all*, not of the whole result — those are
+/// very different numbers for a key only a tenth of conversations ever set, and
+/// showing the second one makes every value look negligible. `session_count -
+/// with_key` is the "not set" remainder, which the renderer states rather than
+/// leaving as an unexplained gap.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightTagGroup {
+    name: String,
+    with_key: i64,
+    distinct_values: i64,
+    values: Vec<InsightBucket>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationInsights {
+    /// Echoed back so the renderer cannot draw one unit and label the other.
+    unit: String,
+    /// Rows in `insight_matches` — the matching turns. Zero in conversations
+    /// mode, where the table is never built.
+    matched_interactions: i64,
+    /// Whether anything actually singled out particular turns. With no query
+    /// and no pill every interaction of every matched conversation is a match,
+    /// and the labelling must stop saying "matching".
+    matches_are_narrowed: bool,
+    /// The conversations in the result set — in interactions mode, the ones the
+    /// matching turns came from.
+    session_count: i64,
+    /// Every interaction in those conversations, whether or not it matched.
+    interaction_count: i64,
+    first_ts: String,
+    last_ts: String,
+    median_interactions: i64,
+    genai_sessions: i64,
+    pos_feedback_sessions: i64,
+    neg_feedback_sessions: i64,
+    /// Conversations carrying a thumbs up **and** a thumbs down.
+    ///
+    /// Without it the feedback split is not a part-to-whole at all: the two
+    /// flags are independent, so "no feedback" cannot be derived by subtracting
+    /// them, and a stacked bar built that way over-counts the overlap and
+    /// under-counts the remainder.
+    mixed_feedback_sessions: i64,
+    zero_recog_sessions: i64,
+    low_recog_sessions: i64,
+    low_recog_threshold: i64,
+    by_day: Vec<InsightBucket>,
+    by_hour: Vec<InsightBucket>,
+    /// 7 × 24, weekday-major, Monday first — flat so it crosses the bridge as
+    /// one array rather than seven.
+    hour_weekday: Vec<i64>,
+    length_buckets: Vec<InsightBucket>,
+    recognition_bands: Vec<InsightBucket>,
+    cultures: Vec<InsightBucket>,
+    recognition_types: Vec<InsightBucket>,
+    dialog_status: Vec<InsightBucket>,
+    contexts: Vec<InsightTagGroup>,
+    metadata: Vec<InsightTagGroup>,
+    entities: Vec<InsightBucket>,
+    articles: Vec<InsightBucket>,
+    dialog_nodes: Vec<InsightBucket>,
+    dialogs: Vec<InsightBucket>,
+    first_messages: Vec<InsightBucket>,
+    search_mode: String,
+    timing_ms: i64,
+}
+
+/// What one bar on the dashboard counts.
+///
+/// The charts started out counting conversations, which is the right default —
+/// it is what the session list beside them shows. But a conversation is eight
+/// turns and a search usually matches one of them, so "at what hour?" was
+/// really answering "at what hour did conversations *containing* a match
+/// start?". Counting the matching turns themselves is a different, often
+/// sharper question, and the two must never be confused for one another — which
+/// is why the mode is echoed back in the payload and stated in every export.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum InsightUnit {
+    Conversations,
+    Interactions,
+}
+
+impl InsightUnit {
+    fn parse(raw: Option<&str>) -> Self {
+        match raw {
+            Some("interactions") => InsightUnit::Interactions,
+            _ => InsightUnit::Conversations,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            InsightUnit::Conversations => "conversations",
+            InsightUnit::Interactions => "interactions",
+        }
+    }
+}
+
+/// How one interaction is classified, as `session_summary_insert_sql`
+/// classifies it before aggregating per conversation.
+///
+/// Written out once and shared: in interactions mode the headline counters and
+/// the recognition chart both need them, and two spellings of "is this turn a
+/// zero-recognition turn?" is exactly how a tile and a chart on one screen come
+/// to disagree about the same rows.
+///
+/// A GenAI answer did not come from Conversational AI Cloud recognition, so it
+/// is neither a zero nor a low score — it is unscored, and is excluded from
+/// both.
+const IS_GENAI_ROW: &str = "(i.main_interaction_type = 'GenerativeAI' \
+     OR i.all_interaction_types LIKE '%GenerativeAI%')";
+const IS_ZERO_RECOG_ROW: &str = "(i.recognition_quality = 0 \
+     AND COALESCE(i.recognition_type, '') != '' \
+     AND i.recognition_type != 'GenerativeAI' \
+     AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI')";
+const IS_SCORED_ROW: &str = "(i.recognition_quality > 0 \
+     AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+     AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI')";
+
+/// The matching interactions, one row each.
+///
+/// `log_id` is the primary key rather than `(log_id, session_uuid)`: an
+/// interaction belongs to exactly one conversation, and several OR groups of
+/// one search can match the same row — `INSERT OR IGNORE` then dedupes it
+/// instead of counting it twice.
+const INSIGHT_DROP_TEMP: &str = "\
+DROP TABLE IF EXISTS temp.insight_sessions;\
+DROP TABLE IF EXISTS temp.insight_matches;\
+DROP TABLE IF EXISTS temp.insight_weights;";
+
+/// What one conversation is worth to a chart keyed by conversation: 1, or the
+/// number of its turns that matched.
+///
+/// A table of its own rather than a column on `insight_sessions`, and the
+/// narrowness is the entire point. The tag joins read this weight once per
+/// joined row — half a million times on a real database — and reading a column
+/// off `insight_sessions` means decoding a ten-column record whose widest field
+/// is the conversation's opening message. Measured on 120k interactions: 421 ms
+/// per tag table against 357 ms, for the same answer.
+const INSIGHT_WEIGHT_TABLE: &str = "\
+DROP TABLE IF EXISTS temp.insight_weights;\
+CREATE TEMP TABLE insight_weights (\
+    session_uuid TEXT PRIMARY KEY,\
+    n            INTEGER NOT NULL\
+);";
+
+const INSIGHT_MATCH_TABLE: &str = "\
+DROP TABLE IF EXISTS temp.insight_matches;\
+CREATE TEMP TABLE insight_matches (\
+    log_id       INTEGER PRIMARY KEY,\
+    session_uuid TEXT NOT NULL\
+);\
+CREATE INDEX temp.idx_insight_match_session ON insight_matches(session_uuid);";
+
+/// Every aggregate below reads this table, never `filtered_sessions`.
+///
+/// The filter query is genuinely expensive — an FTS match, an entity scan, a
+/// materialized feedback relation — and there are ~15 aggregates. Running them
+/// against the CTE would re-derive the result set once per chart. Resolving it
+/// **once** into a temp table turns every chart into a join against a small
+/// indexed relation, and makes each query readable on its own.
+const INSIGHT_TEMP_TABLE: &str = "\
+DROP TABLE IF EXISTS temp.insight_sessions;\
+CREATE TEMP TABLE insight_sessions (\
+    session_uuid                     TEXT PRIMARY KEY,\
+    first_ts                         TEXT NOT NULL,\
+    interaction_count                INTEGER NOT NULL DEFAULT 0,\
+    culture                          TEXT NOT NULL DEFAULT '',\
+    first_user_message               TEXT NOT NULL DEFAULT '',\
+    has_gen_ai                       INTEGER NOT NULL DEFAULT 0,\
+    has_neg_feedback                 INTEGER NOT NULL DEFAULT 0,\
+    has_pos_feedback                 INTEGER NOT NULL DEFAULT 0,\
+    has_zero_recog                   INTEGER NOT NULL DEFAULT 0,\
+    min_positive_recognition_quality REAL NOT NULL DEFAULT 0\
+);";
+
+/// Read a `(kind, label, count)` aggregate into one bucket list per kind.
+///
+/// Exists so two charts over the same JSON column can share a single pass: the
+/// query ranks within each kind and this splits the ranked rows apart again.
+fn insight_split_buckets(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn ToSql],
+    fallback: &str,
+) -> Result<BTreeMap<i64, Vec<InsightBucket>>, String> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(insight_err)?;
+    let rows = stmt
+        .query_map(params, |row| {
+            let kind: i64 = row.get(0)?;
+            let label: Option<String> = row.get(1)?;
+            let count: i64 = row.get(2)?;
+            Ok((kind, label, count))
+        })
+        .map_err(insight_err)?;
+    let mut out: BTreeMap<i64, Vec<InsightBucket>> = BTreeMap::new();
+    for row in rows {
+        let (kind, label, count) = row.map_err(insight_err)?;
+        let label = label.unwrap_or_default();
+        let label = if label.trim().is_empty() { fallback.to_string() } else { label };
+        out.entry(kind).or_default().push(InsightBucket::new(label, count));
+    }
+    Ok(out)
+}
+
+/// Read a `(label, count)` aggregate into buckets.
+///
+/// Every chart query below has this shape, so it is written once. A NULL or
+/// empty label becomes `fallback` rather than an unlabelled bar.
+fn insight_buckets(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn ToSql],
+    fallback: &str,
+) -> Result<Vec<InsightBucket>, String> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(insight_err)?;
+    let rows = stmt
+        .query_map(params, |row| {
+            let label: Option<String> = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((label.unwrap_or_default(), count))
+        })
+        .map_err(insight_err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (label, count) = row.map_err(insight_err)?;
+        let label = if label.trim().is_empty() { fallback.to_string() } else { label };
+        out.push(InsightBucket::new(label, count));
+    }
+    Ok(out)
+}
+
+/// Per-key coverage and the top values of each, for one tag table.
+///
+/// `context_index` and `metadata_index` are keyed by conversation, not by
+/// interaction — there is no per-turn context to count — so both readings join
+/// the same relation and differ only in what a conversation is worth.
+/// `insight_weights.n` carries that weight: 1 per conversation, or the
+/// number of its turns that matched.
+///
+/// **Weighting is what keeps the interactions reading affordable.** Joining
+/// `insight_matches` (one row per matching turn) to a table keyed by session
+/// multiplies the join by each conversation's length before the `DISTINCT`
+/// collapses it back down — measured at 2.1 s per table on a 120k-interaction
+/// database, against 0.34 s for the identical answer in conversations mode.
+/// Summing a weight over the session set gives the same numbers over a join an
+/// order of magnitude smaller.
+///
+/// It also removes the `DISTINCT` from the values query outright: `(name,
+/// value, session_uuid)` is the tag table's primary key, so a conversation
+/// appears at most once per value and `SUM(n)` cannot double count.
+/// The per-name total still needs one, because a conversation whose context
+/// changed mid-way legitimately carries two values of the same key.
+fn insight_tag_groups(
+    conn: &Connection,
+    table: &str,
+    wanted: Option<&str>,
+) -> Result<Vec<InsightTagGroup>, String> {
+    // How many conversations (or matching turns) set each key at all, counting
+    // a conversation once however many values of that key it carried.
+    //
+    // The inner `GROUP BY (name, session)` is what does the counting-once, and
+    // it is deliberately a GROUP BY rather than the `SELECT DISTINCT` it reads
+    // like: `idx_ctx_name_session` is `(name, session_uuid)`, so grouping in
+    // that order is a covering-index scan with nothing to sort, where the
+    // DISTINCT form built a temp b-tree over the whole join.
+    // `MAX(n)` is the session's own weight — every row of the group is
+    // the same conversation, so any of them would do.
+    let mut totals: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+    {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT name, SUM(n) FROM (\
+                   SELECT t.name AS name, MAX(s.n) AS n \
+                   FROM insight_weights s JOIN {table} t \
+                     ON t.session_uuid = s.session_uuid \
+                   GROUP BY t.name, t.session_uuid\
+                 ) GROUP BY name"
+            ))
+            .map_err(insight_err)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(insight_err)?;
+        for row in rows {
+            let (name, with_key) = row.map_err(insight_err)?;
+            if name.trim().is_empty() {
+                continue;
+            }
+            totals.insert(name, (with_key, 0));
+        }
+    }
+
+    // How many distinct values each key has — what the picker shows, and what
+    // the chart note counts as folded away.
+    //
+    // Deliberately a nested `GROUP BY t.name, t.value` and then a count of the
+    // groups, rather than the `COUNT(DISTINCT t.value)` it reads as. The tag
+    // table's primary key is `(name, value, session_uuid)`, so grouping in that
+    // order is an ordered walk of a covering index with nothing to sort, where
+    // `COUNT(DISTINCT)` builds a temp b-tree per key: 101 ms against 316 ms on
+    // a 120k-interaction database, for the same numbers.
+    {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT name, COUNT(*) FROM (\
+                   SELECT t.name AS name, t.value AS value \
+                   FROM insight_weights s JOIN {table} t \
+                     ON t.session_uuid = s.session_uuid \
+                   GROUP BY t.name, t.value\
+                 ) GROUP BY name"
+            ))
+            .map_err(insight_err)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(insight_err)?;
+        for row in rows {
+            let (name, distinct) = row.map_err(insight_err)?;
+            if let Some(entry) = totals.get_mut(&name) {
+                entry.1 = distinct;
+            }
+        }
+    }
+
+    let mut out: Vec<InsightTagGroup> = totals
+        .into_iter()
+        .map(|(name, (with_key, distinct_values))| InsightTagGroup {
+            name,
+            with_key,
+            distinct_values,
+            values: Vec::new(),
+        })
+        .collect();
+    // Most-covering key first: that is the one worth opening on, and it saves
+    // the renderer from re-deciding the same order.
+    out.sort_by(|a, b| b.with_key.cmp(&a.with_key).then_with(|| a.name.cmp(&b.name)));
+
+    // Only one key is charted at a time, so only one key's values are read.
+    //
+    // Reading all of them cost a second full scan of the join and returned ~40
+    // keys × 12 values per table to draw one chart — measured at 150 ms per
+    // table on a 120k-interaction database, against 23 ms for a single key,
+    // which `idx_ctx_name_session` turns into a range scan. It also stops the
+    // cost growing with a customer's key count. The renderer asks for another
+    // key through `get_insight_tag_values` and caches what comes back.
+    let selected = wanted
+        .filter(|w| out.iter().any(|g| g.name == *w))
+        .map(|w| w.to_string())
+        .or_else(|| out.first().map(|g| g.name.clone()));
+    if let Some(name) = selected {
+        let values = insight_tag_values(conn, table, &name)?;
+        if let Some(group) = out.iter_mut().find(|g| g.name == name) {
+            group.values = values;
+        }
+    }
+    Ok(out)
+}
+
+/// The top values of one tag key, capped so a key with thousands of values
+/// cannot produce a chart nobody can read.
+fn insight_tag_values(
+    conn: &Connection,
+    table: &str,
+    name: &str,
+) -> Result<Vec<InsightBucket>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT t.value, SUM(s.n) AS n \
+             FROM insight_weights s JOIN {table} t \
+               ON t.session_uuid = s.session_uuid \
+             WHERE t.name = ?1 \
+             GROUP BY t.value \
+             ORDER BY n DESC, t.value ASC \
+             LIMIT {INSIGHT_TAG_VALUES_PER_NAME}"
+        ))
+        .map_err(insight_err)?;
+    let rows = stmt
+        .query_map(params![name], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(insight_err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (value, count) = row.map_err(insight_err)?;
+        // An empty value is a real state — "set, with no value" — and is
+        // distinct from the key being absent. The filter chips spell it the
+        // same way; a blank bar would just look like a rendering fault.
+        let label = if value.is_empty() { "(empty)".to_string() } else { value };
+        out.push(InsightBucket::new(label, count));
+    }
+    Ok(out)
+}
+/// `None` means the read was cancelled — `cancel_db_query` interrupted it.
+///
+/// A cancelled read is an outcome the user asked for, so it is not an `Err`:
+/// the renderer would have to recognise it by its message to avoid painting a
+/// red failure over a modal the user is already closing.
+#[tauri::command]
+async fn get_conversation_insights(
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+    unit: Option<String>,
+) -> Result<Option<ConversationInsights>, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        // A second parameter, not a field on `GetSessionsArgs`: those args are
+        // the search, shared verbatim with `get_sessions`, and the unit is a
+        // property of the reading rather than of the result set.
+        let out = conversation_insights(conn, &args, InsightUnit::parse(unit.as_deref()));
+        if out.is_err() {
+            // The resolved result set is dropped at the end of a successful
+            // run; an interrupt lands before that, and the temp tables are
+            // per-connection on a connection that outlives the call. Left
+            // behind, a cancelled read holds its pages for the rest of the
+            // session.
+            let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        }
+        match out {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What a cancelled Insights read returns instead of an error.
+///
+/// An interrupt is the user pressing Cancel, not a broken query, and the two
+/// arrive down the same channel — so a cancelled read would otherwise report
+/// itself in red as "Insights query error: interrupted". The command turns this
+/// sentinel into `Ok(None)`, which reaches the renderer as `null`.
+const INSIGHTS_CANCELLED: &str = "__insights_cancelled__";
+
+/// Every rusqlite error in this section goes through here.
+fn insight_err(e: rusqlite::Error) -> String {
+    if let rusqlite::Error::SqliteFailure(err, _) = &e {
+        if err.code == rusqlite::ErrorCode::OperationInterrupted {
+            return INSIGHTS_CANCELLED.to_string();
+        }
+    }
+    format!("Insights query error: {e}")
+}
+
+/// One measured step of an insights run.
+///
+/// The cost is dominated by a handful of scans, and which one dominates depends
+/// on the shape of the database rather than on anything visible in the SQL —
+/// guessing produced the wrong answer twice. `perf::insights_cost` reads these
+/// back, and a slow run in the field logs them under `target: "insights"`.
+struct InsightPhases {
+    marks: Vec<(&'static str, u128)>,
+    at: Instant,
+}
+
+impl InsightPhases {
+    fn new() -> Self {
+        Self { marks: Vec::new(), at: Instant::now() }
+    }
+
+    fn mark(&mut self, name: &'static str) {
+        self.marks.push((name, self.at.elapsed().as_micros()));
+        self.at = Instant::now();
+    }
+
+    /// Slowest first — on a large database two or three steps carry the whole
+    /// cost and the rest are noise, so ordering by name would bury the answer.
+    fn summary(&self) -> String {
+        let mut sorted = self.marks.clone();
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted
+            .iter()
+            .map(|(n, us)| format!("{n} {:.1}ms", *us as f64 / 1000.0))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// The Context and Metadata sections, read after the dashboard is on screen.
+///
+/// Split out of the dashboard read because it is more than half of it — two
+/// scans of a join the size of the whole result set, per table — and it draws
+/// two charts that sit below the fold. Paying for it first meant nothing at all
+/// appeared until it was done.
+///
+/// Both tables in one call so the result set is resolved once, which is the
+/// other half of what a read costs.
+#[tauri::command]
+async fn get_insight_tags(
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+    unit: Option<String>,
+    keys: Option<InsightTagKeys>,
+) -> Result<Option<InsightTags>, String> {
+    let db = db_state.inner().clone();
+    let keys = keys.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let out = resolve_insight_scope(conn, &args, InsightUnit::parse(unit.as_deref()))
+            .and_then(|_| {
+                let contexts =
+                    insight_tag_groups(conn, "context_index", keys.context.as_deref())?;
+                let metadata =
+                    insight_tag_groups(conn, "metadata_index", keys.metadata.as_deref())?;
+                Ok(InsightTags { contexts, metadata })
+            });
+        let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        match out {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightTags {
+    contexts: Vec<InsightTagGroup>,
+    metadata: Vec<InsightTagGroup>,
+}
+
+/// One tag key's values, for switching the Context or Metadata chart.
+///
+/// The dashboard read returns values for a single key — see
+/// `insight_tag_groups` — so choosing another needs this. It re-resolves the
+/// same result set, which is most of what it costs; the values themselves are a
+/// range scan of one key. `None` means the read was cancelled.
+#[tauri::command]
+async fn get_insight_tag_values(
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+    unit: Option<String>,
+    kind: String,
+    name: String,
+) -> Result<Option<Vec<InsightBucket>>, String> {
+    // Never interpolated — `kind` comes off the wire and the table name cannot
+    // be a bound parameter.
+    let table = match kind.as_str() {
+        "context" => "context_index",
+        "metadata" => "metadata_index",
+        _ => return Err(format!("Unknown tag kind: {kind}")),
+    };
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        let out = resolve_insight_scope(conn, &args, InsightUnit::parse(unit.as_deref()))
+            .and_then(|_| insight_tag_values(conn, table, &name));
+        let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        match out {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Every aggregate the Insights view shows, over one resolved result set.
+///
+/// Split out of the command — as `sessions_page_sql` and `write_ai_export` are
+/// — so the queries can be run against a real `Connection` in a test without a
+/// Tauri `State`. What goes wrong here is never "it fails to run", it is a join
+/// or a bin quietly counting the wrong thing, and that is only visible in the
+/// numbers that come back.
+fn conversation_insights(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+    unit: InsightUnit,
+) -> Result<ConversationInsights, String> {
+    let (insights, phases) = conversation_insights_timed(conn, args, unit)?;
+    log::debug!(
+        target: "insights",
+        "insights {} in {}ms: {}",
+        unit.as_str(),
+        insights.timing_ms,
+        phases.summary()
+    );
+    Ok(insights)
+}
+
+/// Which Context and Metadata key the dashboard is currently charting.
+///
+/// Sent with the read because only the selected key's values are fetched, and
+/// carried across a unit switch so the two readings of one key can be compared
+/// without losing your place.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightTagKeys {
+    context: Option<String>,
+    metadata: Option<String>,
+}
+
+/// What one Insights read is looking at, once the search has been resolved.
+struct InsightScope {
+    /// How many interactions matched, in the interactions reading. Zero in the
+    /// conversations reading, where it is not a number anything shows.
+    matched_interactions: i64,
+    /// False when nothing singled out particular turns — no query, no pill —
+    /// so every interaction of every matched conversation is a "match" and the
+    /// labelling must stop saying "matching".
+    matches_are_narrowed: bool,
+    /// Which of the three search paths ran — the renderer says so on screen.
+    search_mode: String,
+}
+
+/// Resolve the search into the three temp tables every aggregate reads.
+///
+/// Split out because two commands need it: the dashboard, and the follow-up
+/// that fetches one tag key's values. The filter query is genuinely expensive
+/// — an FTS match, an entity scan, a materialized feedback relation — and
+/// running it once per chart instead of once per call is exactly what this
+/// avoids.
+fn resolve_insight_scope(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+    unit: InsightUnit,
+) -> Result<InsightScope, String> {
+    let filter_query = build_session_filter_query(conn, args)?;
+    let params_ref: Vec<&dyn ToSql> =
+        filter_query.param_values.iter().map(|b| b.as_ref()).collect();
+
+    conn.execute_batch(INSIGHT_TEMP_TABLE).map_err(insight_err)?;
+    let resolve_sql = format!(
+        r#"WITH
+base_sessions AS (
+    SELECT s.*
+    FROM session_summary s
+    {base_where}
+)
+{search_cte},
+filtered_sessions AS (
+    {filtered_from}
+)
+INSERT INTO insight_sessions
+      (session_uuid, first_ts, interaction_count, culture, first_user_message,
+       has_gen_ai, has_neg_feedback, has_pos_feedback, has_zero_recog,
+       min_positive_recognition_quality)
+SELECT session_uuid, first_ts, interaction_count, culture, first_user_message,
+       has_gen_ai, has_neg_feedback, has_pos_feedback, has_zero_recog,
+       min_positive_recognition_quality
+FROM filtered_sessions
+WHERE session_uuid IS NOT NULL AND session_uuid != ''"#,
+        base_where = filter_query.base_where.as_str(),
+        search_cte = filter_query.search_cte.as_str(),
+        filtered_from = filter_query.filtered_from.as_str(),
+    );
+    conn.execute(&resolve_sql, params_ref.as_slice())
+        .map_err(insight_err)?;
+    // Every conversation is worth 1 until the interactions reading says
+    // otherwise, which it does below once the matching turns are known.
+    conn.execute_batch(INSIGHT_WEIGHT_TABLE).map_err(insight_err)?;
+    conn.execute(
+        "INSERT INTO insight_weights (session_uuid, n) \
+         SELECT session_uuid, 1 FROM insight_sessions",
+        [],
+    )
+    .map_err(insight_err)?;
+
+    // ── The matching interactions, when that is what is being counted ──
+    //
+    // Resolved from the search's own pre-collapse relation, then narrowed to
+    // the conversations that survived the session-level filters — the match
+    // relation applies the per-row conditions but knows nothing about the date
+    // range or `has_real_user_input`.
+    //
+    // With no query and no pill, nothing singled out particular turns, so every
+    // interaction of every matched conversation is a match. The mode is still
+    // worth having there — it counts interactions instead of conversations —
+    // but the labelling has to stop saying "matching", which is what
+    // `matches_are_narrowed` tells the renderer.
+    let matches_are_narrowed = filter_query.match_rows.is_some();
+    let mut matched_interactions = 0i64;
+    if unit == InsightUnit::Interactions {
+        conn.execute_batch(INSIGHT_MATCH_TABLE).map_err(insight_err)?;
+        match filter_query.match_rows.as_deref() {
+            Some(match_rows) => {
+                let sql = format!(
+                    r#"WITH
+base_sessions AS (
+    SELECT s.*
+    FROM session_summary s
+    {base_where}
+)
+{search_cte}
+INSERT OR IGNORE INTO insight_matches (log_id, session_uuid)
+SELECT m.match_log_id, m.session_uuid
+FROM ({match_rows}) m
+JOIN insight_sessions s ON s.session_uuid = m.session_uuid
+WHERE m.match_log_id IS NOT NULL"#,
+                    base_where = filter_query.base_where.as_str(),
+                    search_cte = filter_query.search_cte.as_str(),
+                );
+                conn.execute(&sql, params_ref.as_slice())
+            }
+            None => conn.execute(
+                "INSERT OR IGNORE INTO insight_matches (log_id, session_uuid) \
+                 SELECT i.log_id, i.session_uuid \
+                 FROM insight_sessions s \
+                 JOIN interactions i ON i.session_uuid = s.session_uuid",
+                [],
+            ),
+        }
+        .map_err(insight_err)?;
+        matched_interactions = conn
+            .query_row("SELECT COUNT(*) FROM insight_matches", [], |r| r.get(0))
+            .unwrap_or(0);
+        // How many of each conversation's turns matched — the weight that lets
+        // everything keyed by conversation stay a join the size of the session
+        // set. See `insight_tag_groups` for why that matters.
+        conn.execute(
+            "UPDATE insight_weights SET n = COALESCE(\
+                 (SELECT COUNT(*) FROM insight_matches m \
+                   WHERE m.session_uuid = insight_weights.session_uuid), 0)",
+            [],
+        )
+        .map_err(insight_err)?;
+    }
+
+    Ok(InsightScope {
+        matched_interactions,
+        matches_are_narrowed,
+        search_mode: filter_query.search_mode.clone(),
+    })
+}
+
+/// The body of `conversation_insights`, handing back what each step cost.
+///
+/// Split out rather than logged in place so `perf::insights_cost` measures the
+/// queries the app really runs instead of a copy of them that can drift.
+fn conversation_insights_timed(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+    unit: InsightUnit,
+) -> Result<(ConversationInsights, InsightPhases), String> {
+    {
+        let started = Instant::now();
+        let mut phases = InsightPhases::new();
+
+        let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
+        let scope = resolve_insight_scope(conn, args, unit)?;
+        phases.mark("resolve");
+
+        let matches_are_narrowed = scope.matches_are_narrowed;
+        let matched_interactions = scope.matched_interactions;
+
+        // The row source every chart groups over, and how it counts one thing.
+        //
+        // Both branches expose `i.*` (the interaction) so the "what answered"
+        // queries below are written once; only what a row *is* differs — one
+        // conversation, or one matching turn.
+        let (row_from, ts_col, culture_col, count_expr) = match unit {
+            InsightUnit::Conversations => (
+                "insight_sessions s",
+                "s.first_ts",
+                "s.culture",
+                "COUNT(DISTINCT i.session_uuid)",
+            ),
+            InsightUnit::Interactions => (
+                "insight_matches m JOIN interactions i ON i.log_id = m.log_id",
+                "i.timestamp_start",
+                "i.culture",
+                "COUNT(DISTINCT i.log_id)",
+            ),
+        };
+        // The row source for "what answered" — the interactions themselves,
+        // either all of a matched conversation's or only the matching ones.
+        let answer_from = match unit {
+            InsightUnit::Conversations => {
+                "insight_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid"
+            }
+            InsightUnit::Interactions => {
+                "insight_matches m JOIN interactions i ON i.log_id = m.log_id"
+            }
+        };
+
+        // ── Headline ──
+        let (
+            session_count,
+            interaction_count,
+            first_ts,
+            last_ts,
+            genai_sessions,
+            pos_feedback_sessions,
+            neg_feedback_sessions,
+            mixed_feedback_sessions,
+            zero_recog_sessions,
+            low_recog_sessions,
+        ) = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(interaction_count), 0), \
+                        COALESCE(MIN(first_ts), ''), COALESCE(MAX(first_ts), ''), \
+                        COALESCE(SUM(has_gen_ai), 0), COALESCE(SUM(has_pos_feedback), 0), \
+                        COALESCE(SUM(has_neg_feedback), 0), \
+                        COALESCE(SUM(CASE WHEN has_pos_feedback = 1 AND has_neg_feedback = 1 \
+                                          THEN 1 ELSE 0 END), 0), \
+                        COALESCE(SUM(has_zero_recog), 0), \
+                        COALESCE(SUM(CASE WHEN min_positive_recognition_quality > 0 \
+                                           AND min_positive_recognition_quality < ?1 \
+                                          THEN 1 ELSE 0 END), 0) \
+                 FROM insight_sessions",
+                params![low_recog_threshold],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, i64>(5)?,
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, i64>(7)?,
+                        r.get::<_, i64>(8)?,
+                        r.get::<_, i64>(9)?,
+                    ))
+                },
+            )
+            .map_err(insight_err)?;
+
+        // In interactions mode the same six headline numbers describe the
+        // matching turns, not the conversations holding them — a conversation
+        // "has zero recognition" if *any* turn scored zero, which says nothing
+        // about whether the turn that matched did.
+        //
+        // The classifications mirror `session_summary_insert_sql` exactly: a
+        // GenAI answer is not scored by Conversational AI Cloud recognition, so
+        // it is neither a zero nor a low score, it is unscored.
+        let (
+            first_ts,
+            last_ts,
+            genai_sessions,
+            zero_recog_sessions,
+            low_recog_sessions,
+        ) = if unit == InsightUnit::Interactions {
+            conn.query_row(
+                &format!(
+                    "SELECT COALESCE(MIN(i.timestamp_start), ''), \
+                            COALESCE(MAX(i.timestamp_start), ''), \
+                            COALESCE(SUM(CASE WHEN {IS_GENAI_ROW} THEN 1 ELSE 0 END), 0), \
+                            COALESCE(SUM(CASE WHEN {IS_ZERO_RECOG_ROW} THEN 1 ELSE 0 END), 0), \
+                            COALESCE(SUM(CASE WHEN {IS_SCORED_ROW} \
+                                               AND i.recognition_quality < ?1 \
+                                              THEN 1 ELSE 0 END), 0) \
+                     FROM insight_matches m JOIN interactions i ON i.log_id = m.log_id"
+                ),
+                params![low_recog_threshold],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .map_err(insight_err)?
+        } else {
+            (first_ts, last_ts, genai_sessions, zero_recog_sessions, low_recog_sessions)
+        };
+
+        // The mean is pulled up hard by a handful of very long conversations,
+        // so the typical length is the median. Cheap here: the set is already
+        // resolved and the column is small.
+        let median_interactions: i64 = if session_count == 0 {
+            0
+        } else {
+            conn.query_row(
+                "SELECT interaction_count FROM insight_sessions \
+                 ORDER BY interaction_count LIMIT 1 OFFSET ?1",
+                params![(session_count - 1) / 2],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        };
+        phases.mark("headline");
+
+        // ── When ──
+        let by_day = {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT substr({ts_col}, 1, 10) AS d, COUNT(*), COUNT(*) \
+                     FROM {row_from} GROUP BY d ORDER BY d ASC"
+                ))
+                .map_err(insight_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(InsightBucket {
+                        label: row.get::<_, String>(0)?,
+                        count: row.get::<_, i64>(1)?,
+                        extra: Some(row.get::<_, i64>(2)?),
+                    })
+                })
+                .map_err(insight_err)?;
+            rows.filter_map(|r| r.ok()).filter(|b| !b.label.is_empty()).collect::<Vec<_>>()
+        };
+        phases.mark("by_day");
+
+        // Hours are read straight out of the stored string rather than through
+        // strftime: the database stores naive UTC by design, so the substring
+        // *is* the UTC hour and no timezone can be applied to it by accident.
+        let mut by_hour: Vec<InsightBucket> =
+            (0..24).map(|h| InsightBucket::new(format!("{h:02}"), 0)).collect();
+        let mut hour_weekday = vec![0i64; 7 * 24];
+        {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT CAST(strftime('%w', {ts_col}) AS INTEGER) AS wd, \
+                            CAST(substr({ts_col}, 12, 2) AS INTEGER) AS hr, COUNT(*) \
+                     FROM {row_from} \
+                     WHERE length({ts_col}) >= 13 \
+                     GROUP BY wd, hr"
+                ))
+                .map_err(insight_err)?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(insight_err)?;
+            for row in rows {
+                let (wd, hr, count) = row.map_err(insight_err)?;
+                let (Some(wd), Some(hr)) = (wd, hr) else { continue };
+                if !(0..24).contains(&hr) || !(0..7).contains(&wd) {
+                    continue;
+                }
+                by_hour[hr as usize].count += count;
+                // strftime('%w') is 0 = Sunday; the grid reads Monday-first,
+                // which is what a working week looks like to the people reading it.
+                let row_index = ((wd + 6) % 7) as usize;
+                hour_weekday[row_index * 24 + hr as usize] += count;
+            }
+        }
+        phases.mark("hour_weekday");
+
+        // ── Shape of a conversation ──
+        //
+        // Bins, not a raw count per length: the tail runs to hundreds and the
+        // question being asked is "one-shot or a real exchange?".
+        //
+        // This is the one chart whose own unit does not follow the toggle: it
+        // bins *conversations* either way. What changes is what is being binned
+        // — every turn, or only the matching ones — which is why the card is
+        // retitled rather than dropped. Its note and tooltips say
+        // "conversations", so the axis can never be misread as the unit.
+        let length_source = match unit {
+            InsightUnit::Conversations => "SELECT interaction_count AS n FROM insight_sessions",
+            InsightUnit::Interactions => {
+                "SELECT COUNT(*) AS n FROM insight_matches GROUP BY session_uuid"
+            }
+        };
+        let length_buckets = insight_buckets(
+            conn,
+            &format!(
+                "SELECT CASE \
+                   WHEN n <= 1 THEN '1' \
+                   WHEN n = 2 THEN '2' \
+                   WHEN n <= 5 THEN '3–5' \
+                   WHEN n <= 10 THEN '6–10' \
+                   WHEN n <= 20 THEN '11–20' \
+                   ELSE '21+' END AS bucket, COUNT(*) \
+                 FROM ({length_source}) GROUP BY bucket"
+            ),
+            &[],
+            "?",
+        )?;
+        phases.mark("length_buckets");
+
+        // The band is the conversation's *worst* recognised turn, which is what
+        // the Low % / Zero % pills already filter on — so the chart and the
+        // pills describe the same thing.
+        let recognition_bands = insight_buckets(
+            conn,
+            &match unit {
+                InsightUnit::Conversations => "SELECT CASE \
+                       WHEN has_zero_recog = 1 THEN 'Zero' \
+                       WHEN min_positive_recognition_quality <= 0 THEN 'Not scored' \
+                       WHEN min_positive_recognition_quality < 40 THEN 'Under 40%' \
+                       WHEN min_positive_recognition_quality < 70 THEN '40–69%' \
+                       ELSE '70–100%' END AS band, COUNT(*) \
+                     FROM insight_sessions GROUP BY band"
+                    .to_string(),
+                // Per turn there is no "worst of" to take: the score on the row
+                // *is* the answer, which is the sharper reading of the two and
+                // the reason the mode exists.
+                InsightUnit::Interactions => format!(
+                    "SELECT CASE \
+                       WHEN {IS_ZERO_RECOG_ROW} THEN 'Zero' \
+                       WHEN NOT {IS_SCORED_ROW} THEN 'Not scored' \
+                       WHEN i.recognition_quality < 40 THEN 'Under 40%' \
+                       WHEN i.recognition_quality < 70 THEN '40–69%' \
+                       ELSE '70–100%' END AS band, COUNT(*) \
+                     FROM insight_matches m JOIN interactions i ON i.log_id = m.log_id \
+                     GROUP BY band"
+                ),
+            },
+            &[],
+            "Not scored",
+        )?;
+        phases.mark("recognition_bands");
+
+        let cultures = insight_buckets(
+            conn,
+            &format!(
+                "SELECT {culture_col} AS culture, COUNT(*) c FROM {row_from} \
+                 GROUP BY culture ORDER BY c DESC, culture ASC LIMIT ?1"
+            ),
+            &[&INSIGHT_TOP_N],
+            "(none)",
+        )?;
+        phases.mark("cultures");
+
+        // Deliberately conversation-only: the opening question is a fact about
+        // the conversation, and there is no per-turn reading of it. The
+        // renderer drops the card in interactions mode and says why.
+        let first_messages = if unit == InsightUnit::Interactions {
+            Vec::new()
+        } else {
+        insight_buckets(
+            conn,
+            "SELECT MIN(first_user_message), COUNT(*) c FROM insight_sessions \
+             WHERE first_user_message != '' \
+               AND first_user_message NOT LIKE '#%#' \
+               AND LOWER(first_user_message) != 'continue' \
+             GROUP BY LOWER(first_user_message) ORDER BY c DESC LIMIT ?1",
+            &[&INSIGHT_TOP_N],
+            "(empty)",
+        )?
+        };
+        phases.mark("first_messages");
+
+        // ── What answered ──
+        let recognition_types = insight_buckets(
+            conn,
+            &format!(
+                "SELECT i.recognition_type, COUNT(*) c \
+                 FROM {answer_from} \
+                 WHERE COALESCE(i.recognition_type, '') != '' \
+                 GROUP BY i.recognition_type ORDER BY c DESC LIMIT ?1"
+            ),
+            &[&INSIGHT_TOP_N],
+            "(none)",
+        )?;
+        phases.mark("recognition_types");
+
+        // `entity_index` carries `log_id`, so in interactions mode this is the
+        // entity the *matching turn* triggered rather than one anything in the
+        // conversation triggered.
+        let entities = insight_buckets(
+            conn,
+            &match unit {
+                InsightUnit::Conversations =>
+                    "SELECT e.name, COUNT(DISTINCT e.session_uuid) c \
+                     FROM insight_sessions s JOIN entity_index e ON e.session_uuid = s.session_uuid \
+                     GROUP BY e.name ORDER BY c DESC, e.name ASC LIMIT ?1"
+                        .to_string(),
+                InsightUnit::Interactions =>
+                    "SELECT e.name, COUNT(DISTINCT e.log_id) c \
+                     FROM insight_matches m JOIN entity_index e ON e.log_id = m.log_id \
+                     GROUP BY e.name ORDER BY c DESC, e.name ASC LIMIT ?1"
+                        .to_string(),
+            },
+            &[&INSIGHT_TOP_N],
+            "(unnamed)",
+        )?;
+        phases.mark("entities");
+
+        // `article_ids` holds both Articles (`qa-…`) and the Dialog nodes an
+        // answer came from (`dn-<dialog>-<node>`). They answer different
+        // questions and merging them into one chart would put two kinds of
+        // thing on one axis — but they are one column, so they are read in one
+        // pass and split afterwards. Two passes meant parsing every row's JSON
+        // twice, which measured as the third-largest cost in the whole run.
+        let (articles, dialog_nodes) = {
+            let mut by_kind = insight_split_buckets(
+                conn,
+                &format!(
+                    "SELECT bucket_kind, bucket_label, c FROM (\
+                       SELECT bucket_kind, bucket_label, c, \
+                              ROW_NUMBER() OVER (PARTITION BY bucket_kind \
+                                                 ORDER BY c DESC, bucket_label ASC) rn \
+                       FROM (\
+                         SELECT CASE WHEN je.value LIKE 'qa-%' THEN 0 ELSE 1 END AS bucket_kind, \
+                                je.value AS bucket_label, {count_expr} c \
+                         FROM {answer_from}, json_each(i.article_ids) je \
+                         WHERE i.article_ids LIKE '[%' AND json_valid(i.article_ids) \
+                           AND (je.value LIKE 'qa-%' OR je.value LIKE 'dn-%') \
+                         GROUP BY bucket_kind, bucket_label\
+                       )\
+                     ) WHERE rn <= ?1 ORDER BY bucket_kind ASC, c DESC, bucket_label ASC"
+                ),
+                &[&INSIGHT_TOP_N],
+                "(unknown)",
+            )?;
+            (by_kind.remove(&0).unwrap_or_default(), by_kind.remove(&1).unwrap_or_default())
+        };
+        phases.mark("article_ids");
+
+        // A `dialog_paths` cell is `{"<status>": "<dialog>:<node>/<node>/…"}`.
+        // Both readings of it come out of one pass, for the same reason
+        // `article_ids` does:
+        //
+        //   kind 0 — the Dialog the conversation walked through, the run before
+        //            the first colon. Deliberately a wider question than the
+        //            `dn-` chart above, which needs the answer to have come
+        //            *from* one of the Dialog's nodes.
+        //   kind 1 — the key beside the path (`EndedOrInProgress`, `DropOut`),
+        //            which is how the conversation left the Dialog it was in.
+        //
+        // `CROSS JOIN` is load-bearing: it fixes the two-row relation as the
+        // inner loop, so `json_each` is walked once and each entry yields both
+        // readings. Written as a plain comma join SQLite is free to put the two
+        // rows outside and parse the JSON twice, which is the cost this exists
+        // to avoid.
+        //
+        // So are the `bucket_` alias names. `json_each` exposes columns called
+        // `key`, `value` and `type`, and a `GROUP BY value` binds to the real
+        // column in preference to an output alias of the same name — so the
+        // obvious spelling grouped by the raw path rather than by the Dialog
+        // cut out of it, and `6391:2` and `6391:2/15/4` counted as two Dialogs.
+        let (dialogs, dialog_status) = {
+            let mut by_kind = insight_split_buckets(
+                conn,
+                &format!(
+                    "SELECT bucket_kind, bucket_label, c FROM (\
+                       SELECT bucket_kind, bucket_label, c, \
+                              ROW_NUMBER() OVER (PARTITION BY bucket_kind \
+                                                 ORDER BY c DESC, bucket_label ASC) rn \
+                       FROM (\
+                         SELECT k.kind AS bucket_kind, \
+                                CASE k.kind WHEN 0 THEN \
+                                  CASE WHEN instr(je.value, ':') > 0 \
+                                       THEN substr(je.value, 1, instr(je.value, ':') - 1) \
+                                       ELSE je.value END \
+                                  ELSE je.key END AS bucket_label, \
+                                {count_expr} c \
+                         FROM {answer_from}, json_each(i.dialog_paths) je \
+                         CROSS JOIN (SELECT 0 AS kind UNION ALL SELECT 1) k \
+                         WHERE i.dialog_paths LIKE '{{%' AND json_valid(i.dialog_paths) \
+                           AND (k.kind = 1 OR je.type = 'text') \
+                         GROUP BY bucket_kind, bucket_label\
+                       )\
+                     ) WHERE rn <= ?1 ORDER BY bucket_kind ASC, c DESC, bucket_label ASC"
+                ),
+                &[&INSIGHT_TOP_N],
+                "(unknown)",
+            )?;
+            (by_kind.remove(&0).unwrap_or_default(), by_kind.remove(&1).unwrap_or_default())
+        };
+        phases.mark("dialog_paths");
+
+
+
+        // The temp table is per-connection and the connection is long-lived, so
+        // leaving a full result set behind would hold its pages for the rest of
+        // the session. Dropping it is not correctness — the next run recreates
+        // it — but it is a lot of memory to keep for nothing.
+        let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+
+        Ok((ConversationInsights {
+            session_count,
+            interaction_count,
+            first_ts,
+            last_ts,
+            median_interactions,
+            genai_sessions,
+            pos_feedback_sessions,
+            neg_feedback_sessions,
+            mixed_feedback_sessions,
+            zero_recog_sessions,
+            low_recog_sessions,
+            low_recog_threshold,
+            by_day,
+            by_hour,
+            hour_weekday,
+            length_buckets,
+            recognition_bands,
+            cultures,
+            recognition_types,
+            dialog_status,
+            // Deliberately empty: the Context and Metadata sections are filled
+            // by `get_insight_tags` once the rest of the dashboard is on
+            // screen. They cost more than half the read and they sit below the
+            // fold, so paying for them before anything is drawn made the whole
+            // dashboard wait on two charts nobody has scrolled to yet.
+            contexts: Vec::new(),
+            metadata: Vec::new(),
+            entities,
+            articles,
+            dialog_nodes,
+            dialogs,
+            first_messages,
+            unit: unit.as_str().to_string(),
+            matched_interactions,
+            matches_are_narrowed,
+            search_mode: scope.search_mode.clone(),
+            timing_ms: started.elapsed().as_millis() as i64,
+        }, phases))
+    }
 }
 
 fn json_or_text(text: &str) -> serde_json::Value {
@@ -6632,8 +7926,11 @@ pub fn run() {
             finalize_import_run,
             compact_database,
             get_sessions,
+            get_conversation_insights,
+            get_insight_tags,
+            get_insight_tag_values,
             export_conversations_for_ai,
-            cancel_session_search,
+            cancel_db_query,
             get_session_interactions,
             get_date_range,
             get_context_options,
@@ -8485,6 +9782,216 @@ mod tests {
 mod perf {
     use super::*;
 
+    /// A database with the shape Insights actually reads.
+    ///
+    /// `seed_feedback_db` is not enough here: it carries one context pair, no
+    /// metadata at all and a constant `article_ids`, so every aggregate this
+    /// harness exists to time would collapse into a single bucket and the
+    /// `json_each` scans — which are the cost — would have nothing to walk.
+    fn seed_insights_db(rows: i64) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("cai-ins-bench-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::create_dir_all(&dir);
+        let header = "LogId|InteractionUuid|SessionUuid|TimestampStart|TimestampEnd|Culture|\
+                      MainInteractionType|AllInteractionTypes|InteractionValue|OutputText|\
+                      ArticleIds|DialogPaths|RecognitionType|RecognitionQuality|\
+                      RecognitionDetails|Contexts|FeedbackInfo|OutputMetadata";
+        let ctx_names = [
+            "channel", "escalationGroup", "lang", "device", "loggedIn", "campaign",
+            "park", "season", "abVariant", "entryPoint", "browser", "os",
+            "referrer", "memberTier", "cartState", "flowStep", "locale", "region",
+            "partner", "appVersion", "hasTicket", "hotelStay", "annualPass", "consent",
+            "surface", "experiment", "queue", "agentPool", "topicHint", "retry",
+        ];
+        let meta_names = [
+            "entryType", "nochat", "transaction", "attractionIdentifier", "restaurantName",
+            "abortTransactionAction.topicName", "escalationGroup", "answerVariant", "cardType",
+            "ctaTarget", "formId", "handoffTeam", "intentGroup", "knowledgeSet", "layout",
+            "mediaKind", "nextStep", "offerId", "priority", "promptKind", "quickReplySet",
+            "sourceSystem", "surveyId", "templateId", "tone", "trackingTag", "urgency",
+            "validationRule", "widgetId", "wheelchair",
+        ];
+        let mut s = String::with_capacity((rows as usize) * 700 + header.len());
+        s.push_str(header);
+        for id in 0..rows {
+            let sess = id / 9;
+            // ~90 days, so `by_day` has a real spread and the date range filter
+            // has something to cut.
+            let day_index = sess % 90;
+            let (month, day) = if day_index < 31 {
+                (1, day_index + 1)
+            } else if day_index < 59 {
+                (2, day_index - 30)
+            } else {
+                (3, day_index - 58)
+            };
+            let hour = 6 + (id * 7 % 16);
+            let feedback = if id % 40 == 39 {
+                let score = if id % 80 == 39 { -1 } else { 1 };
+                format!("{{\"score\": {score}, \"originatingInteractionId\": \"u{}\"}}", id - 1)
+            } else {
+                String::new()
+            };
+            let (kind, all_kinds, recog_type, quality) = if !feedback.is_empty() {
+                ("Feedback", "Feedback", "", 0)
+            } else if id % 17 == 0 {
+                ("GenerativeAI", "QA,GenerativeAI", "GenerativeAI", 0)
+            } else if id % 13 == 0 {
+                ("Question", "Question", "Faq", 35)
+            } else if id % 11 == 0 {
+                ("Question", "Question", "Faq", 0)
+            } else {
+                ("Question", "Question", "Faq", 88)
+            };
+            // Both an Article and a Dialog node on most rows: the two charts
+            // over `article_ids` read the same column with different prefixes.
+            let article_ids = format!(
+                "[\"qa-{}\",\"dn-{}-{}\"]",
+                id % 400,
+                id % 60,
+                id % 12
+            );
+            let status = if id % 7 == 0 { "DropOut" } else { "EndedOrInProgress" };
+            let dialog_paths =
+                format!("{{\"{status}\":\"{}:1/{}/{}\"}}", id % 60, id % 12, id % 5);
+            let contexts = (0..4)
+                .map(|k| {
+                    let n = ctx_names[((id * 3 + k * 7) % ctx_names.len() as i64) as usize];
+                    format!("{{\"name\":\"{n}\",\"value\":\"v{}\"}}", (id + k) % 8)
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let metadata = (0..4)
+                .map(|k| {
+                    let n = meta_names[((id * 5 + k * 3) % meta_names.len() as i64) as usize];
+                    format!("{{\"key\":\"{n}\",\"value\":\"m{}\"}}", (id + k) % 8)
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            s.push('\n');
+            s.push_str(&format!(
+                "{id}|u{id}|s{sess}|{month:02}/{day:02}/2026 {hour:02}:30:22|\
+                 {month:02}/{day:02}/2026 {hour:02}:30:25|nl|\
+                 {kind}|{all_kinds}|wat zijn de openingstijden van het park {id}|\
+                 Het park is open van 10 tot 18 uur {id}|\
+                 {article_ids}|{dialog_paths}|{recog_type}|{quality}|\
+                 {{\"entityMatches\":[{{\"entityId\":{},\"displayName\":\"ENT_{}\",\
+                 \"name\":\"ENT_{}_1\",\"match\":\"openingstijden\"}}]}}|\
+                 [{contexts}]|{feedback}|[{metadata}]",
+                id % 200,
+                id % 200,
+                id % 200,
+            ));
+        }
+        let csv = dir.join("seed.csv");
+        fs::write(&csv, s).expect("write csv");
+        let db_path = dir.join("ins.db");
+        let mut conn = open_db(db_path.to_str().unwrap()).expect("open");
+        import_csv_into(&mut conn, csv.to_str().unwrap(), Some(36500), b'|', false)
+            .expect("import");
+        drop(conn);
+        (dir, db_path)
+    }
+
+    /// Not an assertion — a measurement harness. Run with:
+    ///   cargo test --release perf::insights_cost -- --nocapture --ignored
+    ///
+    /// Prints per-phase timings for both readings over a realistically sized
+    /// database, so an optimisation here is aimed at whatever is actually
+    /// dominant rather than at whichever query looks worst in the source.
+    /// `CAI_BENCH_ROWS` overrides the size; `CAI_TEST_DB` measures a real one
+    /// instead of the seeded shape.
+    #[test]
+    #[ignore]
+    fn insights_cost() {
+        let (dir, db_path) = match std::env::var("CAI_TEST_DB") {
+            Ok(path) => (None, PathBuf::from(path)),
+            Err(_) => {
+                let rows: i64 = std::env::var("CAI_BENCH_ROWS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(120_000);
+                println!("seeding {rows} interactions…");
+                let t = Instant::now();
+                let (dir, db) = seed_insights_db(rows);
+                println!("  seeded in {:?}", t.elapsed());
+                (Some(dir), db)
+            }
+        };
+        let conn = open_db(db_path.to_str().unwrap()).expect("open");
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
+            .unwrap_or(0);
+        let sessions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+            .unwrap_or(0);
+        println!("database: {total} interactions, {sessions} sessions");
+        println!("path: {}\n", db_path.display());
+
+        let cases: Vec<(&str, GetSessionsArgs)> = vec![
+            ("no filter", GetSessionsArgs::default()),
+            (
+                "common term",
+                GetSessionsArgs {
+                    query: Some("openingstijden".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "zero-recognition pill",
+                GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
+            ),
+        ];
+
+        for (label, args) in &cases {
+            for unit in [InsightUnit::Conversations, InsightUnit::Interactions] {
+                // Best of three: run-to-run noise on a laptop is larger than
+                // most of the individual phases.
+                let mut best = u128::MAX;
+                let mut best_phases = String::new();
+                let mut count = 0i64;
+                for _ in 0..3 {
+                    let t = Instant::now();
+                    let (d, phases) =
+                        conversation_insights_timed(&conn, args, unit).expect("insights");
+                    let us = t.elapsed().as_micros();
+                    if us < best {
+                        best = us;
+                        best_phases = phases.summary();
+                        count = d.session_count;
+                    }
+                }
+                // The tag sections are a second read the renderer fires after
+                // the dashboard paints, so they are timed apart — the first
+                // number is when something appears, the second when the last
+                // two charts fill in.
+                let mut tags_best = u128::MAX;
+                for _ in 0..3 {
+                    let t = Instant::now();
+                    resolve_insight_scope(&conn, args, unit).expect("scope");
+                    insight_tag_groups(&conn, "context_index", None).expect("contexts");
+                    insight_tag_groups(&conn, "metadata_index", None).expect("metadata");
+                    tags_best = tags_best.min(t.elapsed().as_micros());
+                }
+                println!(
+                    "{label:<22} {:<14} {:>7.0}ms first paint, {:>7.0}ms tags  \
+                     ({count} conversations)",
+                    unit.as_str(),
+                    best as f64 / 1000.0,
+                    tags_best as f64 / 1000.0
+                );
+                println!("    {best_phases}");
+            }
+        }
+        drop(conn);
+        // `CAI_BENCH_KEEP` leaves the seeded database behind, so a candidate
+        // query can be shaped against it directly before being written back
+        // into the source.
+        if let (Some(dir), Err(_)) = (dir, std::env::var("CAI_BENCH_KEEP")) {
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
     /// Not an assertion — a measurement harness. Run with:
     ///   cargo test --release perf::import_cost -- --nocapture --ignored
     ///
@@ -9104,6 +10611,731 @@ mod fts_semantics {
 /// Every test here drives the real [`build_session_filter_query`] against a real
 /// (in-memory) database with the real FTS index, because each of these bugs was
 /// invisible in the SQL and only showed up in the rows that came back.
+/// The Insights aggregates, over a database whose expected numbers are known.
+///
+/// Every one of these queries runs against a temp table the search resolves
+/// into, so nothing here fails loudly when it is wrong — a mis-joined chart
+/// returns *a* number, plausibly shaped, and only a fixture with counted
+/// answers tells it from the right one.
+#[cfg(test)]
+mod insights {
+    use super::*;
+
+    /// One conversation, as the charts need to see it: a timestamp that lands
+    /// in a known hour and weekday, and the answer fields the "what answered"
+    /// charts read.
+    struct Sess<'a> {
+        uuid: &'a str,
+        /// Naive UTC, exactly as the importer stores it.
+        ts: &'a str,
+        turns: i64,
+        quality: f64,
+        article_ids: &'a str,
+        dialog_paths: &'a str,
+    }
+
+    impl<'a> Default for Sess<'a> {
+        fn default() -> Self {
+            Sess {
+                uuid: "s",
+                ts: "2026-06-01T09:00:00",
+                turns: 1,
+                quality: 90.0,
+                article_ids: "",
+                dialog_paths: "",
+            }
+        }
+    }
+
+    fn seed(sessions: &[Sess]) -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        let mut log_id = 1i64;
+        for s in sessions {
+            for turn in 0..s.turns.max(1) {
+                conn.execute(
+                    "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                     timestamp_start, timestamp_end, culture, main_interaction_type, \
+                     all_interaction_types, interaction_value, output_text, article_ids, \
+                     dialog_paths, recognition_type, recognition_quality, imported_at) \
+                     VALUES (?1,'u'||?1,?2,?3,?3,'nl','Question','Question',\
+                             'hoe laat open je','om tien uur',?4,?5,'Article',?6,0)",
+                    params![
+                        log_id,
+                        s.uuid,
+                        s.ts,
+                        if turn == 0 { s.article_ids } else { "" },
+                        if turn == 0 { s.dialog_paths } else { "" },
+                        s.quality,
+                    ],
+                )
+                .expect("insert interaction");
+                log_id += 1;
+            }
+        }
+        rebuild_session_summary(&conn).expect("summary");
+        conn
+    }
+
+    fn insights(conn: &Connection) -> ConversationInsights {
+        conversation_insights(
+            conn,
+            &GetSessionsArgs::default(),
+            InsightUnit::Conversations
+        )
+        .expect("insights")
+    }
+
+    /// One turn, with its own text and its own timestamp — which is the whole
+    /// point of the interactions unit, and something the `Sess` seeder above
+    /// (one text, one timestamp per conversation) cannot express.
+    fn add_turn(
+        conn: &Connection,
+        log_id: i64,
+        session: &str,
+        ts: &str,
+        user: &str,
+        quality: f64,
+    ) {
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             timestamp_end, culture, main_interaction_type, all_interaction_types, \
+             interaction_value, output_text, recognition_type, recognition_quality, imported_at) \
+             VALUES (?1,'u'||?1,?2,?3,?3,'nl','Question','Question',?4,'antwoord','Article',?5,0)",
+            params![log_id, session, ts, user, quality],
+        )
+        .expect("insert turn");
+        conn.execute(
+            "INSERT INTO interactions_fts(rowid, interaction_value, output_text, article_ids, \
+             dialog_paths) VALUES (?1, ?2, 'antwoord', '', '')",
+            params![log_id, user],
+        )
+        .expect("index turn");
+    }
+
+    fn bucket(buckets: &[InsightBucket], label: &str) -> i64 {
+        buckets.iter().find(|b| b.label == label).map(|b| b.count).unwrap_or(0)
+    }
+
+    /// The charts describe the conversations the sidebar is listing — not a
+    /// second, differently-filtered set. Anything else and the headline number
+    /// disagrees with the result count directly above it.
+    #[test]
+    fn the_headline_counts_exactly_the_sessions_the_search_returns() {
+        let conn = seed(&[
+            Sess { uuid: "a", turns: 3, ..Default::default() },
+            Sess { uuid: "b", turns: 7, ..Default::default() },
+            Sess { uuid: "c", turns: 1, ..Default::default() },
+        ]);
+        let i = insights(&conn);
+        assert_eq!(i.session_count, 3);
+        assert_eq!(i.interaction_count, 11);
+        // The median, not the mean: 3.67 would describe none of these.
+        assert_eq!(i.median_interactions, 3);
+        assert_eq!(i.length_buckets.iter().map(|b| b.count).sum::<i64>(), 3);
+        assert_eq!(bucket(&i.length_buckets, "1"), 1);
+        assert_eq!(bucket(&i.length_buckets, "3–5"), 1);
+        assert_eq!(bucket(&i.length_buckets, "6–10"), 1);
+
+        // …and a filter narrows both together.
+        let genai_only = conversation_insights(
+            &conn,
+            &GetSessionsArgs { filter: Some("genai".into()), ..Default::default() },
+            InsightUnit::Conversations
+        )
+        .expect("insights");
+        assert_eq!(genai_only.session_count, 0);
+        assert_eq!(genai_only.interaction_count, 0);
+    }
+
+    /// The database stores naive UTC by design, so the hour is a substring of
+    /// the stored string and no local offset can be applied to it by accident.
+    /// The grid reads Monday-first, which `strftime('%w')` (0 = Sunday) does not.
+    #[test]
+    fn hours_are_utc_and_the_heatmap_week_starts_on_monday() {
+        let conn = seed(&[
+            Sess { uuid: "mon", ts: "2026-06-01T14:05:00", ..Default::default() },
+            Sess { uuid: "wed", ts: "2026-06-03T23:59:59", ..Default::default() },
+            Sess { uuid: "sun", ts: "2026-06-07T00:00:00", ..Default::default() },
+        ]);
+        let i = insights(&conn);
+
+        assert_eq!(i.by_hour.len(), 24);
+        assert_eq!(i.by_hour[14].count, 1);
+        assert_eq!(i.by_hour[23].count, 1);
+        assert_eq!(i.by_hour[0].count, 1);
+        assert_eq!(i.by_hour.iter().map(|b| b.count).sum::<i64>(), 3);
+
+        assert_eq!(i.hour_weekday.len(), 7 * 24);
+        assert_eq!(i.hour_weekday[0 * 24 + 14], 1, "Monday 14:00");
+        assert_eq!(i.hour_weekday[2 * 24 + 23], 1, "Wednesday 23:00");
+        assert_eq!(i.hour_weekday[6 * 24 + 0], 1, "Sunday 00:00 — the last row, not the first");
+        assert_eq!(i.hour_weekday.iter().sum::<i64>(), 3);
+
+        // Days are UTC dates, one bucket each, in order.
+        let days: Vec<&str> = i.by_day.iter().map(|b| b.label.as_str()).collect();
+        assert_eq!(days, vec!["2026-06-01", "2026-06-03", "2026-06-07"]);
+        assert_eq!(i.first_ts, "2026-06-01T14:05:00");
+        assert_eq!(i.last_ts, "2026-06-07T00:00:00");
+    }
+
+    /// `article_ids` holds Articles *and* the Dialog nodes an answer came from,
+    /// and `dialog_paths` holds Dialogs merely walked through. Three different
+    /// questions; merging any two of them puts unlike things on one axis.
+    #[test]
+    fn articles_dialog_nodes_and_walked_dialogs_are_counted_apart() {
+        let conn = seed(&[
+            Sess {
+                uuid: "a",
+                article_ids: r#"["qa-101","dn-6391-4"]"#,
+                dialog_paths: r#"{"EndedOrInProgress":"6391:2/15/4"}"#,
+                ..Default::default()
+            },
+            Sess {
+                uuid: "b",
+                article_ids: r#"["qa-101"]"#,
+                dialog_paths: r#"{"DropOut":"6391:2","EndedOrInProgress":"77:1"}"#,
+                ..Default::default()
+            },
+            Sess { uuid: "c", article_ids: "[]", dialog_paths: "", ..Default::default() },
+        ]);
+        let i = insights(&conn);
+
+        assert_eq!(bucket(&i.articles, "qa-101"), 2);
+        assert_eq!(i.articles.len(), 1, "a dn- id is not an Article");
+        assert_eq!(bucket(&i.dialog_nodes, "dn-6391-4"), 1);
+        assert_eq!(i.dialog_nodes.len(), 1);
+
+        // Both sessions walked dialog 6391; only one walked 77.
+        assert_eq!(bucket(&i.dialogs, "6391"), 2);
+        assert_eq!(bucket(&i.dialogs, "77"), 1);
+        assert_eq!(bucket(&i.dialog_status, "EndedOrInProgress"), 2);
+        assert_eq!(bucket(&i.dialog_status, "DropOut"), 1);
+    }
+
+    /// A value's share is of the sessions that carry the key at all. Against
+    /// the whole result set, every value of a rarely-set key reads as
+    /// negligible — which is a statement about the key, not about the value.
+    #[test]
+    fn a_tag_values_share_is_of_the_sessions_that_carry_its_key() {
+        let conn = seed(&[
+            Sess { uuid: "a", ..Default::default() },
+            Sess { uuid: "b", ..Default::default() },
+            Sess { uuid: "c", ..Default::default() },
+            Sess { uuid: "d", ..Default::default() },
+        ]);
+        for (name, value, session) in [
+            ("channel", "web", "a"),
+            ("channel", "web", "b"),
+            ("channel", "app", "c"),
+            ("park", "", "a"),
+        ] {
+            conn.execute(
+                "INSERT INTO context_index (name, value, session_uuid) VALUES (?1,?2,?3)",
+                params![name, value, session],
+            )
+            .expect("index context");
+        }
+        conn.execute(
+            "INSERT INTO metadata_index (name, value, session_uuid) VALUES ('nochat','true','a')",
+            [],
+        )
+        .expect("index metadata");
+
+        let i = insights(&conn);
+        assert_eq!(i.session_count, 4);
+        // The dashboard read carries no tags at all — they are more than half
+        // its cost and they draw two charts below the fold.
+        assert!(i.contexts.is_empty() && i.metadata.is_empty());
+
+        let tags = |ctx: Option<&str>| {
+            resolve_insight_scope(&conn, &GetSessionsArgs::default(), InsightUnit::Conversations)
+                .expect("scope");
+            let contexts = insight_tag_groups(&conn, "context_index", ctx).expect("contexts");
+            let metadata = insight_tag_groups(&conn, "metadata_index", None).expect("metadata");
+            (contexts, metadata)
+        };
+        let (contexts, metadata) = tags(None);
+
+        // Most-covering key first, so the view opens on the one worth reading.
+        let names: Vec<&str> = contexts.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, vec!["channel", "park"]);
+
+        let channel = &contexts[0];
+        assert_eq!(channel.with_key, 3, "d never set it — that is the 'not set' remainder");
+        assert_eq!(channel.distinct_values, 2);
+        assert_eq!(bucket(&channel.values, "web"), 2);
+        assert_eq!(bucket(&channel.values, "app"), 1);
+
+        // Only the charted key carries values — one chart is drawn at a time,
+        // and reading every key's values cost a second full scan of the join
+        // for forty charts nobody asked for.
+        assert!(contexts[1].values.is_empty(), "an unselected key carries no values");
+        assert_eq!(contexts[1].with_key, 1, "…but its coverage is still known");
+        assert_eq!(contexts[1].distinct_values, 1, "…and so is its value count");
+
+        // Asking for that key fills it in, and "set, with no value" is a real
+        // state that must not render as a blank bar.
+        let (park, _) = tags(Some("park"));
+        assert_eq!(bucket(&park[1].values, "(empty)"), 1);
+        assert!(park[0].values.is_empty(), "the other key is dropped in turn");
+        // The command behind the key picker has to agree with it, or switching
+        // keys would draw a different chart from the one the section opened on.
+        let direct = insight_tag_values(&conn, "context_index", "park").expect("values");
+        assert_eq!(direct, park[1].values);
+
+        // Metadata is its own table and must not leak into the context groups.
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(metadata[0].name, "nochat");
+        assert!(!names.contains(&"nochat"));
+    }
+
+    /// The band is the conversation's *worst* scored turn, which is what the
+    /// Low % and Zero % pills already filter on — so a chart and a pill on the
+    /// same screen cannot disagree about the same conversation.
+    #[test]
+    fn the_recognition_band_is_the_conversations_worst_scored_turn() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        // One conversation that answered well once and badly once.
+        for (log_id, session, quality) in
+            [(1i64, "mixed", 95.0f64), (2, "mixed", 22.0), (3, "good", 88.0), (4, "zero", 0.0)]
+        {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, culture, main_interaction_type, all_interaction_types, \
+                 interaction_value, output_text, recognition_type, recognition_quality, \
+                 imported_at) \
+                 VALUES (?1,'u'||?1,?2,'2026-06-01T09:00:00','nl','Question','Question',\
+                         'vraag','antwoord','Article',?3,0)",
+                params![log_id, session, quality],
+            )
+            .expect("insert");
+        }
+        rebuild_session_summary(&conn).expect("summary");
+
+        let i = insights(&conn);
+        assert_eq!(bucket(&i.recognition_bands, "Under 40%"), 1, "the 95% turn does not rescue it");
+        assert_eq!(bucket(&i.recognition_bands, "70–100%"), 1);
+        assert_eq!(bucket(&i.recognition_bands, "Zero"), 1);
+        assert_eq!(i.recognition_bands.iter().map(|b| b.count).sum::<i64>(), i.session_count);
+
+        // And the headline counters agree with the bands.
+        assert_eq!(i.zero_recog_sessions, 1);
+        // The feedback split is only a part-to-whole if the overlap is known:
+        // both flags can be set on one conversation, so "no feedback" is not
+        // `total - up - down`.
+        assert_eq!(i.pos_feedback_sessions, 0);
+        assert_eq!(i.neg_feedback_sessions, 0);
+        assert_eq!(i.mixed_feedback_sessions, 0);
+        assert_eq!(i.low_recog_sessions, 1, "worst turn 22% is under the default 60");
+        assert_eq!(i.low_recog_threshold, 60);
+    }
+
+
+    /// The aggregates over a real Interaction Log, not a fixture.
+    ///
+    /// Every chart is a join or a `json_each` over columns whose real contents
+    /// are messier than anything worth hand-writing — `dialog_paths` with two
+    /// statuses in one cell, `article_ids` mixing `qa-` and `dn-`, metadata
+    /// carrying embedded JSON. A wrong join here does not fail, it returns a
+    /// plausible number, so what is asserted are the invariants that a wrong
+    /// one breaks: every per-conversation breakdown has to partition the result
+    /// set exactly, and nothing may count a conversation the search excluded.
+    ///
+    /// Skipped when the sample export is not checked out beside the app.
+    #[test]
+    fn the_aggregates_partition_a_real_interaction_log() {
+        let csv_path =
+            std::path::Path::new("../Efteling_EFTELING_nl_InteractionLog_2026-03-25-2.csv");
+        if !csv_path.exists() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("cai-insights-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let db_path = dir.join("t.db");
+        let _ = fs::remove_file(&db_path);
+        let mut conn = Connection::open(&db_path).expect("open db");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        let res = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+            .expect("import succeeds");
+        assert!(res.inserted > 0, "sample export produced no rows");
+
+        let i = conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Conversations)
+            .expect("insights");
+        assert!(i.session_count > 0, "no conversations");
+
+        // Against what the sidebar itself would report, not against the whole
+        // table: the default search already drops conversations with no real
+        // user input, and a dashboard describing a wider set than the list
+        // beside it is the one failure this whole feature cannot afford.
+        let args = GetSessionsArgs::default();
+        let mut fq = build_session_filter_query(&conn, &args).expect("filter query");
+        fq.param_values.push(Box::new(50i64));
+        fq.param_values.push(Box::new(0i64));
+        let p_limit = format!("?{}", fq.param_values.len() - 1);
+        let p_offset = format!("?{}", fq.param_values.len());
+        let sql = sessions_page_sql(&fq, &p_limit, &p_offset);
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let listed: i64 = conn
+            .prepare(&sql)
+            .expect("prepare page")
+            .query_row(params.as_slice(), |r| r.get(10))
+            .expect("page");
+        assert_eq!(i.session_count, listed, "the charts describe a different set than the list");
+        assert!(i.session_count < conn
+            .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get::<_, i64>(0))
+            .unwrap(), "the sample has no filtered-out conversations, so this proves nothing");
+
+        // And the interaction total is over *those* conversations only.
+        let interactions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
+            .unwrap();
+        assert!(i.interaction_count > 0 && i.interaction_count <= interactions);
+
+        // Each of these bins every conversation exactly once, so each has to add
+        // back up to the whole. A double-counting join shows up here and nowhere
+        // else — the individual bars all look reasonable.
+        let sum = |b: &[InsightBucket]| b.iter().map(|x| x.count).sum::<i64>();
+        assert_eq!(sum(&i.by_day), i.session_count, "by_day");
+        assert_eq!(sum(&i.by_hour), i.session_count, "by_hour");
+        assert_eq!(sum(&i.length_buckets), i.session_count, "length_buckets");
+        assert_eq!(sum(&i.recognition_bands), i.session_count, "recognition_bands");
+        assert_eq!(
+            i.hour_weekday.iter().sum::<i64>(),
+            i.session_count,
+            "the heatmap lost or gained conversations"
+        );
+        assert_eq!(i.hour_weekday.len(), 7 * 24);
+        assert_eq!(i.by_hour.len(), 24);
+
+        // Feedback has to be a partition too, once the overlap is taken out.
+        let both = i.mixed_feedback_sessions;
+        assert!(both <= i.pos_feedback_sessions.min(i.neg_feedback_sessions));
+        assert!(
+            i.pos_feedback_sessions + i.neg_feedback_sessions - both <= i.session_count,
+            "more rated conversations than there are conversations"
+        );
+
+        // Nothing may claim more conversations than the result set holds, and a
+        // value may not claim more than the key it belongs to.
+        for group in i.contexts.iter().chain(i.metadata.iter()) {
+            assert!(
+                group.with_key <= i.session_count,
+                "{} covers more conversations than exist",
+                group.name
+            );
+            assert!(group.values.len() as i64 <= INSIGHT_TAG_VALUES_PER_NAME);
+            for v in &group.values {
+                assert!(v.count <= group.with_key, "{}={} exceeds its key", group.name, v.label);
+            }
+            assert!(group.distinct_values >= group.values.len() as i64);
+            // The values are deliberately NOT asserted to sum to `with_key`.
+            // They don't, on the real log: `context_index` is keyed by
+            // (name, value, session_uuid), so a conversation whose context
+            // changed mid-way contributes to two values while counting once
+            // toward `with_key`. That is not a defect to fix here — it is why
+            // the chart carries no derived "Other" bar and says so when its
+            // bars add up to more than their denominator.
+        }
+        // Multi-valued keys are the reason the chart has no derived remainder.
+        // Assert the shape rather than that the sample happens to contain one:
+        // the sum may exceed `with_key`, and must never be taken for a total.
+        for group in i.contexts.iter().chain(i.metadata.iter()) {
+            let shown: i64 = group.values.iter().map(|v| v.count).sum();
+            if shown > group.with_key {
+                assert!(
+                    group.values.len() > 1,
+                    "{} exceeds its key with a single value, which cannot happen",
+                    group.name
+                );
+            }
+        }
+
+        // `conversation_id` and `CURRENT_DATETIME` are excluded at index time —
+        // one value per session and one per message make them thousands of
+        // chips each matching a single thing.
+        for group in &i.metadata {
+            assert!(!META_EXCLUDED_KEYS.contains(&group.name.as_str()), "{}", group.name);
+        }
+
+        // The three "what answered" charts read two columns with three
+        // different shapes; each must yield only its own kind of id.
+        for a in &i.articles {
+            assert!(a.label.starts_with("qa-"), "not an Article: {}", a.label);
+            assert!(a.count <= i.session_count);
+        }
+        for n in &i.dialog_nodes {
+            assert!(n.label.starts_with("dn-"), "not a Dialog node: {}", n.label);
+        }
+        for d in &i.dialogs {
+            assert!(
+                d.label.chars().all(|c| c.is_ascii_digit()) && !d.label.is_empty(),
+                "a Dialog id still carries its path: {}",
+                d.label
+            );
+        }
+        for e in &i.entities {
+            assert!(e.count <= i.session_count, "entity {} over-counts", e.label);
+        }
+
+        // Timestamps are naive UTC, and the day/hour charts read them as
+        // substrings — a row whose format drifted would silently fall into the
+        // wrong bucket rather than fail.
+        assert_eq!(i.first_ts.len(), 19, "unexpected timestamp format: {}", i.first_ts);
+        assert!(i.first_ts.as_bytes()[10] == b'T', "{}", i.first_ts);
+        assert!(i.first_ts <= i.last_ts);
+        for d in &i.by_day {
+            assert_eq!(d.label.len(), 10, "not a UTC date: {}", d.label);
+        }
+
+        // And a filter has to narrow the whole dashboard, not just the headline.
+        let zero = conversation_insights(
+            &conn,
+            &GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
+            InsightUnit::Conversations
+        )
+        .expect("insights");
+        assert!(zero.session_count <= i.session_count);
+        assert_eq!(zero.session_count, zero.zero_recog_sessions);
+        assert_eq!(sum(&zero.by_hour), zero.session_count);
+        assert!(zero.interaction_count <= i.interaction_count);
+
+        // The same invariants under the interactions unit, where every join in
+        // the "what answered" family changes shape — from `session_uuid` to
+        // `log_id` — and a mis-keyed one still returns a plausible number.
+        let t = conversation_insights(&conn, &args, InsightUnit::Interactions).expect("insights");
+        assert_eq!(t.unit, "interactions");
+        assert_eq!(t.session_count, i.session_count, "the unit changed the result set");
+        assert_eq!(t.interaction_count, i.interaction_count);
+        assert!(!t.matches_are_narrowed, "an unfiltered search singles out no turn");
+        assert_eq!(
+            t.matched_interactions, t.interaction_count,
+            "with nothing narrowing it, every interaction is a match"
+        );
+        assert_eq!(sum(&t.by_day), t.matched_interactions, "by_day");
+        assert_eq!(sum(&t.by_hour), t.matched_interactions, "by_hour");
+        assert_eq!(sum(&t.recognition_bands), t.matched_interactions, "recognition_bands");
+        assert_eq!(t.hour_weekday.iter().sum::<i64>(), t.matched_interactions);
+        // The length chart still bins conversations, in both units.
+        assert_eq!(sum(&t.length_buckets), t.session_count, "length_buckets");
+        assert!(t.first_messages.is_empty(), "an opening question has no per-turn reading");
+        for a in &t.articles {
+            assert!(a.label.starts_with("qa-"));
+            assert!(a.count <= t.matched_interactions, "{} over-counts turns", a.label);
+        }
+        for d in &t.dialogs {
+            assert!(d.label.chars().all(|c| c.is_ascii_digit()) && !d.label.is_empty());
+        }
+        for e in &t.entities {
+            assert!(e.count <= t.matched_interactions, "entity {} over-counts turns", e.label);
+        }
+        for group in t.contexts.iter().chain(t.metadata.iter()) {
+            assert!(
+                group.with_key <= t.matched_interactions,
+                "{} covers more turns than matched",
+                group.name
+            );
+            for v in &group.values {
+                assert!(v.count <= group.with_key, "{}={} exceeds its key", group.name, v.label);
+            }
+        }
+        // Counting turns cannot count fewer of them than conversations.
+        assert!(t.matched_interactions >= i.session_count);
+
+        // A search that singles out particular turns really does narrow it.
+        let narrowed = conversation_insights(
+            &conn,
+            &GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
+            InsightUnit::Interactions
+        )
+        .expect("insights");
+        assert!(narrowed.matches_are_narrowed);
+        assert!(
+            narrowed.matched_interactions < narrowed.interaction_count,
+            "a pill matched every interaction in its conversations, which cannot be right"
+        );
+        assert_eq!(sum(&narrowed.by_hour), narrowed.matched_interactions);
+        assert_eq!(
+            bucket(&narrowed.recognition_bands, "Zero"),
+            narrowed.matched_interactions,
+            "every turn the Zero pill singled out must land in the Zero band"
+        );
+
+        println!(
+            "real log: {} conversations, {} interactions ({} turns under the Zero pill), \
+             {} context keys, {} metadata keys, {} entities, {} Articles, {} Dialogs — {} ms",
+            i.session_count,
+            i.interaction_count,
+            narrowed.matched_interactions,
+            i.contexts.len(),
+            i.metadata.len(),
+            i.entities.len(),
+            i.articles.len(),
+            i.dialogs.len(),
+            i.timing_ms,
+        );
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The unit changes what a bar counts — not which conversations are in it.
+    ///
+    /// A conversation is several turns and a search usually matches one of
+    /// them, so counting conversations answers a different question from
+    /// counting the turns that matched. Both are right; confusing them is not.
+    #[test]
+    fn the_interactions_unit_counts_matching_turns_not_the_conversations_holding_them() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        // One long conversation whose *middle* two turns mention parking, and
+        // one short conversation with a single mention — six turns, three hits,
+        // across two conversations.
+        add_turn(&conn, 1, "long", "2026-06-01T08:00:00", "goedemiddag", 90.0);
+        add_turn(&conn, 2, "long", "2026-06-01T14:00:00", "waar kan ik parkeren", 90.0);
+        add_turn(&conn, 3, "long", "2026-06-01T14:30:00", "en parkeren voor bussen", 20.0);
+        add_turn(&conn, 4, "long", "2026-06-01T15:00:00", "dank je", 90.0);
+        add_turn(&conn, 5, "short", "2026-06-02T09:00:00", "parkeren kosten", 90.0);
+        add_turn(&conn, 6, "short", "2026-06-02T09:05:00", "ok", 90.0);
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = GetSessionsArgs {
+            query: Some("parkeren".into()),
+            query_scope: Some("user".into()),
+            ..Default::default()
+        };
+        let convs = conversation_insights(&conn, &args, InsightUnit::Conversations).expect("conv");
+        let turns = conversation_insights(&conn, &args, InsightUnit::Interactions).expect("int");
+
+        // Same conversations either way — the unit is a reading of one result
+        // set, never a different filter.
+        assert_eq!(convs.session_count, 2);
+        assert_eq!(turns.session_count, 2);
+        assert_eq!(convs.matched_interactions, 0, "the match table is not built when unused");
+        assert_eq!(turns.matched_interactions, 3, "three turns mention parking, not six");
+        assert!(turns.matches_are_narrowed);
+        assert_eq!(turns.unit, "interactions");
+        assert_eq!(convs.unit, "conversations");
+        // Every interaction of those conversations is still reported, so the
+        // matched turns can be read as a share of the whole.
+        assert_eq!(turns.interaction_count, 6);
+
+        // The hour is the matching turn's own, not the conversation's start.
+        // This is the difference the mode exists for: `long` *starts* at 08:00
+        // and has nothing to do with parking until 14:00.
+        let hour = |i: &ConversationInsights, h: usize| i.by_hour[h].count;
+        assert_eq!(hour(&convs, 8), 1, "conversations are counted at their start");
+        assert_eq!(hour(&convs, 14), 0);
+        assert_eq!(hour(&turns, 8), 0, "the 08:00 greeting did not match");
+        assert_eq!(hour(&turns, 14), 2, "both parking turns are at 14:xx");
+        assert_eq!(hour(&turns, 9), 1);
+        assert_eq!(turns.by_hour.iter().map(|b| b.count).sum::<i64>(), 3);
+        assert_eq!(turns.hour_weekday.iter().sum::<i64>(), 3);
+        assert_eq!(turns.by_day.iter().map(|b| b.count).sum::<i64>(), 3);
+
+        // The band is the turn's own score, with no "worst of" to take: the
+        // conversation `long` is a 20% conversation, but two of its three
+        // matching turns answered at 90%.
+        let band = |i: &ConversationInsights, l: &str| bucket(&i.recognition_bands, l);
+        assert_eq!(band(&convs, "Under 40%"), 1, "the whole conversation is dragged down");
+        assert_eq!(band(&turns, "70–100%"), 2);
+        assert_eq!(band(&turns, "Under 40%"), 1);
+        assert_eq!(turns.recognition_bands.iter().map(|b| b.count).sum::<i64>(), 3);
+        assert_eq!(turns.low_recog_sessions, 1, "one matching turn scored under 60");
+
+        // The length chart keeps binning conversations either way; what it bins
+        // changes from every turn to only the matching ones.
+        assert_eq!(bucket(&convs.length_buckets, "3–5"), 1, "`long` has four turns");
+        assert_eq!(bucket(&convs.length_buckets, "2"), 1);
+        assert_eq!(bucket(&turns.length_buckets, "2"), 1, "`long` matched twice");
+        assert_eq!(bucket(&turns.length_buckets, "1"), 1, "`short` matched once");
+
+        // The opening question has no per-turn reading and is not invented.
+        assert!(!convs.first_messages.is_empty());
+        assert!(turns.first_messages.is_empty());
+    }
+
+    /// With nothing narrowing the search, every interaction is a match.
+    ///
+    /// The mode is still worth having — it counts interactions instead of
+    /// conversations — but nothing singled out particular turns, and the
+    /// labelling has to stop claiming otherwise.
+    #[test]
+    fn with_no_query_and_no_pill_every_interaction_is_a_match() {
+        let conn = seed(&[
+            Sess { uuid: "a", turns: 3, ..Default::default() },
+            Sess { uuid: "b", turns: 7, ..Default::default() },
+        ]);
+        let turns =
+            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions)
+                .expect("insights");
+        assert_eq!(turns.session_count, 2);
+        assert_eq!(turns.matched_interactions, 10);
+        assert_eq!(turns.interaction_count, 10);
+        assert!(!turns.matches_are_narrowed, "nothing narrowed it — do not say 'matching'");
+        assert_eq!(turns.by_hour.iter().map(|b| b.count).sum::<i64>(), 10);
+    }
+
+    /// A pill with no text query narrows to particular turns too: the
+    /// recognition filter already resolves the rows that scored badly.
+    #[test]
+    fn a_pill_alone_still_singles_out_the_turns_that_satisfied_it() {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        add_turn(&conn, 1, "s", "2026-06-01T08:00:00", "eerste", 95.0);
+        add_turn(&conn, 2, "s", "2026-06-01T09:00:00", "tweede", 12.0);
+        add_turn(&conn, 3, "s", "2026-06-01T10:00:00", "derde", 30.0);
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = GetSessionsArgs { filter: Some("low_recog".into()), ..Default::default() };
+        let turns = conversation_insights(&conn, &args, InsightUnit::Interactions).expect("int");
+        assert!(turns.matches_are_narrowed);
+        assert_eq!(turns.session_count, 1);
+        assert_eq!(turns.matched_interactions, 2, "only the two turns under 60");
+        assert_eq!(turns.by_hour[9].count, 1);
+        assert_eq!(turns.by_hour[10].count, 1);
+        assert_eq!(turns.by_hour[8].count, 0, "the 95% turn did not satisfy the pill");
+    }
+
+    /// The temp table the aggregates read is per-connection and the connection
+    /// outlives the call, so a second run must not see the first run's rows.
+    #[test]
+    fn a_second_run_does_not_see_the_first_runs_result_set() {
+        let conn = seed(&[
+            Sess { uuid: "a", ..Default::default() },
+            Sess { uuid: "b", ..Default::default() },
+        ]);
+        assert_eq!(insights(&conn).session_count, 2);
+        assert_eq!(insights(&conn).session_count, 2, "not 4");
+        // …including across a change of unit, which builds a second temp table.
+        let turns =
+            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions)
+                .expect("insights");
+        assert_eq!(turns.matched_interactions, 2);
+        assert_eq!(
+            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions)
+                .expect("insights")
+                .matched_interactions,
+            2,
+            "not 4"
+        );
+
+        let narrowed = conversation_insights(
+            &conn,
+            &GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
+            InsightUnit::Conversations
+        )
+        .expect("insights");
+        assert_eq!(narrowed.session_count, 0);
+        assert_eq!(insights(&conn).session_count, 2);
+    }
+}
+
 #[cfg(test)]
 mod conv_search {
     use super::*;
