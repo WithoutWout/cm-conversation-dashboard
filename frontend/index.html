@@ -10787,6 +10787,12 @@
             listen
               ? listen("ai-export-progress", handler)
               : Promise.resolve(() => {}),
+          // The one-time migrations a first open runs. Silent on every open
+          // after that, which is why the label only changes when one fires.
+          onDbMigrating: (handler) =>
+            listen
+              ? listen("db-migrating", handler)
+              : Promise.resolve(() => {}),
           // Interrupts whatever the conversations database is running — a
           // session search or an Insights read, which cannot both be in flight
           // because they share one connection behind one lock.
@@ -10935,6 +10941,8 @@
           })
       if (!window.backend.onAiExportProgress)
         window.backend.onAiExportProgress = () => Promise.resolve(() => {})
+      if (!window.backend.onDbMigrating)
+        window.backend.onDbMigrating = () => Promise.resolve(() => {})
       if (!window.backend.cancelDbQuery) window.backend.cancelDbQuery = _convStub
       if (!window.backend.getSessionInteractions)
         window.backend.getSessionInteractions = () => Promise.resolve([])
@@ -19950,6 +19958,16 @@
           _cdataRenderChrome()
       }
 
+      /// What each migration phase says while it runs.
+      ///
+      /// Worded as what is happening to *their* data, not as the name of the
+      /// table involved: "answerIndex" means nothing to the person waiting.
+      const DB_MIGRATION_LABELS = {
+        answerIndex: "Indexing what answered each question…",
+        contexts: "Reorganising stored conversations…",
+        compacting: "Reclaiming disk space…",
+      }
+
       /**
        * Connect to a database file.
        *
@@ -19959,6 +19977,15 @@
        * backfills. On a mature database that is seconds of a frozen-looking
        * window, so it gets the overlay — without a Cancel button, because
        * there is nothing safe to cancel halfway through a migration.
+       *
+       * **A first open after an upgrade is a different operation again.**
+       * Interning the stored contexts rewrites every row and then compacts the
+       * file — 19-64 s on an 824 MB database, depending on how much of it is
+       * already in the page cache — and a spinner that spends all of
+       * it saying "Opening database…" reads as a hang. The backend reports its
+       * phases and this relabels the overlay as they arrive; on every open
+       * after that no event fires and the label never changes, which is
+       * exactly right.
        */
       async function openDbAtPath(path) {
         setConvOverlay(
@@ -19967,6 +19994,32 @@
           false,
         )
         setConvDbBusy(true)
+        // Subscribed before the invoke, or the first phase is missed. Awaited
+        // for the same reason: `listen` resolves once the listener is actually
+        // registered, and starting the work before then is the same race.
+        let unlistenMigration = null
+        try {
+          unlistenMigration = await window.backend.onDbMigrating((ev) => {
+            const p = (ev && ev.payload) || {}
+            const label = DB_MIGRATION_LABELS[p.phase]
+            if (!label) return
+            // The row count is a live count, not a percentage — knowing how
+            // many are left would cost the very scan the migration exists to
+            // stop doing. It is here because it is the only thing on screen
+            // that visibly moves.
+            const moved =
+              p.phase === "contexts" && p.done > 0
+                ? ` ${p.done.toLocaleString()} conversations moved.`
+                : ""
+            setConvOverlay(
+              true,
+              `${label}${moved} This runs once.`,
+              false,
+            )
+          })
+        } catch {
+          unlistenMigration = null
+        }
         // Same paint yield loadSessions() needs, and bounded for the same
         // reason: this must not hang if the window isn't being composited.
         await yieldToPaint()
@@ -19989,6 +20042,14 @@
           showImportToast("error", "Could not open database: " + e)
           return false
         } finally {
+          // The migration cannot report anything once the open has returned,
+          // and a listener left registered would relabel a later open's
+          // overlay from a database this one no longer has.
+          if (unlistenMigration) {
+            try {
+              unlistenMigration()
+            } catch {}
+          }
           // loadSessions() owns the overlay on its own path and has already
           // hidden it by now; hiding twice is harmless, leaving it up is not.
           setConvOverlay(false)

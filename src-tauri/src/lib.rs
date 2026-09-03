@@ -48,6 +48,58 @@ const UPDATE_PROGRESS_EVENT: &str = "update-progress";
 /// with a save dialog, a full-result query and a file write inside it.
 const AI_EXPORT_PROGRESS_EVENT: &str = "ai-export-progress";
 
+/// Phase updates for the one-time migrations [`open_db`] runs.
+///
+/// Opening a database is normally under a second, so it has never needed to say
+/// anything. A database that has not been migrated yet is a different
+/// operation: interning the contexts rewrites every row and then VACUUMs, which
+/// on an 824 MB / 149k-row database is 19-64 s (warm to cold page cache) of a
+/// spinner that otherwise says
+/// "Opening database…" and gives no sign of being alive.
+const DB_MIGRATION_EVENT: &str = "db-migrating";
+
+/// What a migration is doing, as the renderer needs to hear it.
+///
+/// Only phases that are actually slow are reported. `Contexts` carries a
+/// running count rather than a percentage on purpose: knowing how many rows are
+/// left would cost a full scan of the widest column in the database to answer,
+/// which is the very thing the migration exists to stop doing. A live count is
+/// honest and free; a progress bar would be neither.
+#[derive(Clone, Copy)]
+enum MigrationPhase {
+    /// Building `answer_index` from the interactions already stored.
+    AnswerIndex,
+    /// Interning `contexts`, with the number of rows moved so far.
+    Contexts(i64),
+    /// The VACUUM that turns the freed pages back into disk space.
+    Compacting,
+}
+
+impl MigrationPhase {
+    fn payload(self) -> serde_json::Value {
+        match self {
+            Self::AnswerIndex => serde_json::json!({ "phase": "answerIndex" }),
+            Self::Contexts(done) => serde_json::json!({ "phase": "contexts", "done": done }),
+            Self::Compacting => serde_json::json!({ "phase": "compacting" }),
+        }
+    }
+}
+
+/// Where an open reports its migration progress, if anywhere.
+///
+/// A borrowed closure rather than an `AppHandle`, so `open_db` stays callable
+/// from the ~15 tests and the perf harnesses that have no Tauri app to hand —
+/// they pass [`NO_MIGRATION_PROGRESS`] and the calls compile away.
+type MigrationReporter<'a> = &'a dyn Fn(MigrationPhase);
+
+/// The reporter for every caller that has nowhere to report to.
+///
+/// Only the tests and the perf harnesses use it — `set_db_path` is the one
+/// production caller and it always reports — so a non-test build sees it, and
+/// [`open_db`] beside it, as dead.
+#[allow(dead_code)]
+const NO_MIGRATION_PROGRESS: MigrationReporter<'static> = &|_| {};
+
 /// Rows buffered before an import commits a transaction.
 ///
 /// Each flush is one commit, so this is the commit interval as much as a buffer
@@ -1181,6 +1233,7 @@ CREATE TABLE IF NOT EXISTS interactions (
     articles                TEXT,
     faqs_found              TEXT,
     contexts                TEXT,
+    contexts_id             INTEGER,
     pages                   TEXT,
     link_click_info         TEXT,
     feedback_info           TEXT,
@@ -1233,6 +1286,72 @@ CREATE TABLE IF NOT EXISTS entity_index (
     matched      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (log_id, name)
 ) WITHOUT ROWID;
+-- What an answer came from, lifted out of `article_ids` and `dialog_paths` at
+-- import time — the third table of the same family as `entity_index` and
+-- `metadata_index`, and for the same reason.
+--
+-- Every Insights read used to answer "which Articles / Dialogs / nodes / exit
+-- statuses does this result set involve?" with `json_each` over the matched
+-- rows of `interactions`. That table is by far the largest thing in the file
+-- (553 MB of an 824 MB database on the reference export, because `contexts`
+-- alone is 173 MB of it), so those two charts were reading hundreds of
+-- megabytes to produce fifteen bars — and they were the bulk of every read:
+-- `dialog_paths` and `article_ids` together measured 70-90% of the total.
+--
+-- Worse, the cost did not shrink with the search. The planner has no statistics
+-- for the resolved temp table, so it drove from `interactions` and probed the
+-- scope per row: a search matching 1331 conversations cost *more* (4954 ms)
+-- than no filter at all (461 ms). Pinning the join order with `CROSS JOIN` was
+-- measured and rejected — it wins narrow and loses wide, and `ANALYZE` on the
+-- temp table does not settle it either. This table removes the question
+-- instead. Measured on the same 149k-interaction database: 12.7 s to 51 ms
+-- narrow, 14.4 s to 118 ms wide.
+--
+-- One row per (turn, kind, value), so `COUNT(*)` here is `COUNT(DISTINCT
+-- log_id)` there and the interactions reading needs no DISTINCT at all; the
+-- conversations reading still counts distinct sessions. `WITHOUT ROWID` keeps
+-- it to one write per fact, as `entity_index` does.
+--
+-- `idx_answer_session` is what the conversations reading joins on; the
+-- interactions reading probes the primary key by `log_id`. There is
+-- deliberately no index on `(kind, value)` — nothing reads this table that way
+-- yet, and every extra b-tree is a per-row tax on import. Add one with the
+-- query that needs it (the `#ID` search is the obvious candidate), not before.
+CREATE TABLE IF NOT EXISTS answer_index (
+    log_id       INTEGER NOT NULL,
+    session_uuid TEXT NOT NULL,
+    kind         INTEGER NOT NULL,
+    value        TEXT NOT NULL,
+    PRIMARY KEY (log_id, kind, value)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_answer_session ON answer_index(session_uuid, kind);
+-- The session context JSON, stored once per distinct value instead of once per
+-- turn.
+--
+-- `interactions.contexts` was **173 MB of an 824 MB database** — 21% of the
+-- whole file — holding only 15,404 distinct values across 149,761 rows. The
+-- context of a session barely changes between its turns, and CM.com repeats the
+-- whole blob on every one of them; at ~1.2 KB each that is comfortably past
+-- SQLite's inline-payload limit, so every row spilled onto overflow pages and
+-- every scan of `interactions` paid for them.
+--
+-- Interning it took `interactions` from 553 MB to 262 MB and the file from
+-- 824 MB to 531 MB. Nothing about what the app shows changes: the readers
+-- resolve the reference back to the same JSON.
+--
+-- **The index is on a hash, not on the JSON.** A `UNIQUE` constraint on `json`
+-- is the obvious spelling and it costs a second full copy of every blob in the
+-- index — measured at **67 MB against 0.18 MB** for the hash index, which is
+-- most of the saving given back. Lookup is by hash *and* json, so a collision
+-- (or a change to the hash function) can only ever cost a duplicate blob row;
+-- it can never return the wrong context. That is what makes a non-cryptographic
+-- hash the right tool here.
+CREATE TABLE IF NOT EXISTS context_blobs (
+    id   INTEGER PRIMARY KEY,
+    hash INTEGER NOT NULL,
+    json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_context_blobs_hash ON context_blobs(hash);
 CREATE TABLE IF NOT EXISTS session_summary (
     session_uuid                     TEXT PRIMARY KEY,
     first_ts                         TEXT NOT NULL,
@@ -1342,6 +1461,87 @@ const META_METADATA_INDEX_BUILT: &str = "metadata_index_built";
 /// 3. `CURRENT_DATETIME` excluded — one value per message, so every chip
 ///    matched exactly one message
 const METADATA_INDEX_RULES_VERSION: i64 = 3;
+
+const META_CONTEXTS_INTERNED: &str = "contexts_interned";
+
+/// Which *rules* the stored `contexts_id` references were built with.
+///
+/// Versioned for the reason [`METADATA_INDEX_RULES_VERSION`] is. Bump it if the
+/// set of values considered worth interning changes.
+///
+/// 1. initial
+const CONTEXTS_INTERN_RULES_VERSION: i64 = 1;
+
+/// The expression every reader uses in place of `interactions.contexts`.
+///
+/// Written once because there are four of them and they must not drift: a
+/// reader left on the raw column would silently return an empty context for
+/// every migrated row, which reads as "this conversation had no context"
+/// rather than as a bug.
+///
+/// The `COALESCE` fallback to `i.contexts` is deliberate and permanent. The
+/// migration nulls the column as it interns each row, so a database part-way
+/// through one — interrupted, or one whose migration failed and will be retried
+/// on the next open — has some rows in each shape, and both must read
+/// correctly. It also means the column can stay where it is: dropping it would
+/// rewrite the whole table for no benefit VACUUM does not already give.
+///
+/// Requires the interactions table to be aliased `i`.
+const CONTEXTS_EXPR: &str = "COALESCE((SELECT cb.json FROM context_blobs cb \
+     WHERE cb.id = i.contexts_id), i.contexts, '')";
+
+/// FNV-1a over the context JSON, as stored in `context_blobs.hash`.
+///
+/// Written out rather than taken from `DefaultHasher` because the value is
+/// *persisted*: `DefaultHasher`'s output is explicitly not guaranteed stable
+/// across Rust releases, so a toolchain upgrade would stop new imports finding
+/// the blobs already in the database and quietly start duplicating them. FNV-1a
+/// is four lines and fixed forever.
+///
+/// Truncated to 63 bits so it is always a positive SQLite INTEGER.
+fn context_blob_hash(json: &str) -> i64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in json.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    (h >> 1) as i64
+}
+
+/// Whether a context cell is worth interning at all.
+///
+/// The three empty spellings are ~1% of rows and would each take a blob row and
+/// a reference to say nothing; `CONTEXTS_EXPR` already resolves a null
+/// `contexts_id` to `''`, which is what every reader treated them as anyway.
+fn contexts_worth_interning(json: &str) -> bool {
+    !matches!(json.trim(), "" | "[]" | "null")
+}
+
+const META_ANSWER_INDEX_BUILT: &str = "answer_index_built";
+
+/// Which *rules* the stored `answer_index` rows were built with.
+///
+/// Versioned from the start rather than a bare "have we built it?" flag, for
+/// the reason [`METADATA_INDEX_RULES_VERSION`] records: a plain flag freezes a
+/// database at whatever rules it happened to be indexed with, and every later
+/// correction silently skips it. Bump this whenever [`answer_index_rows`]
+/// starts producing different facts for the same input; the rebuild clears the
+/// table first, because the backfill inserts with `OR IGNORE`.
+///
+/// 1. initial
+const ANSWER_INDEX_RULES_VERSION: i64 = 1;
+
+/// An Article the answer came from: `qa-<id>` in `article_ids`.
+const ANSWER_KIND_ARTICLE: i64 = 0;
+/// A Dialog node the answer came from: `dn-<dialog>-<node>` in `article_ids`.
+const ANSWER_KIND_DIALOG_NODE: i64 = 1;
+/// A Dialog the conversation walked through: the run before the first colon of
+/// a `dialog_paths` value. Deliberately wider than [`ANSWER_KIND_DIALOG_NODE`],
+/// which needs the answer to have come *from* one of the Dialog's nodes.
+const ANSWER_KIND_DIALOG: i64 = 2;
+/// How the conversation left the Dialog it was in: the key beside the path in
+/// `dialog_paths` (`EndedOrInProgress`, `DropOut`).
+const ANSWER_KIND_DIALOG_STATUS: i64 = 3;
 
 // ── Flagged DB schema ────────────────────────────────────────────────────────
 
@@ -1654,13 +1854,15 @@ SELECT
         LIMIT 1
     ), '') AS first_user_message,
     COALESCE((
-        SELECT i3.contexts
+        SELECT COALESCE((SELECT cb.json FROM context_blobs cb WHERE cb.id = i3.contexts_id),
+                        i3.contexts)
         FROM interactions i3
         WHERE i3.session_uuid = s.session_uuid
-          AND i3.contexts IS NOT NULL
-          AND i3.contexts != ''
-          AND i3.contexts != '[]'
-          AND i3.contexts != 'null'
+          AND (i3.contexts_id IS NOT NULL
+               OR (i3.contexts IS NOT NULL
+                   AND i3.contexts != ''
+                   AND i3.contexts != '[]'
+                   AND i3.contexts != 'null'))
         ORDER BY i3.log_id DESC
         LIMIT 1
     ), '') AS contexts_snapshot,
@@ -1918,7 +2120,17 @@ fn backfill_metadata_index(conn: &Connection, rebuild: bool) -> Result<i64, rusq
     }
 }
 
+/// Open a conversations database, running any pending migrations.
+///
+/// The plain form for the callers — tests, perf harnesses — that have no Tauri
+/// app to report to. [`open_db_reporting`] is the same function with somewhere
+/// to say what it is doing, and is what the app itself calls.
+#[allow(dead_code)]
 fn open_db(path: &str) -> Result<Connection, String> {
+    open_db_reporting(path, NO_MIGRATION_PROGRESS)
+}
+
+fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Cannot open DB: {e}"))?;
     // PRAGMA journal_mode returns a result row, so it must be run via query_row.
     // PRAGMA synchronous is a pure setter and works via execute_batch.
@@ -1946,11 +2158,15 @@ fn open_db(path: &str) -> Result<Connection, String> {
              SELECT json_extract(c.value, '$.name'), \
                     json_extract(c.value, '$.value'), \
                     i.session_uuid \
-             FROM interactions i, json_each(i.contexts) c \
-             WHERE i.contexts IS NOT NULL \
-               AND i.contexts != '' \
-               AND i.contexts != '[]' \
-               AND i.contexts != 'null' \
+             FROM interactions i, json_each(COALESCE( \
+                    (SELECT cb.json FROM context_blobs cb WHERE cb.id = i.contexts_id), \
+                    i.contexts)) c \
+             WHERE COALESCE( \
+                     (SELECT cb.json FROM context_blobs cb WHERE cb.id = i.contexts_id), \
+                     i.contexts) NOT IN ('', '[]', 'null') \
+               AND COALESCE( \
+                     (SELECT cb.json FROM context_blobs cb WHERE cb.id = i.contexts_id), \
+                     i.contexts) IS NOT NULL \
                AND json_extract(c.value, '$.name') IS NOT NULL \
                AND json_extract(c.value, '$.name') != ''",
         )
@@ -1990,6 +2206,86 @@ fn open_db(path: &str) -> Result<Connection, String> {
             }
             Err(e) => {
                 log::warn!(target: "import", "metadata backfill failed, will retry on next open: {e}");
+            }
+        }
+    }
+
+    // Migrate existing databases: the reference column beside `contexts`.
+    let _ = conn.execute_batch("ALTER TABLE interactions ADD COLUMN contexts_id INTEGER");
+
+    // Intern the contexts already in the database.
+    //
+    // This one is unlike the index backfills beside it: it does not derive a
+    // new table from `interactions`, it *rewrites* `interactions`. That is the
+    // point — the saving is in the rows it empties, not in the blobs it writes
+    // — and it is why the VACUUM below is part of the migration rather than
+    // something the user is left to discover in the Database tab. Without it
+    // the file is briefly *larger* and nothing measurable improves, which reads
+    // as the upgrade having done nothing.
+    let contexts_rules = meta_flag_version(&conn, META_CONTEXTS_INTERNED);
+    if contexts_rules < CONTEXTS_INTERN_RULES_VERSION {
+        let started = Instant::now();
+        report(MigrationPhase::Contexts(0));
+        match intern_existing_contexts(&conn, report) {
+            Ok(moved) => {
+                log::info!(
+                    target: "import",
+                    "interned {moved} session contexts in {}ms (rules v{contexts_rules} -> v{CONTEXTS_INTERN_RULES_VERSION})",
+                    started.elapsed().as_millis()
+                );
+                set_meta_version(&conn, META_CONTEXTS_INTERNED, CONTEXTS_INTERN_RULES_VERSION);
+                // Only when rows actually moved: on a fresh or already-migrated
+                // database this would be a full file rewrite for nothing.
+                // VACUUM cannot run inside a transaction and needs room for a
+                // second copy of the file, so a failure here is logged and
+                // shrugged off — the database is correct either way, just
+                // bigger, and `compact_database` can finish the job later.
+                if moved > 0 {
+                    report(MigrationPhase::Compacting);
+                    let vac = Instant::now();
+                    match conn.execute_batch("VACUUM") {
+                        Ok(()) => log::info!(
+                            target: "import",
+                            "compacted after interning in {}ms",
+                            vac.elapsed().as_millis()
+                        ),
+                        Err(e) => log::warn!(
+                            target: "import",
+                            "interning succeeded but VACUUM did not: {e} — run Compact database to reclaim the space"
+                        ),
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!(target: "import", "context interning failed, will retry on next open: {e}");
+            }
+        }
+    }
+
+    // Backfill answer_index from existing interactions.
+    //
+    // Versioned rather than a bare flag, and gated on the version rather than
+    // on "is the table empty?", for the two reasons the metadata backfill above
+    // is: a database whose answers came from nothing would otherwise re-scan
+    // the whole table on every launch, and a later correction to
+    // `answer_index_rows` has to be able to reach a database already indexed.
+    let answer_rules = meta_flag_version(&conn, META_ANSWER_INDEX_BUILT);
+    if answer_rules < ANSWER_INDEX_RULES_VERSION {
+        let started = Instant::now();
+        report(MigrationPhase::AnswerIndex);
+        let rebuild = answer_rules > 0;
+        match backfill_answer_index(&conn, rebuild) {
+            Ok(rows) => {
+                log::info!(
+                    target: "import",
+                    "indexed {rows} answer sources in {}ms (rules v{answer_rules} -> v{ANSWER_INDEX_RULES_VERSION}{})",
+                    started.elapsed().as_millis(),
+                    if rebuild { ", rebuilt" } else { "" }
+                );
+                set_meta_version(&conn, META_ANSWER_INDEX_BUILT, ANSWER_INDEX_RULES_VERSION);
+            }
+            Err(e) => {
+                log::warn!(target: "import", "answer backfill failed, will retry on next open: {e}");
             }
         }
     }
@@ -2253,6 +2549,11 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
          (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
         params![cutoff_dt],
     );
+    let _ = conn.execute(
+        "DELETE FROM answer_index WHERE log_id IN \
+         (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
+        params![cutoff_dt],
+    );
     let deleted = conn
         .execute(
             "DELETE FROM interactions WHERE timestamp_start < ?1",
@@ -2285,6 +2586,7 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
 
 #[tauri::command]
 async fn set_db_path(
+    app: AppHandle,
     db_state: State<'_, SharedDbState>,
     search_interrupt: State<'_, SharedSearchInterrupt>,
     path: String,
@@ -2292,7 +2594,14 @@ async fn set_db_path(
     let db = db_state.inner().clone();
     let interrupt_state = search_interrupt.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_db(&path)?;
+        // A first open of an unmigrated database is not the sub-second
+        // operation the overlay's "Opening database…" implies — see
+        // `DB_MIGRATION_EVENT`. Emitting from inside `spawn_blocking` is fine:
+        // the work is on this thread, but the event goes out through the app
+        // handle rather than through the blocked runtime.
+        let conn = open_db_reporting(&path, &|phase| {
+            let _ = app.emit(DB_MIGRATION_EVENT, phase.payload());
+        })?;
         let interrupt_handle = Arc::new(conn.get_interrupt_handle());
         let mut state = db.lock().map_err(|e| e.to_string())?;
         state.conn = Some(conn);
@@ -2861,6 +3170,254 @@ fn entity_index_rows(recognition_details: &str) -> Vec<(Option<i64>, String, Str
         .collect()
 }
 
+/// The `(kind, value)` facts one interaction contributes to [`answer_index`].
+///
+/// The single source of truth for what that table holds: the import path and
+/// the backfill both call this, so a database migrated today indexes exactly
+/// what a fresh import would — the property
+/// `the_answer_backfill_matches_what_an_import_would_have_indexed` asserts.
+///
+/// It reproduces, deliberately and exactly, what the two `json_each` aggregates
+/// in `conversation_insights_timed` used to compute inline:
+///
+/// - `article_ids` is `["qa-1234","dn-6391-4"]`. Only `qa-` and `dn-` entries
+///   are kept, and the prefix is what separates the two charts — an Article and
+///   a Dialog node answer different questions and would put two kinds of thing
+///   on one axis.
+/// - `dialog_paths` is `{"<status>": "<dialog>:<node>/<node>/…"}`. The path
+///   yields the Dialog (the run before the first colon), the key yields the exit
+///   status. The status is taken from **every** member, the Dialog only from
+///   string-valued ones — matching the old `k.kind = 1 OR je.type = 'text'`.
+///
+/// Duplicates within one turn are left to the table's primary key rather than
+/// deduplicated here: `INSERT OR IGNORE` already collapses them, and the counts
+/// were `COUNT(DISTINCT …)` on both sides before.
+fn answer_index_rows(article_ids: &str, dialog_paths: &str) -> Vec<(i64, String)> {
+    let mut out = Vec::new();
+
+    // Cheap gate before parsing, matching the old `LIKE '[%'` / `LIKE '{%'`
+    // guards: a cell that is empty, `null` or not the expected container is by
+    // far the common case on some exports and parsing it is pure cost.
+    if article_ids.trim_start().starts_with('[') {
+        if let Ok(ids) = serde_json::from_str::<Vec<serde_json::Value>>(article_ids) {
+            for id in &ids {
+                let Some(s) = id.as_str() else { continue };
+                if s.starts_with("qa-") {
+                    out.push((ANSWER_KIND_ARTICLE, s.to_string()));
+                } else if s.starts_with("dn-") {
+                    out.push((ANSWER_KIND_DIALOG_NODE, s.to_string()));
+                }
+            }
+        }
+    }
+
+    if dialog_paths.trim_start().starts_with('{') {
+        if let Ok(paths) =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(dialog_paths)
+        {
+            for (status, path) in &paths {
+                if !status.is_empty() {
+                    out.push((ANSWER_KIND_DIALOG_STATUS, status.clone()));
+                }
+                let Some(p) = path.as_str() else { continue };
+                let dialog = match p.find(':') {
+                    Some(i) => &p[..i],
+                    None => p,
+                };
+                if !dialog.is_empty() {
+                    out.push((ANSWER_KIND_DIALOG, dialog.to_string()));
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Rebuild [`answer_index`] from the interactions already in the database.
+///
+/// A Rust pass rather than one SQL statement, for the reason
+/// [`backfill_metadata_index`] is: routing the migration through the same
+/// [`answer_index_rows`] the import path uses is stronger than asserting that
+/// two implementations agree, because there is only one. It streams inside a
+/// single transaction, and a failure leaves the flag unset so the next open
+/// retries.
+fn backfill_answer_index(conn: &Connection, rebuild: bool) -> Result<i64, rusqlite::Error> {
+    let mut rows = 0i64;
+    conn.execute_batch("BEGIN")?;
+    let result = (|| -> Result<(), rusqlite::Error> {
+        if rebuild {
+            conn.execute("DELETE FROM answer_index", [])?;
+        }
+        let mut read = conn.prepare(
+            "SELECT log_id, session_uuid, COALESCE(article_ids, ''), COALESCE(dialog_paths, '') \
+             FROM interactions \
+             WHERE article_ids LIKE '[%' OR dialog_paths LIKE '{%'",
+        )?;
+        let mut write = conn.prepare(
+            "INSERT OR IGNORE INTO answer_index(log_id, session_uuid, kind, value) \
+             VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        let mut cursor = read.query([])?;
+        while let Some(row) = cursor.next()? {
+            let log_id: i64 = row.get(0)?;
+            let session: String = row.get(1)?;
+            if session.is_empty() {
+                continue;
+            }
+            let article_ids: String = row.get(2)?;
+            let dialog_paths: String = row.get(3)?;
+            for (kind, value) in answer_index_rows(&article_ids, &dialog_paths) {
+                rows += write.execute(params![log_id, session, kind, value])? as i64;
+            }
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(rows)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// Resolve one context blob to its `context_blobs.id`, inserting it if new.
+///
+/// `cache` is a per-batch memo of what has already been resolved. Without it
+/// this is a b-tree probe per imported row; with it, roughly one per *distinct*
+/// context, because a session's turns repeat the same blob and arrive together.
+/// It is scoped to the batch rather than the connection on purpose — an import
+/// run holds no bound on how many distinct contexts it will see, and a cache
+/// that lives as long as the run is a leak with a customer-shaped size.
+///
+/// Returns `None` for the empty spellings, which are left unreferenced; see
+/// [`contexts_worth_interning`].
+fn intern_contexts(
+    conn: &Connection,
+    cache: &mut HashMap<String, i64>,
+    json: &str,
+) -> Option<i64> {
+    if !contexts_worth_interning(json) {
+        return None;
+    }
+    if let Some(id) = cache.get(json) {
+        return Some(*id);
+    }
+    let hash = context_blob_hash(json);
+    // Matched on hash *and* json: the hash only narrows, the text decides. A
+    // collision therefore costs an extra row, never a wrong context.
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM context_blobs WHERE hash = ?1 AND json = ?2",
+            params![hash, json],
+            |r| r.get(0),
+        )
+        .ok();
+    let id = match existing {
+        Some(id) => id,
+        None => {
+            conn.execute(
+                "INSERT INTO context_blobs (hash, json) VALUES (?1, ?2)",
+                params![hash, json],
+            )
+            .ok()?;
+            conn.last_insert_rowid()
+        }
+    };
+    cache.insert(json.to_string(), id);
+    Some(id)
+}
+
+/// Move the contexts already in the database into `context_blobs`.
+///
+/// A Rust pass rather than one SQL statement, for the reason
+/// [`backfill_metadata_index`] is: it shares [`intern_contexts`] with the import
+/// path, so a migrated database and a freshly imported one cannot disagree about
+/// what a context reference means.
+///
+/// **It nulls `interactions.contexts` as it goes**, which is the half that
+/// actually reclaims anything — writing the reference alone would make the file
+/// larger, not smaller. `CONTEXTS_EXPR` reads both shapes, so a run interrupted
+/// half way leaves a database that still works and finishes on the next open.
+///
+/// Returns how many rows were interned, so the caller knows whether a VACUUM is
+/// worth its own cost.
+fn intern_existing_contexts(
+    conn: &Connection,
+    report: MigrationReporter,
+) -> Result<i64, rusqlite::Error> {
+    let mut moved = 0i64;
+    let mut cache: HashMap<String, i64> = HashMap::new();
+    // Batched rather than one transaction over the whole table: on the
+    // reference database this rewrites ~150k rows and 173 MB, and a single
+    // transaction that size holds the entire change in the WAL before any of it
+    // lands. Reading the ids first also keeps the read cursor off the table
+    // being updated.
+    const BATCH: usize = 20_000;
+    loop {
+        let pending: Vec<(i64, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT log_id, contexts FROM interactions \
+                 WHERE contexts_id IS NULL AND contexts IS NOT NULL \
+                   AND contexts NOT IN ('', '[]', 'null') \
+                 LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![BATCH as i64], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        if pending.is_empty() {
+            break;
+        }
+        conn.execute_batch("BEGIN")?;
+        let result = (|| -> Result<(), rusqlite::Error> {
+            let mut upd = conn.prepare(
+                "UPDATE interactions SET contexts_id = ?2, contexts = NULL WHERE log_id = ?1",
+            )?;
+            for (log_id, json) in &pending {
+                match intern_contexts(conn, &mut cache, json) {
+                    Some(id) => {
+                        upd.execute(params![log_id, id])?;
+                        moved += 1;
+                    }
+                    // Not worth interning after all — clear it anyway, or the
+                    // next pass selects the same row forever.
+                    None => {
+                        conn.execute(
+                            "UPDATE interactions SET contexts = NULL WHERE log_id = ?1",
+                            params![log_id],
+                        )?;
+                    }
+                }
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => conn.execute_batch("COMMIT")?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e);
+            }
+        }
+        // Per batch, not per row: this is the only thing on screen moving, and
+        // 20,000 events to say the same sentence would cost more than the work.
+        report(MigrationPhase::Contexts(moved));
+        // The cache is per-run here rather than per-batch: the migration reads
+        // the whole table once and the distinct-context count is bounded by
+        // what is already stored (15,404 on the reference database), so it is a
+        // known small number rather than an open-ended one.
+        if pending.len() < BATCH {
+            break;
+        }
+    }
+    Ok(moved)
+}
+
 /// The whole import, against an open connection.
 ///
 /// Split out of the command so tests can drive a real CSV into a real database
@@ -2993,9 +3550,9 @@ fn import_csv_into(
                 article_ids, dialog_paths, tdialog_status,
                 recognition_type, recognition_quality,
                 generative_ai_sources, articles, faqs_found,
-                contexts, pages, link_click_info, feedback_info,
+                contexts, contexts_id, pages, link_click_info, feedback_info,
                 output_metadata, recognition_details, imported_at
-            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)"#,
+            ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)"#,
         ) {
             Ok(s) => s,
             Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
@@ -3026,6 +3583,13 @@ fn import_csv_into(
             Ok(s) => s,
             Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
         };
+        let mut ans_stmt = match tx.prepare_cached(
+            "INSERT OR IGNORE INTO answer_index(log_id, session_uuid, kind, value) \
+             VALUES (?1, ?2, ?3, ?4)",
+        ) {
+            Ok(s) => s,
+            Err(e) => { errors.push(format!("Prepare error: {e}")); return; }
+        };
         let mut backfill_stmt = match tx.prepare_cached(
             "UPDATE interactions SET recognition_details = ?1 WHERE log_id = ?2 AND (recognition_details IS NULL OR recognition_details = '')",
         ) {
@@ -3042,6 +3606,9 @@ fn import_csv_into(
         // normalizations per row cost no allocation after the first.
         let mut ts_start = String::with_capacity(32);
         let mut ts_end = String::with_capacity(32);
+        // Context blob -> id, for the length of this batch. See
+        // `intern_contexts` for why it is not held for the whole run.
+        let mut ctx_blob_cache: HashMap<String, i64> = HashMap::new();
         for record in batch {
             let get_r = |idx: Option<usize>| -> &str {
                 idx.and_then(|i| record.get(i)).unwrap_or("")
@@ -3054,6 +3621,14 @@ fn import_csv_into(
             parse_ts_into(get_r(c_ts_start), &mut ts_start);
             parse_ts_into(get_r(c_ts_end), &mut ts_end);
             let quality: f64 = get_r(c_recog_quality).parse().unwrap_or(0.0);
+            // The session context goes into `context_blobs` and the row keeps
+            // only a reference — see that table for why. `intern_contexts`
+            // memoizes within the batch, which is what keeps this to roughly
+            // one lookup per *distinct* context rather than one per row: a
+            // session's turns almost always repeat the same blob, and they
+            // arrive together.
+            let contexts_id =
+                intern_contexts(&tx, &mut ctx_blob_cache, get_r(c_contexts));
             let result = ins_stmt.execute(
                 params![
                     log_id,
@@ -3074,7 +3649,10 @@ fn import_csv_into(
                     get_r(c_genai),
                     get_r(c_articles),
                     get_r(c_faqs),
-                    get_r(c_contexts),
+                    // The column itself stays NULL from here on; the reference
+                    // beside it is where the context lives.
+                    None::<String>,
+                    contexts_id,
                     get_r(c_pages),
                     get_r(c_link_click),
                     get_r(c_feedback),
@@ -3137,6 +3715,19 @@ fn import_csv_into(
                             matched.as_str()
                         ]);
                     }
+                    // Index what this turn's answer came from, so the Insights
+                    // Article/Dialog charts never have to parse these two JSON
+                    // columns at query time — see `answer_index`.
+                    for (kind, value) in
+                        answer_index_rows(get_r(c_article_ids), get_r(c_dialog_paths))
+                    {
+                        let _ = ans_stmt.execute(params![
+                            log_id,
+                            session_id,
+                            kind,
+                            value.as_str()
+                        ]);
+                    }
                     *inserted += 1;
                 }
                 Ok(_) => {
@@ -3161,6 +3752,7 @@ fn import_csv_into(
         drop(ctx_stmt);
         drop(meta_stmt);
         drop(ent_stmt);
+        drop(ans_stmt);
         drop(backfill_stmt);
         drop(touched_stmt);
         let _ = tx.commit();
@@ -5021,15 +5613,6 @@ impl Default for InsightSections {
     }
 }
 
-impl InsightSections {
-    /// `dialog_paths` is one JSON scan yielding two charts in two different
-    /// sections — the Dialog walked through (Content) and how the conversation
-    /// left it (Quality) — so it runs when either was asked for.
-    fn needs_dialog_paths(self) -> bool {
-        self.quality || self.content
-    }
-}
-
 /// What the Insights temp tables currently hold.
 ///
 /// The result set is resolved by `build_session_filter_query` — an FTS match,
@@ -5313,22 +5896,27 @@ fn conversation_insights_timed(
         // Both branches expose `i.*` (the interaction) so the "what answered"
         // queries below are written once; only what a row *is* differs — one
         // conversation, or one matching turn.
-        let (row_from, ts_col, culture_col, count_expr) = match unit {
-            InsightUnit::Conversations => (
-                "insight_sessions s",
-                "s.first_ts",
-                "s.culture",
-                "COUNT(DISTINCT i.session_uuid)",
-            ),
+        let (row_from, ts_col, culture_col) = match unit {
+            InsightUnit::Conversations => ("insight_sessions s", "s.first_ts", "s.culture"),
             InsightUnit::Interactions => (
                 "insight_matches m JOIN interactions i ON i.log_id = m.log_id",
                 "i.timestamp_start",
                 "i.culture",
-                "COUNT(DISTINCT i.log_id)",
             ),
         };
         // The row source for "what answered" — the interactions themselves,
         // either all of a matched conversation's or only the matching ones.
+        //
+        // The join order is deliberately left to the planner. Pinning it with
+        // `CROSS JOIN` so the resolved temp table drives was tried and measured:
+        // it is 62x faster on a narrowed search and materially *slower* when the
+        // scope is most of the database, because at that point 16k index seeks
+        // into a 553 MB table lose to one sequential scan. `ANALYZE` on the temp
+        // table does not settle it either — with real row counts the planner
+        // still chose seeks for the wide case, and it got slower, not faster.
+        // A hint that is wrong half the time is worse than no hint; the fix for
+        // the queries that actually hurt is `answer_index`, which stops them
+        // reading `interactions` at all.
         let answer_from = match unit {
             InsightUnit::Conversations => {
                 "insight_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid"
@@ -5639,64 +6227,55 @@ fn conversation_insights_timed(
         )? };
         phases.mark("entities");
 
-        // `article_ids` holds both Articles (`qa-…`) and the Dialog nodes an
-        // answer came from (`dn-<dialog>-<node>`). They answer different
-        // questions and merging them into one chart would put two kinds of
-        // thing on one axis — but they are one column, so they are read in one
-        // pass and split afterwards. Two passes meant parsing every row's JSON
-        // twice, which measured as the third-largest cost in the whole run.
-        let (articles, dialog_nodes) = if !sections.content {
-            (Vec::new(), Vec::new())
+        // ── What answered ──
+        //
+        // Four charts, one pass, and none of it touches `interactions`.
+        //
+        // These used to be two `json_each` aggregates over the matched rows of
+        // `interactions` — re-deriving, on every read, facts that never change
+        // once a row is imported. On the reference database that was 70-90% of
+        // the entire Insights read, and it got *worse* as the search narrowed,
+        // because the planner drove from the 553 MB table and probed the
+        // resolved scope per row. `answer_index` holds the same facts as one
+        // row per (turn, kind, value); see its definition in `DB_SCHEMA` for the
+        // measurements and for why a `CROSS JOIN` hint was not the fix.
+        //
+        // The four kinds are still four separate charts — an Article, a Dialog
+        // node, a Dialog walked through and an exit status answer different
+        // questions and would put four kinds of thing on one axis — but they
+        // are one table, so they are ranked in one pass and split afterwards.
+        // Only the kinds the chosen sections actually render are asked for: an
+        // unselected section is not a cheap query left running for tidiness.
+        let mut wanted_kinds: Vec<i64> = Vec::new();
+        if sections.content {
+            wanted_kinds.push(ANSWER_KIND_ARTICLE);
+            wanted_kinds.push(ANSWER_KIND_DIALOG_NODE);
+            wanted_kinds.push(ANSWER_KIND_DIALOG);
+        }
+        if sections.quality {
+            wanted_kinds.push(ANSWER_KIND_DIALOG_STATUS);
+        }
+        let (articles, dialog_nodes, dialogs, dialog_status) = if wanted_kinds.is_empty() {
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
         } else {
-            let mut by_kind = insight_split_buckets(
-                conn,
-                &format!(
-                    "SELECT bucket_kind, bucket_label, c FROM (\
-                       SELECT bucket_kind, bucket_label, c, \
-                              ROW_NUMBER() OVER (PARTITION BY bucket_kind \
-                                                 ORDER BY c DESC, bucket_label ASC) rn \
-                       FROM (\
-                         SELECT CASE WHEN je.value LIKE 'qa-%' THEN 0 ELSE 1 END AS bucket_kind, \
-                                je.value AS bucket_label, {count_expr} c \
-                         FROM {answer_from}, json_each(i.article_ids) je \
-                         WHERE i.article_ids LIKE '[%' AND json_valid(i.article_ids) \
-                           AND (je.value LIKE 'qa-%' OR je.value LIKE 'dn-%') \
-                         GROUP BY bucket_kind, bucket_label\
-                       )\
-                     ) WHERE rn <= ?1 ORDER BY bucket_kind ASC, c DESC, bucket_label ASC"
+            // The row source for the answer facts, mirroring `answer_from` but
+            // against the narrow table: all of a matched conversation's turns,
+            // or only the matching ones.
+            let (answer_src, answer_count) = match unit {
+                InsightUnit::Conversations => (
+                    "insight_sessions s JOIN answer_index a ON a.session_uuid = s.session_uuid",
+                    "COUNT(DISTINCT a.session_uuid)",
                 ),
-                &[&INSIGHT_TOP_N],
-                "(unknown)",
-            )?;
-            (by_kind.remove(&0).unwrap_or_default(), by_kind.remove(&1).unwrap_or_default())
-        };
-        phases.mark("article_ids");
-
-        // A `dialog_paths` cell is `{"<status>": "<dialog>:<node>/<node>/…"}`.
-        // Both readings of it come out of one pass, for the same reason
-        // `article_ids` does:
-        //
-        //   kind 0 — the Dialog the conversation walked through, the run before
-        //            the first colon. Deliberately a wider question than the
-        //            `dn-` chart above, which needs the answer to have come
-        //            *from* one of the Dialog's nodes.
-        //   kind 1 — the key beside the path (`EndedOrInProgress`, `DropOut`),
-        //            which is how the conversation left the Dialog it was in.
-        //
-        // `CROSS JOIN` is load-bearing: it fixes the two-row relation as the
-        // inner loop, so `json_each` is walked once and each entry yields both
-        // readings. Written as a plain comma join SQLite is free to put the two
-        // rows outside and parse the JSON twice, which is the cost this exists
-        // to avoid.
-        //
-        // So are the `bucket_` alias names. `json_each` exposes columns called
-        // `key`, `value` and `type`, and a `GROUP BY value` binds to the real
-        // column in preference to an output alias of the same name — so the
-        // obvious spelling grouped by the raw path rather than by the Dialog
-        // cut out of it, and `6391:2` and `6391:2/15/4` counted as two Dialogs.
-        let (dialogs, dialog_status) = if !sections.needs_dialog_paths() {
-            (Vec::new(), Vec::new())
-        } else {
+                InsightUnit::Interactions => (
+                    "insight_matches m JOIN answer_index a ON a.log_id = m.log_id",
+                    "COUNT(DISTINCT a.log_id)",
+                ),
+            };
+            let kind_list = wanted_kinds
+                .iter()
+                .map(|k| k.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             let mut by_kind = insight_split_buckets(
                 conn,
                 &format!(
@@ -5705,17 +6284,10 @@ fn conversation_insights_timed(
                               ROW_NUMBER() OVER (PARTITION BY bucket_kind \
                                                  ORDER BY c DESC, bucket_label ASC) rn \
                        FROM (\
-                         SELECT k.kind AS bucket_kind, \
-                                CASE k.kind WHEN 0 THEN \
-                                  CASE WHEN instr(je.value, ':') > 0 \
-                                       THEN substr(je.value, 1, instr(je.value, ':') - 1) \
-                                       ELSE je.value END \
-                                  ELSE je.key END AS bucket_label, \
-                                {count_expr} c \
-                         FROM {answer_from}, json_each(i.dialog_paths) je \
-                         CROSS JOIN (SELECT 0 AS kind UNION ALL SELECT 1) k \
-                         WHERE i.dialog_paths LIKE '{{%' AND json_valid(i.dialog_paths) \
-                           AND (k.kind = 1 OR je.type = 'text') \
+                         SELECT a.kind AS bucket_kind, a.value AS bucket_label, \
+                                {answer_count} c \
+                         FROM {answer_src} \
+                         WHERE a.kind IN ({kind_list}) \
                          GROUP BY bucket_kind, bucket_label\
                        )\
                      ) WHERE rn <= ?1 ORDER BY bucket_kind ASC, c DESC, bucket_label ASC"
@@ -5724,11 +6296,13 @@ fn conversation_insights_timed(
                 "(unknown)",
             )?;
             (
-                if sections.content { by_kind.remove(&0).unwrap_or_default() } else { Vec::new() },
-                if sections.quality { by_kind.remove(&1).unwrap_or_default() } else { Vec::new() },
+                by_kind.remove(&ANSWER_KIND_ARTICLE).unwrap_or_default(),
+                by_kind.remove(&ANSWER_KIND_DIALOG_NODE).unwrap_or_default(),
+                by_kind.remove(&ANSWER_KIND_DIALOG).unwrap_or_default(),
+                by_kind.remove(&ANSWER_KIND_DIALOG_STATUS).unwrap_or_default(),
             )
         };
-        phases.mark("dialog_paths");
+        phases.mark("answer_index");
 
 
 
@@ -6833,12 +7407,13 @@ fn tag_option_rows(conn: &Connection, table: &str) -> Result<Vec<ContextOption>,
     // that simply has a lot of values — picking every chip by hand is not a
     // realistic way to ask "was this set?". It is also the only way to express
     // the complement of "not set" once a key has more values than are shown.
+    // `session_summary` holds exactly one row per session, so this is the same
+    // number `COUNT(DISTINCT session_uuid) FROM interactions` returns — without
+    // walking `idx_session_ts` over every interaction in the database to
+    // rediscover it. Measured on a 149k-interaction database: 234 ms to 11 ms,
+    // and the filter popover asks for it twice (Context and Metadata).
     let total_sessions: i64 = conn
-        .query_row(
-            "SELECT COUNT(DISTINCT session_uuid) FROM interactions",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
         .unwrap_or(0);
     let mut stmt2 = conn
         .prepare(&format!(
@@ -6896,7 +7471,8 @@ async fn get_session_interactions(
 
         let mut stmt = conn
             .prepare_cached(
-                r#"SELECT
+                &format!(
+                    r#"SELECT
                 log_id, interaction_uuid, session_uuid,
                 timestamp_start, timestamp_end, culture,
                 main_interaction_type, all_interaction_types,
@@ -6904,11 +7480,12 @@ async fn get_session_interactions(
                 article_ids, dialog_paths, tdialog_status,
                 recognition_type, recognition_quality,
                 generative_ai_sources, articles, faqs_found,
-                contexts, pages, link_click_info, feedback_info,
+                {CONTEXTS_EXPR}, pages, link_click_info, feedback_info,
                 output_metadata, recognition_details
-            FROM interactions
+            FROM interactions i
             WHERE session_uuid = ?1
-            ORDER BY log_id ASC"#,
+            ORDER BY log_id ASC"#
+                ),
             )
             .map_err(|e| format!("Prepare error: {e}"))?;
 
@@ -7314,6 +7891,13 @@ async fn delete_interactions_by_dates(
             ),
             params_refs.as_slice(),
         );
+        let _ = tx.execute(
+            &format!(
+                "DELETE FROM answer_index WHERE log_id IN \
+                 (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
+            ),
+            params_refs.as_slice(),
+        );
 
         // Delete from interactions
         let deleted = tx
@@ -7693,7 +8277,8 @@ async fn flag_session(
             let conn = state.conn.as_ref().ok_or("No database open.")?;
             let mut stmt = conn
                 .prepare(
-                    r#"SELECT
+                    &format!(
+                        r#"SELECT
                         log_id, interaction_uuid, session_uuid,
                         timestamp_start, timestamp_end, culture,
                         main_interaction_type, all_interaction_types,
@@ -7701,11 +8286,12 @@ async fn flag_session(
                         article_ids, dialog_paths, tdialog_status,
                         recognition_type, recognition_quality,
                         generative_ai_sources, articles, faqs_found,
-                        contexts, pages, link_click_info, feedback_info,
+                        {CONTEXTS_EXPR}, pages, link_click_info, feedback_info,
                         output_metadata, recognition_details
-                    FROM interactions
+                    FROM interactions i
                     WHERE session_uuid = ?1
-                    ORDER BY log_id ASC"#,
+                    ORDER BY log_id ASC"#
+                    ),
                 )
                 .map_err(|e| format!("Prepare error: {e}"))?;
             let rows: Vec<InteractionRow> = stmt
@@ -9163,6 +9749,203 @@ mod tests {
         let max_summary_log: i64 = conn.query_row("SELECT MAX(last_log_id) FROM session_summary", [], |r| r.get(0)).unwrap();
         assert_eq!(sessions, summaries);
         assert_eq!(max_log, max_summary_log);
+    }
+
+    /// Interning the contexts changes the file, not the answers.
+    ///
+    /// This is the test the migration rests on. It rewrites `interactions`
+    /// rather than deriving a new table from it, so the failure mode is not a
+    /// crash — it is every conversation quietly reporting no context, which
+    /// looks like the data having changed. So every reader is snapshotted
+    /// before the migration and compared against itself after.
+    #[test]
+    fn interning_the_contexts_does_not_change_what_any_reader_returns() {
+        let conn = test_conn();
+        seed_corpus(&conn);
+        // A second turn repeating the first's context — the redundancy the
+        // whole change exists to remove — plus the three empty spellings, which
+        // must survive as "no context" rather than as a blob.
+        insert_row(&conn, Row { log_id: 20, session: "s1", ts: "2026-06-01T09:03:00", value: "en verder", main_type: "Question", all_types: "Question", feedback: "", quality: 0.7, recog_type: "Faq", contexts: r#"[{"name":"park","value":"efteling"}]"# });
+        insert_row(&conn, Row { log_id: 21, session: "s6", ts: "2026-06-01T09:04:00", value: "leeg", main_type: "Question", all_types: "Question", feedback: "", quality: 0.7, recog_type: "Faq", contexts: "null" });
+        rebuild_session_summary(&conn).expect("summary");
+
+        // What every reader says before the migration.
+        let read_contexts = |conn: &Connection| -> Vec<String> {
+            conn.prepare(&format!(
+                "SELECT log_id || '=' || {CONTEXTS_EXPR} FROM interactions i ORDER BY log_id"
+            ))
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        let read_snapshots = |conn: &Connection| -> Vec<String> {
+            conn.prepare(
+                "SELECT session_uuid || '=' || contexts_snapshot FROM session_summary \
+                 ORDER BY session_uuid",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        let before = read_contexts(&conn);
+        let snapshots_before = read_snapshots(&conn);
+        assert!(
+            before.iter().any(|r| r.contains("park")),
+            "fixture must actually carry contexts: {before:?}"
+        );
+        assert!(
+            snapshots_before.iter().any(|r| r.contains("park")),
+            "fixture must produce a snapshot: {snapshots_before:?}"
+        );
+
+        // The reporter is captured, not ignored: a migration that reports
+        // nothing leaves the open overlay silent for the whole of a ~19 s
+        // rewrite, which is the problem the event exists to solve.
+        let reported = std::cell::RefCell::new(Vec::new());
+        let moved = intern_existing_contexts(&conn, &|phase| {
+            if let MigrationPhase::Contexts(done) = phase {
+                reported.borrow_mut().push(done);
+            }
+        })
+        .expect("intern");
+        assert!(moved > 0, "nothing was interned");
+        let reported = reported.into_inner();
+        assert_eq!(
+            reported.last().copied(),
+            Some(moved),
+            "the last report must be the final count, got {reported:?}"
+        );
+
+        // Every context reads back byte for byte.
+        assert_eq!(read_contexts(&conn), before);
+        // And the column really was emptied of everything that costs anything
+        // — otherwise this test would pass on a migration that wrote the
+        // references and reclaimed nothing. The empty spellings are left where
+        // they are on purpose: they are four bytes, rewriting them would be a
+        // page write per row to save nothing, and `CONTEXTS_EXPR` reads them
+        // correctly either way.
+        let still_inline: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM interactions \
+                 WHERE contexts IS NOT NULL AND contexts NOT IN ('', '[]', 'null')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_inline, 0, "a real context was left inline");
+
+        // The summary is derived from the same column, so it has to be
+        // recomputable to the identical snapshot afterwards.
+        rebuild_session_summary(&conn).expect("resummary");
+        assert_eq!(read_snapshots(&conn), snapshots_before);
+
+        // The duplicate context is stored once, which is the entire point.
+        let blobs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM context_blobs", [], |r| r.get(0))
+            .unwrap();
+        let referencing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM interactions WHERE contexts_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            blobs < referencing,
+            "{referencing} rows should share fewer than {blobs} blobs"
+        );
+
+        // Running it again is a no-op rather than a second copy of everything.
+        assert_eq!(
+            intern_existing_contexts(&conn, NO_MIGRATION_PROGRESS).expect("re-intern"),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM context_blobs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            blobs
+        );
+    }
+
+    /// An import stores the reference, not the blob — and two turns sharing a
+    /// context share the row.
+    #[test]
+    fn importing_the_same_context_twice_stores_it_once() {
+        let conn = test_conn();
+        let ctx = r#"[{"name":"park","value":"efteling"}]"#;
+        let mut cache = HashMap::new();
+        let a = intern_contexts(&conn, &mut cache, ctx);
+        let b = intern_contexts(&conn, &mut cache, ctx);
+        assert_eq!(a, b);
+        assert!(a.is_some());
+        // A cold cache must find the existing row rather than insert a second.
+        let mut cold = HashMap::new();
+        assert_eq!(intern_contexts(&conn, &mut cold, ctx), a);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM context_blobs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        // The empty spellings take no row and no reference.
+        for empty in ["", "[]", "null", "  "] {
+            assert_eq!(intern_contexts(&conn, &mut cold, empty), None, "{empty:?}");
+        }
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM context_blobs", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        // Two different contexts that happen to be stored are told apart by the
+        // json, not merely by the hash.
+        let other = r#"[{"name":"park","value":"efteling2"}]"#;
+        assert_ne!(intern_contexts(&conn, &mut cold, other), a);
+    }
+
+    /// A purge takes the answer facts with it.
+    ///
+    /// `answer_index` is keyed by `log_id`, so a row left behind by a purge is
+    /// not merely stale — it is a fact about an interaction that no longer
+    /// exists, and it goes on being counted in every Insights chart. The same
+    /// failure `entity_index` has a rule about; both are derived tables that
+    /// only deletion can break.
+    #[test]
+    fn a_purge_removes_the_answer_facts_of_the_rows_it_strips() {
+        let conn = test_conn();
+        // `purge_old` compares ISO strings against a cutoff derived from the
+        // wall clock, so the two rows straddle it by construction rather than
+        // by arithmetic — otherwise this test would start failing on a date
+        // instead of on a defect.
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             article_ids, dialog_paths, imported_at) \
+             VALUES (1,'u','old','1971-01-01T09:00:00','[\"qa-1\"]','{\"DropOut\":\"9:1\"}',0), \
+                    (2,'u','new','2999-01-01T09:00:00','[\"qa-2\"]','{\"EndedOrInProgress\":\"7:1\"}',0)",
+            [],
+        )
+        .expect("insert");
+        backfill_answer_index(&conn, false).expect("index");
+        let indexed: i64 = conn
+            .query_row("SELECT COUNT(*) FROM answer_index", [], |r| r.get(0))
+            .unwrap();
+        // Three facts per row: the Article, the Dialog walked through, and the
+        // status it left on.
+        assert_eq!(indexed, 6, "both rows should be indexed");
+
+        purge_old(&conn, 30);
+
+        // The recent row's facts survive; the purged row's are gone with it.
+        let left: Vec<i64> = conn
+            .prepare("SELECT DISTINCT log_id FROM answer_index ORDER BY 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec![2], "purged interaction left answer rows behind");
     }
 
     /// A purge strips a session's rows entirely; its summary must disappear
@@ -10972,6 +11755,13 @@ mod insights {
             }
         }
         rebuild_session_summary(&conn).expect("summary");
+        // The Article/Dialog charts read `answer_index`, which a real database
+        // fills at import or at open. Seeding rows straight into `interactions`
+        // skips both, so the migration path is what stands in for them here —
+        // and going through `backfill_answer_index` rather than hand-written
+        // INSERTs is deliberate: a fixture that indexed differently from the
+        // app would make these tests agree with nothing.
+        backfill_answer_index(&conn, false).expect("answer index");
         conn
     }
 
@@ -12285,6 +13075,161 @@ mod conv_search {
 
     /// A database written before `metadata_index` existed is backfilled on
     /// open, while every later import goes through `metadata_index_rows`. Both
+    /// The four rows in `answer_index` are exactly the buckets the two
+    /// `json_each` aggregates used to compute inline.
+    ///
+    /// This is the test the whole change rests on. Replacing a query with a
+    /// precomputed table is only a performance change if the table holds the
+    /// same facts, and "the charts look about right" is not a check — a
+    /// silently narrower index reads as the data having changed. So the old SQL
+    /// is kept here, run against the same rows, and the two are compared bucket
+    /// for bucket.
+    #[test]
+    fn answer_index_holds_what_the_json_scans_used_to_compute() {
+        let conn = Connection::open_in_memory().expect("mem db");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+
+        // Real shapes, including the ones that made the old SQL subtle: a path
+        // with no colon, two paths in one cell, a `dn-` id that must not be
+        // read as an Article, an id that is neither, and a non-string path
+        // value (which contributes its status but no Dialog).
+        let rows: &[(i64, &str, &str, &str)] = &[
+            (1, "s1", r#"["qa-1868","dn-6391-4"]"#, r#"{"EndedOrInProgress":"6391:2/15/4"}"#),
+            (2, "s1", r#"["qa-1868"]"#, r#"{"DropOut":"6391:2"}"#),
+            (3, "s2", r#"["dn-193-7","other"]"#, r#"{"EndedOrInProgress":"193"}"#),
+            (4, "s2", "", r#"{"EndedOrInProgress":"6391:1","DropOut":"193:3"}"#),
+            (5, "s3", "[]", r#"{"Aborted":null}"#),
+            (6, "s3", "not json", "not json"),
+        ];
+        for (log_id, session, article_ids, dialog_paths) in rows {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, article_ids, dialog_paths, imported_at) \
+                 VALUES (?1,'u',?2,'2026-06-01T09:00:00',?3,?4,0)",
+                params![log_id, session, article_ids, dialog_paths],
+            )
+            .expect("insert");
+        }
+        backfill_answer_index(&conn, false).expect("backfill");
+
+        // The scope every Insights read joins against.
+        conn.execute_batch(INSIGHT_TEMP_TABLE).expect("temp table");
+        conn.execute_batch(
+            "INSERT INTO insight_sessions (session_uuid, first_ts) \
+             SELECT DISTINCT session_uuid, '2026-06-01T09:00:00' FROM interactions",
+        )
+        .expect("scope");
+
+        // What the old code ran: two aggregates, four kinds, renumbered here to
+        // the `ANSWER_KIND_*` values so the two sides are comparable.
+        let old_sql = "\
+            SELECT CASE WHEN je.value LIKE 'qa-%' THEN 0 ELSE 1 END AS bucket_kind, \
+                   je.value AS bucket_label, COUNT(DISTINCT i.session_uuid) c \
+            FROM insight_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid, \
+                 json_each(i.article_ids) je \
+            WHERE i.article_ids LIKE '[%' AND json_valid(i.article_ids) \
+              AND (je.value LIKE 'qa-%' OR je.value LIKE 'dn-%') \
+            GROUP BY bucket_kind, bucket_label \
+            UNION ALL \
+            SELECT k.kind + 2 AS bucket_kind, \
+                   CASE k.kind WHEN 0 THEN \
+                     CASE WHEN instr(je.value, ':') > 0 \
+                          THEN substr(je.value, 1, instr(je.value, ':') - 1) \
+                          ELSE je.value END \
+                     ELSE je.key END AS bucket_label, \
+                   COUNT(DISTINCT i.session_uuid) c \
+            FROM insight_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid, \
+                 json_each(i.dialog_paths) je \
+            CROSS JOIN (SELECT 0 AS kind UNION ALL SELECT 1) k \
+            WHERE i.dialog_paths LIKE '{%' AND json_valid(i.dialog_paths) \
+              AND (k.kind = 1 OR je.type = 'text') \
+            GROUP BY bucket_kind, bucket_label \
+            ORDER BY 1, 2";
+        let new_sql = "\
+            SELECT a.kind, a.value, COUNT(DISTINCT a.session_uuid) c \
+            FROM insight_sessions s JOIN answer_index a ON a.session_uuid = s.session_uuid \
+            GROUP BY a.kind, a.value ORDER BY 1, 2";
+
+        let read = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| {
+                    Ok(format!(
+                        "{}|{}|{}",
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)?
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        let old = read(old_sql);
+        let new = read(new_sql);
+        assert_eq!(new, old, "answer_index disagrees with the json_each scans");
+
+        // Not vacuous: the shapes above have to have produced all four kinds,
+        // or the comparison could pass on an empty result.
+        assert!(old.iter().any(|r| r.starts_with("0|qa-1868|")), "{old:?}");
+        assert!(old.iter().any(|r| r.starts_with("1|dn-6391-4|")), "{old:?}");
+        assert!(old.iter().any(|r| r.starts_with("2|6391|")), "{old:?}");
+        assert!(old.iter().any(|r| r.starts_with("3|DropOut|")), "{old:?}");
+        // A path with no colon is the Dialog itself, not a dropped row.
+        assert!(old.iter().any(|r| r.starts_with("2|193|")), "{old:?}");
+        // `other` matches neither prefix and is indexed as neither kind.
+        assert!(!old.iter().any(|r| r.contains("|other|")), "{old:?}");
+        // A null path still contributes its status.
+        assert!(old.iter().any(|r| r.starts_with("3|Aborted|")), "{old:?}");
+    }
+
+    /// A database migrated today indexes exactly what a fresh import would.
+    ///
+    /// The same property `the_metadata_backfill_matches_what_an_import_would_have_indexed`
+    /// pins, and it holds for the same structural reason: both paths call
+    /// `answer_index_rows`, so there is one implementation rather than two that
+    /// agree today.
+    #[test]
+    fn the_answer_backfill_matches_what_an_import_would_have_indexed() {
+        let article_ids = r#"["qa-12","dn-7-1","nope"]"#;
+        let dialog_paths = r#"{"EndedOrInProgress":"7:1/2","DropOut":"9"}"#;
+        let conn = Connection::open_in_memory().expect("mem db");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+             article_ids, dialog_paths, imported_at) \
+             VALUES (1,'u','s','2026-06-01T09:00:00',?1,?2,0)",
+            params![article_ids, dialog_paths],
+        )
+        .expect("insert");
+        backfill_answer_index(&conn, false).expect("backfill");
+
+        let mut backfilled: Vec<String> = conn
+            .prepare("SELECT kind || '=' || value FROM answer_index")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        backfilled.sort();
+
+        let mut imported: Vec<String> = answer_index_rows(article_ids, dialog_paths)
+            .into_iter()
+            .map(|(kind, value)| format!("{kind}={value}"))
+            .collect();
+        imported.sort();
+
+        assert_eq!(backfilled, imported);
+        assert!(imported.contains(&"0=qa-12".to_string()), "{imported:?}");
+        assert!(imported.contains(&"1=dn-7-1".to_string()), "{imported:?}");
+        assert!(imported.contains(&"2=7".to_string()), "{imported:?}");
+        assert!(imported.contains(&"2=9".to_string()), "{imported:?}");
+        assert!(imported.contains(&"3=DropOut".to_string()), "{imported:?}");
+        // `nope` matches neither prefix.
+        assert_eq!(imported.len(), 6, "{imported:?}");
+    }
+
     /// now call the same function, and this pins that they stay that way — an
     /// old database that filtered differently from a freshly imported one is
     /// the failure this guards.

@@ -469,22 +469,51 @@ under `target: "insights"` and `perf::insights_cost` prints it.
     million times — and a column on `insight_sessions` means decoding a
     ten-column record whose widest field is the conversation's opening message:
     421 ms per table against 357 ms, for the same answer.
-- **`article_ids` and `dialog_paths` are each read in one pass, not two.**
-  `article_ids` holds Articles (`qa-`) *and* the Dialog nodes an answer came
-  from (`dn-`); `dialog_paths` holds the Dialog walked through *and* the outcome
-  key beside it. Four charts, two columns — and parsing the same JSON twice was
-  the third-largest cost in the run. `insight_split_buckets` ranks within each
-  kind and splits the rows apart again.
-  - **`CROSS JOIN` against a two-row relation is load-bearing** in the
-    `dialog_paths` query: it fixes those rows as the inner loop so `json_each`
-    is walked once and each entry yields both readings. As a plain comma join
-    SQLite is free to put the two rows outside and parse the JSON twice.
-  - **So are the `bucket_` alias names.** `json_each` exposes columns called
-    `key`, `value` and `type`, and a `GROUP BY value` binds to the *real column*
-    in preference to an output alias of the same name — so the obvious spelling
-    grouped by the raw path rather than by the Dialog cut out of it, and
-    `6391:2` and `6391:2/15/4` counted as two Dialogs.
-    `articles_dialog_nodes_and_walked_dialogs_are_counted_apart` caught it.
+- **The four "what answered" charts read `answer_index`, not `interactions`.**
+  Which Articles, Dialog nodes, walked Dialogs and exit statuses a result set
+  involves are facts that never change once a row is imported, so they are
+  lifted out of `article_ids` and `dialog_paths` at import time into a narrow
+  table — the third of the same family as `entity_index` and `metadata_index`.
+  `answer_index_rows` is the single source of truth for what it holds, called by
+  both the import path and the backfill.
+  - **The two `json_each` aggregates they replaced were 70-90% of every read.**
+    They parsed JSON out of `interactions`, which is 553 MB of an 824 MB
+    database on the reference export — hundreds of megabytes read to produce
+    fifteen bars.
+  - **And the cost did not shrink with the search, it grew.** A resolved temp
+    table carries no statistics, so the planner drove from `interactions` and
+    probed the scope per row: a search matching 1331 conversations cost
+    **4954 ms** where no filter at all cost **461 ms**. Measured end to end on a
+    149k-interaction database, the whole read went **6285 ms → 276 ms**
+    (conversations) and **6306 ms → 773 ms** (interactions).
+  - **Pinning the join order was tried and rejected.** `CROSS JOIN` so the
+    resolved table drives is 62x faster narrow and materially *slower* when the
+    scope is most of the database — at that point 16k index seeks into a 553 MB
+    table lose to one sequential scan. `ANALYZE` on the temp table does not
+    settle it either: with real row counts the planner still chose seeks for the
+    wide case and got slower. A hint that is wrong half the time is worse than
+    no hint, which is why the fix removes the question instead of re-answering
+    it.
+  - **Four charts, one pass.** An Article, a Dialog node, a Dialog walked
+    through and an exit status answer different questions and would put four
+    kinds of thing on one axis, so they stay four charts — but they are one
+    table now, ranked in one query and split by `insight_split_buckets`. Only
+    the kinds the chosen sections render are asked for.
+  - **One row per `(log_id, kind, value)`**, so the interactions reading needs
+    no `DISTINCT` at all and the conversations reading still counts distinct
+    sessions. It costs ~540k rows and 71 MB on the reference database (a 7%
+    larger file) and no measurable import time — `perf::import_cost` is
+    unchanged within noise.
+  - **`answer_index_holds_what_the_json_scans_used_to_compute` is the test the
+    change rests on.** It keeps the old SQL and compares it bucket for bucket
+    against the new table over the same rows, including the shapes that made the
+    old query subtle: a path with no colon, two paths in one cell, a `dn-` id
+    that must not read as an Article, and a null path that still contributes its
+    status. Replacing a query with a table is only a performance change if the
+    table holds the same facts, and a silently narrower index reads as the data
+    having changed rather than as a bug.
+  - **Deletion has to reach it**, like every other derived table: `purge_old`
+    and `delete_interactions_by_dates` both remove its rows.
 - **Only the charted key's values are read.** One chart is drawn at a time, and
   reading every key's cost a second full scan of the join to return ~40 keys ×
   12 values per table — 150 ms per table against 23 ms for one key, which

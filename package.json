@@ -5,7 +5,7 @@
   "author": "Wout van Os",
   "scripts": {
     "tauri": "tauri",
-    "test:frontend": "node frontend/tests/collections.test.js && node frontend/tests/export-integrity.test.js && node frontend/tests/conv-search.test.js && node frontend/tests/update-modal.test.js && node frontend/tests/settings-backup.test.js && node frontend/tests/metadata-filter.test.js && node frontend/tests/msg-meta-place.test.js && node frontend/tests/loading-gate.test.js && node frontend/tests/insights.test.js",
+    "test:frontend": "node frontend/tests/collections.test.js && node frontend/tests/export-integrity.test.js && node frontend/tests/conv-search.test.js && node frontend/tests/update-modal.test.js && node frontend/tests/settings-backup.test.js && node frontend/tests/metadata-filter.test.js && node frontend/tests/msg-meta-place.test.js && node frontend/tests/loading-gate.test.js && node frontend/tests/insights.test.js && node frontend/tests/db-migration-progress.test.js",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },
