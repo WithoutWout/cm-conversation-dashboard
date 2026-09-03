@@ -91,37 +91,47 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Insights now asks first, instead of loading everything
+            ### Insights is between 3x and 39x faster
 
-            Opening **Insights** used to build all sixteen charts before it
-            showed you anything, which on a wide search meant several seconds of
-            staring at a spinner — for charts you may not have wanted.
+            The charts that say which Articles and Dialogs your conversations
+            went through used to be worked out from scratch every time you
+            opened Insights, by reading through every stored message. That was
+            most of the wait — and, oddly, a **narrower** search was slower than
+            no search at all.
 
-            It now opens on a short screen that asks what you want: whether to
-            count **conversations** or the **interactions** that matched, and
-            which sections to build — Volume, Quality, Context, Metadata,
-            Content. Each one says what it answers and roughly what it costs.
+            Those facts are now worked out once, when data is imported. On a
+            database of 150,000 interactions, Insights over a typical search
+            went from **6.3 seconds to 0.2 seconds**. Every combination we
+            measured is now under a second, and most are under a quarter of one.
 
-            Asking for one section instead of everything takes **23ms instead of
-            537ms** on a 120,000-interaction database. Your choice is
-            remembered, and anything you left out is offered at the bottom of
-            the dashboard — one click adds it in place, without rebuilding what
-            is already on screen.
+            Searching for a Dialog by ID got the same treatment: **1.5 seconds
+            to 0.03 seconds**.
 
-            ### It no longer re-runs your search
+            ### Your database gets about 30% smaller
 
-            Every read after the first — adding a section, switching to another
-            Context key, flipping between conversations and interactions — now
-            reuses the result set your search already produced instead of
-            searching again. On a typical search that is the difference between
-            **88ms and 12ms**. Importing or deleting data ends the reuse
-            automatically, so the charts can never describe stale results.
+            The context of a conversation was being stored again in full on
+            every single message of it. On a real 824 MB database that was
+            173 MB — a fifth of the whole file — repeating the same 15,000
+            values over and over.
 
-            ### More room, and headings that stay put
+            It is now stored once and referenced. That database came out at
+            **596 MB**, and one with a lot of deleted history in it went from
+            **758 MB to 306 MB**. A smaller file is a faster one: this is
+            part of why the numbers above are what they are.
 
-            The dashboard now uses the whole window, so more charts fit side by
-            side without scrolling. Section headings no longer let charts slide
-            up into view above them as you scroll.
+            Nothing you can see changes — every conversation, context and chart
+            reads exactly as it did before. We checked that literally, comparing
+            all 149,761 stored contexts before and after.
+
+            ### The first launch after this update takes a minute
+
+            Your existing database is reorganised once, in place. Depending on
+            its size that takes anywhere from twenty seconds to about a minute,
+            and the app now tells you what it is doing while it works rather
+            than sitting on a spinner. **This happens once.** Every launch after
+            it is back to under a second.
+
+            Importing is unaffected — very slightly faster, if anything.
 
             ---
 
