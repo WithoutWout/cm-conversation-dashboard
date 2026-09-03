@@ -59,6 +59,8 @@ const EXPORTS = [
   "insBuildCards",
   "insTiles",
   "insSearchSummary",
+  "INS_SECTIONS",
+  "INS_READ_SECTIONS",
 ]
 const {
   INS_THEME_SCREEN,
@@ -79,6 +81,8 @@ const {
   insBuildCards,
   insTiles,
   insSearchSummary,
+  INS_SECTIONS,
+  INS_READ_SECTIONS,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -508,6 +512,64 @@ test("a card with no data is not rendered at all", () => {
   // Sections come out in reading order and nothing lands outside one.
   const sections = [...new Set(cards.map((c) => c.section))]
   assert.deepStrictEqual(sections, ["Volume", "Quality", "Context", "Metadata", "Content"])
+})
+
+// The chooser and the card builder name the same five sections, and they have
+// to keep naming them the same way: the dashboard decides what to draw by
+// looking a card's section up in the chosen set. Rename one on either side and
+// every card in it silently disappears — no error, no empty state, just a
+// missing section on a screen that has no other way of saying so.
+test("the chooser and the cards agree on what a section is", () => {
+  const offered = INS_SECTIONS.map((sec) => sec.key)
+  assert.deepStrictEqual(offered, ["volume", "quality", "context", "metadata", "content"])
+  const drawn = [...new Set(insBuildCards(CONVS, INS_THEME_SCREEN).map((c) => c.section))]
+  for (const name of drawn) {
+    assert.ok(
+      offered.includes(name.toLowerCase()),
+      "the card builder draws a section the chooser cannot offer: " + name,
+    )
+  }
+  // Context and Metadata come back from their own call, so they are never sent
+  // as part of the dashboard read.
+  assert.deepStrictEqual(INS_READ_SECTIONS, ["volume", "quality", "content"])
+  for (const key of INS_READ_SECTIONS) {
+    const sec = INS_SECTIONS.find((x) => x.key === key)
+    assert.ok(sec.fields && sec.fields.length, key + " has no fields to merge when added")
+  }
+  // Every field a section claims is a field the payload actually carries, or
+  // adding that section later would merge nothing into the dashboard.
+  for (const sec of INS_SECTIONS) {
+    for (const f of sec.fields || []) {
+      assert.ok(f in CONVS, sec.key + " claims a field the payload has no such key for: " + f)
+    }
+  }
+})
+
+// A section left out of the chooser must contribute no card at all — including
+// the one card that is not built from that section's own query.
+//
+// Feedback comes off the headline counters, which are read whatever was chosen,
+// so an unchosen Quality section would otherwise leave exactly one Quality
+// chart stranded on the dashboard under a heading for a section that was never
+// read. Filtering by emptiness instead of by the choice is what lets that
+// through, which is why the renderer filters by the choice.
+test("a section that was not chosen contributes no card, not even a derived one", () => {
+  const chosen = { volume: true, quality: false, context: false, metadata: false, content: false }
+  // The payload as the backend returns it with only Volume asked for: every
+  // Quality and Content array empty, every headline counter still populated.
+  const partial = { ...CONVS }
+  for (const sec of INS_SECTIONS) {
+    if (chosen[sec.key]) continue
+    for (const f of sec.fields || []) partial[f] = []
+  }
+  const all = insBuildCards(partial, INS_THEME_SCREEN)
+  assert.ok(
+    all.some((c) => c.section === "Quality"),
+    "the fixture must still produce a derived Quality card, or this proves nothing",
+  )
+  const kept = all.filter((c) => chosen[c.section.toLowerCase()])
+  assert.deepStrictEqual([...new Set(kept.map((c) => c.section))], ["Volume"])
+  assert.ok(kept.length, "Volume was chosen and drew nothing")
 })
 
 // Every value on this dashboard is reachable without looking at a colour. The

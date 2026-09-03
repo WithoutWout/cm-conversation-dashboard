@@ -163,6 +163,10 @@ struct SourceDefinition {
 struct DbState {
     conn: Option<Connection>,
     path: Option<String>,
+    /// What the Insights temp tables currently hold — see `InsightScopeCache`.
+    /// Lives beside the connection because that is what the tables live on: a
+    /// new connection means the tables are gone and the cache with them.
+    insight_scope: InsightScopeCache,
 }
 
 impl Default for DbState {
@@ -170,6 +174,7 @@ impl Default for DbState {
         Self {
             conn: None,
             path: None,
+            insight_scope: InsightScopeCache::default(),
         }
     }
 }
@@ -2292,6 +2297,8 @@ async fn set_db_path(
         let mut state = db.lock().map_err(|e| e.to_string())?;
         state.conn = Some(conn);
         state.path = Some(path);
+        // The Insights temp tables lived on the connection that just went away.
+        state.insight_scope = InsightScopeCache::default();
         let mut ih = interrupt_state.lock().map_err(|e| e.to_string())?;
         *ih = Some(interrupt_handle);
         Ok(())
@@ -3277,7 +3284,10 @@ async fn get_date_range(db_state: State<'_, SharedDbState>) -> Result<DateRange,
     .map_err(|e| e.to_string())?
 }
 
-#[derive(Deserialize, Default)]
+// `Serialize` is here for one reason: the Insights scope cache fingerprints
+// the search by serialising these args, so a second read of the same search can
+// reuse the result set it already resolved. See `InsightScopeCache`.
+#[derive(Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct GetSessionsArgs {
     page: Option<i64>,
@@ -4371,7 +4381,21 @@ struct ConversationInsights {
     dialogs: Vec<InsightBucket>,
     first_messages: Vec<InsightBucket>,
     search_mode: String,
+    /// Which sections this payload actually holds — see `InsightSections`.
+    sections: InsightSectionsOut,
+    /// Whether the result set was already resolved and simply reused.
+    scope_reused: bool,
     timing_ms: i64,
+}
+
+/// The echo of [`InsightSections`]. A separate type only because the input is
+/// `Deserialize` and this is `Serialize`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSectionsOut {
+    volume: bool,
+    quality: bool,
+    content: bool,
 }
 
 /// What one bar on the dashboard counts.
@@ -4712,28 +4736,63 @@ async fn get_conversation_insights(
     db_state: State<'_, SharedDbState>,
     args: GetSessionsArgs,
     unit: Option<String>,
+    sections: Option<InsightSections>,
 ) -> Result<Option<ConversationInsights>, String> {
     let db = db_state.inner().clone();
+    let sections = sections.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
-        let state = db.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("No database open.")?;
-        // A second parameter, not a field on `GetSessionsArgs`: those args are
-        // the search, shared verbatim with `get_sessions`, and the unit is a
-        // property of the reading rather than of the result set.
-        let out = conversation_insights(conn, &args, InsightUnit::parse(unit.as_deref()));
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        // Split borrow: the queries read the connection while the cache beside
+        // it records what they resolved.
+        let DbState { conn, insight_scope, .. } = &mut *state;
+        let conn = conn.as_ref().ok_or("No database open.")?;
+        // Two more parameters, not fields on `GetSessionsArgs`: those args are
+        // the search, shared verbatim with `get_sessions`. The unit and the
+        // chosen sections are properties of the reading, not of the result set
+        // — which is exactly why the scope cache survives a change to either.
+        let out = conversation_insights(
+            conn,
+            &args,
+            InsightUnit::parse(unit.as_deref()),
+            sections,
+            insight_scope,
+        );
         if out.is_err() {
-            // The resolved result set is dropped at the end of a successful
-            // run; an interrupt lands before that, and the temp tables are
-            // per-connection on a connection that outlives the call. Left
-            // behind, a cancelled read holds its pages for the rest of the
-            // session.
+            // A successful run leaves its tables in place on purpose. An
+            // interrupt lands mid-build, so what is on the connection describes
+            // nothing — drop it, and forget it, or the next read would reuse
+            // half a result set.
             let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+            insight_scope.clear();
         }
         match out {
             Ok(v) => Ok(Some(v)),
             Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
             Err(e) => Err(e),
         }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Free the resolved result set.
+///
+/// Called when the Insights modal closes. The temp tables are the cache that
+/// makes every read after the first cheap, and they live on a connection that
+/// outlives the modal — so something has to say when the search they describe
+/// has stopped being interesting. Nothing depends on this for correctness: the
+/// fingerprint would have caught a stale set anyway. It is memory.
+#[tauri::command]
+async fn release_insight_scope(db_state: State<'_, SharedDbState>) -> Result<(), String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let DbState { conn, insight_scope, .. } = &mut *state;
+        if let Some(conn) = conn.as_ref() {
+            let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        }
+        insight_scope.clear();
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -4810,17 +4869,33 @@ async fn get_insight_tags(
     let db = db_state.inner().clone();
     let keys = keys.unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
-        let state = db.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("No database open.")?;
-        let out = resolve_insight_scope(conn, &args, InsightUnit::parse(unit.as_deref()))
-            .and_then(|_| {
-                let contexts =
-                    insight_tag_groups(conn, "context_index", keys.context.as_deref())?;
-                let metadata =
-                    insight_tag_groups(conn, "metadata_index", keys.metadata.as_deref())?;
-                Ok(InsightTags { contexts, metadata })
-            });
-        let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let DbState { conn, insight_scope, .. } = &mut *state;
+        let conn = conn.as_ref().ok_or("No database open.")?;
+        let out =
+            resolve_insight_scope(conn, &args, InsightUnit::parse(unit.as_deref()), insight_scope)
+                .and_then(|_| {
+                    // Each table is a scan of a join the size of the result
+                    // set, so a section nobody asked for is worth not reading.
+                    let contexts = if keys.context_on.unwrap_or(true) {
+                        insight_tag_groups(conn, "context_index", keys.context.as_deref())?
+                    } else {
+                        Vec::new()
+                    };
+                    let metadata = if keys.metadata_on.unwrap_or(true) {
+                        insight_tag_groups(conn, "metadata_index", keys.metadata.as_deref())?
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(InsightTags { contexts, metadata })
+                });
+        // The dashboard read almost always resolved this same search moments
+        // ago, so this is normally free. Only a failed or interrupted one is
+        // dropped — a good one stays for the next tag key.
+        if out.is_err() {
+            let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+            insight_scope.clear();
+        }
         match out {
             Ok(v) => Ok(Some(v)),
             Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
@@ -4861,11 +4936,16 @@ async fn get_insight_tag_values(
     };
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let state = db.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("No database open.")?;
-        let out = resolve_insight_scope(conn, &args, InsightUnit::parse(unit.as_deref()))
-            .and_then(|_| insight_tag_values(conn, table, &name));
-        let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let DbState { conn, insight_scope, .. } = &mut *state;
+        let conn = conn.as_ref().ok_or("No database open.")?;
+        let out =
+            resolve_insight_scope(conn, &args, InsightUnit::parse(unit.as_deref()), insight_scope)
+                .and_then(|_| insight_tag_values(conn, table, &name));
+        if out.is_err() {
+            let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+            insight_scope.clear();
+        }
         match out {
             Ok(v) => Ok(Some(v)),
             Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
@@ -4887,8 +4967,10 @@ fn conversation_insights(
     conn: &Connection,
     args: &GetSessionsArgs,
     unit: InsightUnit,
+    sections: InsightSections,
+    cache: &mut InsightScopeCache,
 ) -> Result<ConversationInsights, String> {
-    let (insights, phases) = conversation_insights_timed(conn, args, unit)?;
+    let (insights, phases) = conversation_insights_timed(conn, args, unit, sections, cache)?;
     log::debug!(
         target: "insights",
         "insights {} in {}ms: {}",
@@ -4909,6 +4991,116 @@ fn conversation_insights(
 struct InsightTagKeys {
     context: Option<String>,
     metadata: Option<String>,
+    /// Whether each section was asked for at all. A key of `None` means "pick
+    /// the most-covering one", which is a different thing from "do not read
+    /// this table" — hence the separate flags. Absent is on, so an older caller
+    /// gets both.
+    context_on: Option<bool>,
+    metadata_on: Option<bool>,
+}
+
+/// Which parts of the dashboard a read is being asked for.
+///
+/// Insights used to compute all sixteen charts the moment the modal opened,
+/// which on a wide search is several seconds of work the user never asked for —
+/// and most of it scrolled past unread. The modal now opens on a chooser and
+/// this says what was chosen, so a read costs what was asked for and nothing
+/// else. Absent means everything, which is what the tests and any older caller
+/// mean by saying nothing.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSections {
+    volume: bool,
+    quality: bool,
+    content: bool,
+}
+
+impl Default for InsightSections {
+    fn default() -> Self {
+        Self { volume: true, quality: true, content: true }
+    }
+}
+
+impl InsightSections {
+    /// `dialog_paths` is one JSON scan yielding two charts in two different
+    /// sections — the Dialog walked through (Content) and how the conversation
+    /// left it (Quality) — so it runs when either was asked for.
+    fn needs_dialog_paths(self) -> bool {
+        self.quality || self.content
+    }
+}
+
+/// What the Insights temp tables currently hold.
+///
+/// The result set is resolved by `build_session_filter_query` — an FTS match,
+/// an entity scan, a materialized feedback relation — and that is most of what
+/// an Insights read costs. Every read after the first asks about the *same*
+/// search: another section, another tag key, the other unit. Re-running the
+/// filter query for each of those is re-doing the search the user already ran.
+///
+/// So the resolved tables are kept on the connection and this records what is
+/// in them. Two fingerprints, not one, because the session set and the matching
+/// turns invalidate on different things: switching the unit rebuilds
+/// `insight_matches` and `insight_weights` and leaves the expensive
+/// `insight_sessions` exactly where it is.
+///
+/// **`changes` is the safety catch.** `Connection::total_changes` counts every
+/// row this connection has inserted, updated or deleted, so an import, a
+/// deletion or a purge moves it and the cache stops matching — without every
+/// write path having to remember this exists. Recorded *after* the tables are
+/// built, since building them is itself a write.
+#[derive(Default)]
+struct InsightScopeCache {
+    /// The search these tables were resolved from, or `None` when nothing is
+    /// resolved.
+    sessions_sig: Option<String>,
+    /// Which reading `insight_matches` / `insight_weights` describe.
+    unit: Option<InsightUnit>,
+    /// `total_changes()` as it stood when the tables were last built. `None`
+    /// means nothing is cached — and, since a hit requires a `Some` on both
+    /// sides, that a failed read of the counter can never look like one.
+    changes: Option<i64>,
+    matched_interactions: i64,
+    matches_are_narrowed: bool,
+    search_mode: String,
+}
+
+impl InsightScopeCache {
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The scope this read wants, or `None` if it has to be built.
+    fn hit(&self, conn: &Connection, sig: &str, unit: InsightUnit) -> Option<InsightScope> {
+        let now = insight_data_stamp(conn);
+        if self.sessions_sig.as_deref() != Some(sig)
+            || self.unit != Some(unit)
+            || now.is_none()
+            || self.changes != now
+        {
+            return None;
+        }
+        Some(InsightScope {
+            matched_interactions: self.matched_interactions,
+            matches_are_narrowed: self.matches_are_narrowed,
+            search_mode: self.search_mode.clone(),
+            reused: true,
+        })
+    }
+}
+
+/// Rows this connection has written since it was opened.
+///
+/// SQLite's own counter, read through the scalar function of the same name.
+/// Any import, deletion or purge moves it, so the scope cache invalidates
+/// itself without every write path in the file having to know it exists.
+fn insight_data_stamp(conn: &Connection) -> Option<i64> {
+    conn.query_row("SELECT total_changes()", [], |r| r.get(0)).ok()
+}
+
+/// The search, as a string that changes whenever the result set would.
+fn insight_scope_sig(args: &GetSessionsArgs) -> String {
+    serde_json::to_string(args).unwrap_or_default()
 }
 
 /// What one Insights read is looking at, once the search has been resolved.
@@ -4922,6 +5114,10 @@ struct InsightScope {
     matches_are_narrowed: bool,
     /// Which of the three search paths ran — the renderer says so on screen.
     search_mode: String,
+    /// True when the tables were already holding this search and nothing had to
+    /// be re-derived. Reported in the phase log, so "why was that instant?" has
+    /// an answer.
+    reused: bool,
 }
 
 /// Resolve the search into the three temp tables every aggregate reads.
@@ -4935,11 +5131,50 @@ fn resolve_insight_scope(
     conn: &Connection,
     args: &GetSessionsArgs,
     unit: InsightUnit,
+    cache: &mut InsightScopeCache,
+) -> Result<InsightScope, String> {
+    let sig = insight_scope_sig(args);
+    if let Some(scope) = cache.hit(conn, &sig, unit) {
+        return Ok(scope);
+    }
+    // The session set survives a unit switch — it is the same search — so only
+    // the matching turns and the weights derived from them are rebuilt. On a
+    // real database that is the difference between re-running an FTS match over
+    // the whole interaction table and not.
+    let stamp = insight_data_stamp(conn);
+    let sessions_reusable = cache.sessions_sig.as_deref() == Some(sig.as_str())
+        && stamp.is_some()
+        && cache.changes == stamp;
+    if !sessions_reusable {
+        cache.clear();
+    }
+    let scope = resolve_insight_scope_uncached(conn, args, unit, sessions_reusable)?;
+    *cache = InsightScopeCache {
+        sessions_sig: Some(sig),
+        unit: Some(unit),
+        changes: insight_data_stamp(conn),
+        matched_interactions: scope.matched_interactions,
+        matches_are_narrowed: scope.matches_are_narrowed,
+        search_mode: scope.search_mode.clone(),
+    };
+    Ok(scope)
+}
+
+/// Build the temp tables, with no cache in the way.
+///
+/// `keep_sessions` is what makes a unit switch cheap: `insight_sessions` is
+/// already holding this search, so only the turn-level tables are rebuilt.
+fn resolve_insight_scope_uncached(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+    unit: InsightUnit,
+    keep_sessions: bool,
 ) -> Result<InsightScope, String> {
     let filter_query = build_session_filter_query(conn, args)?;
     let params_ref: Vec<&dyn ToSql> =
         filter_query.param_values.iter().map(|b| b.as_ref()).collect();
 
+    if !keep_sessions {
     conn.execute_batch(INSIGHT_TEMP_TABLE).map_err(insight_err)?;
     let resolve_sql = format!(
         r#"WITH
@@ -4967,8 +5202,10 @@ WHERE session_uuid IS NOT NULL AND session_uuid != ''"#,
     );
     conn.execute(&resolve_sql, params_ref.as_slice())
         .map_err(insight_err)?;
+    }
     // Every conversation is worth 1 until the interactions reading says
-    // otherwise, which it does below once the matching turns are known.
+    // otherwise, which it does below once the matching turns are known. Cheap
+    // enough to redo on a unit switch: it is one scan of a resolved table.
     conn.execute_batch(INSIGHT_WEIGHT_TABLE).map_err(insight_err)?;
     conn.execute(
         "INSERT INTO insight_weights (session_uuid, n) \
@@ -5035,12 +5272,17 @@ WHERE m.match_log_id IS NOT NULL"#,
             [],
         )
         .map_err(insight_err)?;
+    } else {
+        // Only the interactions reading has matching turns, so switching back
+        // would otherwise leave a table nothing reads holding its pages.
+        let _ = conn.execute_batch("DROP TABLE IF EXISTS temp.insight_matches;");
     }
 
     Ok(InsightScope {
         matched_interactions,
         matches_are_narrowed,
         search_mode: filter_query.search_mode.clone(),
+        reused: false,
     })
 }
 
@@ -5052,14 +5294,16 @@ fn conversation_insights_timed(
     conn: &Connection,
     args: &GetSessionsArgs,
     unit: InsightUnit,
+    sections: InsightSections,
+    cache: &mut InsightScopeCache,
 ) -> Result<(ConversationInsights, InsightPhases), String> {
     {
         let started = Instant::now();
         let mut phases = InsightPhases::new();
 
         let low_recog_threshold = args.low_recog_threshold.unwrap_or(60).clamp(1, 99);
-        let scope = resolve_insight_scope(conn, args, unit)?;
-        phases.mark("resolve");
+        let scope = resolve_insight_scope(conn, args, unit, cache)?;
+        phases.mark(if scope.reused { "resolve (reused)" } else { "resolve" });
 
         let matches_are_narrowed = scope.matches_are_narrowed;
         let matched_interactions = scope.matched_interactions;
@@ -5196,7 +5440,11 @@ fn conversation_insights_timed(
         phases.mark("headline");
 
         // ── When ──
-        let by_day = {
+        //
+        // Everything from here down is gated on what was asked for. A section
+        // nobody selected is not a cheap query left running for tidiness — the
+        // JSON scans below are the bulk of a read.
+        let by_day = if !sections.volume { Vec::new() } else {
             let mut stmt = conn
                 .prepare(&format!(
                     "SELECT substr({ts_col}, 1, 10) AS d, COUNT(*), COUNT(*) \
@@ -5219,10 +5467,13 @@ fn conversation_insights_timed(
         // Hours are read straight out of the stored string rather than through
         // strftime: the database stores naive UTC by design, so the substring
         // *is* the UTC hour and no timezone can be applied to it by accident.
-        let mut by_hour: Vec<InsightBucket> =
-            (0..24).map(|h| InsightBucket::new(format!("{h:02}"), 0)).collect();
+        let mut by_hour: Vec<InsightBucket> = if sections.volume {
+            (0..24).map(|h| InsightBucket::new(format!("{h:02}"), 0)).collect()
+        } else {
+            Vec::new()
+        };
         let mut hour_weekday = vec![0i64; 7 * 24];
-        {
+        if sections.volume {
             let mut stmt = conn
                 .prepare(&format!(
                     "SELECT CAST(strftime('%w', {ts_col}) AS INTEGER) AS wd, \
@@ -5272,7 +5523,7 @@ fn conversation_insights_timed(
                 "SELECT COUNT(*) AS n FROM insight_matches GROUP BY session_uuid"
             }
         };
-        let length_buckets = insight_buckets(
+        let length_buckets = if !sections.volume { Vec::new() } else { insight_buckets(
             conn,
             &format!(
                 "SELECT CASE \
@@ -5286,13 +5537,13 @@ fn conversation_insights_timed(
             ),
             &[],
             "?",
-        )?;
+        )? };
         phases.mark("length_buckets");
 
         // The band is the conversation's *worst* recognised turn, which is what
         // the Low % / Zero % pills already filter on — so the chart and the
         // pills describe the same thing.
-        let recognition_bands = insight_buckets(
+        let recognition_bands = if !sections.quality { Vec::new() } else { insight_buckets(
             conn,
             &match unit {
                 InsightUnit::Conversations => "SELECT CASE \
@@ -5319,10 +5570,10 @@ fn conversation_insights_timed(
             },
             &[],
             "Not scored",
-        )?;
+        )? };
         phases.mark("recognition_bands");
 
-        let cultures = insight_buckets(
+        let cultures = if !sections.content { Vec::new() } else { insight_buckets(
             conn,
             &format!(
                 "SELECT {culture_col} AS culture, COUNT(*) c FROM {row_from} \
@@ -5330,13 +5581,13 @@ fn conversation_insights_timed(
             ),
             &[&INSIGHT_TOP_N],
             "(none)",
-        )?;
+        )? };
         phases.mark("cultures");
 
         // Deliberately conversation-only: the opening question is a fact about
         // the conversation, and there is no per-turn reading of it. The
         // renderer drops the card in interactions mode and says why.
-        let first_messages = if unit == InsightUnit::Interactions {
+        let first_messages = if unit == InsightUnit::Interactions || !sections.content {
             Vec::new()
         } else {
         insight_buckets(
@@ -5353,7 +5604,7 @@ fn conversation_insights_timed(
         phases.mark("first_messages");
 
         // ── What answered ──
-        let recognition_types = insight_buckets(
+        let recognition_types = if !sections.quality { Vec::new() } else { insight_buckets(
             conn,
             &format!(
                 "SELECT i.recognition_type, COUNT(*) c \
@@ -5363,13 +5614,13 @@ fn conversation_insights_timed(
             ),
             &[&INSIGHT_TOP_N],
             "(none)",
-        )?;
+        )? };
         phases.mark("recognition_types");
 
         // `entity_index` carries `log_id`, so in interactions mode this is the
         // entity the *matching turn* triggered rather than one anything in the
         // conversation triggered.
-        let entities = insight_buckets(
+        let entities = if !sections.content { Vec::new() } else { insight_buckets(
             conn,
             &match unit {
                 InsightUnit::Conversations =>
@@ -5385,7 +5636,7 @@ fn conversation_insights_timed(
             },
             &[&INSIGHT_TOP_N],
             "(unnamed)",
-        )?;
+        )? };
         phases.mark("entities");
 
         // `article_ids` holds both Articles (`qa-…`) and the Dialog nodes an
@@ -5394,7 +5645,9 @@ fn conversation_insights_timed(
         // thing on one axis — but they are one column, so they are read in one
         // pass and split afterwards. Two passes meant parsing every row's JSON
         // twice, which measured as the third-largest cost in the whole run.
-        let (articles, dialog_nodes) = {
+        let (articles, dialog_nodes) = if !sections.content {
+            (Vec::new(), Vec::new())
+        } else {
             let mut by_kind = insight_split_buckets(
                 conn,
                 &format!(
@@ -5441,7 +5694,9 @@ fn conversation_insights_timed(
         // column in preference to an output alias of the same name — so the
         // obvious spelling grouped by the raw path rather than by the Dialog
         // cut out of it, and `6391:2` and `6391:2/15/4` counted as two Dialogs.
-        let (dialogs, dialog_status) = {
+        let (dialogs, dialog_status) = if !sections.needs_dialog_paths() {
+            (Vec::new(), Vec::new())
+        } else {
             let mut by_kind = insight_split_buckets(
                 conn,
                 &format!(
@@ -5468,17 +5723,19 @@ fn conversation_insights_timed(
                 &[&INSIGHT_TOP_N],
                 "(unknown)",
             )?;
-            (by_kind.remove(&0).unwrap_or_default(), by_kind.remove(&1).unwrap_or_default())
+            (
+                if sections.content { by_kind.remove(&0).unwrap_or_default() } else { Vec::new() },
+                if sections.quality { by_kind.remove(&1).unwrap_or_default() } else { Vec::new() },
+            )
         };
         phases.mark("dialog_paths");
 
 
 
-        // The temp table is per-connection and the connection is long-lived, so
-        // leaving a full result set behind would hold its pages for the rest of
-        // the session. Dropping it is not correctness — the next run recreates
-        // it — but it is a lot of memory to keep for nothing.
-        let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+        // The resolved tables are deliberately left in place — they are the
+        // cache the next read reuses, which is what makes adding a section,
+        // switching a tag key or switching the unit cheap. `release_insight_scope`
+        // frees them when the modal closes; a new connection takes them with it.
 
         Ok((ConversationInsights {
             session_count,
@@ -5517,6 +5774,16 @@ fn conversation_insights_timed(
             matched_interactions,
             matches_are_narrowed,
             search_mode: scope.search_mode.clone(),
+            // Echoed so the renderer draws cards only for what was read. A
+            // section that was not asked for comes back as empty arrays, which
+            // on its own is indistinguishable from "asked for, and there is
+            // nothing in it".
+            sections: InsightSectionsOut {
+                volume: sections.volume,
+                quality: sections.quality,
+                content: sections.content,
+            },
+            scope_reused: scope.reused,
             timing_ms: started.elapsed().as_millis() as i64,
         }, phases))
     }
@@ -7927,6 +8194,7 @@ pub fn run() {
             compact_database,
             get_sessions,
             get_conversation_insights,
+            release_insight_scope,
             get_insight_tags,
             get_insight_tag_values,
             export_conversations_for_ai,
@@ -9953,7 +10221,14 @@ mod perf {
                 for _ in 0..3 {
                     let t = Instant::now();
                     let (d, phases) =
-                        conversation_insights_timed(&conn, args, unit).expect("insights");
+                        conversation_insights_timed(
+                            &conn,
+                            args,
+                            unit,
+                            InsightSections::default(),
+                            &mut InsightScopeCache::default(),
+                        )
+                        .expect("insights");
                     let us = t.elapsed().as_micros();
                     if us < best {
                         best = us;
@@ -9968,17 +10243,39 @@ mod perf {
                 let mut tags_best = u128::MAX;
                 for _ in 0..3 {
                     let t = Instant::now();
-                    resolve_insight_scope(&conn, args, unit).expect("scope");
+                    resolve_insight_scope(&conn, args, unit, &mut InsightScopeCache::default())
+                        .expect("scope");
                     insight_tag_groups(&conn, "context_index", None).expect("contexts");
                     insight_tag_groups(&conn, "metadata_index", None).expect("metadata");
                     tags_best = tags_best.min(t.elapsed().as_micros());
                 }
+                // What the chooser actually asks for, and what it costs to
+                // come back for more. `warm` is a second read against the
+                // result set the first one left resolved — the number that
+                // says whether "add a section" re-runs the search.
+                let one = InsightSections { volume: true, quality: false, content: false };
+                let mut cache = InsightScopeCache::default();
+                let mut cold = u128::MAX;
+                let mut warm = u128::MAX;
+                for i in 0..4 {
+                    let t = Instant::now();
+                    conversation_insights_timed(&conn, args, unit, one, &mut cache)
+                        .expect("one section");
+                    let us = t.elapsed().as_micros();
+                    if i == 0 {
+                        cold = us;
+                    } else {
+                        warm = warm.min(us);
+                    }
+                }
                 println!(
-                    "{label:<22} {:<14} {:>7.0}ms first paint, {:>7.0}ms tags  \
-                     ({count} conversations)",
+                    "{label:<22} {:<14} {:>7.0}ms all, {:>7.0}ms tags, \
+                     {:>7.0}ms one section, {:>7.0}ms again (reused)  ({count} conversations)",
                     unit.as_str(),
                     best as f64 / 1000.0,
-                    tags_best as f64 / 1000.0
+                    tags_best as f64 / 1000.0,
+                    cold as f64 / 1000.0,
+                    warm as f64 / 1000.0
                 );
                 println!("    {best_phases}");
             }
@@ -10682,9 +10979,144 @@ mod insights {
         conversation_insights(
             conn,
             &GetSessionsArgs::default(),
-            InsightUnit::Conversations
+            InsightUnit::Conversations,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
         )
         .expect("insights")
+    }
+
+    /// A section nobody asked for is not read — and one that was asked for
+    /// comes back exactly as it does in a full read.
+    ///
+    /// The gating is a dozen `if` guards spread through one long function, and
+    /// the way that goes wrong is not a crash: it is a section quietly still
+    /// being computed (so the chooser saves nothing) or a section quietly not
+    /// being computed when it was chosen (so a chart silently disappears).
+    /// Both are only visible in what comes back.
+    #[test]
+    fn a_section_that_was_not_asked_for_is_not_read() {
+        let conn = seed(&[
+            Sess {
+                uuid: "a",
+                turns: 3,
+                article_ids: r#"["qa-1","dn-9-2"]"#,
+                dialog_paths: r#"{"EndedOrInProgress":"9:2/3"}"#,
+                ..Default::default()
+            },
+            Sess { uuid: "b", turns: 1, quality: 0.0, ..Default::default() },
+        ]);
+        let full = insights(&conn);
+        let only = |sections: InsightSections| {
+            conversation_insights(
+                &conn,
+                &GetSessionsArgs::default(),
+                InsightUnit::Conversations,
+                sections,
+                &mut InsightScopeCache::default(),
+            )
+            .expect("insights")
+        };
+
+        let volume = only(InsightSections { volume: true, quality: false, content: false });
+        // Asked for, and identical to the full read.
+        assert_eq!(volume.by_day, full.by_day);
+        assert_eq!(volume.by_hour, full.by_hour);
+        assert_eq!(volume.length_buckets, full.length_buckets);
+        assert_eq!(volume.hour_weekday, full.hour_weekday);
+        // Not asked for, and therefore absent — not merely empty by accident:
+        // the full read found something in every one of these.
+        assert!(!full.recognition_bands.is_empty(), "the seed must exercise Quality");
+        assert!(!full.entities.is_empty() || !full.articles.is_empty());
+        assert!(volume.recognition_bands.is_empty());
+        assert!(volume.recognition_types.is_empty());
+        assert!(volume.dialog_status.is_empty());
+        assert!(volume.articles.is_empty());
+        assert!(volume.dialogs.is_empty());
+        assert!(volume.cultures.is_empty());
+        assert!(volume.first_messages.is_empty());
+
+        // The headline is not a section: the tiles are always shown, and they
+        // are one query over the already-resolved set.
+        assert_eq!(volume.session_count, full.session_count);
+        assert_eq!(volume.interaction_count, full.interaction_count);
+        assert_eq!(volume.neg_feedback_sessions, full.neg_feedback_sessions);
+
+        // `dialog_paths` is one scan feeding two sections. Each must get its
+        // own half and neither the other's.
+        let quality = only(InsightSections { volume: false, quality: true, content: false });
+        assert_eq!(quality.dialog_status, full.dialog_status);
+        assert!(quality.dialogs.is_empty(), "the walked Dialog belongs to Content");
+        let content = only(InsightSections { volume: false, quality: false, content: true });
+        assert_eq!(content.dialogs, full.dialogs);
+        assert_eq!(content.articles, full.articles);
+        assert_eq!(content.dialog_nodes, full.dialog_nodes);
+        assert!(content.dialog_status.is_empty(), "the outcome key belongs to Quality");
+        assert!(content.by_day.is_empty());
+
+        assert!(volume.sections.volume && !volume.sections.quality && !volume.sections.content);
+    }
+
+    /// The second read of one search reuses the result set the first resolved,
+    /// and a write to the database ends that.
+    ///
+    /// This is the whole reason adding a section, switching a tag key or
+    /// switching the unit is cheap — resolving the search is most of what a
+    /// read costs. Reuse that is *too* eager is the dangerous half: a cache
+    /// still answering after an import would chart rows that are no longer the
+    /// result of that search, and the numbers would simply be wrong with
+    /// nothing on screen to say so.
+    #[test]
+    fn a_second_read_of_one_search_reuses_the_resolved_result_set() {
+        let conn = seed(&[
+            Sess { uuid: "a", turns: 2, ..Default::default() },
+            Sess { uuid: "b", turns: 1, ..Default::default() },
+        ]);
+        let args = GetSessionsArgs::default();
+        let mut cache = InsightScopeCache::default();
+
+        let first = resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
+            .expect("first");
+        assert!(!first.reused, "nothing was resolved before this");
+        let again = resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
+            .expect("again");
+        assert!(again.reused, "the same search must not be resolved twice");
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM insight_sessions"),
+            2,
+            "and the tables it reuses must still be the right ones"
+        );
+
+        // The other reading is a different scope — the matching turns and the
+        // weights are rebuilt — but it is the same search, so it is not a
+        // cache miss the caller ever pays the filter query for.
+        let turns = resolve_insight_scope(&conn, &args, InsightUnit::Interactions, &mut cache)
+            .expect("turns");
+        assert!(!turns.reused);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM insight_matches"), 3);
+        assert_eq!(count(&conn, "SELECT SUM(n) FROM insight_weights"), 3);
+
+        // A different search is a different result set.
+        let other = GetSessionsArgs { query: Some("hoe laat".into()), ..Default::default() };
+        let narrowed =
+            resolve_insight_scope(&conn, &other, InsightUnit::Interactions, &mut cache)
+                .expect("narrowed");
+        assert!(!narrowed.reused);
+
+        // And the same search over changed data is a different result set too,
+        // which nothing in the args can express. `total_changes()` is what
+        // catches it.
+        let back = resolve_insight_scope(&conn, &other, InsightUnit::Interactions, &mut cache)
+            .expect("back");
+        assert!(back.reused);
+        add_turn(&conn, 900, "c", "2026-06-01T09:30:00", "hoe laat open je", 90.0);
+        let after = resolve_insight_scope(&conn, &other, InsightUnit::Interactions, &mut cache)
+            .expect("after");
+        assert!(!after.reused, "an import must not be answered out of the cache");
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).unwrap_or(-1)
     }
 
     /// One turn, with its own text and its own timestamp — which is the whole
@@ -10742,7 +11174,9 @@ mod insights {
         let genai_only = conversation_insights(
             &conn,
             &GetSessionsArgs { filter: Some("genai".into()), ..Default::default() },
-            InsightUnit::Conversations
+            InsightUnit::Conversations,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
         )
         .expect("insights");
         assert_eq!(genai_only.session_count, 0);
@@ -10850,7 +11284,12 @@ mod insights {
         assert!(i.contexts.is_empty() && i.metadata.is_empty());
 
         let tags = |ctx: Option<&str>| {
-            resolve_insight_scope(&conn, &GetSessionsArgs::default(), InsightUnit::Conversations)
+            resolve_insight_scope(
+                &conn,
+                &GetSessionsArgs::default(),
+                InsightUnit::Conversations,
+                &mut InsightScopeCache::default(),
+            )
                 .expect("scope");
             let contexts = insight_tag_groups(&conn, "context_index", ctx).expect("contexts");
             let metadata = insight_tag_groups(&conn, "metadata_index", None).expect("metadata");
@@ -10964,7 +11403,10 @@ mod insights {
             .expect("import succeeds");
         assert!(res.inserted > 0, "sample export produced no rows");
 
-        let i = conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Conversations)
+        let i = conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Conversations,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        )
             .expect("insights");
         assert!(i.session_count > 0, "no conversations");
 
@@ -11096,7 +11538,9 @@ mod insights {
         let zero = conversation_insights(
             &conn,
             &GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
-            InsightUnit::Conversations
+            InsightUnit::Conversations,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
         )
         .expect("insights");
         assert!(zero.session_count <= i.session_count);
@@ -11107,7 +11551,10 @@ mod insights {
         // The same invariants under the interactions unit, where every join in
         // the "what answered" family changes shape — from `session_uuid` to
         // `log_id` — and a mis-keyed one still returns a plausible number.
-        let t = conversation_insights(&conn, &args, InsightUnit::Interactions).expect("insights");
+        let t = conversation_insights(&conn, &args, InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        ).expect("insights");
         assert_eq!(t.unit, "interactions");
         assert_eq!(t.session_count, i.session_count, "the unit changed the result set");
         assert_eq!(t.interaction_count, i.interaction_count);
@@ -11150,7 +11597,9 @@ mod insights {
         let narrowed = conversation_insights(
             &conn,
             &GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
-            InsightUnit::Interactions
+            InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
         )
         .expect("insights");
         assert!(narrowed.matches_are_narrowed);
@@ -11208,8 +11657,14 @@ mod insights {
             query_scope: Some("user".into()),
             ..Default::default()
         };
-        let convs = conversation_insights(&conn, &args, InsightUnit::Conversations).expect("conv");
-        let turns = conversation_insights(&conn, &args, InsightUnit::Interactions).expect("int");
+        let convs = conversation_insights(&conn, &args, InsightUnit::Conversations,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        ).expect("conv");
+        let turns = conversation_insights(&conn, &args, InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        ).expect("int");
 
         // Same conversations either way — the unit is a reading of one result
         // set, never a different filter.
@@ -11271,7 +11726,10 @@ mod insights {
             Sess { uuid: "b", turns: 7, ..Default::default() },
         ]);
         let turns =
-            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions)
+            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        )
                 .expect("insights");
         assert_eq!(turns.session_count, 2);
         assert_eq!(turns.matched_interactions, 10);
@@ -11293,7 +11751,10 @@ mod insights {
         rebuild_session_summary(&conn).expect("summary");
 
         let args = GetSessionsArgs { filter: Some("low_recog".into()), ..Default::default() };
-        let turns = conversation_insights(&conn, &args, InsightUnit::Interactions).expect("int");
+        let turns = conversation_insights(&conn, &args, InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        ).expect("int");
         assert!(turns.matches_are_narrowed);
         assert_eq!(turns.session_count, 1);
         assert_eq!(turns.matched_interactions, 2, "only the two turns under 60");
@@ -11314,11 +11775,17 @@ mod insights {
         assert_eq!(insights(&conn).session_count, 2, "not 4");
         // …including across a change of unit, which builds a second temp table.
         let turns =
-            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions)
+            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        )
                 .expect("insights");
         assert_eq!(turns.matched_interactions, 2);
         assert_eq!(
-            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions)
+            conversation_insights(&conn, &GetSessionsArgs::default(), InsightUnit::Interactions,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
+        )
                 .expect("insights")
                 .matched_interactions,
             2,
@@ -11328,7 +11795,9 @@ mod insights {
         let narrowed = conversation_insights(
             &conn,
             &GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() },
-            InsightUnit::Conversations
+            InsightUnit::Conversations,
+            InsightSections::default(),
+            &mut InsightScopeCache::default(),
         )
         .expect("insights");
         assert_eq!(narrowed.session_count, 0);

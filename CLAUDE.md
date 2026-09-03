@@ -85,8 +85,9 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `begin_import_run`         | `beginImportRun()`                | Opens an import run: resets the touched-session set, sets the `pending_finalize` crash marker, raises `wal_autocheckpoint` |
 | `finalize_import_run`      | `finalizeImportRun(maxAgeDays)`   | Closes a run: purge, scoped summary rebuild, FTS merge, planner stats, WAL restore — once, instead of once per file. Safe no-op when no run is open |
 | `compact_database`         | `compactDatabase()`               | `VACUUM`s the database, returning pages freed by deletions and schema migrations to the filesystem. Returns `{ bytesBefore, bytesAfter, durationMs }` |
-| `get_conversation_insights` | `getConversationInsights(args, unit)` | Every aggregate the Insights dashboard shows **except the two tag sections**, over the **same `GetSessionsArgs`** `get_sessions` takes. `unit` is `"conversations"` (default) or `"interactions"` — see `### The two readings`. Returns `null` when the read was cancelled |
-| `get_insight_tags`    | `getInsightTags(args, unit, keys)` | The Context and Metadata sections, read *after* the dashboard paints — see `### Why it is two reads, not one`. `keys` is `{context, metadata}`, the key each section is charting |
+| `get_conversation_insights` | `getConversationInsights(args, unit, sections)` | The Insights aggregates for the **sections that were asked for**, over the **same `GetSessionsArgs`** `get_sessions` takes. `unit` is `"conversations"` (default) or `"interactions"` — see `### The two readings`; `sections` is `{volume, quality, content}` — see `### The chooser`. Never the two tag sections. Returns `null` when the read was cancelled |
+| `release_insight_scope` | `releaseInsightScope()`         | Frees the resolved result set the Insights temp tables hold. Called when the modal closes — see `### The result set is resolved once, not once per read` |
+| `get_insight_tags`    | `getInsightTags(args, unit, keys)` | The Context and Metadata sections, read *after* the dashboard paints — see `### Why it is two reads, not one`. `keys` is `{context, metadata, contextOn, metadataOn}` — which key each section is charting, and whether it was asked for at all |
 | `get_insight_tag_values` | `getInsightTagValues(args, unit, kind, name)` | One tag key's values, for switching the Context or Metadata chart |
 | `cancel_db_query`     | `cancelDbQuery()`                | Interrupts whatever the conversations database is running — a session search or an Insights read. A no-op when nothing is running |
 
@@ -609,8 +610,10 @@ as distributions. Every one of its reads takes the *same* `GetSessionsArgs` as
 count and the count above the session list are the same number by construction;
 there is no second notion of "the current results" that can drift.
 
-It opens in two reads and can be stopped part-way — see
-`### Why it is two reads, not one` and `### Cancelling`.
+It **opens on a chooser and reads nothing** until asked — see `### The chooser`.
+What it then reads comes back in two reads, reuses a result set it has already
+resolved, and can be stopped part-way — see `### Why it is two reads, not one`,
+`### The result set is resolved once, not once per read`, and `### Cancelling`.
 
 It is called **Insights**, not Analytics — "Analytics API" already names the
 import source, and reusing the word would make two unrelated things share a name.
@@ -729,6 +732,28 @@ hundred values are both dead ends and neither is visible from a name.
   `hidden` attribute's UA `display: none`, so without it the popover floats over
   the charts from the moment the modal opens.
 - Escape closes the picker before the modal, so one press dismisses one thing.
+
+### The screen it is given
+
+Insights is deliberately the largest surface in the app —
+`min(2100px, 97vw)` × `96vh`, where every other modal is sized to its content.
+Sixteen charts at a fixed 480px each: every 480px of width is another column and
+every 100px of height is another chart row read without scrolling, so capping it
+at a comfortable dialog size spent the window on backdrop.
+
+**The section headings are sticky, and making that work is one rule about the
+scroll container, not a style choice.** `.ins-body` carries **no top padding**,
+because WebKit resolves a sticky `top: 0` against the scrollport's *content*
+box: a `padding-top` parks the stuck heading that far down the pane and leaves a
+band above it that the cards scroll through in full view — a strip of chart
+above the heading with nothing to explain it. Measured at exactly the 16px the
+padding was, with 4 of 9 probe points across the pane hitting a card. The space
+now lives on `.ins-tiles` instead.
+
+The heading is **full-bleed** to match: negative side margins carry its opaque
+background out over the body's side padding, so nothing can pass beside it
+either. With both, every probe point from the top of the scrollport down to the
+heading's bottom hits the heading, at every scroll position.
 
 ### Why the charts are hand-built SVG
 
@@ -857,13 +882,107 @@ the end of it.
   is in the header, in the HTML report and in the plain-text report — and it
   never returns empty (an unfiltered view says so in words).
 
+### The chooser
+
+Opening Insights used to fire every aggregate at once. On a wide search that is
+several seconds in which the modal shows a spinner and nothing else — for
+sixteen charts, most of which scroll past unread. It opens on a chooser instead:
+what to count, and which of the five sections to build.
+
+Measured on the seeded 120k-interaction / 13.3k-conversation database
+(`perf::insights_cost`), the cost of asking for one section rather than all
+three read sections:
+
+| | all sections | one section | the same again |
+| --- | --- | --- | --- |
+| conversations, no filter | 537 ms | **23 ms** | 12 ms |
+| conversations, a search term | 599 ms | **88 ms** | 12 ms |
+| interactions, no filter | 667 ms | **212 ms** | 139 ms |
+| interactions, a search term | 785 ms | **333 ms** | 139 ms |
+
+(The third column is the same read against a result set already resolved — see
+`### The result set is resolved once, not once per read`. On the search-term row
+it is the whole difference between 88 ms and 12 ms.)
+
+- **`INS_SECTIONS` is the single menu**: each section's name, what it answers,
+  what it costs, and — for the three the dashboard read covers — which payload
+  fields carry it. The renderer filters cards by it, the loading pane names the
+  chosen sections from it, and `insAddSection` merges by its `fields`.
+  `the chooser and the cards agree on what a section is` pins the two halves
+  together: a section renamed on one side and not the other makes every card in
+  it silently disappear, with no error and no empty state.
+- **Cards are filtered by the choice, not by emptiness.** A section that was not
+  read comes back as empty arrays and most of its cards drop out on their own —
+  but **Feedback** is built from the headline counters, which are always read.
+  Filtering by emptiness would leave that one chart stranded under a heading for
+  a section nobody asked for. `a section that was not chosen contributes no
+  card, not even a derived one` is built around exactly that card.
+- **The two tag sections are off by default** and marked *slower*: they are the
+  expensive half, and they say nothing until a key is chosen. Volume, Quality
+  and Content are on, because between them they answer what people open this
+  for.
+- **What was left out is offered at the bottom of the dashboard**, not only back
+  on the chooser. A section nobody selected is invisible on this screen, and
+  "the chart I wanted isn't here" needs an answer on the screen it is missing
+  from.
+- **Adding a section is not a reload.** `insAddSection` fetches only that
+  section and merges its fields into the payload already being drawn — the
+  result set is still resolved, so the fetch costs the third column above. A
+  reload would re-run every aggregate already on the screen.
+- **The chooser means "nothing has been read"**, so `insShowSetup` clears
+  `insData`. Keeping it would leave Copy dashboard live over a dashboard that is
+  no longer on screen.
+- **The header's unit toggle works in both stages**, and in the chooser it is a
+  choice rather than a refetch: nothing has been read, so it costs nothing and
+  simply redraws.
+- The selection is remembered in `cm-insights-sections`, read key by key so a
+  file written by an older build cannot introduce one and a hand-edited one
+  cannot introduce any. All-false falls back to the default — it is not a state
+  the chooser can act on.
+
+### The result set is resolved once, not once per read
+
+`build_session_filter_query` — an FTS match, an entity scan, a materialized
+feedback relation — is most of what an Insights read costs, and every read after
+the first asks about the **same search**: another section, another tag key, the
+other unit. Re-resolving it for each of those is re-running the search the user
+already ran.
+
+So the temp tables stay on the connection and `InsightScopeCache` records what
+is in them. On the search-term case above that is **76 ms of an 88 ms read**.
+
+- **Two fingerprints, not one.** The session set and the matching turns
+  invalidate on different things: switching the unit rebuilds `insight_matches`
+  and `insight_weights` and leaves the expensive `insight_sessions` exactly
+  where it is (`keep_sessions`).
+- **`total_changes()` is the safety catch**, and it is why no write path in this
+  file has to know the cache exists. SQLite's own counter moves on any insert,
+  update or delete this connection makes — an import, a deletion, a purge — so
+  the fingerprint stops matching on its own. Recorded *after* the tables are
+  built, since building them is itself a write. A failed read of the counter can
+  never look like a hit: a hit requires `Some` on both sides.
+- **Reuse that is too eager is the dangerous half.** A stale hit would chart
+  rows that are no longer the result of that search, and the numbers would
+  simply be wrong with nothing on screen to say so.
+  `a_second_read_of_one_search_reuses_the_resolved_result_set` asserts both
+  directions, including that an import ends the reuse.
+- **A failed or interrupted read drops the tables *and* clears the cache**, in
+  each of the three commands. An interrupt lands mid-build, so what is on the
+  connection describes nothing — and a cache still pointing at it would reuse
+  half a result set.
+- **`release_insight_scope` is memory, not correctness.** The fingerprint would
+  have caught a stale set anyway; this hands the pages back when the modal
+  closes. `set_db_path` clears the cache too, because the connection the tables
+  lived on has gone.
+
 ### Why it is two reads, not one
 
-Opening Insights fires **`get_conversation_insights`**, and the renderer draws
-the answer; **`get_insight_tags`** follows, unawaited, and fills the Context and
-Metadata sections in. Those two sections were more than half of what a read cost
-and they draw two charts below the fold, so charging the whole dashboard for
-them meant nothing at all appeared until they were done.
+Building fires **`get_conversation_insights`**, and the renderer draws the
+answer; **`get_insight_tags`** follows, unawaited, and fills the Context and
+Metadata sections in — when they were chosen. Those two sections were more than
+half of what a read cost and they draw two charts below the fold, so charging
+the whole dashboard for them meant nothing at all appeared until they were
+done.
 
 Measured on a seeded 120k-interaction / 13.3k-conversation database
 (`perf::insights_cost`), against the single-read version:
@@ -880,8 +999,12 @@ Measured on a seeded 120k-interaction / 13.3k-conversation database
   *still reading* from *read, and there is nothing*, which both arrive as an
   empty list; `tagsLoaded` is the only thing that tells them apart.
 - **Both tables come back in one call**, so the result set is resolved once —
-  that resolve is the other half of what a read costs (up to 193 ms with a
-  search term).
+  and, since the dashboard read resolved the same search moments earlier, that
+  resolve is now normally a cache hit rather than the 193 ms it used to be with
+  a search term.
+- **Each table is read only if its section was chosen** (`contextOn` /
+  `metadataOn`). A key of `None` means "pick the most-covering one", which is a
+  different thing from "do not read this table" — hence the separate flags.
 - **`insLoadTags` is guarded three ways** — a newer read (`insLoadSeq`), a
   cancelled read (`null`), and a payload since replaced (`insData !== d`).
 
@@ -908,8 +1031,10 @@ Insights read nobody wants any more blocks the next search as well as itself.
   stop one is changing your mind about it; a toggle that goes inert for the
   duration makes you wait out the answer you no longer want.
 - **The temp tables are dropped on any non-success**, in the command rather than
-  in `conversation_insights` — an interrupt lands before the normal drop, and
-  they live on a connection that outlives the call.
+  in `conversation_insights`, and the scope cache is cleared with them — an
+  interrupt lands mid-build, and they live on a connection that outlives the
+  call. A *successful* read deliberately leaves them; see
+  `### The result set is resolved once, not once per read`.
 
 ### The backend
 
@@ -924,9 +1049,11 @@ under `target: "insights"` and `perf::insights_cost` prints it.
   FTS match, an entity scan, a materialized feedback relation — and there are
   ~15 aggregates; running them against the CTE would re-derive the result set
   once per chart. `resolve_insight_scope` is shared by all three commands. The
-  tables are dropped at the end of the call, and
-  `a_second_run_does_not_see_the_first_runs_result_set` pins that, since the
-  connection outlives the call.
+  tables now *survive* a successful call on purpose — see
+  `### The result set is resolved once, not once per read` — and
+  `a_second_run_does_not_see_the_first_runs_result_set` pins the rebuild path
+  instead: a read that does *not* reuse them must replace their rows, never
+  append to them.
 - **`insight_weights` is what one conversation is worth**: 1, or the number of
   its turns that matched. Context and metadata are keyed by conversation, so the
   interactions reading joined `insight_matches` — one row per matching turn — to
@@ -1260,10 +1387,16 @@ The detail header states the collection in one line (`N items · N export rows �
 
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
-                toggle | Copy dashboard | ✕
+                toggle | Choose data | Copy dashboard | ✕
   header row 2: what the slice holds | chips describing the search this is
                 | one quiet UTC badge
-  body (one scrolling canvas, not tabs; section headings are sticky):
+  body, on open — the chooser, and nothing is read until it is answered:
+    what the current search matched
+    Count: Conversations / Interactions, each with what it means
+    Sections: Volume · Quality · Context · Metadata · Content, each with
+              what it answers and what it costs (fast / medium / slower)
+    Build N sections
+  body, once built (one scrolling canvas, not tabs; section headings are sticky):
     stat tiles (conversations · interactions · median length · GenAI ·
                 thumbs down · zero recognition · under threshold)
     Volume   — per day · by hour (UTC) · day × hour heatmap · length
@@ -1273,6 +1406,7 @@ The detail header states the collection in one line (`N items · N export rows �
     Metadata — one key button (searchable picker) + its values
     Content  — entities · opening questions (conversations only) ·
                Articles · Dialogs · Dialog nodes · cultures
+    Not loaded — one button per section left out, to add it in place
   every card: title · what it counts · Image / Data copy buttons
   while reading: a Cancel button under the spinner; the unit toggle stays live
 
@@ -1409,6 +1543,7 @@ Always use these terms in the UI:
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
+| `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 
 Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer. A settings backup does export them, and still does not break that rule; see `## Settings backup`.

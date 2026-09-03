@@ -7259,11 +7259,16 @@
          attribute on the SVG element, because the same string has to render
          identically inside an <img> when it is rasterised for the clipboard.
          What is styled here is only the frame around them. */
+      /* Deliberately the largest surface in the app. Sixteen charts at a
+         fixed 480px each: every 480px of width is another column and every
+         100px of height is another chart row read without scrolling, so
+         capping this at a "comfortable" dialog size spent the window on
+         backdrop. It takes what the window has and stops one gutter short. */
       .modal-box.ins-modal-box {
-        width: min(1360px, 95vw);
-        max-width: min(1360px, 95vw);
-        height: min(880px, 92vh);
-        max-height: 92vh;
+        width: min(2100px, 97vw);
+        max-width: min(2100px, 97vw);
+        height: 96vh;
+        max-height: 96vh;
         display: flex;
         flex-direction: column;
       }
@@ -7415,12 +7420,19 @@
         /* The card grid crosses the scrollable threshold as sections render;
            reserving the gutter keeps every chart from shifting sideways. */
         scrollbar-gutter: stable;
-        padding: 16px 20px 24px;
+        /* No padding at the top, and that is not spacing taste — it is what
+           makes the sticky section headings work. WebKit resolves a sticky
+           `top: 0` against the scrollport's *content* box, so a padding-top
+           parks the stuck heading that far down the pane and leaves a band
+           above it that the cards scroll through in full view. The space is
+           on the first child instead. */
+        padding: 0 20px 24px;
       }
       .ins-tiles {
         display: flex;
         flex-wrap: wrap;
         gap: 10px;
+        padding-top: 16px;
         margin-bottom: 20px;
       }
       .ins-tile {
@@ -7454,25 +7466,257 @@
         font-size: 0.65rem;
         color: var(--muted);
       }
+      /* ── The chooser ──────────────────────────────────────────────
+         The screen this modal opens on. Reading everything the moment it
+         opened meant several seconds of work nobody had asked for; this asks
+         first. Narrow on purpose — it is a form, and a form stretched across
+         a 2000px dialog is unreadable. */
+      .ins-setup {
+        max-width: 760px;
+        margin: 0 auto;
+        /* Top-aligned rather than centred in the pane: a form that starts in
+           the middle of a near-full-screen dialog has nothing above it to
+           anchor to, and centring one that outgrows the pane pushes its first
+           question off the top where it cannot be scrolled back to. */
+        padding: min(6vh, 48px) 0 30px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        animation: fade-in 160ms ease-out;
+      }
+      .ins-setup-head h3 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .ins-setup-head p {
+        font-size: 0.76rem;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.5;
+      }
+      .ins-setup-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .ins-setup-legend {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+      }
+      .ins-setup-all {
+        background: none;
+        border: none;
+        color: var(--accent);
+        cursor: pointer;
+        font-size: 0.68rem;
+        text-transform: none;
+        letter-spacing: 0;
+        padding: 0;
+      }
+      .ins-setup-all:hover {
+        text-decoration: underline;
+      }
+      /* The unit is picked here as well as in the header, because in the
+         chooser it is a decision rather than a switch: nothing has been read,
+         so it costs nothing, and each option can afford the sentence that says
+         what it means. */
+      .ins-setup-units {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .ins-setup-unit {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        align-items: flex-start;
+        text-align: left;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 10px 13px;
+        cursor: pointer;
+        color: var(--muted);
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .ins-setup-unit strong {
+        font-size: 0.82rem;
+        color: var(--text);
+        font-weight: 600;
+      }
+      .ins-setup-unit span {
+        font-size: 0.68rem;
+        line-height: 1.45;
+      }
+      .ins-setup-unit:hover {
+        border-color: var(--muted);
+      }
+      .ins-setup-unit.active {
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 12%, var(--surface2));
+      }
+      .ins-setup-list {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .ins-setup-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 10px 13px;
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .ins-setup-item:hover {
+        border-color: var(--muted);
+      }
+      .ins-setup-item.on {
+        border-color: var(--accent);
+      }
+      .ins-setup-item input {
+        margin-top: 2px;
+        accent-color: var(--accent);
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .ins-setup-item-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+        min-width: 0;
+      }
+      .ins-setup-item-text strong {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .ins-setup-item-text span {
+        font-size: 0.69rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      /* What a section costs, said before it is chosen rather than discovered
+         while waiting for it. Three words, not milliseconds — the real number
+         depends on the database and would be a promise this cannot keep. */
+      .ins-cost {
+        flex-shrink: 0;
+        font-size: 0.6rem;
+        font-style: normal;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 6px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      .ins-cost-fast {
+        color: var(--green);
+        border-color: color-mix(in srgb, var(--green) 45%, transparent);
+      }
+      .ins-cost-medium {
+        color: var(--blue);
+        border-color: color-mix(in srgb, var(--blue) 45%, transparent);
+      }
+      .ins-cost-slower {
+        color: var(--orange);
+        border-color: color-mix(in srgb, var(--orange) 45%, transparent);
+      }
+      .ins-setup-foot {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .ins-setup-note {
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      /* What was left out, offered at the bottom of the dashboard. Without it
+         a missing chart has no explanation on the screen it is missing from. */
+      .ins-more {
+        display: flex;
+        align-items: stretch;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 6px 0 14px;
+      }
+      .ins-more-label {
+        align-self: center;
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: var(--muted);
+      }
+      .ins-more-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        text-align: left;
+        max-width: 340px;
+        background: var(--surface2);
+        border: 1px dashed var(--border);
+        border-radius: 9px;
+        padding: 8px 12px;
+        cursor: pointer;
+        transition: border-color 0.15s;
+      }
+      .ins-more-btn:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .ins-more-btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .ins-more-btn strong {
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .ins-more-btn span {
+        font-size: 0.66rem;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .ins-more-btn .ins-cost {
+        margin-top: 3px;
+      }
       .ins-section {
         margin-bottom: 22px;
       }
       /* Sticky, so a section's name is still on screen at the bottom of its
          charts — the body is one long canvas by design and sixteen charts is a
-         long way from the heading that says what they are about. Opaque, or
-         the cards scroll through it. */
+         long way from the heading that says what they are about.
+
+         Full-bleed, and that is the whole of it: negative margins carry the
+         opaque background out over the body's side padding, so no part of a
+         card can pass beside the heading either. Paired with `.ins-body`'s
+         zero top padding, a stuck heading covers the pane edge to edge and
+         nothing scrolls in front of it. */
       .ins-section > h4 {
         position: sticky;
         top: 0;
-        z-index: 2;
+        z-index: 3;
         background: var(--surface);
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.07em;
         color: var(--muted);
-        border-bottom: 1px solid var(--border);
-        padding: 4px 0 5px;
-        margin-bottom: 10px;
+        box-shadow: inset 0 -1px 0 var(--border);
+        padding: 10px 20px 6px;
+        margin: 0 -20px 10px;
       }
       /* auto-FILL, not auto-fit. Under auto-fit an empty track collapses, so a
          section holding one card — Context and Metadata always do — stretched
@@ -7755,8 +7999,14 @@
         .ins-tooltip,
         .ins-act,
         .ins-key,
+        .ins-setup-unit,
+        .ins-setup-item,
+        .ins-more-btn,
         .ins-unit button {
           transition: none;
+        }
+        .ins-setup {
+          animation: none;
         }
       }
 
@@ -7891,6 +8141,13 @@
         <symbol id="i-clock" viewBox="0 0 16 16">
           <circle cx="8" cy="8" r="5.7" />
           <path d="M8 4.6V8l2.4 1.5" />
+        </symbol>
+        <!-- Three sliders: what this dashboard is set to show. -->
+        <symbol id="i-sliders" viewBox="0 0 16 16">
+          <path d="M2.6 4.4h10.8M2.6 8h10.8M2.6 11.6h10.8" />
+          <circle cx="5.6" cy="4.4" r="1.5" />
+          <circle cx="10.4" cy="8" r="1.5" />
+          <circle cx="6.6" cy="11.6" r="1.5" />
         </symbol>
         <symbol id="i-info" viewBox="0 0 16 16">
           <circle cx="8" cy="8" r="5.7" />
@@ -9798,6 +10055,17 @@
               </button>
             </div>
             <div class="ins-header-actions">
+              <!--
+                Back to the chooser. Permanent rather than only on the
+                dashboard: which sections are loaded is the one thing about this
+                screen you change repeatedly, and hunting for the way back to it
+                is what made the old always-load-everything behaviour feel like
+                the only option.
+              -->
+              <button id="insSetupBtn" onclick="insShowSetup()"
+                title="Choose what to count and which sections to build">
+                <svg class=ui-icon><use href=#i-sliders /></svg> Choose data
+              </button>
               <button class="btn-primary" id="insCopyAllBtn" disabled
                 title="Put the whole dashboard on the clipboard as rich text — paste it straight into an email">
                 <svg class=ui-icon><use href=#i-clipboard /></svg> Copy dashboard
@@ -10508,8 +10776,11 @@
             invoke("get_insight_tags", { args, unit, keys }),
           getInsightTagValues: (args, unit, kind, name) =>
             invoke("get_insight_tag_values", { args, unit, kind, name }),
-          getConversationInsights: (args, unit) =>
-            invoke("get_conversation_insights", { args, unit }),
+          getConversationInsights: (args, unit, sections) =>
+            invoke("get_conversation_insights", { args, unit, sections }),
+          // Frees the resolved result set the Insights temp tables hold. Called
+          // on close — see `release_insight_scope`.
+          releaseInsightScope: () => invoke("release_insight_scope"),
           // The export is one long invoke with a save dialog, a full-result
           // query and a file write in it; these are the phase boundaries.
           onAiExportProgress: (handler) =>
@@ -10648,6 +10919,8 @@
           Promise.resolve({ contexts: [], metadata: [] })
       if (!window.backend.getInsightTagValues)
         window.backend.getInsightTagValues = () => Promise.resolve([])
+      if (!window.backend.releaseInsightScope)
+        window.backend.releaseInsightScope = () => Promise.resolve()
       if (!window.backend.exportConversationsForAi)
         window.backend.exportConversationsForAi = () =>
           Promise.resolve({
@@ -20775,6 +21048,106 @@
 
       const INS_CHART_W = 640
 
+      /// The five sections, in the order the dashboard reads in.
+      ///
+      /// This is the whole menu: what a section answers, what it costs, and —
+      /// for the three the dashboard read covers — which fields of the payload
+      /// carry it. Context and Metadata have no `fields` because they arrive
+      /// through their own call (`get_insight_tags`) rather than as part of the
+      /// dashboard payload.
+      const INS_SECTIONS = [
+        {
+          key: "volume",
+          name: "Volume",
+          blurb: "When they happened — per day, by hour, day × hour, and how long they ran.",
+          cost: "fast",
+          fields: ["byDay", "byHour", "hourWeekday", "lengthBuckets"],
+        },
+        {
+          key: "quality",
+          name: "Quality",
+          blurb:
+            "Recognition scores, thumbs up and down, how the answer was found, and how Dialogs ended.",
+          cost: "fast",
+          fields: ["recognitionBands", "recognitionTypes", "dialogStatus"],
+        },
+        {
+          key: "context",
+          name: "Context",
+          blurb: "One context key at a time — what the conversations were in.",
+          cost: "slower",
+        },
+        {
+          key: "metadata",
+          name: "Metadata",
+          blurb: "One metadata key at a time — what the answers were marked with.",
+          cost: "slower",
+        },
+        {
+          key: "content",
+          name: "Content",
+          blurb: "Entities, opening questions, Articles, Dialogs, Dialog nodes and cultures.",
+          cost: "medium",
+          fields: [
+            "entities",
+            "firstMessages",
+            "articles",
+            "dialogNodes",
+            "dialogs",
+            "cultures",
+          ],
+        },
+      ]
+
+      /// The three the dashboard read itself covers. Context and Metadata are
+      /// their own call and are never sent in `sections`.
+      const INS_READ_SECTIONS = ["volume", "quality", "content"]
+
+      /// What the chooser is currently offering to build.
+      ///
+      /// Insights used to open by reading everything, which on a wide search is
+      /// several seconds before anything at all appears — for sixteen charts,
+      /// most of which scroll past unread. It opens on this instead, and a read
+      /// costs what was asked for.
+      ///
+      /// Volume, Quality and Content are on by default because between them
+      /// they answer the questions people open this for. The two tag sections
+      /// are off: they are the expensive half, and they need a key chosen
+      /// before they say anything.
+      let insSections = (() => {
+        const fallback = {
+          volume: true,
+          quality: true,
+          content: true,
+          context: false,
+          metadata: false,
+        }
+        try {
+          const raw = JSON.parse(localStorage.getItem("cm-insights-sections") || "null")
+          if (!raw || typeof raw !== "object") return fallback
+          const out = {}
+          // Read key by key rather than trusting the stored object: a file
+          // written by an older build simply has fewer keys, and one edited by
+          // hand cannot introduce any.
+          for (const sec of INS_SECTIONS) out[sec.key] = !!raw[sec.key]
+          // Nothing selected is not a state the chooser can act on.
+          return INS_SECTIONS.some((sec) => out[sec.key]) ? out : fallback
+        } catch (e) {
+          return fallback
+        }
+      })()
+
+      function insSaveSections() {
+        try {
+          localStorage.setItem("cm-insights-sections", JSON.stringify(insSections))
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the choice */
+        }
+      }
+
+      /// "setup" while the chooser is up, "dashboard" once something is read.
+      let insStage = "setup"
+
       /// The nouns a payload is described in, derived once so a card, a tile,
       /// a tooltip and a pasted report cannot disagree about what was counted.
       ///
@@ -21368,8 +21741,134 @@
         insArgs = args
         insCtxKey = null
         insMetaKey = null
+        insData = null
+        insSpecs = new Map()
         overlay.classList.add("open")
-        await insLoad()
+        // Deliberately no read. Opening used to fire every aggregate at once,
+        // so the first thing this modal did was make the user wait for charts
+        // they had not asked for. It opens on the chooser; the read starts when
+        // they say what they want.
+        insShowSetup()
+      }
+
+      // ── The chooser ──────────────────────────────────────────────────
+
+      /// Put the chooser up, abandoning whatever was being read.
+      function insShowSetup() {
+        if (insLoading) insStopRead()
+        insStage = "setup"
+        // The chooser means "nothing has been read". Keeping the previous
+        // payload would leave Copy dashboard live over a dashboard that is no
+        // longer on screen, and the header describing a reading the chooser is
+        // in the middle of changing.
+        insData = null
+        insSpecs = new Map()
+        insCloseKeyPicker()
+        insSyncCopyAll()
+        insSyncUnitToggle()
+        insRenderHeader()
+        insRenderSetup()
+      }
+
+      /// The chooser, and the only screen this modal opens on.
+      ///
+      /// Both counts come off the conversation search that is already on
+      /// screen, so it states the size of what it is about to read without
+      /// reading anything.
+      function insRenderSetup() {
+        const body = document.getElementById("insBody")
+        if (!body) return
+        const chosen = INS_SECTIONS.filter((sec) => insSections[sec.key])
+        body.innerHTML = `<div class="ins-setup">
+          <div class="ins-setup-head">
+            <h3>What do you want to look at?</h3>
+            <p>Charts are built from the conversations your current search
+               matched — nothing is searched again.</p>
+          </div>
+
+          <div class="ins-setup-group">
+            <span class="ins-setup-legend">Count</span>
+            <div class="ins-setup-units">
+              ${["conversations", "interactions"]
+                .map(
+                  (u) => `<button class="ins-setup-unit${
+                    insUnit === u ? " active" : ""
+                  }" onclick="insSetUnit('${u}')">
+                    <strong>${u === "interactions" ? "Interactions" : "Conversations"}</strong>
+                    <span>${
+                      u === "interactions"
+                        ? "One bar per matching turn — sharper, and usually the bigger number."
+                        : "One bar per conversation, the same set the list beside this shows."
+                    }</span>
+                  </button>`,
+                )
+                .join("")}
+            </div>
+          </div>
+
+          <div class="ins-setup-group">
+            <span class="ins-setup-legend">Sections
+              <button class="ins-setup-all" onclick="insSetAllSections(${
+                chosen.length === INS_SECTIONS.length ? "false" : "true"
+              })">${chosen.length === INS_SECTIONS.length ? "Select none" : "Select all"}</button>
+            </span>
+            <div class="ins-setup-list">
+              ${INS_SECTIONS.map(
+                (sec) => `<label class="ins-setup-item${
+                  insSections[sec.key] ? " on" : ""
+                }">
+                  <input type="checkbox" ${insSections[sec.key] ? "checked" : ""}
+                    onchange="insToggleSection('${sec.key}')">
+                  <span class="ins-setup-item-text">
+                    <strong>${esc(sec.name)}</strong>
+                    <span>${esc(sec.blurb)}</span>
+                  </span>
+                  <span class="ins-cost ins-cost-${sec.cost}">${esc(sec.cost)}</span>
+                </label>`,
+              ).join("")}
+            </div>
+          </div>
+
+          <div class="ins-setup-foot">
+            <button class="btn-primary" id="insBuildBtn" ${
+              chosen.length ? "" : "disabled"
+            } onclick="insBuild()">
+              ${
+                chosen.length
+                  ? "Build " + chosen.length + " section" + (chosen.length === 1 ? "" : "s")
+                  : "Choose at least one section"
+              }
+            </button>
+            <span class="ins-setup-note">${
+              chosen.length
+                ? esc(chosen.map((c) => c.name).join(" · "))
+                : "Nothing selected."
+            }</span>
+          </div>
+        </div>`
+      }
+
+      /// Toggle one section in the chooser.
+      ///
+      /// The whole panel re-renders rather than just the row: the Build button
+      /// names the count, the footer names the sections, and "Select all" flips
+      /// to "Select none" — all of which are wrong the moment one box changes.
+      function insToggleSection(key) {
+        insSections[key] = !insSections[key]
+        insSaveSections()
+        insRenderSetup()
+      }
+
+      function insSetAllSections(on) {
+        for (const sec of INS_SECTIONS) insSections[sec.key] = !!on
+        insSaveSections()
+        insRenderSetup()
+      }
+
+      function insBuild() {
+        if (!INS_SECTIONS.some((sec) => insSections[sec.key])) return
+        insStage = "dashboard"
+        insLoad()
       }
 
       /// Switch what the charts count and read the same result set again.
@@ -21380,6 +21879,20 @@
       async function insSetUnit(unit) {
         const wanted = unit === "interactions" ? "interactions" : "conversations"
         if (wanted === insUnit || !insArgs) return
+        if (insStage === "setup") {
+          // Nothing has been read yet, so this is a choice rather than a
+          // refetch. Note it and redraw the chooser.
+          insUnit = wanted
+          try {
+            localStorage.setItem("cm-insights-unit", insUnit)
+          } catch (e) {
+            /* a full or disabled store is not a reason to refuse the switch */
+          }
+          insRenderHeader()
+          insSyncUnitToggle()
+          insRenderSetup()
+          return
+        }
         // Deliberately live mid-read. The whole point of being able to stop a
         // read is to change your mind about it; a toggle that goes inert for
         // the duration makes the user wait out the answer they no longer want.
@@ -21396,6 +21909,13 @@
         await insLoad()
       }
 
+      /// Which of the three read sections a payload should carry.
+      function insWantedSections() {
+        const out = {}
+        for (const key of INS_READ_SECTIONS) out[key] = !!insSections[key]
+        return out
+      }
+
       async function insLoad() {
         const args = insArgs
         if (!args) return
@@ -21403,6 +21923,7 @@
         // only reason to start a second one is that the first is answering a
         // question that is no longer being asked.
         if (insLoading) insStopRead()
+        insStage = "dashboard"
         insData = null
         insSpecs = new Map()
         insCloseKeyPicker()
@@ -21411,13 +21932,14 @@
         insLoading = true
         insSyncCopyAll()
         insSyncUnitToggle()
+        const want = insWantedSections()
         // The counts are aggregates over every interaction in the result set,
         // which on a wide search is genuinely seconds of work — so the wait
         // carries a way out of it, not just an explanation of itself.
         setPaneLoading(
           "insBody",
           "Reading the search results…",
-          "Counting interactions, contexts, entities and answers across every matching conversation",
+          insSectionNote(want),
           `<button onclick="insCancelRead()">Cancel</button>`,
         )
         // Let WebKit paint before the invoke takes the IPC channel. Bounded —
@@ -21425,7 +21947,7 @@
         await yieldToPaint()
         const mySeq = ++insLoadSeq
         try {
-          const res = await window.backend.getConversationInsights(args, insUnit)
+          const res = await window.backend.getConversationInsights(args, insUnit, want)
           // A second toggle while the first read is in flight must not paint
           // the older answer over the newer one.
           if (mySeq !== insLoadSeq) return
@@ -21440,7 +21962,9 @@
           insRenderBody()
           // The two tag sections follow, deliberately not awaited by the paint
           // above — see `get_insight_tags` for why they are their own read.
-          insLoadTags(res, mySeq)
+          // Only when they were asked for: they are the expensive half, and
+          // this is the whole reason the chooser lists them separately.
+          if (insSections.context || insSections.metadata) insLoadTags(res, mySeq)
         } catch (e) {
           if (mySeq !== insLoadSeq) return
           clearPaneLoading("insBody")
@@ -21465,11 +21989,71 @@
       /// charts below the fold — so charging the whole dashboard for them meant
       /// nothing appeared at all until they were done. Both tables come back in
       /// one call, so the result set is resolved once.
+      /// What the loading pane says it is doing, in terms of what was chosen.
+      function insSectionNote(want) {
+        const names = INS_SECTIONS.filter(
+          (sec) => want[sec.key] || (!INS_READ_SECTIONS.includes(sec.key) && insSections[sec.key]),
+        ).map((sec) => sec.name)
+        return names.length
+          ? "Reading " + names.join(", ") + " across every matching conversation"
+          : "Counting the matching conversations"
+      }
+
+      /// Add a section to a dashboard that is already on screen.
+      ///
+      /// Not a reload: the result set is still resolved on the connection, so
+      /// this fetches only the section that was missing and merges its fields
+      /// into the payload already being drawn. Reloading would re-run every
+      /// aggregate that is already on the screen.
+      async function insAddSection(key) {
+        const sec = INS_SECTIONS.find((x) => x.key === key)
+        if (!sec || insSections[key] || insAdding) return
+        insSections[key] = true
+        insSaveSections()
+        const d = insData
+        // The two tag sections are their own call and their own read; turning
+        // one on is the same work as the dashboard's follow-up read.
+        if (!INS_READ_SECTIONS.includes(key)) {
+          insRenderBody()
+          if (d) {
+            d.tagsLoaded = false
+            insLoadTags(d, insLoadSeq)
+          }
+          return
+        }
+        if (!d) return
+        insAdding = key
+        insRenderBody()
+        const mySeq = insLoadSeq
+        const want = {}
+        for (const k of INS_READ_SECTIONS) want[k] = k === key
+        try {
+          const res = await window.backend.getConversationInsights(insArgs, insUnit, want)
+          // A newer read, a cancellation, or a payload since replaced.
+          if (mySeq !== insLoadSeq || insData !== d) return
+          if (res) for (const f of sec.fields) d[f] = res[f]
+        } catch (e) {
+          if (mySeq !== insLoadSeq || insData !== d) return
+          insSections[key] = false
+          showImportToast("error", "Could not read " + sec.name + ". " + String(e))
+        } finally {
+          if (mySeq === insLoadSeq && insData === d) {
+            insAdding = null
+            insRenderBody()
+          }
+        }
+      }
+
+      /// The section currently being added, so its button can say so.
+      let insAdding = null
+
       async function insLoadTags(d, seq) {
         try {
           const tags = await window.backend.getInsightTags(insArgs, insUnit, {
             context: insCtxKey,
             metadata: insMetaKey,
+            contextOn: !!insSections.context,
+            metadataOn: !!insSections.metadata,
           })
           // A newer read, a cancellation (`null`), or a payload that has since
           // been replaced: in all three the answer is no longer this screen's.
@@ -21506,8 +22090,9 @@
         insSyncUnitToggle()
         document.getElementById("insBody").innerHTML =
           `<div class="ins-empty"><strong>Stopped.</strong>
-            <span>Nothing was read. Change the search or the unit and try again.</span>
+            <span>Nothing was read.</span>
             <button class="btn-primary" onclick="insLoad()">Read again</button>
+            <button onclick="insShowSetup()">Change what to read</button>
           </div>`
       }
 
@@ -21528,6 +22113,10 @@
         // would sit behind an answer nobody is going to look at. The interrupt
         // is a no-op when nothing is running.
         insStopRead()
+        // The resolved result set is a cache, not a fact about the app — hold
+        // it while the modal is open, hand the pages back when it is not.
+        window.backend.releaseInsightScope().catch(() => {})
+        insStage = "setup"
         document.getElementById("insightsModal").classList.remove("open")
         insCloseKeyPicker()
         insHideTooltip()
@@ -21589,7 +22178,14 @@
             }</span></div>`
           return
         }
-        const cards = insBuildCards(d, INS_THEME_SCREEN)
+        // A section that was not read comes back as empty arrays, so most of
+        // its cards drop out on their own — but not all of them: the Feedback
+        // card is built from the headline counters, which are always read.
+        // Filtering by the choice rather than by emptiness is what keeps one
+        // Quality card from appearing in a dashboard with no Quality section.
+        const cards = insBuildCards(d, INS_THEME_SCREEN).filter(
+          (c) => insSections[c.section.toLowerCase()],
+        )
         insSpecs = new Map(cards.map((c) => [c.id, c]))
 
         let html = `<div class="ins-tiles">${insTiles(d)
@@ -21614,7 +22210,7 @@
         const tagSections = [
           ["Context", "context", d.contexts, insCtxKey],
           ["Metadata", "metadata", d.metadata, insMetaKey],
-        ]
+        ].filter(([, kind]) => insSections[kind])
         for (const [name] of tagSections) {
           if (!sections.some((s) => s.name === name)) sections.push({ name, cards: [] })
         }
@@ -21622,6 +22218,7 @@
         const order = ["Volume", "Quality", "Context", "Metadata", "Content"]
         sections.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name))
         for (const section of sections) {
+          const key = section.name.toLowerCase()
           html += `<div class="ins-section"><h4>${esc(section.name)}</h4>`
           const tag = tagSections.find((t) => t[0] === section.name)
           if (tag) html += insTagKeyBar(tag[1], tag[2], tag[3])
@@ -21629,6 +22226,16 @@
             .map((c) => insCardHtml(c))
             .join("")}</div>`
           if (tag && !section.cards.length) html += insTagPendingHtml(tag)
+          // A section just switched on has its heading before it has its
+          // charts. Saying so is the difference between "reading" and "this
+          // section is empty", which look identical.
+          if (!tag && !section.cards.length) {
+            html +=
+              insAdding === key
+                ? `<div class="ins-tag-pending"><span class="mini-spinner"></span>
+                     Reading ${esc(section.name)}…</div>`
+                : `<div class="ins-tag-pending">Nothing to chart here in this result.</div>`
+          }
           html += `</div>`
         }
         // The footer states only what is not visible from the screen itself.
@@ -21636,6 +22243,27 @@
         // remains is the reading, and — in the interactions reading only — the
         // two cards that are deliberately absent, since a missing card is the
         // one thing here nobody can ask a question about.
+        // Whatever was left out, offered where its absence is felt rather than
+        // only back on the chooser. A section nobody selected is invisible on
+        // this screen, and "the chart I wanted isn't here" has to have an
+        // answer that is one click away.
+        const missing = INS_SECTIONS.filter((sec) => !insSections[sec.key])
+        if (missing.length) {
+          html += `<div class="ins-more">
+            <span class="ins-more-label">Not loaded</span>
+            ${missing
+              .map(
+                (sec) => `<button class="ins-more-btn" ${
+                  insAdding ? "disabled" : ""
+                } onclick="insAddSection('${sec.key}')">
+                  <strong>${esc(sec.name)}</strong>
+                  <span>${esc(sec.blurb)}</span>
+                  <em class="ins-cost ins-cost-${sec.cost}">${esc(sec.cost)}</em>
+                </button>`,
+              )
+              .join("")}
+          </div>`
+        }
         const w = insWords(d)
         html += `<div class="ins-foot">Every chart counts <strong>${esc(
           w.subject,
