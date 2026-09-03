@@ -22014,11 +22014,12 @@
         // The two tag sections are their own call and their own read; turning
         // one on is the same work as the dashboard's follow-up read.
         if (!INS_READ_SECTIONS.includes(key)) {
+          // Cleared *before* the render, not after: the flag is the only thing
+          // that tells "still reading" from "read, and there is nothing", and
+          // the other tag section may well have set it already.
+          if (d) d.tagsLoaded = false
           insRenderBody()
-          if (d) {
-            d.tagsLoaded = false
-            insLoadTags(d, insLoadSeq)
-          }
+          if (d) insLoadTags(d, insLoadSeq)
           return
         }
         if (!d) return
