@@ -7418,6 +7418,15 @@
         flex-shrink: 0;
         margin-left: auto;
       }
+      /* Only a positioning context for the refresh overlay. The flex sizing
+         has to pass straight through it, or `#insBody` stops being the thing
+         that scrolls and the sticky headings go with it. */
+      .ins-body-wrap {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+      }
       .ins-body {
         flex: 1;
         min-height: 0;
@@ -10108,7 +10117,26 @@
             </span>
           </div>
         </div>
-        <div class="ins-body" id="insBody"></div>
+        <!--
+          The body and an overlay over it, rather than the body alone.
+          Switching the unit used to tear the dashboard down and put a spinner
+          in its place, even when the answer for the other reading was already
+          in hand. The scrollport is still `#insBody` itself — the wrapper is
+          only a positioning context — so the sticky-heading rule below is
+          untouched.
+        -->
+        <div class="ins-body-wrap">
+          <div class="ins-body" id="insBody"></div>
+          <div class="conv-search-loading-overlay" id="insRefreshOverlay">
+            <div class="conv-search-loading-box">
+              <div class="mini-spinner"></div>
+              <span class="ins-refresh-label" id="insRefreshLabel">Reading…</span>
+              <button class="conv-search-cancel-btn" onclick="insCancelRead()">
+                &#x2715; Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!--
@@ -20132,6 +20160,7 @@
         await yieldToPaint()
         try {
           await window.backend.setDbPath(path)
+          insDropPayloadCache() // a different database entirely
           convDbPath = path
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
           updateConvDbStatus()
@@ -20180,6 +20209,7 @@
         if (convDbPath) {
           try {
             await window.backend.setDbPath(convDbPath)
+            insDropPayloadCache()
             window.backend
               .getDateRange()
               .then(({ min, max }) => initDatePicker(min, max))
@@ -20433,6 +20463,7 @@
           finalized = true
           try {
             const f = await window.backend.finalizeImportRun(dataRetentionDays)
+            insDropPayloadCache() // rows arrived; every aggregate is now stale
             if (f) totalPurged += f.purged || 0
           } catch (_) {}
         }
@@ -22332,6 +22363,13 @@
         // it in would suggest the charts describe one page of it.
         delete args.page
         insArgs = args
+        // One string, computed once. `buildConvSessionArgs` is a fixed object
+        // literal and `insArgs` is a spread of it, assigned here and never
+        // mutated — so the fingerprint is constant for a whole modal session,
+        // and keeping it in the key documents the dependency for the day that
+        // stops being true.
+        insArgsSig = JSON.stringify(args)
+        insDropPayloadCache()
         insCtxKey = null
         insMetaKey = null
         insData = null
@@ -22356,6 +22394,11 @@
         // in the middle of changing.
         insData = null
         insSpecs = new Map()
+        // The payload cache is deliberately *kept*. `insData` is cleared here
+        // so Copy dashboard cannot act on a dashboard that is no longer on
+        // screen; a cache entry is not on screen and cannot be acted on, and
+        // keeping it is what makes "Choose data → Build" instant when nothing
+        // was actually changed.
         insCloseKeyPicker()
         insSyncCopyAll()
         insSyncUnitToggle()
@@ -22563,6 +22606,89 @@
         return out
       }
 
+      /// Payloads already read in this modal session.
+      ///
+      /// Switching the unit is a different *question about the same result
+      /// set*, and the answer to the question you switched away from does not
+      /// go stale in the meantime. Tearing the dashboard down and re-reading
+      /// it was several seconds of spinner to arrive back at numbers that were
+      /// on screen a moment ago.
+      ///
+      /// Keyed by unit and by the search — never by which sections were read.
+      /// A payload missing a section is not a different answer, it is a partial
+      /// one, and `insCacheDecide` is what turns that into a top-up rather than
+      /// a reload.
+      let insPayloadCache = new Map()
+      let insArgsSig = ""
+
+      function insCacheKey(unit, sig) {
+        return unit + "|" + sig
+      }
+
+      /// Cached, partly cached, or not at all.
+      ///
+      /// Pure, and separate from `insLoad`, because this is the decision worth
+      /// pinning: a miss where there should be a hit is a wasted read, and a
+      /// hit where there should be a miss draws numbers that are no longer the
+      /// answer, with nothing on screen to say so.
+      function insCacheDecide(entry, want) {
+        const missing = INS_READ_SECTIONS.filter(
+          (k) => want[k] && !(entry && entry.read && entry.read[k]),
+        )
+        return { hit: !!entry && !missing.length, missing }
+      }
+
+      /// Everything read in this modal session is now wrong. Called from every
+      /// write path to the conversations database, and on close.
+      ///
+      /// Structurally a write cannot land while an entry is live — the overlay
+      /// covers the window and every write path is behind the data modal — but
+      /// the backend's `total_changes()` safety catch does not extend to the
+      /// renderer, so this is the half of it that does. One named function so
+      /// every write path is greppable.
+      function insDropPayloadCache() {
+        insPayloadCache = new Map()
+      }
+
+      /// Raise or drop the in-place refresh overlay.
+      ///
+      /// Gated, so a top-up that finishes in ten milliseconds paints nothing —
+      /// the same threshold every other loading affordance in this file uses.
+      /// The blur is not decoration: during a top-up the header's unit toggle
+      /// already reads the *target* unit while the cards below still hold the
+      /// previous one, and this dashboard is built around a chart never being
+      /// readable as the other reading.
+      function insSetRefreshing(on, label) {
+        const overlay = document.getElementById("insRefreshOverlay")
+        if (!overlay) return
+        const text = document.getElementById("insRefreshLabel")
+        if (text && label) text.textContent = label
+        gateLoading("insRefresh", !!on, (visible) =>
+          fadeIndicator(overlay, visible, "visible"),
+        )
+      }
+
+      /// Fill in the values of a selected tag key that a cached payload does
+      /// not carry.
+      ///
+      /// The dashboard read only returns the *selected* key's values, so a key
+      /// chosen after that read has an empty `values` — and the section would
+      /// sit on "Reading …" for ever, because nothing was going to fetch it.
+      function insEnsureTagValues() {
+        const d = insData
+        if (!d || !d.tagsLoaded) return
+        for (const kind of ["context", "metadata"]) {
+          if (!insSections[kind]) continue
+          const name = kind === "context" ? insCtxKey : insMetaKey
+          if (!name) continue
+          const groups = (kind === "context" ? d.contexts : d.metadata) || []
+          const group = groups.find((g) => g.name === name)
+          if (group && !(group.values && group.values.length)) {
+            insFetchTagValues(kind, name)
+          }
+        }
+      }
+
       async function insLoad() {
         const args = insArgs
         if (!args) return
@@ -22571,55 +22697,127 @@
         // question that is no longer being asked.
         if (insLoading) insStopRead()
         insStage = "dashboard"
-        insData = null
-        insSpecs = new Map()
         insCloseKeyPicker()
+
+        const want = insWantedSections()
+        const key = insCacheKey(insUnit, insArgsSig)
+        const entry = insPayloadCache.get(key)
+        const { hit, missing } = insCacheDecide(entry, want)
+
+        // ── Already read ──
+        //
+        // No call, no spinner, and above all no teardown: this is what makes
+        // toggling between the two readings a redraw rather than a wait.
+        if (hit) {
+          insData = entry.payload
+          insSyncCopyAll()
+          insSyncUnitToggle()
+          insRenderHeader()
+          insRenderBody()
+          insEnsureTagValues()
+          return
+        }
+
+        const toppingUp = !!entry
+        insData = toppingUp ? entry.payload : null
+        insSpecs = toppingUp ? insSpecs : new Map()
         insRenderHeader()
-        document.getElementById("insBody").innerHTML = ""
         insLoading = true
         insSyncCopyAll()
         insSyncUnitToggle()
-        const want = insWantedSections()
-        // The counts are aggregates over every interaction in the result set,
-        // which on a wide search is genuinely seconds of work — so the wait
-        // carries a way out of it, not just an explanation of itself.
-        setPaneLoading(
-          "insBody",
-          "Reading the search results…",
-          insSectionNote(want),
-          `<button onclick="insCancelRead()">Cancel</button>`,
-        )
+
+        if (toppingUp) {
+          // The dashboard stays on screen and behind a blur. The result set is
+          // still resolved on the connection, so this is normally tens of
+          // milliseconds and the gate means nothing is painted at all.
+          const missWant = {}
+          for (const k of INS_READ_SECTIONS) missWant[k] = missing.includes(k)
+          insSetRefreshing(true, "Reading " + insSectionNote(missWant))
+        } else {
+          document.getElementById("insBody").innerHTML = ""
+          // The counts are aggregates over every interaction in the result set,
+          // which on a wide search is genuinely seconds of work — so the wait
+          // carries a way out of it, not just an explanation of itself.
+          setPaneLoading(
+            "insBody",
+            "Reading the search results…",
+            insSectionNote(want),
+            `<button onclick="insCancelRead()">Cancel</button>`,
+          )
+        }
         // Let WebKit paint before the invoke takes the IPC channel. Bounded —
         // see yieldToPaint.
         await yieldToPaint()
         const mySeq = ++insLoadSeq
+        // Only what is actually missing is asked for. On a top-up that is one
+        // section against the three a reload would re-run, over a result set
+        // that is already resolved.
+        const ask = {}
+        for (const k of INS_READ_SECTIONS) ask[k] = missing.includes(k)
         try {
-          const res = await window.backend.getConversationInsights(args, insUnit, want)
+          const res = await window.backend.getConversationInsights(args, insUnit, ask)
           // A second toggle while the first read is in flight must not paint
           // the older answer over the newer one.
           if (mySeq !== insLoadSeq) return
+          insSetRefreshing(false)
           clearPaneLoading("insBody")
           // `null` is a cancelled read, which the backend reports as an outcome
           // rather than as an error — see `get_conversation_insights`. Nothing
           // to draw, and nothing has gone wrong; `insCancelRead` has already
-          // put the stopped state on screen.
+          // put the stopped state on screen. Nothing is cached from it either:
+          // an interrupt lands mid-build and the answer describes nothing.
           if (!res) return
-          insData = res
+
+          let payload = res
+          if (toppingUp) {
+            // Merge into the payload already on screen rather than replacing
+            // it — the sections it carries are still that unit's answer for
+            // the same search, and the read above did not ask for them again.
+            payload = entry.payload
+            for (const k of missing) {
+              const sec = INS_SECTIONS.find((x) => x.key === k)
+              for (const f of (sec && sec.fields) || []) payload[f] = res[f]
+            }
+          }
+          for (const k of missing) {
+            if (!entry) break
+            entry.read[k] = true
+          }
+          insPayloadCache.set(key, {
+            payload,
+            read: entry ? entry.read : { ...want },
+          })
+
+          insData = payload
           insRenderHeader()
           insRenderBody()
           // The two tag sections follow, deliberately not awaited by the paint
           // above — see `get_insight_tags` for why they are their own read.
           // Only when they were asked for: they are the expensive half, and
-          // this is the whole reason the chooser lists them separately.
-          if (insSections.context || insSections.metadata) insLoadTags(res, mySeq)
+          // this is the whole reason the chooser lists them separately. A
+          // cached payload already carries them, and must not read again.
+          if (insSections.context || insSections.metadata) {
+            if (payload.tagsLoaded) insEnsureTagValues()
+            else insLoadTags(payload, mySeq)
+          }
         } catch (e) {
           if (mySeq !== insLoadSeq) return
+          insSetRefreshing(false)
           clearPaneLoading("insBody")
-          document.getElementById(
-            "insBody",
-          ).innerHTML = `<div class="ins-empty"><strong>Could not build the insights.</strong><span>${esc(
-            String(e),
-          )}</span></div>`
+          if (toppingUp) {
+            // The dashboard on screen is still a correct answer for the
+            // sections it holds; painting a failure over it would lose that.
+            for (const k of missing) insSections[k] = false
+            insSaveSections()
+            insRenderBody()
+            showImportToast("error", "Could not read the rest. " + String(e))
+          } else {
+            document.getElementById(
+              "insBody",
+            ).innerHTML = `<div class="ins-empty"><strong>Could not build the insights.</strong><span>${esc(
+              String(e),
+            )}</span></div>`
+          }
         } finally {
           if (mySeq === insLoadSeq) {
             insLoading = false
@@ -22686,6 +22884,16 @@
           showImportToast("error", "Could not read " + sec.name + ". " + String(e))
         } finally {
           if (mySeq === insLoadSeq && insData === d) {
+            // The current unit's entry now holds one more section. The *other*
+            // unit's entry is deliberately left alone: it is still a correct
+            // answer for what it holds, and `insLoad`'s top-up path is exactly
+            // the machinery that fills its gap if the user switches. Reading
+            // this section for a dashboard nobody is looking at is the
+            // behaviour the chooser exists to prevent.
+            const entry = insPayloadCache.get(insCacheKey(insUnit, insArgsSig))
+            if (entry && entry.payload === d && INS_READ_SECTIONS.includes(key)) {
+              entry.read[key] = true
+            }
             insAdding = null
             insRenderBody()
           }
@@ -22726,6 +22934,7 @@
       function insStopRead() {
         insLoadSeq++
         insLoading = false
+        insSetRefreshing(false)
         clearPaneLoading("insBody")
         window.backend.cancelDbQuery().catch(() => {})
       }
@@ -22733,9 +22942,24 @@
       /// Cancel from the loading pane's own button.
       function insCancelRead() {
         if (!insLoading) return
+        const hadDashboard = !!insData
         insStopRead()
         insSyncCopyAll()
         insSyncUnitToggle()
+        // A cancelled *top-up* leaves a dashboard that is still a correct
+        // answer for the sections it holds. Painting "Nothing was read" over
+        // it would throw away something valid to report something that is not
+        // even true of the screen.
+        if (hadDashboard) {
+          for (const k of INS_READ_SECTIONS) {
+            const sec = INS_SECTIONS.find((x) => x.key === k)
+            const has = (sec.fields || []).some((f) => insData[f] !== undefined)
+            if (insSections[k] && !has) insSections[k] = false
+          }
+          insSaveSections()
+          insRenderBody()
+          return
+        }
         document.getElementById("insBody").innerHTML =
           `<div class="ins-empty"><strong>Stopped.</strong>
             <span>Nothing was read.</span>
@@ -22764,6 +22988,11 @@
         // The resolved result set is a cache, not a fact about the app — hold
         // it while the modal is open, hand the pages back when it is not.
         window.backend.releaseInsightScope().catch(() => {})
+        // And so are the payloads, for a shorter time still. The backend's
+        // `total_changes()` catch does not reach the renderer, and an import
+        // between two opens is entirely possible — a cached dashboard of rows
+        // that no longer exist would be wrong with nothing on screen to say so.
+        insDropPayloadCache()
         insStage = "setup"
         document.getElementById("insightsModal").classList.remove("open")
         insCloseKeyPicker()
@@ -23184,14 +23413,26 @@
         if (kind === "context") insCtxKey = name
         else insMetaKey = name
         insCloseKeyPicker()
-        const d = insData
-        const groups = (kind === "context" ? d && d.contexts : d && d.metadata) || []
-        const group = groups.find((g) => g.name === name)
         // Draw immediately with whatever is known. On a key already visited
         // that is the whole chart; on a new one it is the section's heading and
         // its own loading line, which beats a frozen dashboard.
         insRenderBody()
-        if (!group || (group.values && group.values.length)) return
+        insFetchTagValues(kind, name)
+      }
+
+      /// One key's values, fetched once and cached on its group.
+      ///
+      /// Split out of `insSetTagKey` because `insEnsureTagValues` needs exactly
+      /// this on a cache hit, and two copies of "fetch, guard, cache, redraw"
+      /// is how one of them comes to drop a guard.
+      async function insFetchTagValues(kind, name) {
+        const d = insData
+        const groups = (kind === "context" ? d && d.contexts : d && d.metadata) || []
+        const group = groups.find((g) => g.name === name)
+        if (!group || (group.values && group.values.length) || group.valuesLoading) {
+          return
+        }
+        group.valuesLoading = true
         const seq = ++insTagSeq
         try {
           const values = await window.backend.getInsightTagValues(
@@ -23210,6 +23451,8 @@
           if (seq !== insTagSeq || insData !== d) return
           group.valuesError = String(e)
           insRenderBody()
+        } finally {
+          group.valuesLoading = false
         }
       }
 
@@ -24213,6 +24456,7 @@
           try {
             _impSetOp("Finishing up…", "Updating summaries and search index")
             const f = await window.backend.finalizeImportRun(dataRetentionDays)
+            insDropPayloadCache() // rows arrived; every aggregate is now stale
             if (f) {
               totals.purged += f.purged || 0
               const t = f.timings
@@ -25412,6 +25656,7 @@
         status.textContent = "This can take a while on a large database."
         try {
           const r = await window.backend.compactDatabase()
+          insDropPayloadCache()
           const saved = (r.bytesBefore || 0) - (r.bytesAfter || 0)
           status.textContent =
             saved > 0
@@ -25850,6 +26095,7 @@
         if (deleteBtn) deleteBtn.disabled = true
         try {
           const res = await window.backend.deleteInteractionsByDates(dates)
+          insDropPayloadCache() // rows are gone; every aggregate is now stale
           const deleted = res?.deleted ?? 0
           showImportToast(
             "success",

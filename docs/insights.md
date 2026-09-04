@@ -63,9 +63,13 @@ each other. That is the whole design constraint here.
   expressible. `every card, tile and tooltip in one reading names that reading`
   pins it, and the copied TSV's column header names the unit too — a bare number
   in a spreadsheet cell has no other way to say which reading it came from.
-- **Switching refetches; it does not re-derive.** Nearly every aggregate is a
-  different query in the other reading. `insLoadSeq` discards a stale answer if
-  the user toggles twice quickly, and the toggle goes inert while a read runs.
+- **Switching never re-derives — but it does not re-read either.** Nearly every
+  aggregate is a different query in the other reading, and deriving one reading
+  from the other in the renderer is precisely how a chart and its own label come
+  to disagree. That rule is untouched. What changed is that the answer to the
+  reading you switched *away* from does not go stale while you look at the
+  other one, so it is kept — see `Switching the unit is a redraw`. `insLoadSeq`
+  still discards a stale answer if the user toggles twice quickly.
 - **The selected Context/Metadata key survives the switch**, so the two readings
   of one key can be compared in two clicks.
 
@@ -440,6 +444,62 @@ it is the whole difference between 88 ms and 12 ms.)
   file written by an older build cannot introduce one and a hand-edited one
   cannot introduce any. All-false falls back to the default — it is not a state
   the chooser can act on.
+
+## Switching the unit is a redraw
+
+`insPayloadCache` holds the payloads read in this modal session, keyed by unit
+and by `insArgsSig` — never by which sections were read. A payload missing a
+section is not a different answer, it is a partial one, and that distinction is
+what turns a switch into a **top-up** rather than a reload.
+
+`insLoad` has three paths, decided by `insCacheDecide` before anything touches
+the DOM:
+
+| | what happens |
+| --- | --- |
+| **hit** | assign, render, `insEnsureTagValues()`. No call, no spinner, no teardown |
+| **top-up** | the dashboard stays on screen behind a blur; only the *missing* sections are fetched and merged |
+| **miss** | the read as it was, cached on success only |
+
+- **The key is stable, and deliberately still carries the args.**
+  `buildConvSessionArgs` is a fixed object literal, `insArgs` is a spread of it
+  assigned in exactly one place and never mutated — so `JSON.stringify` is
+  constant for a whole modal session. Keeping it in the key costs nothing and
+  documents the dependency for the day that stops being true.
+- **The other unit's entry is never invalidated by `insAddSection`.** It is
+  still a correct answer for the sections it holds, and the top-up path is
+  exactly the machinery that fills its gap *if* the user switches. Fetching the
+  new section for both units eagerly would spend a read on a dashboard nobody
+  is looking at — the behaviour the chooser exists to prevent.
+- **`insShowSetup` keeps the cache; `closeConversationInsights` clears it.**
+  `insData` is cleared in the chooser so Copy dashboard cannot act on a
+  dashboard that is no longer on screen — but a cache entry is not on screen
+  and cannot be acted on, and keeping it is what makes "Choose data → Build"
+  instant when nothing was actually changed. Clearing on close is **required**:
+  the backend's `total_changes()` catch does not extend to the renderer, and an
+  import between two opens would otherwise draw a dashboard of rows that no
+  longer exist, with nothing on screen to say so. `insDropPayloadCache` is
+  called from every write path as well, so they are all greppable.
+- **Nothing is cached from a cancelled or failed read.** An interrupt lands
+  mid-build and the answer describes nothing.
+- **A cached payload already carries its tags**, so `insLoadTags` is skipped on
+  a hit. But the *selected key* can have changed since that payload was read,
+  and the dashboard read only returns the selected key's values — so
+  `insEnsureTagValues` fetches the ones a cached payload has no values for.
+  Without it that section sits on "Reading …" for ever, because nothing was
+  going to fetch it. `insFetchTagValues` is split out of `insSetTagKey` so
+  there is one fetch-guard-cache-redraw path rather than two.
+- **A top-up keeps the dashboard on screen, behind a blur.** Not decoration:
+  during a top-up the header's unit toggle already reads the *target* unit
+  while the cards below still hold the previous one, and this dashboard is
+  built around a chart never being readable as the other reading. The blur is
+  the honest version of "keep it on screen". It goes through `gateLoading`, so
+  a 12 ms top-up paints nothing at all.
+- **Cancelling a top-up leaves the dashboard.** `insCancelRead` painting
+  "Stopped. Nothing was read." over a dashboard that is still perfectly valid
+  would throw away something correct to report something that is not even true
+  of the screen. The full-miss path keeps `setPaneLoading`, because there
+  genuinely *is* nothing on screen then.
 
 ## The result set is resolved once, not once per read
 

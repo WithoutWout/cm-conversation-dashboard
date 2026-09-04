@@ -48,6 +48,11 @@ function harness({ emitDuring, listenThrows = false, failOpen = false }) {
   let handler = null
   let unlistenCalls = 0
   let listenerLive = false
+  // `openDbAtPath` catches its own failures and reports `false`, so a global
+  // this sandbox does not stub reads here as "the database would not open" —
+  // four of these tests keep passing and only the fifth complains, about
+  // something else entirely. Recorded so the real cause gets named instead.
+  let thrown = null
 
   const ctx = vm.createContext({
     console,
@@ -61,10 +66,13 @@ function harness({ emitDuring, listenThrows = false, failOpen = false }) {
       if (visible && label) labels.push(label)
     },
     setConvDbBusy() {},
+    insDropPayloadCache() {},
     yieldToPaint: () => Promise.resolve(),
     updateConvDbStatus() {},
     initDatePicker() {},
-    showImportToast() {},
+    showImportToast(kind, message) {
+      if (kind === "error") thrown = String(message)
+    },
     loadSessions: () => Promise.resolve(),
     convDbPath: null,
     contextOptionsLoaded: true,
@@ -108,6 +116,7 @@ function harness({ emitDuring, listenThrows = false, failOpen = false }) {
       unlistenCalls,
       listenerLive: () => listenerLive,
       okResult,
+      thrown,
     }))
 }
 
@@ -190,6 +199,12 @@ harness({
     ok(
       "an unavailable event bridge does not stop the database opening",
       r.okResult === true && r.labels[0] === "Opening database…",
+    )
+    // Names the real cause when `openDbAtPath` grows a call this sandbox does
+    // not stub, instead of leaving it to look like a listener problem.
+    ok(
+      "and nothing else in the open threw",
+      !/is not defined/.test(r.thrown || ""),
     )
     ok("and there is nothing to tear down", r.unlistenCalls === 0)
   })

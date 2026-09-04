@@ -68,6 +68,8 @@ const EXPORTS = [
   "insZoneDayBounds",
   "insZoneStampToUtc",
   "insZoneDayOf",
+  "insCacheDecide",
+  "insCacheKey",
 ]
 const {
   INS_THEME_SCREEN,
@@ -97,6 +99,8 @@ const {
   insZoneDayBounds,
   insZoneStampToUtc,
   insZoneDayOf,
+  insCacheDecide,
+  insCacheKey,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -838,6 +842,60 @@ test("the zone label is a place, never an offset", () => {
   // An offset would be right for half the year and wrong for the other half,
   // and a chart spanning both has no single correct one to print.
   assert.ok(!/[+-]\d/.test(insZoneLabel("Europe/Amsterdam")))
+})
+
+// ── Switching the unit ─────────────────────────────────────────────────────
+//
+// The two readings are two questions about one result set, and the answer to
+// the one you switched away from does not go stale while you are looking at
+// the other. A miss where there should be a hit is a wasted read; a hit where
+// there should be a miss draws numbers that are no longer the answer, with
+// nothing on screen to say so.
+const ALL_READ = { volume: true, quality: true, content: true }
+
+test("a payload already read is a redraw, not a read", () => {
+  const entry = { payload: {}, read: { ...ALL_READ } }
+  assert.deepStrictEqual(insCacheDecide(entry, ALL_READ), { hit: true, missing: [] })
+  // Asking for less than was read is still a hit: the extra sections are
+  // simply not rendered.
+  assert.deepStrictEqual(insCacheDecide(entry, { volume: true }), {
+    hit: true,
+    missing: [],
+  })
+})
+
+test("a payload missing a section is topped up, never re-read whole", () => {
+  const entry = { payload: {}, read: { volume: true, quality: true, content: false } }
+  const d = insCacheDecide(entry, ALL_READ)
+  assert.strictEqual(d.hit, false)
+  // Only the missing one. Re-reading the two already in hand is the wait this
+  // whole path exists to remove.
+  assert.deepStrictEqual(d.missing, ["content"])
+})
+
+test("nothing read is a full read, and every chosen section is asked for", () => {
+  const d = insCacheDecide(undefined, ALL_READ)
+  assert.strictEqual(d.hit, false)
+  assert.deepStrictEqual(d.missing, INS_READ_SECTIONS.filter((k) => ALL_READ[k]))
+  // A section that was not chosen is never asked for, cached or not.
+  assert.deepStrictEqual(insCacheDecide(undefined, { volume: true }).missing, ["volume"])
+})
+
+test("the two readings of one search are two cache entries", () => {
+  const sig = JSON.stringify({ query: "parkeren", filter: "all" })
+  assert.notStrictEqual(
+    insCacheKey("conversations", sig),
+    insCacheKey("interactions", sig),
+  )
+  // …and the same reading of a different search is a third.
+  assert.notStrictEqual(
+    insCacheKey("conversations", sig),
+    insCacheKey("conversations", JSON.stringify({ query: "fiets", filter: "all" })),
+  )
+  // The key is stable across two builds of the same args object, which is what
+  // the whole cache rests on.
+  const again = JSON.stringify({ query: "parkeren", filter: "all" })
+  assert.strictEqual(insCacheKey("conversations", sig), insCacheKey("conversations", again))
 })
 
 // The timezone is stated once, not on every card.
