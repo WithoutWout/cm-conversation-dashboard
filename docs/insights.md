@@ -88,18 +88,65 @@ so in interactions mode a turn is counted under the value *its conversation*
 carried. There is no per-turn context to count instead; the card's note says so
 in those words, which is the difference between a caveat and a wrong number.
 
-## One timezone disclaimer, not ten
+## Reading this in your own timezone
 
-The database stores naive UTC by design and the conversation date filter reads
-it that way, so every day and hour on this screen is a UTC one. That used to be
-said on both time axes, in three tooltips, in two card notes, in the header, in
-the footer and in the copied table header — a lot of words for something that is
-true of the whole screen at once and never varies.
+The database stores naive UTC by design. Everything on this screen used to be
+read that way too, while the session list and the chat bubbles beside it were
+formatted in a hardcoded `Europe/Amsterdam` — so one timestamp appeared on two
+different days either side of midnight, in one window.
 
-What is left is **one quiet `.ins-tz` badge in the header**, carrying the
-explanation in its `title`.
+There is now **one display timezone** (`cm-display-timezone`, `""` meaning
+follow the system), and it drives the chat and session timestamps, the Insights
+day and hour buckets, and the conversation date filter. Import and Stored data
+stay UTC — see `docs/import.md`.
 
-- **The hour axis keeps `Hour (UTC)`, and that is a label rather than a
+**The timezone never crosses the bridge, and no SQL mentions one.** The backend
+returns `day_hours`: one row per UTC day per UTC hour. `insTimeSeries` folds it
+into the day series, the hour histogram and the heatmap, shifting each cell by
+its own offset.
+
+- **It cannot be done in SQL.** The bundled SQLite has `'utc'` and `'localtime'`
+  and no IANA zones at all, and `'localtime'` is the *host's* zone, which is the
+  chosen one only by coincidence.
+- **A fixed `±HH:MM` offset is wrong for exactly the query it would serve.**
+  Volume's whole point is weeks to a year, and one offset applied across a DST
+  boundary puts half the rows in the wrong hour — silently, plausibly, and with
+  nothing on the chart to show it. `a spring-forward day loses its missing hour`
+  and `an autumn-back day counts the hour that happened twice` pin both ends.
+- **It costs a query rather than adding one.** `by_day` and `hour_weekday` were
+  two statements; they are one `GROUP BY substr(ts,1,10), substr(ts,12,2)` with
+  no `strftime` at all. A year is 366 rows of 24 numbers, ~40 KB — an order of
+  magnitude less than the dashboard copy already puts on the clipboard, where
+  one object per hour would repeat the date 8,784 times.
+- **The offset is resolved per `(zone, day)`, not per bucket.** It is read at
+  `00:00Z` and `23:00Z`, and on the 363 days a year those agree every hour of
+  the day reuses the answer. A full year costs ~750 `formatToParts` calls.
+- **The shifted instant is read back with `getUTC*` only.** The offset has
+  already been applied; a second host-local shift on top of it is exactly the
+  bug `docs/import.md` warns about.
+- **The badge names a city, never an offset.** `timeZoneName: "short"` yields
+  `GMT+2` half the year and `GMT+1` the other half, and a chart aggregating a
+  year has no single correct offset to print.
+- **The date filter's bounds are shifted in the renderer, never in SQL.**
+  `build_session_filter_query` still compares `s.last_ts >= ?` against a bare
+  column, which is what makes it an `idx_timestamp` range scan; wrapping the
+  column would make the predicate non-sargable *and* still could not express a
+  zone. `insZoneStampToUtc` resolves in two passes — guess at the naive instant,
+  re-read at the corrected one — so a bound landing on a clock change takes the
+  offset in force *at the bound*.
+  - `insZoneDayOf` is its inverse, and is why the dates chip can still name the
+    day that was clicked after the bound has been shifted off it.
+  - The picker's `convDateMin`/`convDateMax` are widened by a day at each end,
+    because they arrive as UTC days. Widening is the safe direction: a pickable
+    day with nothing in it returns nothing, where narrowing makes a day that
+    does have data unselectable.
+  - **The timezone is deliberately not in `GetSessionsArgs`.**
+    `insight_scope_sig` is `serde_json::to_string(args)`, so a field there would
+    drop the resolved result set — re-running an FTS match and an entity scan to
+    answer a question about *display*. `date_from`/`date_to` do change value and
+    are already in the fingerprint, which is right: a different bound is a
+    different result set.
+- **The hour axis says `Hour (Amsterdam)`, and that is a label rather than a
   disclaimer.** A copied chart image is an SVG on its own in someone's email
   with no header above it, and an axis reading `09` with nothing to say what
   that means is ambiguous in a way a date is not. The copied table's column
@@ -107,8 +154,9 @@ explanation in its `title`.
 - **Both exports keep one line each** — the report's own header and footer —
   since neither travels with the badge.
 - `the timezone is a header badge, not a caption on every chart` asserts it over
-  every real card in both readings, and asserts the hour axis is still labelled
-  so it cannot pass by the disclaimer having been deleted outright.
+  every real card in both readings, and asserts the hour axis still names the
+  zone it was drawn in, so it cannot pass by the disclaimer having been deleted
+  outright.
 
 ## The Context and Metadata key picker
 
@@ -262,13 +310,20 @@ never used for series identity.
     read.
 - **Missing days are filled with zeros.** The query returns only days that have
   conversations, so a quiet week would close up and read as uninterrupted
-  activity at a steady rate. `insFillDays` is string arithmetic over UTC dates —
-  no `Date` with a local offset can creep in.
-- **The heatmap week starts on Monday**, which `strftime('%w')` (0 = Sunday) does
-  not; the row index is `(wd + 6) % 7`.
+  activity at a steady rate. `insFillDays` is string arithmetic over the calendar
+  dates the buckets were shifted into — no `Date` read with a local offset can
+  creep in, which is the discipline that must not be relaxed now that those
+  dates are no longer UTC.
+- **The heatmap week starts on Monday.** The weekday is now a property of the
+  *shifted* day, so it is derived in the renderer from the day key —
+  `(getUTCDay() + 6) % 7` — and `strftime('%w')` is gone from the query
+  entirely. `the heatmap week still starts on Monday after the shift` pins it.
 - **Hours are read as a substring of the stored timestamp**, not through
   `strftime`. The database stores naive UTC by design, so the substring *is* the
-  UTC hour and no timezone can be applied to it by accident.
+  UTC hour and no timezone can be applied to it *in the query*. The invariant
+  survives the display timezone, in a different place: the backend still knows
+  only UTC, and `insTimeSeries` is the single thing in the stack that knows a
+  zone — see `Reading this in your own timezone`.
 - **A recognition band is the conversation's worst scored turn**, the same
   measure the Low % and Zero % pills filter on, so a chart and a pill on one
   screen cannot disagree about the same conversation. In the interactions

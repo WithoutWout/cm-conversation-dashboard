@@ -4887,22 +4887,39 @@ const INSIGHT_TOP_N: i64 = 15;
 /// One bar, slice or cell: a label and the number behind it.
 ///
 /// `extra` carries a second number where a series legitimately has two — a
-/// context value's share is counted in sessions, but the day series is worth
-/// having interactions on as well. It is skipped when absent so the payload of
-/// a large `by_day` stays small.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct InsightBucket {
     label: String,
     count: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    extra: Option<i64>,
 }
 
 impl InsightBucket {
     fn new(label: impl Into<String>, count: i64) -> Self {
-        Self { label: label.into(), count, extra: None }
+        Self { label: label.into(), count }
     }
+}
+
+/// One UTC day, and what each of its 24 UTC hours held.
+///
+/// The Volume section's three charts — per day, by hour, and the day × hour
+/// heatmap — are all folds of this one table, and the renderer performs them
+/// *after* shifting each bucket into the display timezone. That is the whole
+/// reason it crosses the bridge in this shape rather than as three finished
+/// series: SQLite here has no IANA timezone support (only `'utc'` and
+/// `'localtime'`, and `'localtime'` is the host's zone rather than the chosen
+/// one), and a fixed `±HH:MM` offset is wrong across a DST boundary for exactly
+/// the multi-week ranges these charts exist for.
+///
+/// A day of 24 numbers rather than 24 `(day, hour)` objects: a year is 366
+/// entries and ~40 KB, an order of magnitude less than the dashboard copy
+/// already puts on the clipboard, where one object per hour would repeat the
+/// date 8,784 times.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct InsightDayHours {
+    day: String,
+    hours: Vec<i64>,
 }
 
 /// One context or metadata key, with the values it took across the result set.
@@ -4955,11 +4972,10 @@ struct ConversationInsights {
     zero_recog_sessions: i64,
     low_recog_sessions: i64,
     low_recog_threshold: i64,
-    by_day: Vec<InsightBucket>,
-    by_hour: Vec<InsightBucket>,
-    /// 7 × 24, weekday-major, Monday first — flat so it crosses the bridge as
-    /// one array rather than seven.
-    hour_weekday: Vec<i64>,
+    /// Per UTC day, per UTC hour. The renderer folds this into the day series,
+    /// the hour histogram and the heatmap, in the display timezone — see
+    /// [`InsightDayHours`].
+    day_hours: Vec<InsightDayHours>,
     length_buckets: Vec<InsightBucket>,
     recognition_bands: Vec<InsightBucket>,
     cultures: Vec<InsightBucket>,
@@ -6032,68 +6048,53 @@ fn conversation_insights_timed(
         // Everything from here down is gated on what was asked for. A section
         // nobody selected is not a cheap query left running for tidiness — the
         // JSON scans below are the bulk of a read.
-        let by_day = if !sections.volume { Vec::new() } else {
+        // Day and hour, both read straight out of the stored string.
+        //
+        // The database stores naive UTC by design, so the two substrings *are*
+        // the UTC day and the UTC hour, and no timezone can be applied to them
+        // here by accident. Applying one is the renderer's job and the
+        // renderer's alone — see [`InsightDayHours`] for why it cannot be done
+        // in SQL, and `docs/insights.md` → "Reading this in your own timezone".
+        //
+        // One query where there were two. The weekday no longer needs
+        // `strftime('%w')` at all: it is a property of the shifted day, which
+        // only the renderer knows.
+        let day_hours = if !sections.volume { Vec::new() } else {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT substr({ts_col}, 1, 10) AS d, COUNT(*), COUNT(*) \
-                     FROM {row_from} GROUP BY d ORDER BY d ASC"
-                ))
-                .map_err(insight_err)?;
-            let rows = stmt
-                .query_map([], |row| {
-                    Ok(InsightBucket {
-                        label: row.get::<_, String>(0)?,
-                        count: row.get::<_, i64>(1)?,
-                        extra: Some(row.get::<_, i64>(2)?),
-                    })
-                })
-                .map_err(insight_err)?;
-            rows.filter_map(|r| r.ok()).filter(|b| !b.label.is_empty()).collect::<Vec<_>>()
-        };
-        phases.mark("by_day");
-
-        // Hours are read straight out of the stored string rather than through
-        // strftime: the database stores naive UTC by design, so the substring
-        // *is* the UTC hour and no timezone can be applied to it by accident.
-        let mut by_hour: Vec<InsightBucket> = if sections.volume {
-            (0..24).map(|h| InsightBucket::new(format!("{h:02}"), 0)).collect()
-        } else {
-            Vec::new()
-        };
-        let mut hour_weekday = vec![0i64; 7 * 24];
-        if sections.volume {
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT CAST(strftime('%w', {ts_col}) AS INTEGER) AS wd, \
+                    "SELECT substr({ts_col}, 1, 10) AS d, \
                             CAST(substr({ts_col}, 12, 2) AS INTEGER) AS hr, COUNT(*) \
                      FROM {row_from} \
                      WHERE length({ts_col}) >= 13 \
-                     GROUP BY wd, hr"
+                     GROUP BY d, hr ORDER BY d ASC"
                 ))
                 .map_err(insight_err)?;
             let rows = stmt
                 .query_map([], |row| {
                     Ok((
-                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, String>(0)?,
                         row.get::<_, Option<i64>>(1)?,
                         row.get::<_, i64>(2)?,
                     ))
                 })
                 .map_err(insight_err)?;
+            // Rows arrive day-ordered, so one pass and no map: push a new day
+            // whenever the key changes.
+            let mut out: Vec<InsightDayHours> = Vec::new();
             for row in rows {
-                let (wd, hr, count) = row.map_err(insight_err)?;
-                let (Some(wd), Some(hr)) = (wd, hr) else { continue };
-                if !(0..24).contains(&hr) || !(0..7).contains(&wd) {
+                let (day, hr, count) = row.map_err(insight_err)?;
+                let Some(hr) = hr else { continue };
+                if day.is_empty() || !(0..24).contains(&hr) {
                     continue;
                 }
-                by_hour[hr as usize].count += count;
-                // strftime('%w') is 0 = Sunday; the grid reads Monday-first,
-                // which is what a working week looks like to the people reading it.
-                let row_index = ((wd + 6) % 7) as usize;
-                hour_weekday[row_index * 24 + hr as usize] += count;
+                if out.last().map(|d| d.day != day).unwrap_or(true) {
+                    out.push(InsightDayHours { day, hours: vec![0i64; 24] });
+                }
+                out.last_mut().unwrap().hours[hr as usize] += count;
             }
-        }
-        phases.mark("hour_weekday");
+            out
+        };
+        phases.mark("day_hours");
 
         // ── Shape of a conversation ──
         //
@@ -6324,9 +6325,7 @@ fn conversation_insights_timed(
             zero_recog_sessions,
             low_recog_sessions,
             low_recog_threshold,
-            by_day,
-            by_hour,
-            hour_weekday,
+            day_hours,
             length_buckets,
             recognition_bands,
             cultures,
@@ -8811,6 +8810,62 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")
+}
+
+// ── The three Volume series, folded in UTC ──────────────────────────────
+//
+// The renderer performs these folds *after* shifting every bucket into the
+// display timezone; these fold in UTC, because what they are here to test
+// is the query — that every interaction lands in exactly one `(day, hour)`
+// cell and that the totals still partition the result set. The shift itself
+// is pinned in `frontend/tests/insights.test.js`, which is the only place
+// that knows what a timezone is.
+#[cfg(test)]
+fn sum_h(dh: &[InsightDayHours]) -> i64 {
+    dh.iter().flat_map(|d| d.hours.iter()).sum()
+}
+
+#[cfg(test)]
+fn utc_by_day(dh: &[InsightDayHours]) -> Vec<InsightBucket> {
+    dh.iter()
+        .map(|d| InsightBucket::new(d.day.clone(), d.hours.iter().sum::<i64>()))
+        .collect()
+}
+
+#[cfg(test)]
+fn utc_by_hour(dh: &[InsightDayHours]) -> Vec<InsightBucket> {
+    let mut out: Vec<InsightBucket> =
+        (0..24).map(|h| InsightBucket::new(format!("{h:02}"), 0)).collect();
+    for d in dh {
+        for (h, c) in d.hours.iter().enumerate() {
+            out[h].count += c;
+        }
+    }
+    out
+}
+
+/// 7 × 24, weekday-major, **Monday first** — the grid the heatmap draws.
+#[cfg(test)]
+fn utc_hour_weekday(dh: &[InsightDayHours]) -> Vec<i64> {
+    let mut out = vec![0i64; 7 * 24];
+    for d in dh {
+        // Julian day number, whose residue mod 7 is already Monday-first
+        // — the rule `strftime('%w')` needed `(wd + 6) % 7` to reach.
+        let (y, m, day) = (
+            d.day[0..4].parse::<i64>().unwrap(),
+            d.day[5..7].parse::<i64>().unwrap(),
+            d.day[8..10].parse::<i64>().unwrap(),
+        );
+        let a = (14 - m) / 12;
+        let yy = y + 4800 - a;
+        let mm = m + 12 * a - 3;
+        let jdn = day + (153 * mm + 2) / 5 + 365 * yy + yy / 4 - yy / 100 + yy / 400 - 32045;
+        let row = (jdn % 7) as usize;
+        for (h, c) in d.hours.iter().enumerate() {
+            out[row * 24 + h] += c;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -11810,10 +11865,8 @@ mod insights {
 
         let volume = only(InsightSections { volume: true, quality: false, content: false });
         // Asked for, and identical to the full read.
-        assert_eq!(volume.by_day, full.by_day);
-        assert_eq!(volume.by_hour, full.by_hour);
+        assert_eq!(volume.day_hours, full.day_hours);
         assert_eq!(volume.length_buckets, full.length_buckets);
-        assert_eq!(volume.hour_weekday, full.hour_weekday);
         // Not asked for, and therefore absent — not merely empty by accident:
         // the full read found something in every one of these.
         assert!(!full.recognition_bands.is_empty(), "the seed must exercise Quality");
@@ -11842,7 +11895,7 @@ mod insights {
         assert_eq!(content.articles, full.articles);
         assert_eq!(content.dialog_nodes, full.dialog_nodes);
         assert!(content.dialog_status.is_empty(), "the outcome key belongs to Quality");
-        assert!(content.by_day.is_empty());
+        assert!(content.day_hours.is_empty());
 
         assert!(volume.sections.volume && !volume.sections.quality && !volume.sections.content);
     }
@@ -11973,9 +12026,44 @@ mod insights {
         assert_eq!(genai_only.interaction_count, 0);
     }
 
+    /// What crosses the bridge is one row per UTC hour of one UTC day, and
+    /// nothing else — the renderer builds all three Volume series out of it,
+    /// after shifting each cell into the display timezone.
+    ///
+    /// Pinned as its own shape rather than only through the folds below,
+    /// because a cell landing on the wrong day or the wrong hour still produces
+    /// series that sum correctly: the fold would move the error, not show it.
+    #[test]
+    fn a_day_of_hours_is_one_slot_per_hour_and_nothing_else() {
+        let conn = seed(&[
+            Sess { uuid: "a", ts: "2026-06-01T14:05:00", ..Default::default() },
+            Sess { uuid: "b", ts: "2026-06-01T14:55:00", ..Default::default() },
+            Sess { uuid: "c", ts: "2026-06-01T23:00:00", ..Default::default() },
+            Sess { uuid: "d", ts: "2026-06-03T00:30:00", ..Default::default() },
+        ]);
+        let i = insights(&conn);
+
+        // Only the days that have something, in order, each with all 24 slots
+        // — the renderer needs the empty hours to shift as well as the full
+        // ones, and it fills the empty *days* itself.
+        let days: Vec<&str> = i.day_hours.iter().map(|d| d.day.as_str()).collect();
+        assert_eq!(days, vec!["2026-06-01", "2026-06-03"]);
+        for d in &i.day_hours {
+            assert_eq!(d.hours.len(), 24, "{} is not 24 hours", d.day);
+        }
+
+        let first = &i.day_hours[0];
+        assert_eq!(first.hours[14], 2, "both 14:xx conversations in one slot");
+        assert_eq!(first.hours[23], 1);
+        assert_eq!(first.hours.iter().sum::<i64>(), 3);
+        assert_eq!(i.day_hours[1].hours[0], 1);
+        assert_eq!(sum_h(&i.day_hours), i.session_count);
+    }
+
     /// The database stores naive UTC by design, so the hour is a substring of
     /// the stored string and no local offset can be applied to it by accident.
-    /// The grid reads Monday-first, which `strftime('%w')` (0 = Sunday) does not.
+    /// The grid reads Monday-first, which `strftime('%w')` (0 = Sunday) did not
+    /// — the weekday is now derived from the day key instead, on both sides.
     #[test]
     fn hours_are_utc_and_the_heatmap_week_starts_on_monday() {
         let conn = seed(&[
@@ -11985,20 +12073,23 @@ mod insights {
         ]);
         let i = insights(&conn);
 
-        assert_eq!(i.by_hour.len(), 24);
-        assert_eq!(i.by_hour[14].count, 1);
-        assert_eq!(i.by_hour[23].count, 1);
-        assert_eq!(i.by_hour[0].count, 1);
-        assert_eq!(i.by_hour.iter().map(|b| b.count).sum::<i64>(), 3);
+        let by_hour = utc_by_hour(&i.day_hours);
+        assert_eq!(by_hour.len(), 24);
+        assert_eq!(by_hour[14].count, 1);
+        assert_eq!(by_hour[23].count, 1);
+        assert_eq!(by_hour[0].count, 1);
+        assert_eq!(by_hour.iter().map(|b| b.count).sum::<i64>(), 3);
 
-        assert_eq!(i.hour_weekday.len(), 7 * 24);
-        assert_eq!(i.hour_weekday[0 * 24 + 14], 1, "Monday 14:00");
-        assert_eq!(i.hour_weekday[2 * 24 + 23], 1, "Wednesday 23:00");
-        assert_eq!(i.hour_weekday[6 * 24 + 0], 1, "Sunday 00:00 — the last row, not the first");
-        assert_eq!(i.hour_weekday.iter().sum::<i64>(), 3);
+        let hw = utc_hour_weekday(&i.day_hours);
+        assert_eq!(hw.len(), 7 * 24);
+        assert_eq!(hw[0 * 24 + 14], 1, "Monday 14:00");
+        assert_eq!(hw[2 * 24 + 23], 1, "Wednesday 23:00");
+        assert_eq!(hw[6 * 24 + 0], 1, "Sunday 00:00 — the last row, not the first");
+        assert_eq!(hw.iter().sum::<i64>(), 3);
 
         // Days are UTC dates, one bucket each, in order.
-        let days: Vec<&str> = i.by_day.iter().map(|b| b.label.as_str()).collect();
+        let by_day = utc_by_day(&i.day_hours);
+        let days: Vec<&str> = by_day.iter().map(|b| b.label.as_str()).collect();
         assert_eq!(days, vec!["2026-06-01", "2026-06-03", "2026-06-07"]);
         assert_eq!(i.first_ts, "2026-06-01T14:05:00");
         assert_eq!(i.last_ts, "2026-06-07T00:00:00");
@@ -12232,17 +12323,17 @@ mod insights {
         // back up to the whole. A double-counting join shows up here and nowhere
         // else — the individual bars all look reasonable.
         let sum = |b: &[InsightBucket]| b.iter().map(|x| x.count).sum::<i64>();
-        assert_eq!(sum(&i.by_day), i.session_count, "by_day");
-        assert_eq!(sum(&i.by_hour), i.session_count, "by_hour");
+        assert_eq!(sum(&utc_by_day(&i.day_hours)), i.session_count, "by_day");
+        assert_eq!(sum(&utc_by_hour(&i.day_hours)), i.session_count, "by_hour");
         assert_eq!(sum(&i.length_buckets), i.session_count, "length_buckets");
         assert_eq!(sum(&i.recognition_bands), i.session_count, "recognition_bands");
         assert_eq!(
-            i.hour_weekday.iter().sum::<i64>(),
+            utc_hour_weekday(&i.day_hours).iter().sum::<i64>(),
             i.session_count,
             "the heatmap lost or gained conversations"
         );
-        assert_eq!(i.hour_weekday.len(), 7 * 24);
-        assert_eq!(i.by_hour.len(), 24);
+        assert_eq!(utc_hour_weekday(&i.day_hours).len(), 7 * 24);
+        assert_eq!(utc_by_hour(&i.day_hours).len(), 24);
 
         // Feedback has to be a partition too, once the overlap is taken out.
         let both = i.mixed_feedback_sessions;
@@ -12320,7 +12411,7 @@ mod insights {
         assert_eq!(i.first_ts.len(), 19, "unexpected timestamp format: {}", i.first_ts);
         assert!(i.first_ts.as_bytes()[10] == b'T', "{}", i.first_ts);
         assert!(i.first_ts <= i.last_ts);
-        for d in &i.by_day {
+        for d in &utc_by_day(&i.day_hours) {
             assert_eq!(d.label.len(), 10, "not a UTC date: {}", d.label);
         }
 
@@ -12335,7 +12426,7 @@ mod insights {
         .expect("insights");
         assert!(zero.session_count <= i.session_count);
         assert_eq!(zero.session_count, zero.zero_recog_sessions);
-        assert_eq!(sum(&zero.by_hour), zero.session_count);
+        assert_eq!(sum(&utc_by_hour(&zero.day_hours)), zero.session_count);
         assert!(zero.interaction_count <= i.interaction_count);
 
         // The same invariants under the interactions unit, where every join in
@@ -12353,10 +12444,13 @@ mod insights {
             t.matched_interactions, t.interaction_count,
             "with nothing narrowing it, every interaction is a match"
         );
-        assert_eq!(sum(&t.by_day), t.matched_interactions, "by_day");
-        assert_eq!(sum(&t.by_hour), t.matched_interactions, "by_hour");
+        assert_eq!(sum(&utc_by_day(&t.day_hours)), t.matched_interactions, "by_day");
+        assert_eq!(sum(&utc_by_hour(&t.day_hours)), t.matched_interactions, "by_hour");
         assert_eq!(sum(&t.recognition_bands), t.matched_interactions, "recognition_bands");
-        assert_eq!(t.hour_weekday.iter().sum::<i64>(), t.matched_interactions);
+        assert_eq!(
+            utc_hour_weekday(&t.day_hours).iter().sum::<i64>(),
+            t.matched_interactions
+        );
         // The length chart still bins conversations, in both units.
         assert_eq!(sum(&t.length_buckets), t.session_count, "length_buckets");
         assert!(t.first_messages.is_empty(), "an opening question has no per-turn reading");
@@ -12397,7 +12491,10 @@ mod insights {
             narrowed.matched_interactions < narrowed.interaction_count,
             "a pill matched every interaction in its conversations, which cannot be right"
         );
-        assert_eq!(sum(&narrowed.by_hour), narrowed.matched_interactions);
+        assert_eq!(
+            sum(&utc_by_hour(&narrowed.day_hours)),
+            narrowed.matched_interactions
+        );
         assert_eq!(
             bucket(&narrowed.recognition_bands, "Zero"),
             narrowed.matched_interactions,
@@ -12472,15 +12569,15 @@ mod insights {
         // The hour is the matching turn's own, not the conversation's start.
         // This is the difference the mode exists for: `long` *starts* at 08:00
         // and has nothing to do with parking until 14:00.
-        let hour = |i: &ConversationInsights, h: usize| i.by_hour[h].count;
+        let hour = |i: &ConversationInsights, h: usize| utc_by_hour(&i.day_hours)[h].count;
         assert_eq!(hour(&convs, 8), 1, "conversations are counted at their start");
         assert_eq!(hour(&convs, 14), 0);
         assert_eq!(hour(&turns, 8), 0, "the 08:00 greeting did not match");
         assert_eq!(hour(&turns, 14), 2, "both parking turns are at 14:xx");
         assert_eq!(hour(&turns, 9), 1);
-        assert_eq!(turns.by_hour.iter().map(|b| b.count).sum::<i64>(), 3);
-        assert_eq!(turns.hour_weekday.iter().sum::<i64>(), 3);
-        assert_eq!(turns.by_day.iter().map(|b| b.count).sum::<i64>(), 3);
+        assert_eq!(sum_h(&turns.day_hours), 3);
+        assert_eq!(utc_hour_weekday(&turns.day_hours).iter().sum::<i64>(), 3);
+        assert_eq!(utc_by_day(&turns.day_hours).iter().map(|b| b.count).sum::<i64>(), 3);
 
         // The band is the turn's own score, with no "worst of" to take: the
         // conversation `long` is a 20% conversation, but two of its three
@@ -12525,7 +12622,7 @@ mod insights {
         assert_eq!(turns.matched_interactions, 10);
         assert_eq!(turns.interaction_count, 10);
         assert!(!turns.matches_are_narrowed, "nothing narrowed it — do not say 'matching'");
-        assert_eq!(turns.by_hour.iter().map(|b| b.count).sum::<i64>(), 10);
+        assert_eq!(sum_h(&turns.day_hours), 10);
     }
 
     /// A pill with no text query narrows to particular turns too: the
@@ -12548,9 +12645,10 @@ mod insights {
         assert!(turns.matches_are_narrowed);
         assert_eq!(turns.session_count, 1);
         assert_eq!(turns.matched_interactions, 2, "only the two turns under 60");
-        assert_eq!(turns.by_hour[9].count, 1);
-        assert_eq!(turns.by_hour[10].count, 1);
-        assert_eq!(turns.by_hour[8].count, 0, "the 95% turn did not satisfy the pill");
+        let turn_hours = utc_by_hour(&turns.day_hours);
+        assert_eq!(turn_hours[9].count, 1);
+        assert_eq!(turn_hours[10].count, 1);
+        assert_eq!(turn_hours[8].count, 0, "the 95% turn did not satisfy the pill");
     }
 
     /// The temp table the aggregates read is per-connection and the connection

@@ -61,6 +61,13 @@ const EXPORTS = [
   "insSearchSummary",
   "INS_SECTIONS",
   "INS_READ_SECTIONS",
+  "insTimeSeries",
+  "insSetDisplayZone",
+  "insZone",
+  "insZoneLabel",
+  "insZoneDayBounds",
+  "insZoneStampToUtc",
+  "insZoneDayOf",
 ]
 const {
   INS_THEME_SCREEN,
@@ -83,6 +90,13 @@ const {
   insSearchSummary,
   INS_SECTIONS,
   INS_READ_SECTIONS,
+  insTimeSeries,
+  insSetDisplayZone,
+  insZone,
+  insZoneLabel,
+  insZoneDayBounds,
+  insZoneStampToUtc,
+  insZoneDayOf,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -326,14 +340,16 @@ const PAYLOAD = {
   zeroRecogSessions: 9,
   lowRecogSessions: 21,
   lowRecogThreshold: 60,
-  byDay: [{ label: "2026-06-01", count: 60 }, { label: "2026-06-07", count: 40 }],
-  // Zero-padded, as the backend emits them — `9:00 UTC` in a tooltip and a
-  // ragged `9` on the axis are both wrong.
-  byHour: Array.from({ length: 24 }, (_, h) => ({
-    label: String(h).padStart(2, "0"),
-    count: h,
-  })),
-  hourWeekday: Array.from({ length: 168 }, (_, i) => i % 5),
+  // One row per UTC day per UTC hour, exactly as `InsightDayHours` crosses the
+  // bridge. The renderer folds this into the day series, the hour histogram and
+  // the heatmap, in the display timezone — nothing arrives pre-folded.
+  //
+  // 2026-06-01 is a Monday and 2026-06-07 a Sunday, and every hour of both is
+  // occupied, so a shift in either direction has somewhere to land.
+  dayHours: [
+    { day: "2026-06-01", hours: Array.from({ length: 24 }, (_, h) => h) },
+    { day: "2026-06-07", hours: Array.from({ length: 24 }, (_, h) => 23 - h) },
+  ],
   lengthBuckets: [{ label: "21+", count: 4 }, { label: "1", count: 60 }, { label: "3–5", count: 36 }],
   recognitionBands: [
     { label: "70–100%", count: 70 },
@@ -648,7 +664,10 @@ test("the slice is always stated, including when nothing was filtered", () => {
 // A weekend is not a property of the numbers, so nothing in the data says
 // where one is — but "why is Tuesday always low?" is unanswerable without it.
 test("the weekend is visible in the picture and named in the table", () => {
-  const volume = insBuildCards(CONVS, INS_THEME_SCREEN).find((c) => c.id === "volume")
+  // Pinned to UTC: the fixture's day keys are UTC days, and in another zone
+  // the series legitimately starts a day earlier or later — which would make
+  // this test a statement about the machine running it.
+  const volume = insBuildCards(CONVS, INS_THEME_SCREEN, "UTC").find((c) => c.id === "volume")
   assert.ok(volume, "no volume card")
   const at = new Map(volume.spec.data.map((d) => [d.label, d]))
   // 2026-06-01 is a Monday, 06 a Saturday, 07 a Sunday.
@@ -675,20 +694,150 @@ test("the weekend is visible in the picture and named in the table", () => {
   assert.ok(insChartTsv(volume.spec).includes("2026-06-07\tSun\t"))
 })
 
-// The bounds the picker sends are always midnight and one second to midnight,
-// which is the one part of that chip carrying no information.
-test("the dates chip names days, and keeps the exact bounds for the hover", () => {
-  const [chip] = insSearchSummary({
-    dateFrom: "2026-06-01T00:00:00",
-    dateTo: "2026-06-30T23:59:59",
+// The bounds the picker sends are instants, not days — a day picked in a zone
+// east of Greenwich is stored as the evening before. The chip has to name the
+// day that was clicked, and it is the one place that can.
+test("the dates chip names the days that were picked, in the display zone", () => {
+  insSetDisplayZone("Europe/Amsterdam")
+  try {
+    const b = insZoneDayBounds("2026-06-01", "2026-06-30", "Europe/Amsterdam")
+    assert.strictEqual(b.from, "2026-05-31T22:00:00", "the bound was not shifted")
+    const [chip] = insSearchSummary({ dateFrom: b.from, dateTo: b.to })
+    assert.strictEqual(chip.value, "2026-06-01 → 2026-06-30")
+    // The exact bound is what the query compared against, so it stays one
+    // hover away and goes into both reports, which travel without a hover.
+    assert.strictEqual(chip.title, b.from + " → " + b.to)
+
+    // A date-only bound has nothing to shift and nothing to trim, so it
+    // carries no hover: a tooltip repeating the text under it says nothing.
+    const [plain] = insSearchSummary({ dateFrom: "2026-06-01" })
+    assert.strictEqual(plain.value, "2026-06-01 → latest")
+    assert.strictEqual(plain.title, undefined)
+  } finally {
+    insSetDisplayZone("")
+  }
+})
+
+// ── Reading the day×hour table in a timezone ───────────────────────────────
+//
+// The backend counts UTC days and UTC hours and knows nothing else; every one
+// of these is arithmetic the renderer alone performs, and every one of them is
+// wrong in a way that still produces a plausible chart.
+const ZONES = [
+  "UTC",
+  "Europe/Amsterdam",
+  "America/New_York",
+  "Asia/Kolkata", // +05:30 — a half-hour offset
+  "Pacific/Chatham", // +12:45 / +13:45 — a quarter-hour offset, and DST
+]
+const dayOf = (hours) => ({ day: "2026-06-30", hours })
+const oneAt = (day, hour, n) => [
+  { day, hours: Array.from({ length: 24 }, (_, h) => (h === hour ? n || 1 : 0)) },
+]
+
+test("a bucket lands on the day and hour it was in the chosen zone", () => {
+  const d = { dayHours: oneAt("2026-06-30", 23) }
+  const ams = insTimeSeries(d, "Europe/Amsterdam")
+  assert.deepStrictEqual(ams.byDay, [{ label: "2026-07-01", count: 1 }])
+  assert.strictEqual(ams.byHour[1].count, 1, "23:00Z is 01:00 in Amsterdam")
+
+  // And the other way: the same instant is still 30 June in New York.
+  const ny = insTimeSeries({ dayHours: oneAt("2026-06-30", 23) }, "America/New_York")
+  assert.deepStrictEqual(ny.byDay, [{ label: "2026-06-30", count: 1 }])
+  assert.strictEqual(ny.byHour[19].count, 1)
+})
+
+test("a spring-forward day loses its missing hour and keeps every conversation", () => {
+  // Amsterdam, 29 March 2026: 02:00 local never happens. 00:00Z is 01:00
+  // local, 01:00Z is 03:00, 02:00Z is 04:00.
+  //
+  // Only the first three hours are occupied, so nothing from the far end of
+  // the day can roll forward into the early hours and mask the gap.
+  const hours = Array.from({ length: 24 }, (_, h) => (h < 3 ? 1 : 0))
+  const s = insTimeSeries({ dayHours: [{ day: "2026-03-29", hours }] }, "Europe/Amsterdam")
+  assert.strictEqual(s.byHour[1].count, 1)
+  assert.strictEqual(s.byHour[2].count, 0, "an hour that did not happen holds something")
+  assert.strictEqual(s.byHour[3].count, 1)
+  assert.strictEqual(s.byHour[4].count, 1)
+  assert.strictEqual(
+    s.byHour.reduce((a, b) => a + b.count, 0),
+    3,
+    "a conversation was lost to the clock change",
+  )
+})
+
+test("an autumn-back day counts the hour that happened twice, once each", () => {
+  // Amsterdam, 25 October 2026: 00:00Z and 01:00Z are both 02:00 local.
+  const hours = Array.from({ length: 24 }, (_, h) => (h === 0 || h === 1 ? 5 : 0))
+  const s = insTimeSeries({ dayHours: [{ day: "2026-10-25", hours }] }, "Europe/Amsterdam")
+  assert.strictEqual(s.byHour[2].count, 10, "the repeated hour is not the sum of both")
+  assert.strictEqual(
+    s.byHour.reduce((a, b) => a + b.count, 0),
+    10,
+  )
+})
+
+test("every bucket is counted exactly once, in every zone", () => {
+  const src = [
+    dayOf(Array.from({ length: 24 }, (_, h) => h + 1)),
+    { day: "2026-07-01", hours: Array.from({ length: 24 }, (_, h) => 24 - h) },
+  ]
+  const total = src.reduce((a, d) => a + d.hours.reduce((x, y) => x + y, 0), 0)
+  for (const zone of ZONES) {
+    const s = insTimeSeries({ dayHours: src }, zone)
+    const sum = (xs) => xs.reduce((a, b) => a + (b.count === undefined ? b : b.count), 0)
+    assert.strictEqual(sum(s.byDay), total, zone + ": byDay")
+    assert.strictEqual(sum(s.byHour), total, zone + ": byHour")
+    assert.strictEqual(sum(s.hourWeekday), total, zone + ": hourWeekday")
+    assert.strictEqual(s.byHour.length, 24, zone)
+    assert.strictEqual(s.hourWeekday.length, 7 * 24, zone)
+    // The day series has to stay in order, since `insFillDays` walks it.
+    const labels = s.byDay.map((b) => b.label)
+    assert.deepStrictEqual(labels, [...labels].sort(), zone + ": days out of order")
+  }
+})
+
+test("the heatmap week still starts on Monday after the shift", () => {
+  // 2026-06-07 is a Sunday. At 12:00Z it is Sunday in every zone here.
+  const s = insTimeSeries({ dayHours: oneAt("2026-06-07", 12) }, "Europe/Amsterdam")
+  assert.strictEqual(s.hourWeekday[6 * 24 + 14], 1, "Sunday is not the last row")
+  // …and 2026-06-01 is a Monday, the first.
+  const m = insTimeSeries({ dayHours: oneAt("2026-06-01", 12) }, "Europe/Amsterdam")
+  assert.strictEqual(m.hourWeekday[0 * 24 + 14], 1, "Monday is not the first row")
+})
+
+test("a local day becomes the instants that bound it, in the column's own shape", () => {
+  const shape = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
+  for (const zone of ZONES) {
+    const b = insZoneDayBounds("2026-07-01", "2026-07-31", zone)
+    // The comparison in `build_session_filter_query` is a plain string compare
+    // against an indexed column. A bound of any other shape stops being one.
+    assert.ok(shape.test(b.from), zone + ": " + b.from)
+    assert.ok(shape.test(b.to), zone + ": " + b.to)
+    assert.ok(b.from < b.to, zone)
+    // And it round-trips: the day that was picked is the day that comes back.
+    assert.strictEqual(insZoneDayOf(b.from, zone), "2026-07-01", zone)
+    assert.strictEqual(insZoneDayOf(b.to, zone), "2026-07-31", zone)
+  }
+  assert.deepStrictEqual(insZoneDayBounds("2026-07-01", "2026-07-01", "UTC"), {
+    from: "2026-07-01T00:00:00",
+    to: "2026-07-01T23:59:59",
   })
-  assert.strictEqual(chip.value, "2026-06-01 → 2026-06-30")
-  assert.strictEqual(chip.title, "2026-06-01T00:00:00 → 2026-06-30T23:59:59")
-  // A bound with nothing to trim carries no hover: a tooltip repeating the text
-  // underneath it is a tooltip that says nothing.
-  const [plain] = insSearchSummary({ dateFrom: "2026-06-01" })
-  assert.strictEqual(plain.value, "2026-06-01 → latest")
-  assert.strictEqual(plain.title, undefined)
+  // A bound landing on a clock change takes the offset in force at the bound
+  // — which is the whole reason the resolve is two passes and not one.
+  assert.strictEqual(
+    insZoneDayBounds("2026-03-29", "2026-03-29", "Europe/Amsterdam").from,
+    "2026-03-28T23:00:00",
+  )
+})
+
+test("the zone label is a place, never an offset", () => {
+  assert.strictEqual(insZoneLabel("Europe/Amsterdam"), "Amsterdam")
+  assert.strictEqual(insZoneLabel("America/New_York"), "New York")
+  assert.strictEqual(insZoneLabel("UTC"), "UTC")
+  // An offset would be right for half the year and wrong for the other half,
+  // and a chart spanning both has no single correct one to print.
+  assert.ok(!/[+-]\d/.test(insZoneLabel("Europe/Amsterdam")))
 })
 
 // The timezone is stated once, not on every card.
@@ -700,30 +849,36 @@ test("the dates chip names days, and keeps the exact bounds for the hover", () =
 // label rather than a disclaimer: an exported hour chart carries nothing else
 // that could say what `09` means.
 test("the timezone is a header badge, not a caption on every chart", () => {
+  const ZONE = "Europe/Amsterdam"
+  const NAMED = /\bUTC\b|Amsterdam/
   const offenders = []
   for (const d of [CONVS, TURNS]) {
-    for (const card of insBuildCards(d, INS_THEME_SCREEN)) {
-      if (/UTC/.test(card.note || "")) offenders.push(card.id + " note")
-      if (/UTC/.test(card.title)) offenders.push(card.id + " title")
+    for (const card of insBuildCards(d, INS_THEME_SCREEN, ZONE)) {
+      if (NAMED.test(card.note || "")) offenders.push(card.id + " note")
+      if (NAMED.test(card.title)) offenders.push(card.id + " title")
       const svg = insRenderChart(card.spec, INS_THEME_SCREEN).svg
       const texts = [...svg.matchAll(/<(?:text|title)[^>]*>([^<]*)</g)].map((m) => m[1])
       for (const t of texts) {
         // The hour axis is the one place it belongs, and it is an axis label.
-        if (/UTC/.test(t) && t !== "Hour (UTC)") offenders.push(card.id + ": " + t)
+        if (NAMED.test(t) && !/^Hour \(.+\)$/.test(t)) offenders.push(card.id + ": " + t)
       }
       // Same exemption in the copied table: the hour column is named after
       // its axis, and a spreadsheet column called "Hour" alone is ambiguous.
       const header = insChartTsv(card.spec).split("\n")[0]
-      if (/UTC/.test(header) && !header.startsWith("Hour (UTC)\t")) {
+      if (NAMED.test(header) && !/^Hour \(.+\)\t/.test(header)) {
         offenders.push(card.id + " table header: " + header)
       }
     }
   }
   assert.deepStrictEqual(offenders, [])
   // …and the one place it does belong is still there, so this cannot pass by
-  // the disclaimer having been deleted outright.
-  const hour = insBuildCards(CONVS, INS_THEME_SCREEN).find((c) => c.id === "hour")
-  assert.strictEqual(hour.spec.axisLabel, "Hour (UTC)")
+  // the disclaimer having been deleted outright — and it names the zone the
+  // chart was actually drawn in, not a constant.
+  const named = (z) =>
+    insBuildCards(CONVS, INS_THEME_SCREEN, z).find((c) => c.id === "hour").spec.axisLabel
+  assert.strictEqual(named(ZONE), "Hour (Amsterdam)")
+  assert.strictEqual(named("UTC"), "Hour (UTC)")
+  assert.strictEqual(named("America/New_York"), "Hour (New York)")
 })
 
 // Every tooltip on this dashboard ends in a counted noun.

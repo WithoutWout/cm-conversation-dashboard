@@ -9497,6 +9497,22 @@
                 border-top: 1px solid var(--border);
               "
             >
+              <label for="setting-timezone">Display timezone</label>
+              <p class="hint" style="margin-bottom: 6px">
+                Where conversation times, the date filter and the Insights
+                charts are read. Import and Stored data stay in UTC, like the
+                database &mdash; there the day you pick is exactly the set of
+                rows that moves.
+              </p>
+              <select id="setting-timezone" style="max-width: 320px"></select>
+            </div>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
               <label for="setting-low-recog-threshold"
                 >Low recognition threshold (%)</label
               >
@@ -10087,9 +10103,8 @@
               lot of words to say something that is true of the whole screen at
               once and never varies.
             -->
-            <span class="ins-tz"
-              title="The database stores every timestamp in UTC, and the conversation date filter reads it that way too — so days and hours here are UTC days and hours, not your local ones.">
-              <svg class=ui-icon><use href=#i-clock /></svg> UTC
+            <span class="ins-tz" id="insTzBadge">
+              <svg class=ui-icon><use href=#i-clock /></svg> <span id="insTzBadgeText">UTC</span>
             </span>
           </div>
         </div>
@@ -17898,6 +17913,7 @@
       document.getElementById("settingsBtn").addEventListener("click", () => {
         document.getElementById("setting-base-url").value = cmBaseUrl
         document.getElementById("setting-halo-url").value = haloBaseUrl
+        _fillTimezoneSelect()
         document.getElementById("setting-low-recog-threshold").value =
           lowRecogThreshold
         // data-retention setting lives on the data modal's Database tab
@@ -18076,6 +18092,7 @@
         { key: "cm-export-keep-unreachable" },
         { key: "chat-copy-format" },
         { key: "conv-low-recog-threshold" },
+        { key: "cm-display-timezone" },
         { key: "conv-data-retention-days" },
         { key: "cm-dismissed-version" },
         // Web build only; absent keys are simply omitted from the file. On the
@@ -18355,6 +18372,17 @@
           .replace(/\/$/, "")
           .replace(/\/conversations$/i, "")
         localStorage.setItem("halo-base-url", haloBaseUrl)
+        const _tzWas = insZone()
+        const _tzEl = document.getElementById("setting-timezone")
+        if (_tzEl) {
+          insSetDisplayZone(_tzEl.value)
+          try {
+            localStorage.setItem("cm-display-timezone", insTzSetting)
+          } catch (e) {
+            /* a full or disabled store is not a reason to refuse the change */
+          }
+        }
+        const _tzChanged = insZone() !== _tzWas
         lowRecogThreshold = Math.min(
           99,
           Math.max(
@@ -18386,11 +18414,85 @@
         }
         saveAnalyticsConfigFromSettings()
         closeSettings()
+        // Everything that names a time has to be redrawn, and the date filter
+        // has to be re-run: its bounds are instants, and they have moved.
+        if (_tzChanged) applyDisplayTimezoneChange()
         renderAllList()
         renderArticleList()
         renderDialogList()
         renderEntityList()
       })
+
+      /// The zone list: the system's own first, then UTC, then everything the
+      /// platform will name.
+      ///
+      /// The system entry stores `""` rather than the resolved name, so a
+      /// laptop that moves timezone follows it and a restored backup does not
+      /// pin the zone of the machine that wrote it.
+      function _fillTimezoneSelect() {
+        const el = document.getElementById("setting-timezone")
+        if (!el) return
+        let zones = []
+        try {
+          zones = Intl.supportedValuesOf("timeZone") || []
+        } catch (e) {
+          zones = []
+        }
+        if (!zones.length) {
+          // Old engines have no `supportedValuesOf`. A short list beats an
+          // empty dropdown, and the resolved system zone is always in it.
+          zones = [
+            "Europe/Amsterdam", "Europe/London", "Europe/Berlin", "Europe/Paris",
+            "Europe/Madrid", "Europe/Lisbon", "Europe/Warsaw", "Europe/Istanbul",
+            "America/New_York", "America/Chicago", "America/Denver",
+            "America/Los_Angeles", "America/Sao_Paulo", "Asia/Dubai",
+            "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney",
+          ]
+        }
+        let resolved = "UTC"
+        try {
+          resolved = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+        } catch (e) {
+          /* keep UTC */
+        }
+        const opts = ['<option value="">System (' + esc(resolved) + ")</option>"]
+        opts.push('<option value="UTC">UTC</option>')
+        for (const z of zones) {
+          if (z === "UTC") continue
+          opts.push('<option value="' + esc(z) + '">' + esc(z) + "</option>")
+        }
+        el.innerHTML = opts.join("")
+        el.value = insTzSetting
+        // A stored zone this build's engine does not know would silently
+        // select nothing; say "System" instead of showing an empty box.
+        if (el.selectedIndex < 0) el.value = ""
+      }
+
+      /// Redraw everything that names a time, and re-run the date filter.
+      function applyDisplayTimezoneChange() {
+        insSyncTzBadge()
+        if (typeof renderSessionList === "function") renderSessionList()
+        if (typeof renderFlaggedList === "function") renderFlaggedList()
+        if (typeof renderDateRangeBtn === "function") renderDateRangeBtn()
+        // The bounds are instants in the old zone, so they no longer name the
+        // days that are still highlighted on the calendar. Re-resolve them and
+        // search again rather than leaving the two disagreeing.
+        if (convPickStart && convDateFrom) {
+          const bounds = insZoneDayBounds(
+            convPickStart,
+            convPickEnd || convPickStart,
+            insZone(),
+          )
+          convDateFrom = bounds.from
+          convDateTo = bounds.to
+          convPage = 1
+          if (typeof loadSessions === "function" && convHasSearched) loadSessions()
+        }
+        // Insights is drawn from `dayHours`, so a new zone is a re-fold rather
+        // than a re-read — but only if it is open.
+        if (insData && insStage === "dashboard") insRenderBody()
+        insRenderHeader()
+      }
 
       document
         .getElementById("checkUpdateBtn")
@@ -21200,7 +21302,7 @@
           name: "Volume",
           blurb: "When they happened — per day, by hour, day × hour, and how long they ran.",
           cost: "fast",
-          fields: ["byDay", "byHour", "hourWeekday", "lengthBuckets"],
+          fields: ["dayHours", "lengthBuckets"],
         },
         {
           key: "quality",
@@ -21343,6 +21445,278 @@
         return theme.neutral
       }
 
+      // ── Reading this in the display timezone ───────────────────────────
+      //
+      // The database stores naive UTC, and every aggregate reads it that way:
+      // `day_hours` comes back as one row per UTC day per UTC hour, and
+      // nothing on the Rust side has ever heard of a timezone. Applying one is
+      // done here and only here.
+      //
+      // It cannot be done in SQL. The bundled SQLite has `'utc'` and
+      // `'localtime'` and nothing else — no IANA zones — and `'localtime'` is
+      // the *host's* zone, which is the chosen one only by coincidence. A fixed
+      // `±HH:MM` offset passed down instead is wrong for exactly the query it
+      // would be used in: Volume's whole point is a range of weeks to a year,
+      // and one offset applied across a DST boundary puts half the rows in the
+      // wrong hour — silently, plausibly, and invisibly from the chart.
+      //
+      // So the offset is resolved per bucket, by the only thing in the stack
+      // that knows the rules.
+
+      /// The zone every day, hour and timestamp on this screen is read in.
+      ///
+      /// `""` means "follow the system", and is stored rather than resolved so
+      /// a machine that moves timezone follows it, and a settings backup does
+      /// not pin the zone of the machine that wrote it.
+      let insTzSetting = (() => {
+        try {
+          return localStorage.getItem("cm-display-timezone") || ""
+        } catch (e) {
+          return ""
+        }
+      })()
+
+      /// Defensive on purpose: this is reachable from `fmtTs`, which the
+      /// bootstrap calls, and a throw here would take out the renderer rather
+      /// than one preference.
+      function insZone() {
+        try {
+          return (
+            insTzSetting ||
+            Intl.DateTimeFormat().resolvedOptions().timeZone ||
+            "UTC"
+          )
+        } catch (e) {
+          return "UTC"
+        }
+      }
+
+      function insSetDisplayZone(tz) {
+        insTzSetting = tz || ""
+        insTzOffsets = new Map()
+      }
+
+      /// The short name for an axis, a badge or a caption.
+      ///
+      /// The city segment, deliberately not `timeZoneName: "short"`: that
+      /// yields `GMT+2` half the year and `GMT+1` the other half, and a chart
+      /// aggregating a year has no single correct offset to print. A city is
+      /// stable across DST and fits on an axis.
+      function insZoneLabel(zone) {
+        const z = String(zone || "UTC")
+        const seg = z.slice(z.lastIndexOf("/") + 1)
+        return seg.replace(/_/g, " ")
+      }
+
+      /// Minutes to add to a UTC instant to get the wall clock in `zone`.
+      ///
+      /// Memoized per `(zone, day)`. The offset is read at `00:00Z` and at
+      /// `23:00Z`; on the 363 days a year they agree, every hour of that day
+      /// reuses the answer and only the two transition days pay per hour. A
+      /// full year costs ~750 `formatToParts` calls rather than 8,784.
+      let insTzOffsets = new Map()
+      function insZoneOffsetMin(day, hour, zone) {
+        const key = zone + "|" + day
+        let entry = insTzOffsets.get(key)
+        if (!entry) {
+          const at0 = insOffsetAt(Date.parse(day + "T00:00:00Z"), zone)
+          const at23 = insOffsetAt(Date.parse(day + "T23:00:00Z"), zone)
+          entry = at0 === at23 ? { flat: at0 } : { flat: null }
+          insTzOffsets.set(key, entry)
+        }
+        if (entry.flat !== null) return entry.flat
+        return insOffsetAt(Date.parse(day + "T" + String(hour).padStart(2, "0") + ":00:00Z"), zone)
+      }
+
+      let insTzFormatters = new Map()
+      function insOffsetAt(utcMs, zone) {
+        if (!Number.isFinite(utcMs)) return 0
+        let fmt = insTzFormatters.get(zone)
+        if (!fmt) {
+          try {
+            fmt = new Intl.DateTimeFormat("en-US", {
+              timeZone: zone,
+              hourCycle: "h23",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })
+          } catch (e) {
+            // An unknown zone name is a setting problem, not a chart problem.
+            fmt = null
+          }
+          insTzFormatters.set(zone, fmt)
+        }
+        if (!fmt) return 0
+        const at = {}
+        for (const part of fmt.formatToParts(new Date(utcMs))) at[part.type] = part.value
+        const asUtc = Date.UTC(
+          +at.year,
+          +at.month - 1,
+          +at.day,
+          +at.hour % 24,
+          +at.minute,
+          +at.second,
+        )
+        return Math.round((asUtc - utcMs) / 60000)
+      }
+
+      /// The one timezone statement on this screen.
+      ///
+      /// It used to appear on both time axes, in three tooltips, in two card
+      /// notes, in the header and in the footer — a lot of words for something
+      /// true of the whole screen at once. Now it names the zone once, and its
+      /// title carries the half that is *not* the reader's: the database, the
+      /// Import calendar and Stored data are all UTC, by design, because the
+      /// day you click there is exactly the set of rows that appears or
+      /// disappears.
+      function insSyncTzBadge() {
+        const badge = document.getElementById("insTzBadge")
+        const text = document.getElementById("insTzBadgeText")
+        if (!badge || !text) return
+        const zone = insZone()
+        text.textContent = insZoneLabel(zone)
+        badge.title =
+          zone === "UTC"
+            ? "Days and hours on this screen are UTC days and hours, which is how the database stores them."
+            : "The database stores every timestamp in UTC. Days and hours here — and the conversation date filter — are read in " +
+              zone +
+              ", set under Settings › Conversations. Import and Stored data stay in UTC, because there the day you pick is exactly the set of rows that moves."
+      }
+
+      /// A `YYYY-MM-DD` key out of a millisecond instant read as UTC.
+      function insUtcDayKey(ms) {
+        const t = new Date(ms)
+        return (
+          t.getUTCFullYear() +
+          "-" +
+          String(t.getUTCMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(t.getUTCDate()).padStart(2, "0")
+        )
+      }
+
+      /// A wall-clock time in `zone`, as the naive-UTC string the column stores.
+      ///
+      /// Two passes, and the second one is the point: the offset is guessed at
+      /// the naive instant, and then re-read at the corrected one. A bound that
+      /// lands on a DST transition gets the offset in force *at the bound*
+      /// rather than the one an hour either side of it.
+      function insZoneStampToUtc(day, time, zone) {
+        const naive = Date.parse(day + "T" + time + "Z")
+        if (!Number.isFinite(naive)) return day + "T" + time
+        let utc = naive - insOffsetAt(naive, zone) * 60000
+        utc = naive - insOffsetAt(utc, zone) * 60000
+        const t = new Date(utc)
+        const p2 = (n) => String(n).padStart(2, "0")
+        return (
+          insUtcDayKey(utc) +
+          "T" +
+          p2(t.getUTCHours()) +
+          ":" +
+          p2(t.getUTCMinutes()) +
+          ":" +
+          p2(t.getUTCSeconds())
+        )
+      }
+
+      /// The two instants that bound a run of calendar days in `zone`, in the
+      /// shape the date filter compares against.
+      ///
+      /// Shifted here rather than in SQL deliberately. `build_session_filter_query`
+      /// compares `s.last_ts >= ?` against a bare column, which is what makes it
+      /// an `idx_timestamp` range scan; wrapping the column in `datetime(…)`
+      /// would make the predicate non-sargable *and* still could not express an
+      /// IANA zone. The bound the user means is a fixed instant, and resolving
+      /// it where the rules live is both correct and free.
+      function insZoneDayBounds(fromDay, toDay, zone) {
+        return {
+          from: insZoneStampToUtc(fromDay, "00:00:00", zone),
+          to: insZoneStampToUtc(toDay, "23:59:59", zone),
+        }
+      }
+
+      /// A `YYYY-MM-DD` key, `n` calendar days away. Pure string arithmetic
+      /// through `Date.UTC`, so no host offset can move it.
+      function insShiftDay(day, n) {
+        const s = String(day || "")
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+        const t = Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10))
+        return insUtcDayKey(t + n * 86400000)
+      }
+
+      /// The calendar day a stored bound falls on, back in `zone`.
+      ///
+      /// The inverse of `insZoneStampToUtc`, and the reason the dates chip can
+      /// still show the day that was clicked after the bound has been shifted
+      /// off it.
+      function insZoneDayOf(stamp, zone) {
+        const s = String(stamp || "")
+        if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return s
+        if (s.length <= 10) return s.slice(0, 10)
+        const utc = Date.parse(s.slice(0, 19) + "Z")
+        if (!Number.isFinite(utc)) return s.slice(0, 10)
+        return insUtcDayKey(utc + insOffsetAt(utc, zone) * 60000)
+      }
+
+      /// The three Volume series, in the display timezone.
+      ///
+      /// One pass over `dayHours`, shifting each `(day, hour)` cell by its own
+      /// offset. The shifted instant is read back with `getUTC*` only: the
+      /// offset has already been applied, and a second host-local shift on top
+      /// of it is exactly the bug `docs/import.md` warns about.
+      ///
+      /// Memoized on the payload, keyed by the zone *and* the identity of the
+      /// array it was derived from — `insAddSection` assigns a fresh
+      /// `dayHours` when Volume is added later, which a value comparison would
+      /// miss.
+      function insTimeSeries(d, zone) {
+        const src = (d && d.dayHours) || []
+        if (d && d._seriesZone === zone && d._seriesRef === src) return d._series
+
+        const perDay = new Map()
+        const byHour = Array.from({ length: 24 }, (_, h) => ({
+          label: String(h).padStart(2, "0"),
+          count: 0,
+        }))
+        const hourWeekday = new Array(7 * 24).fill(0)
+
+        for (const entry of src) {
+          const day = entry && entry.day
+          const hours = (entry && entry.hours) || []
+          if (!day) continue
+          const base = Date.parse(day + "T00:00:00Z")
+          if (!Number.isFinite(base)) continue
+          for (let hr = 0; hr < hours.length && hr < 24; hr++) {
+            const count = hours[hr] || 0
+            if (!count) continue
+            const local = base + hr * 3600000 + insZoneOffsetMin(day, hr, zone) * 60000
+            const t = new Date(local)
+            const key = insUtcDayKey(local)
+            perDay.set(key, (perDay.get(key) || 0) + count)
+            const lh = t.getUTCHours()
+            byHour[lh].count += count
+            // Monday-first, the week as the people reading it work it.
+            const row = (t.getUTCDay() + 6) % 7
+            hourWeekday[row * 24 + lh] += count
+          }
+        }
+
+        const byDay = Array.from(perDay.entries())
+          .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+          .map(([label, count]) => ({ label, count }))
+        const out = { byDay, byHour, hourWeekday }
+        if (d) {
+          d._series = out
+          d._seriesZone = zone
+          d._seriesRef = src
+        }
+        return out
+      }
+
       // Three letters, from a constant — not `toLocaleDateString`. These end
       // up in a copied table and in a chart pasted into someone else's email,
       // where a name that changed with the reader's locale would make two
@@ -21373,8 +21747,8 @@
       /// A day series is a column chart while the columns are readable and a
       /// line once they are not. 62 is where a 640px chart stops giving each
       /// day enough width to be a mark rather than a hairline.
-      function insVolumeSpec(d) {
-        const filled = insFillDays(d.byDay || [])
+      function insVolumeSpec(series) {
+        const filled = insFillDays(series.byDay || [])
         // The axis says `06-01` where the whole series is inside one year: the
         // repeated `2026-` is four characters of noise on every tick, and the
         // year is already in the header, the tooltip and the copied table.
@@ -21495,8 +21869,13 @@
       ///
       /// One list, built once, so the on-screen render, the per-card copy and
       /// the whole-dashboard copy cannot disagree about what the dashboard is.
-      function insBuildCards(d, theme) {
+      function insBuildCards(d, theme, zone) {
         const w = insWords(d)
+        // Passed in rather than read, so a test can pin a zone without
+        // touching global state. Every caller on this screen omits it.
+        const tz = zone || insZone()
+        const tzName = insZoneLabel(tz)
+        const series = insTimeSeries(d, tz)
         const cards = []
         const push = (section, id, title, note, spec) => {
           if (!spec) return
@@ -21523,7 +21902,7 @@
           w.byTurn
             ? "Counted on the day the interaction happened. Days with nothing in them are shown as gaps."
             : "Counted on the day the conversation started. Days with nothing in them are shown as gaps.",
-          { ...insVolumeSpec(d), ...counted({ total: 0 }) },
+          { ...insVolumeSpec(series), ...counted({ total: 0 }) },
         )
         push(
           "Volume",
@@ -21535,8 +21914,14 @@
           counted({
             kind: "columns",
             // The axis says `09`; the tooltip has room to say what that means.
-            data: insToData(d.byHour).map((b) => ({ ...b, tip: b.label + ":00" })),
-            axisLabel: "Hour (UTC)",
+            data: insToData(series.byHour).map((b) => ({
+              ...b,
+              tip: b.label + ":00",
+            })),
+            // A label rather than a disclaimer: an exported hour chart is an
+            // SVG on its own in someone's email, and `09` with nothing beside
+            // it is ambiguous in a way a date is not.
+            axisLabel: "Hour (" + tzName + ")",
             total: 0,
           }),
         )
@@ -21545,7 +21930,7 @@
           "heat",
           "Day of week × hour",
           "The same, laid out as a week. Darker is busier.",
-          { kind: "heatmap", grid: d.hourWeekday || [], unit: w.noun },
+          { kind: "heatmap", grid: series.hourWeekday, unit: w.noun },
         )
         push(
           "Volume",
@@ -21893,9 +22278,19 @@
           // characters of it, in a chip that ellipsises at 340px, next to the
           // search terms that do carry information. The full bound stays one
           // hover away, because it is what the query actually compared against.
+          const zone = insZone()
           const from = a.dateFrom || "start"
           const to = a.dateTo || "latest"
-          const chip = { label: "Dates", value: insDayOf(from) + " → " + insDayOf(to) }
+          // Back out of the zone, not merely trimmed: after the bounds are
+          // shifted, `2026-07-01` local is stored as `2026-06-30T22:00:00`, and
+          // a slice would name a day the user never picked.
+          const chip = {
+            label: "Dates",
+            value:
+              (a.dateFrom ? insZoneDayOf(from, zone) : from) +
+              " → " +
+              (a.dateTo ? insZoneDayOf(to, zone) : to),
+          }
           const exact = from + " → " + to
           if (exact !== chip.value) chip.title = exact
           out.push(chip)
@@ -22397,12 +22792,17 @@
           // stating one two centimetres to the right — where they usually read
           // as the same string twice.
           const args = insArgs || {}
+          const zone = insZone()
           const span =
             d && d.firstTs && d.lastTs && !args.dateFrom && !args.dateTo
-              ? " · " + d.firstTs.slice(0, 10) + " → " + d.lastTs.slice(0, 10)
+              ? " · " +
+                insZoneDayOf(d.firstTs, zone) +
+                " → " +
+                insZoneDayOf(d.lastTs, zone)
               : ""
           sub.textContent = d ? insUnitLine(d, true) + span : "matching the current search"
         }
+        insSyncTzBadge()
         if (chips) {
           chips.innerHTML = insSearchSummary(insArgs)
             .map(
@@ -23029,7 +23429,9 @@
           `<div style="font-size:13px;color:#4b5563;margin-bottom:12px">` +
           `${esc(insUnitLine(d))}` +
           (d.firstTs && d.lastTs
-            ? ` · ${esc(d.firstTs.slice(0, 10))} → ${esc(d.lastTs.slice(0, 10))} UTC`
+            ? ` · ${esc(insZoneDayOf(d.firstTs, insZone()))} → ${esc(
+                insZoneDayOf(d.lastTs, insZone()),
+              )} ${esc(insZoneLabel(insZone()))}`
             : "") +
           `</div>`
 
@@ -23109,7 +23511,7 @@
 
         html +=
           `<div style="${INS_MAIL_FONT}font-size:11px;color:#9ca3af;border-top:1px solid #e8eaee;padding-top:8px;margin-top:16px">` +
-          `All times UTC. Charts count ${esc(
+          `All times ${esc(insZone())}. Charts count ${esc(
             insWords(d).subject,
           )} unless the note says otherwise. ` +
           `Generated by CAI Dashboard${appVersion ? " v" + esc(appVersion) : ""}.` +
@@ -23128,7 +23530,12 @@
           "CONVERSATION INSIGHTS",
           insUnitLine(d) +
             (d.firstTs && d.lastTs
-              ? " · " + d.firstTs.slice(0, 10) + " → " + d.lastTs.slice(0, 10) + " UTC"
+              ? " · " +
+                insZoneDayOf(d.firstTs, insZone()) +
+                " → " +
+                insZoneDayOf(d.lastTs, insZone()) +
+                " " +
+                insZoneLabel(insZone())
               : ""),
           "",
         ]
@@ -25714,30 +26121,46 @@
         }
       }
 
+      /// A stored timestamp, in the display timezone.
+      ///
+      /// The stored string is naive UTC, so the `Z` is what makes the parse
+      /// mean anything; the zone is then the reader's, not this build's. It
+      /// used to be `Europe/Amsterdam` unconditionally, which put the session
+      /// list and the chat an hour or two away from every Insights chart — and
+      /// on a different *day* either side of midnight.
       function fmtTs(iso) {
         if (!iso) return ""
-        // "2026-03-25T09:30:22" stored as UTC → display in CET/Amsterdam time
         const d = new Date(iso.replace("T", " ") + "Z")
         if (isNaN(d)) return iso.replace("T", " ").slice(0, 16)
-        return d.toLocaleString("nl-NL", {
-          timeZone: "Europe/Amsterdam",
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+        try {
+          return d.toLocaleString("nl-NL", {
+            timeZone: insZone(),
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        } catch (e) {
+          // A zone name the platform will not accept is a settings problem;
+          // showing no timestamp at all is not the way to report it.
+          return iso.replace("T", " ").slice(0, 16)
+        }
       }
 
       function fmtChatTime(iso) {
         if (!iso) return ""
         const d = new Date(iso.replace("T", " ") + "Z")
         if (isNaN(d)) return iso.slice(11, 16)
-        return d.toLocaleTimeString("nl-NL", {
-          timeZone: "Europe/Amsterdam",
-          hour: "2-digit",
-          minute: "2-digit",
-        })
+        try {
+          return d.toLocaleTimeString("nl-NL", {
+            timeZone: insZone(),
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        } catch (e) {
+          return iso.slice(11, 16)
+        }
       }
 
       function renderSessionList() {
@@ -27323,8 +27746,12 @@
       let _calHoverSetup = false
 
       function initDatePicker(min, max) {
-        convDateMin = min || ""
-        convDateMax = max || ""
+        // Widened by a day at each end, because these arrive as UTC days and
+        // the calendar shows the reader's. Widening is the safe direction: a
+        // pickable day with nothing in it simply returns nothing, where
+        // narrowing makes a day that does have data unselectable.
+        convDateMin = min ? insShiftDay(min, -1) : ""
+        convDateMax = max ? insShiftDay(max, 1) : ""
         // Only apply defaults once per DB connection — subsequent calls (e.g. on
         // view switch) should refresh the available bounds without touching the
         // user's current selection or calendar month position.
@@ -27335,8 +27762,9 @@
             convPickStart = convDateMax
             convPickEnd = convDateMax
             convPickPhase = 0
-            convDateFrom = convDateMax + "T00:00:00"
-            convDateTo = convDateMax + "T23:59:59"
+            const bounds = insZoneDayBounds(convDateMax, convDateMax, insZone())
+            convDateFrom = bounds.from
+            convDateTo = bounds.to
           } else {
             const now = new Date()
             convPickMonth = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -27463,8 +27891,13 @@
 
       function applyDateRange() {
         const end = convPickEnd || convPickStart
-        convDateFrom = convPickStart + "T00:00:00"
-        convDateTo = end + "T23:59:59"
+        // A day picked on this calendar is a day in the reader's timezone, and
+        // the column it is compared against holds naive UTC. The bounds are
+        // resolved here rather than in SQL: the comparison stays a plain string
+        // compare on an indexed column — see `insZoneDayBounds`.
+        const bounds = insZoneDayBounds(convPickStart, end, insZone())
+        convDateFrom = bounds.from
+        convDateTo = bounds.to
         renderDateRangeBtn()
         document.getElementById("convCalPopup").classList.remove("open")
         document.getElementById("convDateRangeBtn").classList.remove("active")
@@ -27476,9 +27909,13 @@
         const clr = document.getElementById("convDateRangeClear")
         if (!lbl) return
         if (convPickStart) {
+          // `T12:00:00Z` and a forced UTC format: the string is a calendar
+          // day, and parsing it as local midnight then formatting it back is
+          // how a label comes to name the day before the one that was picked.
           const fmtD = (s) => {
-            const d = new Date(s + "T00:00:00")
+            const d = new Date(s + "T12:00:00Z")
             return d.toLocaleDateString("en-GB", {
+              timeZone: "UTC",
               day: "numeric",
               month: "short",
               year: "2-digit",
@@ -27526,11 +27963,9 @@
         const canPrev = !minDate || prevFirst.slice(0, 7) >= minDate.slice(0, 7)
         const canNext = !maxDate || nextFirst.slice(0, 7) <= maxDate.slice(0, 7)
 
-        const _t = new Date()
-        const today = `${_t.getFullYear()}-${String(_t.getMonth() + 1).padStart(
-          2,
-          "0",
-        )}-${String(_t.getDate()).padStart(2, "0")}`
+        // Today in the display timezone, not the host's — the ring has to land
+        // on the same day the charts and the session list call today.
+        const today = insZoneDayOf(new Date().toISOString().slice(0, 19), insZone())
 
         // Day-of-week headers (Mon-start)
         let daysHtml = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]

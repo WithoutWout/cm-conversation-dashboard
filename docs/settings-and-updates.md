@@ -28,7 +28,14 @@ changing that warning too.
 
 **`SETTINGS_EXPORT_KEYS` is an allowlist, not a denylist**, so a localStorage key
 added later defaults to *not* exported and this list stays the only place that
-decision is made. `SETTINGS_EXPORT_EXCLUDED` now holds only `cm-conv-db-path`,
+decision is made.
+
+**`cm-display-timezone` stores `""` for "follow the system"**, and stores it
+rather than the resolved zone name on purpose. Resolving at write time would
+bake the zone of whichever machine wrote the backup into it, so restoring it on
+a laptop that has since travelled — or on a colleague's machine — would pin a
+zone nobody chose. It is not marked `sensitive`: it names no tenant and carries
+no credential. `SETTINGS_EXPORT_EXCLUDED` now holds only `cm-conv-db-path`,
 `cm-data-folder` and `cm-perf-debug` — paths stay out because restoring one on
 another machine points the app at something that isn't there, which is a
 different argument from the one that used to keep credentials out.

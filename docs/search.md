@@ -67,6 +67,21 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - Ranges are merged before insertion, longest-first at a given start: two terms can cover the same span, and `<mark>` nested in `<mark>` renders wrong. `opening | openingstijden` produces one mark, not `[opening][stijden]`.
 - Regex mode is deliberately **not** folded — the user wrote a pattern, and the backend's regex path does not fold either.
 
+## The date filter is an instant, not a day
+
+`date_from` / `date_to` are compared as plain strings against
+`session_summary.last_ts` / `first_ts`, which is what keeps the predicate an
+`idx_timestamp` range scan. They are *not* days: a day picked on the calendar is
+a day in the display timezone, and `insZoneDayBounds` resolves it into the two
+naive-UTC instants that bound it before it reaches Rust — `2026-07-01` in
+Amsterdam is `2026-06-30T22:00:00` → `2026-07-01T21:59:59`.
+
+Shifting the bounds rather than wrapping the column is the whole point: an IANA
+zone cannot be expressed in this SQLite at all, and `datetime(s.first_ts, …)`
+would kill the index. See `docs/insights.md` → "Reading this in your own
+timezone". A change of timezone therefore changes `date_from`/`date_to`, which
+*is* a different result set, and the session list is re-run.
+
 ## Metadata filtering (Context · Metadata)
 
 Both filter popovers — the Content one (`#contentCtxModalOverlay`) and the Conversations one (`#ctxModalOverlay`) — carry **two tabs**: Context and Metadata. Context says what the user's session was in; metadata (`OutputMetaData` / the `OutputMetadata` column) says what the bot's answer was *marked with* — `entryType`, `nochat`, `transaction`, `attractionIdentifier`, `restaurantName`. On the real export that is **40 distinct keys and 196 chips**.

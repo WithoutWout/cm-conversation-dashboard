@@ -98,6 +98,8 @@ The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Stored
 
 Both are UTC for the same reason: the data is. `DATE(timestamp_start)` is UTC, `delete_interactions_by_dates` matches on it, and the request windows the importer builds are UTC days — so on both tabs the day you click is exactly the set of rows that appears or disappears. Don't "unify" either one to local time.
 
+**That rule got harder to keep, not easier.** The rest of the app now has a display timezone (`docs/insights.md` → "Reading this in your own timezone"): the session list, the chat, the conversation date filter and every Insights chart are read in the user's zone. These two calendars are the ones that must not follow, and the reason is the sentence above — they name rows, not moments. Both say so on screen rather than leaving it to be inferred, because a UTC calendar sitting next to a local one is exactly the situation that produces the mistake.
+
 The Import picker used to be local time. The mismatch showed up in two ways worth remembering, because each looks like its own separate bug:
 
 - **One picked day became two requests.** A local day spans two UTC days (at UTC+2, local 25 Mar is `24T22:00Z → 25T21:59Z`), so a contiguous selection always left two ragged UTC edges — the first day fetched only its tail, the last only its head. Both then rendered orange (partly imported) indefinitely and were re-fetched on the next run. Harmless thanks to `INSERT OR IGNORE`, but it read as the importer failing to finish.
