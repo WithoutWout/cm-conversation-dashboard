@@ -7862,6 +7862,70 @@
       .ins-keypop[hidden] {
         display: none;
       }
+      #insExportModal {
+        z-index: 420;
+      }
+      .ins-export-box {
+        width: min(720px, 94vw);
+        max-height: 88vh;
+      }
+      .ins-export-scope {
+        width: fit-content;
+        margin-bottom: 14px;
+      }
+      .ins-export-preview {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 14px;
+        overflow-x: auto;
+        /* The preview is the export theme — a light chart on a dark screen —
+           so it needs its own ground rather than the modal's. */
+        background: #ffffff;
+      }
+      .ins-export-preview svg {
+        display: block;
+        margin: 0 auto;
+      }
+      .ins-export-group {
+        margin-bottom: 14px;
+      }
+      .ins-export-group > h4 {
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .ins-export-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+      .ins-export-row .hint {
+        flex-basis: 100%;
+        margin-top: 2px;
+      }
+      /* `.modal-body label` is the uppercase field-heading style. A checkbox
+         label is a sentence, not a heading — it opts out of all of it. */
+      .modal-body label.ins-export-check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        font-weight: 400;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .ins-export-sections {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+      }
       .ins-keypop {
         position: fixed;
         z-index: 410;
@@ -10097,8 +10161,8 @@
                 <svg class=ui-icon><use href=#i-sliders /></svg> Choose data
               </button>
               <button class="btn-primary" id="insCopyAllBtn" disabled
-                title="Put the whole dashboard on the clipboard as rich text — paste it straight into an email">
-                <svg class=ui-icon><use href=#i-clipboard /></svg> Copy dashboard
+                title="Copy or save the whole dashboard — as rich text for an email, or as plain text">
+                <svg class=ui-icon><use href=#i-download /></svg> Export
               </button>
               <button class="close-btn" id="insCloseBtn">&#x2715;</button>
             </div>
@@ -10135,6 +10199,29 @@
                 &#x2715; Cancel
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        The export modal.
+
+        A sibling of the Insights overlay, not a child of it: nested, the
+        Insights backdrop handler and its `.modal-box` transform rules would
+        both apply to this one as well. Its z-index sits above the Insights
+        overlay (100) and the key picker (410), and below `.import-toast`
+        (500) — the toast has to stay visible, because it is what reports a
+        copy having succeeded.
+      -->
+      <div class="modal-overlay" id="insExportModal">
+        <div class="modal-box ins-export-box">
+          <div class="modal-header">
+            <h3 id="insExportTitle">Export</h3>
+            <button class="close-btn" id="insExportClose">&#x2715;</button>
+          </div>
+          <div class="modal-body" id="insExportBody"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="insExportCancel">Close</button>
           </div>
         </div>
       </div>
@@ -10788,6 +10875,11 @@
           getVersion: () => invoke("get_version"),
           saveCollectionExport: (defaultName, content) =>
             invoke("save_collection_export", { defaultName, content }),
+          saveExportText: (defaultName, format, content) =>
+            invoke("save_export_text", { defaultName, format, content }),
+          // `content` is a plain number array; serde takes it as `Vec<u8>`.
+          saveExportBytes: (defaultName, format, content) =>
+            invoke("save_export_bytes", { defaultName, format, content }),
           exportSettingsBackup: (defaultName, payload) =>
             invoke("export_settings_backup", { defaultName, payload }),
           importSettingsBackup: () => invoke("import_settings_backup"),
@@ -10910,6 +11002,14 @@
       }
       if (!window.backend.saveCollectionExport)
         window.backend.saveCollectionExport = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
+      // Outside Tauri a Save degrades to "cancelled" rather than throwing, so
+      // the export modal stays usable for everything that goes to the clipboard.
+      if (!window.backend.saveExportText)
+        window.backend.saveExportText = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
+      if (!window.backend.saveExportBytes)
+        window.backend.saveExportBytes = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
       // Stub out conversation commands when running outside Tauri (dev preview)
       const _convStub = () => Promise.resolve(null)
@@ -20775,7 +20875,7 @@
         const padL = labelDirect ? 8 : 40
         const padR = 8
         const plotH = spec.plotHeight || 150
-        const h = padT + plotH + padB
+        const h = padT + plotH + padB + (spec.padBottom || 0)
         const plotW = w - padL - padR
         const max = Math.max(1, ...data.map((d) => d.value || 0))
         const ticks = insNiceTicks(max, 4)
@@ -20888,7 +20988,7 @@
         const rowH = 22
         const padT = 4
         const padB = 4
-        const h = padT + padB + Math.max(1, data.length) * rowH
+        const h = padT + padB + Math.max(1, data.length) * rowH + (spec.padBottom || 0)
         // Enough for a real name, never more than a third of the chart: past
         // that the bars have no room left to be compared.
         const gutter = Math.min(200, Math.max(90, Math.round(w * 0.3)))
@@ -20971,7 +21071,7 @@
         const w = spec.width || INS_ROW_W
         const barH = 26
         const legendRows = data.length
-        const h = 6 + barH + 12 + legendRows * 18
+        const h = 6 + barH + 12 + legendRows * 18 + (spec.padBottom || 0)
         const total =
           spec.total || data.reduce((a, d) => a + (d.value || 0), 0) || 1
         let out = insOpen(w, h, theme)
@@ -21031,7 +21131,7 @@
         const cellH = 20
         const gap = 2
         const cellW = (w - padL - 4 - 23 * gap) / 24
-        const h = padT + 7 * (cellH + gap) + 34
+        const h = padT + 7 * (cellH + gap) + 34 + (spec.padBottom || 0)
         const max = Math.max(1, ...grid)
         const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         let out = insOpen(w, h, theme)
@@ -21139,7 +21239,7 @@
         const padT = 12
         const padB = 26
         const plotH = spec.plotHeight || 150
-        const h = padT + plotH + padB
+        const h = padT + plotH + padB + (spec.padBottom || 0)
         const plotW = w - padL - padR
         const max = Math.max(1, ...data.map((d) => d.value || 0))
         const ticks = insNiceTicks(max, 4)
@@ -21227,14 +21327,173 @@
         return { svg: out + "</svg>", width: w, height: h }
       }
 
+      // ── The caption block ──────────────────────────────────────────────
+      //
+      // An exported chart travels alone. A bar reading 43% is alarming or
+      // unremarkable entirely depending on what was searched for, and the
+      // header saying so is on a screen the recipient never saw.
+      //
+      // It is SVG text inside the picture, not HTML around it, because the
+      // single property this whole feature rests on is that a chart depends on
+      // nothing outside itself — a caption in a stylesheet renders as a blank
+      // box the moment it is pasted. Two further rules fall out of that:
+      //
+      //   * absolute coordinates, never a `<g transform>`, so every mark stays
+      //     measurable where it is drawn;
+      //   * *below* the chart, so no existing coordinate moves and every
+      //     builder's layout stays exactly as it was.
+      const INS_CAP_PAD = 12
+      const INS_CAP_GAP = 10
+      const INS_CAP_LINE = 4
+      // Per entry, and overall. A context value can be arbitrarily long, and a
+      // caption that grew a chart by forty rows would be the export.
+      const INS_CAP_MAX_LINES = 3
+      const INS_CAP_MAX_ROWS = 10
+      const INS_CAP_STYLES = {
+        title: { size: 13, weight: "600", tone: "ink", lead: 17 },
+        note: { size: 10.5, tone: "ink2", lead: 14 },
+        meta: { size: 10, tone: "muted", lead: 13 },
+      }
+
+      /// Measure and wrap, without drawing. Pure: no coordinates, no palette.
+      function insCaptionLayout(lines, width) {
+        const rows = []
+        for (const line of lines || []) {
+          if (rows.length >= INS_CAP_MAX_ROWS) break
+          const style = INS_CAP_STYLES[line.style] || INS_CAP_STYLES.meta
+          const text = String(line.text == null ? "" : line.text).trim()
+          if (!text) continue
+          const wrapped = []
+          let current = ""
+          for (const word of text.split(/\s+/)) {
+            const next = current ? current + " " + word : word
+            if (current && insTextWidth(next, style.size) > width) {
+              wrapped.push(current)
+              current = word
+              if (wrapped.length >= INS_CAP_MAX_LINES) break
+            } else {
+              current = next
+            }
+          }
+          if (current && wrapped.length < INS_CAP_MAX_LINES) wrapped.push(current)
+          for (let i = 0; i < wrapped.length; i++) {
+            if (rows.length >= INS_CAP_MAX_ROWS) break
+            // A single word wider than the line has nothing to wrap on, so it
+            // is shortened rather than allowed to run off the canvas — the
+            // same rule every label on this dashboard follows.
+            rows.push({ text: insFitText(wrapped[i], width, style.size), style })
+          }
+        }
+        let height = 0
+        for (const r of rows) height += r.style.lead
+        return { rows, height }
+      }
+
+      /// Draw a measured layout at an absolute origin.
+      function insCaptionDraw(layout, x, y, width, theme) {
+        let out = ""
+        let cursor = y
+        for (const row of layout.rows) {
+          cursor += row.style.lead
+          out += insText(x, cursor - 3, row.text, {
+            fill: theme[row.style.tone] || theme.ink,
+            size: row.style.size,
+            weight: row.style.weight,
+          })
+        }
+        return out
+      }
+
+      /// What a chart has to carry to be readable on its own.
+      ///
+      /// Built *through* `insSearchSummary`, so a captioned chart and a pasted
+      /// report cannot end up describing different slices.
+      function insCaptionLines(card, d, args, zone) {
+        const lines = [{ text: card.title, style: "title" }]
+        if (card.note) lines.push({ text: card.note, style: "note" })
+        for (const c of insSearchSummary(args)) {
+          // `c.value`, not `c.title` — the trimmed form. The exact bound is a
+          // fact about the query and belongs in the report; a caption is read
+          // by a person looking at a picture, and wants the day.
+          lines.push({ text: c.label + ": " + c.value, style: "meta" })
+        }
+        if (d) {
+          lines.push({
+            text: insUnitLine(d) + " · times in " + insZoneLabel(zone || insZone()),
+            style: "meta",
+          })
+        }
+        return lines
+      }
+
       /// The one entry point a chart card renders through, so a card can be
       /// asked for its screen form and its export form by changing one argument.
+      ///
+      /// A `spec.caption` grows the canvas rather than drawing over it: every
+      /// builder lays out from `padT`, `plotH` and its row count and never from
+      /// `h`, so a taller canvas simply leaves surface at the bottom — and
+      /// `insOpen` paints the full height from the start, so there is no seam.
       function insRenderChart(spec, theme) {
-        if (spec.kind === "bars") return insBarChart(spec, theme)
-        if (spec.kind === "stack") return insStackChart(spec, theme)
-        if (spec.kind === "heatmap") return insHeatmap(spec, theme)
-        if (spec.kind === "area") return insAreaChart(spec, theme)
-        return insColumnChart(spec, theme)
+        const draw = (sp) => {
+          if (sp.kind === "bars") return insBarChart(sp, theme)
+          if (sp.kind === "stack") return insStackChart(sp, theme)
+          if (sp.kind === "heatmap") return insHeatmap(sp, theme)
+          if (sp.kind === "area") return insAreaChart(sp, theme)
+          return insColumnChart(sp, theme)
+        }
+        if (!spec.caption || !spec.caption.length) return draw(spec)
+
+        const width = spec.width || INS_COL_W
+        const cap = insCaptionLayout(spec.caption, width - INS_CAP_PAD * 2)
+        if (!cap.rows.length) return draw(spec)
+        const out = draw({
+          ...spec,
+          padBottom: cap.height + INS_CAP_GAP + INS_CAP_LINE + INS_CAP_PAD,
+        })
+        const y = out.height - cap.height - INS_CAP_PAD
+        const ruleY = y - INS_CAP_GAP / 2
+        return {
+          ...out,
+          // The trailing `</svg>` is trimmed and re-closed. Deterministic —
+          // every builder ends with exactly `+ "</svg>"`, which
+          // `every chart builder closes its own tag exactly once` pins.
+          svg:
+            out.svg.slice(0, -6) +
+            insLine(INS_CAP_PAD, ruleY, out.width - INS_CAP_PAD, ruleY, theme.grid) +
+            insCaptionDraw(cap, INS_CAP_PAD, y, out.width - INS_CAP_PAD * 2, theme) +
+            "</svg>",
+        }
+      }
+
+      /// The same table, comma-separated.
+      ///
+      /// Not `insChartTsv().replace(/\t/g, ",")`: a label containing a comma —
+      /// `Stoppen, Faciliteitenkaart` is a real one — has to be quoted, where
+      /// the tab-separated twin never needed to be. RFC 4180: wrap when the
+      /// cell holds a comma, a quote or a newline, and double the quotes.
+      function insChartCsv(spec) {
+        const cell = (v) => {
+          const t = String(v == null ? "" : v)
+          return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t
+        }
+        return insChartTsv(spec)
+          .split("\n")
+          .map((row) => row.split("\t").map(cell).join(","))
+          .join("\n")
+      }
+
+      /// The same table again, as a Markdown pipe table — for Slack, GitHub
+      /// and anything else that renders one but will not take a TSV as cells.
+      function insChartMarkdown(spec) {
+        const rows = insChartTsv(spec).split("\n").map((r) => r.split("\t"))
+        if (!rows.length) return ""
+        // A `|` inside a cell ends the cell; escaped rather than dropped,
+        // because a context value is exactly where one turns up.
+        const cell = (v) => String(v == null ? "" : v).replace(/\|/g, "\\|")
+        const line = (cells) => "| " + cells.map(cell).join(" | ") + " |"
+        const out = [line(rows[0]), "|" + rows[0].map(() => " --- ").join("|") + "|"]
+        for (const r of rows.slice(1)) out.push(line(r))
+        return out.join("\n")
       }
 
       /// The numbers behind a chart, as tab-separated rows.
@@ -23206,15 +23465,10 @@
               ${card.note ? `<p>${esc(card.note)}</p>` : ""}
             </div>
             <div class="ins-card-actions">
-              <button class="ins-act" onclick="insCopyImage('${esc(
+              <button class="ins-act" onclick="insOpenExport('${esc(
                 card.id,
-              )}')" title="Copy this chart as an image, ready to paste into an email">
-                <svg class=ui-icon><use href=#i-copy /></svg> Image
-              </button>
-              <button class="ins-act" onclick="insCopyData('${esc(
-                card.id,
-              )}')" title="Copy the numbers behind this chart as a table">
-                <svg class=ui-icon><use href=#i-table /></svg> Data
+              )}')" title="Copy or save this chart — as a picture, as a vector, or as its numbers">
+                <svg class=ui-icon><use href=#i-download /></svg> Export
               </button>
             </div>
           </div>
@@ -23631,28 +23885,6 @@
         return ok ? Promise.resolve() : Promise.reject(new Error("clipboard refused"))
       }
 
-      function insCopyImage(id) {
-        const card = insSpecs.get(id)
-        if (!card) return
-        const png = insChartCanvas(card.spec).then(insCanvasBlob)
-        insWriteClipboard(
-          [["image/png", png]],
-          "“" + card.title + "” copied as an image",
-          // An image cannot degrade to text, but the numbers can — and they are
-          // what the reader was after.
-          card.title + "\n" + insChartTsv(card.spec),
-        )
-      }
-
-      function insCopyData(id) {
-        const card = insSpecs.get(id)
-        if (!card) return
-        insCopyText(insChartTsv(card.spec)).then(
-          () => showImportToast("success", "“" + card.title + "” data copied — paste into a spreadsheet"),
-          (e) => showImportToast("error", "Could not copy: " + String(e)),
-        )
-      }
-
       // ── The whole dashboard, as one paste ────────────────────────────
 
       /// Inline styles on every element, and a table for the tiles.
@@ -23663,9 +23895,349 @@
       const INS_MAIL_FONT =
         "font-family:'Segoe UI',Helvetica,Arial,sans-serif;"
 
-      async function insBuildReportHtml() {
+      // ── The export modal ───────────────────────────────────────────────
+      //
+      // Two clipboard buttons per card became one Export button and a modal,
+      // because the useful forms outnumber the room on a card head: a chart is
+      // wanted as a picture, as a vector, and as numbers, and any of those may
+      // need to be a file rather than a clipboard write.
+      //
+      // Scope comes first in the body — This chart / Whole dashboard — which is
+      // what keeps the per-card path unconfusing: it never shows a dashboard
+      // option above the thing that was clicked.
+      let insExportScope = "chart"
+      let insExportCardId = null
+      let insExportCaption = (() => {
+        try {
+          return localStorage.getItem("cm-insights-export-caption") !== "0"
+        } catch (e) {
+          return true
+        }
+      })()
+      let insExportSections = null
+
+      function insExportIsOpen() {
+        const el = document.getElementById("insExportModal")
+        return !!el && el.classList.contains("open")
+      }
+
+      function insOpenExport(cardId) {
+        if (!insData) return
+        insCloseKeyPicker()
+        insExportCardId = cardId || null
+        insExportScope = cardId ? "chart" : "dashboard"
+        insExportSections = null
+        document.getElementById("insExportModal").classList.add("open")
+        insRenderExport()
+      }
+
+      function insCloseExport() {
+        document.getElementById("insExportModal").classList.remove("open")
+      }
+
+      function insSetExportScope(scope) {
+        insExportScope = scope === "dashboard" ? "dashboard" : "chart"
+        insRenderExport()
+      }
+
+      function insToggleExportCaption() {
+        insExportCaption = !insExportCaption
+        try {
+          localStorage.setItem("cm-insights-export-caption", insExportCaption ? "1" : "0")
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the choice */
+        }
+        insRenderExport()
+      }
+
+      /// The card an export acts on, with its caption attached when asked for.
+      ///
+      /// One place builds this, so the preview on screen and the bytes that
+      /// leave cannot disagree about whether there is a caption.
+      function insExportSpec(cardId) {
+        const card = insSpecs.get(cardId)
+        if (!card) return null
+        if (!insExportCaption) return card.spec
+        return {
+          ...card.spec,
+          caption: insCaptionLines(card, insData, insArgs, insZone()),
+        }
+      }
+
+      function insExportFileName(cardId, ext) {
+        const card = cardId && insSpecs.get(cardId)
+        const stamp = new Date().toISOString().slice(0, 10)
+        const base = card
+          ? card.title.replace(/[^\w\d]+/g, "-").replace(/^-|-$/g, "").toLowerCase()
+          : "conversation-insights"
+        return base + "-" + stamp + "." + ext
+      }
+
+      /// Which sections the dashboard export covers. Derived from what is
+      /// actually rendered, so a section nobody built cannot be offered.
+      function insExportSectionList() {
+        const out = []
+        for (const card of insSpecs.values()) {
+          if (!out.includes(card.section)) out.push(card.section)
+        }
+        return out
+      }
+
+      function insExportChosenSections() {
+        const all = insExportSectionList()
+        if (!insExportSections) return all
+        const chosen = all.filter((n) => insExportSections.includes(n))
+        return chosen.length ? chosen : all
+      }
+
+      function insToggleExportSection(name) {
+        const all = insExportSectionList()
+        const chosen = insExportChosenSections()
+        insExportSections = chosen.includes(name)
+          ? chosen.filter((n) => n !== name)
+          : all.filter((n) => chosen.includes(n) || n === name)
+        insRenderExport()
+      }
+
+      function insExportCards() {
+        const chosen = insExportChosenSections()
+        return Array.from(insSpecs.values()).filter((c) => chosen.includes(c.section))
+      }
+
+      function insRenderExport() {
+        const body = document.getElementById("insExportBody")
+        const title = document.getElementById("insExportTitle")
+        if (!body) return
+        const card = insExportCardId && insSpecs.get(insExportCardId)
+        if (title) {
+          title.textContent =
+            insExportScope === "chart" && card ? "Export " + card.title : "Export"
+        }
+        const scope = `<div class="ins-unit ins-export-scope">
+            <button class="${insExportScope === "chart" ? "active" : ""}"
+              ${card ? "" : "disabled"}
+              onclick="insSetExportScope('chart')">This chart</button>
+            <button class="${insExportScope === "dashboard" ? "active" : ""}"
+              onclick="insSetExportScope('dashboard')">Whole dashboard</button>
+          </div>`
+        body.innerHTML =
+          scope +
+          (insExportScope === "chart" && card
+            ? insExportChartBody(card)
+            : insExportDashboardBody())
+      }
+
+      function insExportChartBody(card) {
+        const spec = insExportSpec(card.id)
+        const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
+        return `<div class="ins-export-preview">${svg}</div>
+          <label class="ins-export-check">
+            <input type="checkbox" ${insExportCaption ? "checked" : ""}
+              onchange="insToggleExportCaption()">
+            Include a caption in the image
+          </label>
+          <p class="hint" style="margin:4px 0 14px 26px">
+            The chart's title and note, what was searched for, and which reading
+            it counts — so it still explains itself in someone else's inbox.
+          </p>
+          <div class="ins-export-group">
+            <h4>Image</h4>
+            <div class="ins-export-row">
+              <button class="btn-primary" onclick="insExportChartPng(false)">Copy PNG</button>
+              <button class="btn-secondary" onclick="insExportChartPng(true)">Save PNG…</button>
+            </div>
+          </div>
+          <div class="ins-export-group">
+            <h4>Vector</h4>
+            <div class="ins-export-row">
+              <button class="btn-secondary" onclick="insExportChartSvg(false)">Copy SVG source</button>
+              <button class="btn-secondary" onclick="insExportChartSvg(true)">Save SVG…</button>
+              <p class="hint">
+                The clipboard takes an image, plain text or HTML and nothing
+                else reliably, so SVG is copied as its source.
+              </p>
+            </div>
+          </div>
+          <div class="ins-export-group">
+            <h4>Numbers</h4>
+            <div class="ins-export-row">
+              <button class="btn-secondary" onclick="insExportChartData('tsv', false)">Copy TSV</button>
+              <button class="btn-secondary" onclick="insExportChartData('md', false)">Copy Markdown</button>
+              <button class="btn-secondary" onclick="insExportChartData('csv', true)">Save CSV…</button>
+              <button class="btn-secondary" onclick="insExportChartData('tsv', true)">Save TSV…</button>
+            </div>
+          </div>`
+      }
+
+      function insExportDashboardBody() {
+        const all = insExportSectionList()
+        const chosen = insExportChosenSections()
+        const cards = insExportCards()
+        return `<div class="ins-export-group">
+            <h4>Sections</h4>
+            <div class="ins-export-sections">
+              ${all
+                .map(
+                  (name) => `<label class="ins-export-check">
+                    <input type="checkbox" ${chosen.includes(name) ? "checked" : ""}
+                      onchange="insToggleExportSection('${esc(name)}')">
+                    ${esc(name)}
+                  </label>`,
+                )
+                .join("")}
+            </div>
+            <p class="hint" style="margin-top:6px">
+              ${insPlural(cards.length, "charts")}, plus the tiles.
+            </p>
+          </div>
+          <div class="ins-export-group">
+            <h4>Rich text</h4>
+            <div class="ins-export-row">
+              <button class="btn-primary" onclick="insExportReport(false)">Copy for email</button>
+              <button class="btn-secondary" onclick="insExportReport(true)">Save .html…</button>
+              <p class="hint">
+                Every chart as an embedded image, styled inline so a mail client
+                cannot strip it. The captions above are not used here — the
+                report already prints each title and note beside its chart.
+              </p>
+            </div>
+          </div>
+          <div class="ins-export-group">
+            <h4>Plain text</h4>
+            <div class="ins-export-row">
+              <button class="btn-secondary" onclick="insExportReportText(false)">Copy</button>
+              <button class="btn-secondary" onclick="insExportReportText(true)">Save .txt…</button>
+              <p class="hint">
+                Every number, for Slack and anything that refuses HTML.
+              </p>
+            </div>
+          </div>`
+      }
+
+      /// Report a save without claiming one that was cancelled.
+      async function insSaved(promise, what) {
+        try {
+          const res = await promise
+          if (res && res.ok) showImportToast("success", what + " saved.")
+          else if (res && !res.canceled) showImportToast("error", "Could not save " + what + ".")
+        } catch (e) {
+          showImportToast("error", "Could not save " + what + ". " + String(e))
+        }
+      }
+
+      async function insExportChartPng(toFile) {
+        const card = insSpecs.get(insExportCardId)
+        const spec = insExportSpec(insExportCardId)
+        if (!spec || !card) return
+        if (!toFile) {
+          // Still constructed synchronously from a promise — WebKit ties a
+          // clipboard write to the gesture that started it, and rasterising
+          // outlives the gesture. See `insWriteClipboard`.
+          const png = insChartCanvas(spec).then(insCanvasBlob)
+          insWriteClipboard(
+            [["image/png", png]],
+            "“" + card.title + "” copied as an image",
+            // An image cannot degrade to text, but the numbers can — and they
+            // are what the reader was after.
+            card.title + "\n" + insChartTsv(spec),
+          )
+          return
+        }
+        const blob = await insCanvasBlob(await insChartCanvas(spec))
+        const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+        insSaved(
+          window.backend.saveExportBytes(
+            insExportFileName(insExportCardId, "png"),
+            "png",
+            bytes,
+          ),
+          "PNG",
+        )
+      }
+
+      function insExportChartSvg(toFile) {
+        const spec = insExportSpec(insExportCardId)
+        if (!spec) return
+        const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
+        if (!toFile) {
+          insCopyText(svg).then(
+            () => showImportToast("success", "SVG source copied"),
+            (e) => showImportToast("error", "Could not copy: " + String(e)),
+          )
+          return
+        }
+        insSaved(
+          window.backend.saveExportText(
+            insExportFileName(insExportCardId, "svg"),
+            "svg",
+            svg,
+          ),
+          "SVG",
+        )
+      }
+
+      function insExportChartData(format, toFile) {
+        const spec = insExportSpec(insExportCardId)
+        if (!spec) return
+        const text =
+          format === "csv"
+            ? insChartCsv(spec)
+            : format === "md"
+            ? insChartMarkdown(spec)
+            : insChartTsv(spec)
+        if (!toFile) {
+          const card = insSpecs.get(insExportCardId)
+          insCopyText(text).then(
+            () =>
+              showImportToast(
+                "success",
+                "“" + (card ? card.title : "Chart") + "” data copied — paste into a spreadsheet",
+              ),
+            (e) => showImportToast("error", "Could not copy: " + String(e)),
+          )
+          return
+        }
+        insSaved(
+          window.backend.saveExportText(
+            insExportFileName(insExportCardId, format),
+            format,
+            text,
+          ),
+          format.toUpperCase(),
+        )
+      }
+
+      async function insExportReport(toFile) {
+        const cards = insExportCards()
+        if (!toFile) {
+          insCopyAll(cards)
+          return
+        }
+        const html = await insBuildReportHtml(cards)
+        insSaved(
+          window.backend.saveExportText(insExportFileName(null, "html"), "html", html),
+          "report",
+        )
+      }
+
+      function insExportReportText(toFile) {
+        const text = insBuildReportText(insExportCards())
+        if (!toFile) {
+          insCopyText(text).then(
+            () => showImportToast("success", "Report copied as plain text"),
+            (e) => showImportToast("error", "Could not copy: " + String(e)),
+          )
+          return
+        }
+        insSaved(
+          window.backend.saveExportText(insExportFileName(null, "txt"), "txt", text),
+          "report",
+        )
+      }
+
+      async function insBuildReportHtml(only) {
         const d = insData
-        const cards = Array.from(insSpecs.values())
+        const cards = only || Array.from(insSpecs.values())
         let html =
           `<div style="${INS_MAIL_FONT}color:#111827;max-width:680px">` +
           `<div style="font-size:19px;font-weight:700;margin-bottom:2px">Conversation insights</div>` +
@@ -23767,7 +24339,7 @@
       /// Not a courtesy: it is what lands in Slack, in a plain-text mail, and
       /// in anything that refuses HTML — and it carries every number, so the
       /// report is never gated behind being able to see the pictures.
-      function insBuildReportText() {
+      function insBuildReportText(only) {
         const d = insData
         const lines = [
           "CONVERSATION INSIGHTS",
@@ -23792,7 +24364,7 @@
           lines.push(t.label + "\t" + t.value + (t.sub ? "\t" + t.sub : ""))
         }
         let section = null
-        for (const card of insSpecs.values()) {
+        for (const card of only || insSpecs.values()) {
           if (card.section !== section) {
             section = card.section
             lines.push("", "── " + section.toUpperCase() + " ──")
@@ -23804,10 +24376,10 @@
         return lines.join("\n")
       }
 
-      function insCopyAll() {
+      function insCopyAll(only) {
         if (!insData || !insData.sessionCount) return
-        const text = insBuildReportText()
-        const htmlBlob = insBuildReportHtml().then(
+        const text = insBuildReportText(only)
+        const htmlBlob = insBuildReportHtml(only).then(
           (html) => new Blob([html], { type: "text/html" }),
         )
         insWriteClipboard(
@@ -23830,7 +24402,14 @@
       document
         .getElementById("insCloseBtn")
         .addEventListener("click", closeConversationInsights)
-      document.getElementById("insCopyAllBtn").addEventListener("click", insCopyAll)
+      document
+        .getElementById("insCopyAllBtn")
+        .addEventListener("click", () => insOpenExport(null))
+      document.getElementById("insExportClose").addEventListener("click", insCloseExport)
+      document.getElementById("insExportCancel").addEventListener("click", insCloseExport)
+      document.getElementById("insExportModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) insCloseExport()
+      })
       insBindTooltips(document.getElementById("insBody"))
       for (const btn of document.querySelectorAll("#insUnitToggle button")) {
         btn.addEventListener("click", () => insSetUnit(btn.dataset.insUnit))
@@ -23848,6 +24427,13 @@
         // first — one press, one thing dismissed.
         if (insKeyPopKind) {
           insCloseKeyPicker()
+          return
+        }
+        // Extended rather than given its own listener: a second `keydown`
+        // registered after this one fires *after* it, so Escape would close
+        // Insights and only then reach a modal that had gone with it.
+        if (insExportIsOpen()) {
+          insCloseExport()
           return
         }
         if (document.getElementById("insightsModal").classList.contains("open")) {

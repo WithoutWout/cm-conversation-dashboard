@@ -2704,19 +2704,48 @@ async fn select_db_save_path(app: AppHandle) -> FileSaveResult {
 }
 
 #[tauri::command]
-async fn save_collection_export(
+/// The dialog filter label and the forced extension for one export format.
+///
+/// An unknown format is `None` and becomes an error before any dialog opens,
+/// never a default: a typo'd format silently writing a `.json` is corruption
+/// with a success toast over it.
+fn export_format(format: &str) -> Option<(&'static str, &'static str)> {
+    Some(match format {
+        "json" => ("JSON", "json"),
+        "png" => ("PNG image", "png"),
+        "svg" => ("SVG image", "svg"),
+        "csv" => ("CSV", "csv"),
+        "tsv" => ("Tab-separated", "tsv"),
+        "html" => ("HTML", "html"),
+        "md" => ("Markdown", "md"),
+        "txt" => ("Text", "txt"),
+        _ => return None,
+    })
+}
+
+/// Ask for a path and write the bytes.
+///
+/// One body for every export, because two independent implementations of
+/// "open a dialog, force the extension, write" is exactly how the forced
+/// extension comes to differ between them.
+async fn save_with_dialog(
     app: AppHandle,
     default_name: String,
-    content: String,
+    format: &str,
+    data: Vec<u8>,
 ) -> Result<FileSaveResult, String> {
     use tauri_plugin_dialog::DialogExt;
     use tokio::sync::oneshot;
+
+    let Some((label, ext)) = export_format(format) else {
+        return Err(format!("Unknown export format: {format}"));
+    };
 
     let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
 
     app.dialog()
         .file()
-        .add_filter("JSON", &["json"])
+        .add_filter(label, &[ext])
         .set_file_name(&default_name)
         .save_file(move |path| {
             let p = path.and_then(|fp| fp.into_path().ok());
@@ -2730,16 +2759,54 @@ async fn save_collection_export(
             path: None,
         });
     };
-    if path.extension().and_then(|e| e.to_str()) != Some("json") {
-        path.set_extension("json");
+    if path.extension().and_then(|e| e.to_str()) != Some(ext) {
+        path.set_extension(ext);
     }
-    fs::write(&path, content).map_err(|e| format!("Cannot write export file: {e}"))?;
+    fs::write(&path, data).map_err(|e| format!("Cannot write export file: {e}"))?;
 
     Ok(FileSaveResult {
         ok: true,
         canceled: false,
         path: Some(path.to_string_lossy().into_owned()),
     })
+}
+
+#[tauri::command]
+async fn save_export_text(
+    app: AppHandle,
+    default_name: String,
+    format: String,
+    content: String,
+) -> Result<FileSaveResult, String> {
+    save_with_dialog(app, default_name, &format, content.into_bytes()).await
+}
+
+/// The binary half — today, a rasterised chart.
+///
+/// The bytes arrive as a plain number array from the renderer, which serde
+/// deserializes straight into `Vec<u8>`. A 2x PNG of a chart is 60-150 KB, so
+/// the JSON is a few hundred kilobytes on a user-initiated save; a base64
+/// crate or a raw-body `Request` would both cost more than that saves, and the
+/// latter cannot carry the filename alongside the bytes.
+#[tauri::command]
+async fn save_export_bytes(
+    app: AppHandle,
+    default_name: String,
+    format: String,
+    content: Vec<u8>,
+) -> Result<FileSaveResult, String> {
+    save_with_dialog(app, default_name, &format, content).await
+}
+
+/// Unchanged in name, signature and behaviour — a collection export is a
+/// `.json` and has no format to choose.
+#[tauri::command]
+async fn save_collection_export(
+    app: AppHandle,
+    default_name: String,
+    content: String,
+) -> Result<FileSaveResult, String> {
+    save_with_dialog(app, default_name, "json", content.into_bytes()).await
 }
 
 #[tauri::command]
@@ -8766,6 +8833,8 @@ pub fn run() {
             install_update,
             get_version,
             save_collection_export,
+            save_export_text,
+            save_export_bytes,
             export_settings_backup,
             import_settings_backup,
             set_db_path,
@@ -8871,6 +8940,30 @@ fn utc_hour_weekday(dh: &[InsightDayHours]) -> Vec<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A format the renderer offers and this table does not know would open a
+    /// dialog and then write the bytes under the wrong extension. It errors
+    /// before the dialog, which is the only point at which that is recoverable.
+    #[test]
+    fn an_unknown_export_format_is_refused_rather_than_defaulted() {
+        assert!(export_format("jsonn").is_none());
+        assert!(export_format("").is_none());
+        assert!(export_format("PNG").is_none(), "the match is exact, not case-folded");
+    }
+
+    /// Every offered format forces its own extension, and no two share one —
+    /// a shared extension means the dialog filter and the file disagree.
+    #[test]
+    fn every_export_format_forces_its_own_extension() {
+        let formats = ["json", "png", "svg", "csv", "tsv", "html", "md", "txt"];
+        let mut seen = std::collections::HashSet::new();
+        for f in formats {
+            let (label, ext) = export_format(f).expect(f);
+            assert_eq!(ext, f, "{f} does not force its own extension");
+            assert!(!label.is_empty(), "{f} has no dialog filter label");
+            assert!(seen.insert(ext), "{ext} is claimed twice");
+        }
+    }
 
     // ── Export extraction ───────────────────────────────────────────────────
 

@@ -338,28 +338,111 @@ never used for series identity.
 - **Every tooltip ends in a counted noun** via `insPlural` — `1 conversations`
   reads as a bug in the number rather than in the sentence.
 
-## Copying
+## Exporting
 
-Three forms, all of them the point of the feature rather than a convenience on
-the end of it.
+Six forms, all of them the point of the feature rather than a convenience on
+the end of it. Two buttons per card became one **Export** button and a modal,
+because the useful forms outnumber the room on a card head: a chart is wanted
+as a picture, as a vector and as numbers, and any of those may need to be a
+file rather than a clipboard write.
+
+- **Scope is the first control in the body** — *This chart* / *Whole dashboard*
+  — and that is what keeps the per-card path unconfusing: it never shows a
+  dashboard option above the thing that was clicked. The header's Export button
+  simply opens the same modal on the other scope.
+- **The modal is a sibling of the Insights overlay, not a child.** Nested, the
+  Insights backdrop handler and its `.modal-box` transform rules would both
+  apply to it as well. `z-index: 420` puts it above the overlay (100) and the
+  key picker (410), and below `.import-toast` (500) — the toast has to stay
+  visible, because it is what reports a copy having succeeded.
+- **Escape extends the existing chain rather than adding a listener.** A second
+  `keydown` registered after the Insights one fires *after* it, so Escape would
+  close Insights and only then reach a modal that had gone with it. The order is
+  key picker → export modal → Insights.
+- **SVG goes on the clipboard as *source*, and the button says so.**
+  `ClipboardItem` takes `image/png`, `text/plain` and `text/html` and nothing
+  else reliably. Saying it on the button is the difference between a feature and
+  a bug report.
+- **A live preview in the export palette**, so the caption toggle is
+  trustworthy: it shows the picture that will actually leave.
+
+### The caption
+
+An exported chart travels alone. A bar reading 43% is alarming or unremarkable
+entirely depending on what was searched for, and the header saying so is on a
+screen the recipient never saw. One checkbox, not a form — letting the caption
+be half-dropped re-creates the ambiguity it exists to remove.
+
+- **SVG text inside the picture, never HTML around it.** The property this whole
+  feature rests on is that a chart depends on nothing outside itself; a caption
+  in a stylesheet renders as a blank box, and only after it has been pasted.
+- **Absolute coordinates, no `<g transform>`.** `assertInsideCanvas` reads
+  absolute `x`/`y` off each mark, and coordinates inside a translated group
+  would be measured against the wrong origin.
+- **Below the chart, so nothing existing moves.** Every builder lays out from
+  `padT`, `plotH` and its row count and never from `h`, so `spec.padBottom`
+  simply leaves surface at the bottom — and `insOpen` paints the full height
+  from the start, so there is no seam. `a caption grows the chart instead of
+  drawing over it` asserts that no mark's `y` changed.
+- **The trailing `</svg>` is trimmed and re-closed.** Deterministic, because
+  every builder ends with exactly `+ "</svg>"` — which `every chart builder
+  closes its own tag exactly once` pins rather than leaving to a comment.
+- **Bounded at `INS_CAP_MAX_LINES` per entry and `INS_CAP_MAX_ROWS` overall.**
+  A context value can be arbitrarily long, and a caption that grew a chart by
+  forty rows would *be* the export. A word too long to wrap is ellipsised
+  through `insFitText`, the same rule every label here follows.
+- **Built through `insSearchSummary`**, so a captioned chart and a pasted report
+  cannot describe different slices — but it prints `c.value`, the trimmed form,
+  where the reports print `c.title || c.value`. A caption is read by a person
+  looking at a picture and wants the day; the exact bound is a fact about the
+  query and belongs in the report.
+
+### Saving to a file
+
+`save_export_text` and `save_export_bytes` sit beside `save_collection_export`,
+which is now a one-line wrapper over the same body — two independent
+implementations of "open a dialog, force the extension, write" is exactly how
+the forced extension comes to differ between them.
+
+- **An unknown format is an error before the dialog opens, never a default.** A
+  typo'd format silently writing a `.json` is corruption with a success toast
+  over it. `every_export_format_forces_its_own_extension` also pins that no two
+  formats claim one extension.
+- **PNG bytes cross the bridge as a plain number array**, which serde takes as
+  `Vec<u8>`. A 2x chart is 60-150 KB on a user-initiated save; a base64 crate is
+  more code and more risk, and a raw-body `Request` cannot carry the filename
+  alongside the bytes.
+- **Outside Tauri a Save resolves as cancelled rather than throwing**, so the
+  modal stays usable for everything that goes to the clipboard.
+
+### The forms themselves
 
 - **`ClipboardItem` is handed a *promise*, never a resolved blob.** WebKit ties
   clipboard writes to the user gesture that started them, and rasterising an
   image outlives a gesture. Constructing the item synchronously in the click
   handler and letting it resolve afterwards is the only form that works in both
   engines.
-- **Copy image** re-renders the card in `INS_THEME_EXPORT` at 2× and puts a PNG
-  on the clipboard. An image cannot degrade to text, but the numbers can, so a
-  refused write falls back to the chart's table.
-- **Copy data** is the chart's table twin (`insChartTsv`) — tab-separated, so it
-  pastes into Excel as cells. Every value on this dashboard is reachable without
-  looking at a colour, and `every chart has a table twin carrying all of its
-  values` asserts exactly that, per card.
-- **Copy dashboard** writes `text/html` *and* `text/plain`: the HTML carries the
+- **PNG** re-renders the card in `INS_THEME_EXPORT` at 2× — to the clipboard or
+  to a file. An image cannot degrade to text, but the numbers can, so a refused
+  clipboard write falls back to the chart's table.
+- **The table twins are three, not one.** `insChartTsv` is the original and
+  pastes into Excel as cells; `insChartCsv` is *not* a tab-to-comma replace,
+  because a label containing a comma — `Stoppen, Faciliteitenkaart` is a real
+  one — has to be quoted where the tab-separated form never needed to be;
+  `insChartMarkdown` escapes `|`, since a pipe inside a cell would end it.
+  Every value on this dashboard is reachable without looking at a colour, and
+  `every chart has a table twin carrying all of its values` asserts exactly
+  that, per card.
+- **The dashboard report** writes `text/html` *and* `text/plain`: the HTML carries the
   tiles as a table and every chart as an embedded PNG data URI (measured at
   ~620 KB over 16 charts, built in ~100 ms), the plain text carries every number
   for Slack and for anything that refuses HTML. Mail clients strip `<style>`
-  blocks and classes, so every element is styled inline and the layout is tables.
+  blocks and classes, so every element is styled inline and the layout is
+  tables. Both builders take an optional card list, defaulting to everything
+  rendered — which is how the modal's section checkboxes narrow them without a
+  second builder. The caption does not apply
+  here and the modal says so rather than showing a disabled control: the report
+  already prints each title and note beside its chart.
 - **The progress toast only appears once the work has genuinely been slow**
   (`LOADING_SHOW_DELAY_MS`, the same threshold as `gateLoading`). Sixteen charts
   rasterise in about a tenth of a second, and a toast replaced by the success

@@ -69,6 +69,12 @@ const EXPORTS = [
   "insZoneStampToUtc",
   "insZoneDayOf",
   "insCacheDecide",
+  "INS_CAP_MAX_LINES",
+  "INS_CAP_MAX_ROWS",
+  "insChartMarkdown",
+  "insChartCsv",
+  "insCaptionLines",
+  "insCaptionLayout",
   "insCacheKey",
 ]
 const {
@@ -100,6 +106,12 @@ const {
   insZoneStampToUtc,
   insZoneDayOf,
   insCacheDecide,
+  INS_CAP_MAX_LINES,
+  INS_CAP_MAX_ROWS,
+  insChartMarkdown,
+  insChartCsv,
+  insCaptionLines,
+  insCaptionLayout,
   insCacheKey,
 } = new Function(
   sliceByIndent("function esc(s) {") +
@@ -222,7 +234,16 @@ function assertInsideCanvas(spec, label) {
   // measured as left-anchored and a right-aligned one would look overflowing.
   for (const m of svg.matchAll(/<text ([^>]*)>([^<]*)</g)) {
     const attrs = m[1]
-    const x = Number(/\bx="(-?[\d.]+)"/.exec(attrs)[1])
+    // A rotated tick carries its origin in `transform="translate(x,y) rotate()"`
+    // and has no `x` at all. Reading `.exec(...)[1]` off it threw — which never
+    // fired only because `rotateLabels` needs 12–62 days and the fixture spans
+    // seven. Measured at its translate origin instead: rotated by -40° about
+    // that point and anchored at the end, it extends up and to the left of it,
+    // so the origin is its rightmost extent.
+    const rot = /transform="translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(attrs)
+    const xm = /\bx="(-?[\d.]+)"/.exec(attrs)
+    if (!xm && !rot) throw new Error(label + ": a <text> with no position at all")
+    const x = Number(xm ? xm[1] : rot[1])
     const anchor = (/text-anchor="(\w+)"/.exec(attrs) || [])[1] || "start"
     const size = Number((/font-size="([\d.]+)"/.exec(attrs) || [])[1] || 11)
     const tw = insTextWidth(m[2], size)
@@ -234,6 +255,17 @@ function assertInsideCanvas(spec, label) {
 
 test("no mark and no label is drawn outside the chart it belongs to", () => {
   const specs = [
+    // A rotated axis, which needs 12-62 days to appear at all — so no fixture
+    // on this dashboard reached it, and `assertInsideCanvas` threw on the
+    // first `<text>` that carried a transform instead of an `x`.
+    {
+      kind: "columns",
+      rotateLabels: true,
+      data: Array.from({ length: 20 }, (_, i) => ({
+        label: "2026-06-" + String(i + 1).padStart(2, "0"),
+        value: 40 - i,
+      })),
+    },
     { kind: "columns", data: [{ label: "a", value: 7 }, { label: "b", value: 1 }] },
     // The widest tip label this dashboard can produce: a six-figure count with
     // a share beside it, on the bar that reaches the full width of the plot.
@@ -842,6 +874,203 @@ test("the zone label is a place, never an offset", () => {
   // An offset would be right for half the year and wrong for the other half,
   // and a chart spanning both has no single correct one to print.
   assert.ok(!/[+-]\d/.test(insZoneLabel("Europe/Amsterdam")))
+})
+
+// ── The caption block ──────────────────────────────────────────────────────
+//
+// An exported chart travels alone. A bar reading 43% is alarming or
+// unremarkable entirely depending on what was searched for, and the header
+// saying so is on a screen the recipient never saw.
+const CAPTIONED = (spec, lines) => ({
+  ...spec,
+  caption: lines || [
+    { text: "Conversations per day", style: "title" },
+    { text: "Counted on the day the conversation started.", style: "note" },
+    { text: "Search: parkeren · user", style: "meta" },
+  ],
+})
+
+test("a captioned chart still depends on nothing outside itself", () => {
+  // The same battery as the un-captioned one. A caption drawn as HTML, or
+  // referencing a stylesheet, would render as a blank box — and only after it
+  // had been pasted somewhere.
+  const specs = [
+    CAPTIONED({ kind: "columns", data: bars(6) }),
+    CAPTIONED({ kind: "bars", data: bars(5), total: 40 }),
+    CAPTIONED({ kind: "stack", data: bars(3), total: 27 }),
+    CAPTIONED({ kind: "heatmap", grid: Array.from({ length: 168 }, (_, i) => i % 9) }),
+    CAPTIONED({ kind: "area", data: bars(80, 90) }),
+  ]
+  for (const spec of specs) {
+    const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
+    assertWellFormed(svg)
+    assert.ok(!/\sclass=/.test(svg), spec.kind + ": carries a class attribute")
+    assert.ok(!/<style/.test(svg), spec.kind + ": carries a <style> block")
+    assert.ok(!/url\(|href=|xlink/.test(svg), spec.kind + ": references something external")
+    for (const m of svg.match(/<(rect|path|line|circle|text)\b[^>]*>/g) || []) {
+      assert.ok(/fill="|stroke="/.test(m), spec.kind + ": an element with no colour")
+    }
+    for (const m of svg.match(/<text\b[^>]*>/g) || []) {
+      assert.ok(/font-family="/.test(m), spec.kind + ": text with no font of its own")
+    }
+    // The caption text actually reached the picture.
+    assert.ok(svg.includes("Conversations per day"), spec.kind + ": no caption drawn")
+  }
+})
+
+test("a caption grows the chart instead of drawing over it", () => {
+  for (const kind of ["columns", "bars", "stack", "heatmap", "area"]) {
+    const base =
+      kind === "heatmap"
+        ? { kind, grid: Array.from({ length: 168 }, (_, i) => i % 9) }
+        : { kind, data: bars(5), total: 40 }
+    const plain = insRenderChart(base, INS_THEME_EXPORT)
+    const withCap = insRenderChart(CAPTIONED(base), INS_THEME_EXPORT)
+    assert.ok(withCap.height > plain.height, kind + ": the caption took no space")
+    assert.strictEqual(withCap.width, plain.width, kind + ": the caption changed the width")
+    // Nothing the builder drew moved: every mark keeps the y it had before.
+    const ys = (svg) =>
+      [...svg.matchAll(/<rect x="[-\d.]+" y="([-\d.]+)"/g)].map((m) => m[1]).join(",")
+    assert.strictEqual(ys(withCap.svg), ys(plain.svg), kind + ": a mark moved")
+    // …and every caption row is below where the plain chart ended.
+    const capTexts = [...withCap.svg.matchAll(/<text[^>]*\by="([\d.]+)"[^>]*>([^<]*)</g)]
+      .filter((m) => m[2].includes("Conversations per day"))
+    assert.ok(capTexts.length, kind + ": caption title not found")
+    for (const m of capTexts) {
+      assert.ok(Number(m[1]) > plain.height, kind + ": the caption is drawn over the chart")
+    }
+  }
+})
+
+test("nothing in a caption is drawn outside the canvas", () => {
+  for (const d of [CONVS, TURNS]) {
+    for (const card of insBuildCards(d, INS_THEME_SCREEN, "UTC")) {
+      const lines = insCaptionLines(card, d, { query: "parkeren" }, "UTC")
+      assertInsideCanvas(CAPTIONED(card.spec, lines), "captioned " + card.id)
+    }
+  }
+})
+
+test("a caption line too long for the chart is wrapped, never clipped", () => {
+  const long = "Stoppen ".repeat(60).trim()
+  const layout = insCaptionLayout([{ text: long, style: "note" }], 400)
+  assert.ok(layout.rows.length > 1, "a 480-character note produced one row")
+  assert.ok(layout.rows.length <= INS_CAP_MAX_LINES, "an entry outgrew its cap")
+  for (const r of layout.rows) {
+    assert.ok(
+      insTextWidth(r.text, r.style.size) <= 400 + 0.5,
+      "a wrapped row is wider than the chart: " + r.text,
+    )
+  }
+  // A single word with nothing to wrap on is shortened rather than allowed to
+  // run off the canvas — the same rule every label here follows.
+  const oneWord = insCaptionLayout([{ text: "x".repeat(400), style: "note" }], 200)
+  assert.strictEqual(oneWord.rows.length, 1)
+  assert.ok(oneWord.rows[0].text.endsWith("…"), oneWord.rows[0].text)
+  // And a pathological set of entries cannot grow a chart without limit.
+  const many = insCaptionLayout(
+    Array.from({ length: 40 }, (_, i) => ({ text: "line " + i, style: "meta" })),
+    400,
+  )
+  assert.strictEqual(many.rows.length, INS_CAP_MAX_ROWS)
+})
+
+test("a caption full of markup cannot break the picture", () => {
+  const nasty = '</text><script>alert(1)</script> & < > "'
+  const spec = CAPTIONED({ kind: "columns", data: bars(4) }, [
+    { text: nasty, style: "title" },
+    { text: nasty, style: "meta" },
+  ])
+  const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
+  assertWellFormed(svg)
+  assert.ok(!/<script/.test(svg), "a script tag survived into the picture")
+})
+
+test("every chart builder closes its own tag exactly once", () => {
+  // `insRenderChart` trims the trailing `</svg>` to append the caption. That
+  // is only safe while every builder ends with exactly one.
+  const specs = [
+    { kind: "columns", data: bars(4) },
+    { kind: "bars", data: bars(4), total: 40 },
+    { kind: "stack", data: bars(3), total: 27 },
+    { kind: "heatmap", grid: Array.from({ length: 168 }, (_, i) => i % 9) },
+    { kind: "area", data: bars(80, 90) },
+  ]
+  for (const spec of specs) {
+    for (const s of [spec, CAPTIONED(spec)]) {
+      const { svg } = insRenderChart(s, INS_THEME_EXPORT)
+      assert.strictEqual((svg.match(/<svg\b/g) || []).length, 1, spec.kind)
+      assert.strictEqual((svg.match(/<\/svg>/g) || []).length, 1, spec.kind)
+      assert.ok(svg.endsWith("</svg>"), spec.kind + ": does not end with its own close")
+    }
+  }
+})
+
+test("the caption carries the slice the chart was made from", () => {
+  const args = {
+    query: "parkeren",
+    queryScope: "user",
+    filter: "neg_feedback",
+    dateFrom: "2026-06-01",
+  }
+  const card = insBuildCards(CONVS, INS_THEME_SCREEN, "UTC").find((c) => c.id === "volume")
+  const lines = insCaptionLines(card, CONVS, args, "Europe/Amsterdam")
+  const text = lines.map((l) => l.text).join(" | ")
+  assert.ok(text.includes(card.title), "the caption does not name its own chart")
+  assert.ok(text.includes(card.note), "the caption drops the chart's note")
+  // Built *through* `insSearchSummary`, so a captioned chart and a pasted
+  // report cannot end up describing different slices.
+  for (const c of insSearchSummary(args)) {
+    assert.ok(text.includes(c.label + ": " + c.value), c.label + " is missing")
+  }
+  // The trimmed form, not the exact bound: the caption is read by a person
+  // looking at a picture. The exact bound stays in the report, which is where
+  // a machine-checkable boundary actually matters.
+  const bounds = insZoneDayBounds("2026-06-01", "2026-06-30", "Europe/Amsterdam")
+  const dated = insCaptionLines(card, CONVS, { dateFrom: bounds.from, dateTo: bounds.to }, "UTC")
+    .map((l) => l.text)
+    .join(" | ")
+  assert.ok(dated.includes("Dates: 2026-06-01 → 2026-06-30"), dated)
+  assert.ok(!dated.includes("T22:00:00"), "the caption printed a raw bound")
+  assert.ok(text.includes("Amsterdam"), "the caption does not say which zone it is in")
+})
+
+// ── The table twins ────────────────────────────────────────────────────────
+
+test("the CSV and Markdown twins carry every value the TSV does", () => {
+  for (const d of [CONVS, TURNS]) {
+    for (const card of insBuildCards(d, INS_THEME_SCREEN, "UTC")) {
+      const tsv = insChartTsv(card.spec).split("\n")
+      assert.strictEqual(insChartCsv(card.spec).split("\n").length, tsv.length, card.id)
+      // Markdown adds exactly one row: the header separator.
+      assert.strictEqual(
+        insChartMarkdown(card.spec).split("\n").length,
+        tsv.length + 1,
+        card.id,
+      )
+    }
+  }
+})
+
+test("a CSV cell containing a comma is quoted, and the TSV is untouched", () => {
+  const spec = {
+    kind: "bars",
+    axisLabel: "Entity",
+    unit: "conversations",
+    total: 100,
+    data: [
+      { label: "Stoppen, Faciliteitenkaart", value: 60 },
+      { label: 'a "quoted" one', value: 40 },
+    ],
+  }
+  const csv = insChartCsv(spec).split("\n")
+  assert.strictEqual(csv[1], '"Stoppen, Faciliteitenkaart",60,60%')
+  assert.strictEqual(csv[2], '"a ""quoted"" one",40,40%')
+  // The tab-separated twin never needed quoting and must not start.
+  assert.ok(insChartTsv(spec).includes("Stoppen, Faciliteitenkaart\t60\t"))
+  // A pipe inside a Markdown cell would end the cell.
+  assert.ok(insChartMarkdown({ ...spec, data: [{ label: "a | b", value: 1 }] })
+    .includes("a \\| b"))
 })
 
 // ── Switching the unit ─────────────────────────────────────────────────────

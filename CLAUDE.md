@@ -101,7 +101,9 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `check_for_updates`   | `checkForUpdates()`              | Reads the release's `latest.json` through `tauri-plugin-updater`, returns `{ status, version, message, notes, canSelfUpdate, mode, blockedReason }`. See `docs/settings-and-updates.md` → "Self-update" |
 | `install_update`      | `installUpdate()`                | Downloads the verified artifact, installs it, restarts. Portable Windows copies swap their own `.exe`; everything else uses the plugin's installer |
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
-| `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }` |
+| `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }`. A wrapper over `save_with_dialog` |
+| `save_export_text`    | `saveExportText(defaultName, format, content)` | The same, for any format in `export_format` (`svg` `csv` `tsv` `html` `md` `txt` `json`). An unknown format is an `Err` *before* the dialog opens |
+| `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
 | `export_settings_backup` | `exportSettingsBackup(defaultName, payload)` | Merges the Analytics API credentials into the renderer's payload and writes the backup (`0600`). See `docs/settings-and-updates.md` → "Settings backup" |
 | `import_settings_backup` | `importSettingsBackup()`          | Picks a backup, restores the Analytics API credentials from it, returns everything else — `{ ok, canceled, settings, appVersion, schemaVersion, analyticsRestored }` |
 
@@ -549,6 +551,7 @@ Always use these terms in the UI:
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
+| `cm-insights-export-caption` | `"0"` to leave the caption off an exported chart image; anything else, including absent, includes it |
 | `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 
