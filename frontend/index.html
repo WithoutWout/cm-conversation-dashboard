@@ -2925,6 +2925,11 @@
         flex-wrap: wrap;
         gap: 5px;
       }
+      .entity-description {
+        font-size: 0.8rem;
+        color: var(--text);
+        line-height: 1.5;
+      }
       .entity-word-chip {
         font-size: 0.72rem;
         background: var(--bg);
@@ -14966,6 +14971,11 @@
           "</div>" +
           "</div>" +
           '<div class="card-detail">' +
+          (entity.description
+            ? '<div class="detail-section"><h4>Description</h4><p class="entity-description">' +
+              hl(entity.description, q) +
+              "</p></div>"
+            : "") +
           '<div class="detail-section"><h4>Words (' +
           wordCnt +
           ")</h4>" +
@@ -15536,6 +15546,11 @@
         const dlgRefs = entityDialogXrefs(entity)
 
         let html =
+          (entity.description
+            ? '<div class="detail-section"><h4>Description</h4><p class="entity-description">' +
+              esc(entity.description) +
+              "</p></div>"
+            : "") +
           '<div class="detail-section"><h4>Words (' +
           entity.words.length +
           ')</h4><div class="entity-word-grid">'
@@ -19015,6 +19030,34 @@
             if (b.dialogs.length) entityDialogNames.push(name)
           }
 
+          // The same resolution, for the same reason, one level deeper: the
+          // worker's Article/Dialog entity enrichment used to require a
+          // question phrase to *be* an entity's name verbatim, while the chip
+          // on the card resolved by name, then word, then longest token. So a
+          // card could read "Entity: PARKEREN" and a search for one of that
+          // entity's other words would not find the Article it was on.
+          //
+          // Flat pairs rather than an object: phrases are arbitrary user text
+          // and can collide with `Object.prototype` keys.
+          const phraseEntity = []
+          const addPhrase = (text) => {
+            if (!text) return
+            const e = getEntityForChip(text)
+            if (e) phraseEntity.push(text.toUpperCase(), e.name.toUpperCase())
+          }
+          for (const a of allArticles) {
+            for (const qs of a.Questions || []) addPhrase(qs.Text)
+          }
+          for (const item of allDialogsCombined) {
+            for (const n of item.nodes || []) {
+              for (const link of n.links || []) {
+                const cd = (link.condition && link.condition.data) || {}
+                if (cd.isFallback) continue
+                for (const qq of cd.questions || []) addPhrase(qq.text)
+              }
+            }
+          }
+
           searchWorker.postMessage({
             type: "init",
             json: JSON.stringify({
@@ -19025,6 +19068,7 @@
               ctxVars: data.ctxVars || [],
               entityArticleNames,
               entityDialogNames,
+              phraseEntity,
             }),
           })
           triggerSearch()

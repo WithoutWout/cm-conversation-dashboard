@@ -67,7 +67,8 @@ frontend/
     conv-search.test.js, update-modal.test.js,
     settings-backup.test.js, metadata-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
-    insights.test.js                                 — `npm run test:frontend`
+    insights.test.js, entity-search.test.js,
+    db-migration-progress.test.js                    — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
 ```

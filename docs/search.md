@@ -141,6 +141,40 @@ One button and one popover, not two funnels in an already-crowded toolbar: the t
 - **Metadata values keep their case**, unlike entity names — a value is a configured constant the user reads back off a chip, and `Polles Keuken` should not become `polles keuken`.
 - Tests: `the_metadata_backfill_matches_what_an_import_would_have_indexed`, `the_spellings_of_one_nested_value_collapse_to_the_same_pairs`, `restoring_line_breaks_never_edits_inside_a_string`, `only_objects_are_expanded`, `a_metadata_filter_narrows_to_its_own_table`, and `frontend/tests/metadata-filter.test.js` — which asserts **every chip's count against the set the matcher returns**, over the real export when it is checked out beside the app (203 chips across 41 keys). A chip saying "9 items" that filters down to 4 is worse than no chip at all.
 
+## The card and the search agree about entities
+
+An Article card resolves each question phrase to an entity by name, then by
+exact word, then by the longest token — `getEntityForChip` — and draws a chip
+saying so. The *search* behind it required the phrase to be that entity's name
+**verbatim**. So a card could read "Entity: PARKEREN" while a search for one of
+PARKEREN's other words did not return the Article the chip was on, and nothing
+looked wrong in either half.
+
+The resolution stays on the main thread, where `getEntityForChip` lives, and the
+answer is shipped to the worker as a phrase → entity-name map. One resolution,
+two consumers — which is the same arrangement `entityArticleNames` /
+`entityDialogNames` already used for the xref pills.
+
+- **Flat pairs, not an object.** Phrases are arbitrary user text and can collide
+  with `Object.prototype` keys.
+- **The enrichment reads trigger words only** (`_triggerWords`), never
+  `expression`. An entity whose *regex source* happens to contain the search
+  term has not been "found in" an Article — that would be a match on a pattern
+  nobody wrote as content. The Entities tab still searches the expression,
+  which is its job.
+- **An entity is searchable by everything it carries**: its name, its type, its
+  description, and all three word texts (`text`, `wordInBetween`, `expression`).
+  `wordInBetween` and `expression` are what an entity matches on at runtime, so
+  one findable in CM.com by them was not findable here.
+- **The description had been parsed and discarded** by `extract_entities` since
+  it was written — `cols[2]`, read into a variable and dropped. It is the one
+  field saying what an entity is *for*, and it was the one field you could not
+  search. It is now emitted, indexed and shown on the card.
+- `frontend/tests/entity-search.test.js` drives the real worker and asserts
+  both directions: the Article *is* found through the resolved entity, and is
+  *not* found without the map — so the test is about the fix rather than about
+  the Article's own text.
+
 ## Entity → Article / Dialog cross-references
 
 `getEntityForChip(phrase)` is the single source of truth for "which entity is this phrase?", and it resolves by entity name, then by an entity *word*, then by the longest token in the phrase. `entityRefIndex()` is the **exact inverse** of it, built in one pass over the export and cached until `loadData`.

@@ -618,7 +618,7 @@ fn extract_entities(content: &str) -> serde_json::Value {
     // Skip header row
     let _ = lines.next();
     // Use a Vec to preserve insertion order and a HashMap for O(1) lookup
-    let mut ordered: Vec<(String, String, Vec<serde_json::Value>)> = Vec::new();
+    let mut ordered: Vec<(String, String, String, Vec<serde_json::Value>)> = Vec::new();
     let mut order_index: HashMap<String, usize> = HashMap::new();
     for line in lines {
         let cols: Vec<&str> = line.splitn(8, '|').collect();
@@ -627,6 +627,10 @@ fn extract_entities(content: &str) -> serde_json::Value {
         }
         let name = cols[0].trim().to_string();
         let entity_type = cols[1].trim().to_string();
+        // Parsed and kept. It was read and thrown away for as long as this
+        // extractor has existed, which made the one field describing what an
+        // entity is *for* the one field you could not search.
+        let description = cols[2].trim().to_string();
         let words_text = cols[3].trim().to_string();
         if name.is_empty() || words_text.is_empty() {
             continue;
@@ -643,19 +647,25 @@ fn extract_entities(content: &str) -> serde_json::Value {
             "expression": expression,
         });
         if let Some(&idx) = order_index.get(&name) {
-            ordered[idx].2.push(word_obj);
+            ordered[idx].3.push(word_obj);
+            // One row per word, and only the first carries the description on
+            // some exports — so take the first non-empty rather than the first.
+            if ordered[idx].2.is_empty() {
+                ordered[idx].2 = description;
+            }
         } else {
             let idx = ordered.len();
             order_index.insert(name.clone(), idx);
-            ordered.push((name, entity_type, vec![word_obj]));
+            ordered.push((name, entity_type, description, vec![word_obj]));
         }
     }
     let result: Vec<serde_json::Value> = ordered
         .into_iter()
-        .map(|(name, entity_type, words)| {
+        .map(|(name, entity_type, description, words)| {
             serde_json::json!({
                 "name": name,
                 "type": entity_type,
+                "description": description,
                 "words": words,
             })
         })

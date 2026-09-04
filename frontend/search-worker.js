@@ -20,6 +20,9 @@ let allItems = [] // pre-built articles + dialogs combined
 let entityHasArticleXref = new Set() // entity names (upper) that have article xrefs
 let entityHasDialogXref = new Set() // entity names (upper) that have dialog xrefs
 let entityByNameUpper = new Map() // entity name (upper) → entity object, for per-term lookups
+// Content phrase (upper) → entity name (upper), resolved on the main thread by
+// `getEntityForChip` so the search and the card agree. See `entityNamesForPhrases`.
+let phraseEntityUpper = new Map()
 
 // Variable name maps (id → name), populated on "init" from dialogs export
 let convVarMap = new Map() // ConversationVariable id → name
@@ -128,9 +131,26 @@ function termFoundInFields(compiled, fields, fieldsLower) {
 function termMatchesEntityByNames(compiled, entityNameUppers) {
   for (const nameUpper of entityNameUppers) {
     const entity = entityByNameUpper.get(nameUpper)
-    if (entity && termFoundInFields(compiled, entity._searchWords)) return true
+    if (entity && termFoundInFields(compiled, entity._triggerWords)) return true
   }
   return false
+}
+
+/// Which entity a content phrase resolves to, the way the chip on the card does.
+///
+/// The main thread owns that resolution (`getEntityForChip`: exact name, then
+/// exact word, then the longest token) and ships the answer as a map, because
+/// the card and the search disagreeing about the same relationship is exactly
+/// the bug this closes — an Article whose chip reads "Entity: PARKEREN" was
+/// not found by a search for one of that entity's other words unless the
+/// question phrase happened to *be* the entity's name.
+function entityNamesForPhrases(phrasesUpper) {
+  const out = []
+  for (const t of phrasesUpper) {
+    const name = phraseEntityUpper.get(t)
+    if (name && matchingEntityNames.has(name) && !out.includes(name)) out.push(name)
+  }
+  return out
 }
 
 // Check if ALL terms in an AND-group are each found somewhere in the given fields.
@@ -582,7 +602,19 @@ function precomputeDialog(item) {
 
 function precomputeEntity(entity) {
   entity._searchName = entity.name
-  entity._searchWords = entity.words.map((w) => w.text)
+  // Every text an entity actually carries, not just `text`. `wordInBetween`
+  // and `expression` are what an entity matches on at runtime, so an entity
+  // findable in CM.com by one of them was not findable here.
+  const words = []
+  for (const w of entity.words) {
+    if (w.text) words.push(w.text)
+    if (w.wordInBetween) words.push(w.wordInBetween)
+    if (w.expression) words.push(w.expression)
+  }
+  entity._searchWords = words
+  // The trigger phrases alone, for the Article/Dialog enrichment: an entity
+  // should not be dragged into a content result by the text of its own regex.
+  entity._triggerWords = entity.words.map((w) => w.text)
   entity._nameUpper = entity.name.toUpperCase()
 }
 
@@ -748,7 +780,7 @@ function matchDialogCombined(item) {
 function matchArticle(a) {
   const articleEntityNames =
     !searchContent && matchingEntityNames.size > 0
-      ? a._searchQuestionsUpper.filter((t) => matchingEntityNames.has(t))
+      ? entityNamesForPhrases(a._searchQuestionsUpper)
       : []
 
   // Non-content fields (id, question texts) form a single per-item bucket.
@@ -786,7 +818,7 @@ function matchArticle(a) {
 function matchDialog(item) {
   const dialogEntityNames =
     !searchContent && matchingEntityNames.size > 0
-      ? item._entityQuestionTexts.filter((t) => matchingEntityNames.has(t))
+      ? entityNamesForPhrases(item._entityQuestionTexts)
       : []
 
   // Non-content fields (id, name, description, node names) form a single per-item bucket.
@@ -828,7 +860,16 @@ function matchDialog(item) {
 }
 
 function matchEntity(entity) {
-  const fields = [entity._searchName, ...entity._searchWords]
+  // Type and description included: "which entities are Regex ones?" and
+  // "which one handles refunds?" were both unanswerable from this tab, and
+  // the description had been parsed and discarded since the extractor was
+  // written.
+  const fields = [
+    entity._searchName,
+    entity.type || "",
+    entity.description || "",
+    ...entity._searchWords,
+  ]
   return orGroupsMatchFields(_orRegexGroups, fields)
 }
 
@@ -869,6 +910,13 @@ self.onmessage = function (e) {
     buildEntityXrefSets(parsed.entityArticleNames, parsed.entityDialogNames)
     entityByNameUpper = new Map()
     for (const ent of workerEntities) entityByNameUpper.set(ent._nameUpper, ent)
+    // Shipped as flat pairs rather than an object: phrases are arbitrary user
+    // text and can collide with `Object.prototype` keys.
+    phraseEntityUpper = new Map()
+    const pairs = parsed.phraseEntity || []
+    for (let i = 0; i + 1 < pairs.length; i += 2) {
+      phraseEntityUpper.set(pairs[i], pairs[i + 1])
+    }
     return
   }
 
@@ -946,7 +994,9 @@ self.onmessage = function (e) {
           ? []
           : allTerms.map((term) => buildTermRegex(term))
         for (const entity of workerEntities) {
-          const wordMatches = entity._searchWords.some((w) => {
+          // Trigger words only. An entity whose *regex source* happens to
+          // contain the search term has not been "found in" an Article.
+          const wordMatches = entity._triggerWords.some((w) => {
             if (isPlain) {
               return allTerms.some((term) => {
                 const n = searchCase ? term : term.toLowerCase()
