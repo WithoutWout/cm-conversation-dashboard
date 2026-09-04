@@ -7908,8 +7908,21 @@
         flex-basis: 100%;
         margin-top: 2px;
       }
-      /* `.modal-body label` is the uppercase field-heading style. A checkbox
-         label is a sentence, not a heading — it opts out of all of it. */
+      /* `.modal-body label` is the uppercase field-heading style, which suits
+         the short options it was written for ("Popup", "Browser"). These two
+         are sentences that wrap to three lines, where it stops being a style
+         and starts being hard to read. Scoped opt-out, not a global change. */
+      .modal-body .ai-export-choice .radio-option {
+        align-items: flex-start;
+        font-weight: 400;
+        letter-spacing: 0;
+        text-transform: none;
+        line-height: 1.45;
+        margin-bottom: 8px;
+      }
+      .modal-body .ai-export-choice .radio-option input {
+        margin-top: 2px;
+      }
       .modal-body label.ins-export-check {
         display: flex;
         align-items: center;
@@ -10204,6 +10217,60 @@
       </div>
 
       <!--
+        The Context / Metadata key picker.
+        A real export carries around forty keys of each; as a row of chips that
+        was four wrapped lines of buttons above a single chart, and the chart —
+        the thing the section exists for — started below the fold. One button
+        naming the current key, and a searchable list behind it.
+      -->
+      <div class="ins-keypop" id="insKeyPop" hidden>
+        <div class="ins-keypop-head">
+          <input type="text" id="insKeyPopSearch" placeholder="Filter keys…"
+            autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="ins-keypop-list" id="insKeyPopList"></div>
+      </div>
+    </div>
+
+      <!--
+        The Context / Metadata key picker.
+        A real export carries around forty keys of each; as a row of chips that
+        was four wrapped lines of buttons above a single chart, and the chart —
+        the thing the section exists for — started below the fold. One button
+        naming the current key, and a searchable list behind it.
+      -->
+      <div class="ins-keypop" id="insKeyPop" hidden>
+        <div class="ins-keypop-head">
+          <input type="text" id="insKeyPopSearch" placeholder="Filter keys…"
+            autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="ins-keypop-list" id="insKeyPopList"></div>
+      </div>
+    </div>
+
+      <!--
+        Export for AI — the options, before the save dialog.
+
+        Rust opens the OS save dialog as the very first thing it does, so
+        anything the user chooses has to be decided here. Modelled on the
+        settings-backup modal, which is the same shape: a small options dialog
+        whose button then triggers a native save.
+      -->
+      <div class="modal-overlay" id="aiExportModal">
+        <div class="modal-box">
+          <div class="modal-header">
+            <h3>Export for AI</h3>
+            <button class="close-btn" id="aiExportClose">&#x2715;</button>
+          </div>
+          <div class="modal-body" id="aiExportBody"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" id="aiExportCancel">Cancel</button>
+            <button class="btn-primary" id="aiExportGo">Choose file…</button>
+          </div>
+        </div>
+      </div>
+
+      <!--
         The export modal.
 
         A sibling of the Insights overlay, not a child of it: nested, the
@@ -10225,22 +10292,6 @@
           </div>
         </div>
       </div>
-
-      <!--
-        The Context / Metadata key picker.
-        A real export carries around forty keys of each; as a row of chips that
-        was four wrapped lines of buttons above a single chart, and the chart —
-        the thing the section exists for — started below the fold. One button
-        naming the current key, and a searchable list behind it.
-      -->
-      <div class="ins-keypop" id="insKeyPop" hidden>
-        <div class="ins-keypop-head">
-          <input type="text" id="insKeyPopSearch" placeholder="Filter keys…"
-            autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="ins-keypop-list" id="insKeyPopList"></div>
-      </div>
-    </div>
 
     <div class="modal-overlay" id="convDataModal">
       <div class="modal-box conv-data-modal-box">
@@ -10910,8 +10961,8 @@
           cleanupAnalyticsTemp: (paths) =>
             invoke("cleanup_analytics_temp", { paths: paths || null }),
           getSessions: (args) => invoke("get_sessions", { args }),
-          exportConversationsForAi: (args) =>
-            invoke("export_conversations_for_ai", { args }),
+          exportConversationsForAi: (args, options) =>
+            invoke("export_conversations_for_ai", { args, options }),
           getInsightTags: (args, unit, keys) =>
             invoke("get_insight_tags", { args, unit, keys }),
           getInsightTagValues: (args, unit, kind, name) =>
@@ -20621,7 +20672,19 @@
 
       document
         .getElementById("convAiExportBtn")
+        .addEventListener("click", openAiExportModal)
+      document
+        .getElementById("aiExportClose")
+        .addEventListener("click", closeAiExportModal)
+      document
+        .getElementById("aiExportCancel")
+        .addEventListener("click", closeAiExportModal)
+      document
+        .getElementById("aiExportGo")
         .addEventListener("click", exportConversationsForAi)
+      document.getElementById("aiExportModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) closeAiExportModal()
+      })
 
       // ══ INSIGHTS ══════════════════════════════════════════════════════
       //
@@ -27000,6 +27063,76 @@
         }
       }
 
+      /// Did anything actually single out particular interactions?
+      ///
+      /// The mirror of `SessionFilterQuery::match_rows` being `Some`. With no
+      /// query and no pill, every interaction *is* a match, so "matched turns
+      /// only" would mean "everything" under a label claiming otherwise —
+      /// which is why the option is offered only when it means something.
+      function _aiExportIsNarrowed(args) {
+        const a = args || {}
+        if (a.query && String(a.query).trim()) return true
+        return ["neg_feedback", "low_recog", "zero_recog"].includes(a.filter)
+      }
+
+      let aiExportMatchedOnly = false
+
+      function openAiExportModal() {
+        if (!convDbPath) {
+          openDbSetupModal()
+          return
+        }
+        if (!convHasSearched || convTotalSessions <= 0 || convAiExporting) return
+        const args = lastConvSearchArgs || buildConvSessionArgs(convPage)
+        const narrowed = _aiExportIsNarrowed(args)
+        // Reset each time: the previous export's search may have been narrowed
+        // where this one is not, and a remembered choice would then be a
+        // silently ignored one.
+        aiExportMatchedOnly = narrowed && aiExportMatchedOnly
+        const body = document.getElementById("aiExportBody")
+        // States what result set this is about, the way the Share Content
+        // modal does — the whole point is that it exports "the current search".
+        body.innerHTML = `<p class="hint" style="margin-bottom:14px">
+            ${insPlural(convTotalSessions, "conversations")} from the current
+            search${
+              args.query
+                ? ", matching <strong>" + esc(String(args.query)) + "</strong>"
+                : ""
+            }.
+          </p>
+          <label>What to include</label>
+          <div class="radio-group ai-export-choice" style="margin-top:6px">
+            <label class="radio-option">
+              <input type="radio" name="ai-export-scope" value="whole"
+                ${aiExportMatchedOnly ? "" : "checked"}>
+              Whole conversations &mdash; every turn of each matching
+              conversation, so an answer keeps the question that produced it
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="ai-export-scope" value="matched"
+                ${aiExportMatchedOnly ? "checked" : ""}
+                ${narrowed ? "" : "disabled"}>
+              Matching interactions only &mdash; just the turns that satisfied
+              the search
+            </label>
+          </div>
+          ${
+            narrowed
+              ? ""
+              : `<p class="hint" style="margin-top:8px">
+                  Nothing has narrowed this search to particular interactions,
+                  so every turn is a match &mdash; the two options would produce
+                  the same file. Search for something, or use one of the
+                  feedback or recognition filters, to pick them apart.
+                </p>`
+          }`
+        document.getElementById("aiExportModal").classList.add("open")
+      }
+
+      function closeAiExportModal() {
+        document.getElementById("aiExportModal").classList.remove("open")
+      }
+
       async function exportConversationsForAi() {
         if (!convDbPath) {
           openDbSetupModal()
@@ -27007,6 +27140,12 @@
         }
         if (!convHasSearched || convTotalSessions <= 0 || convAiExporting) return
         const args = lastConvSearchArgs || buildConvSessionArgs(convPage)
+        const picked = document.querySelector(
+          'input[name="ai-export-scope"]:checked',
+        )
+        aiExportMatchedOnly = !!picked && picked.value === "matched"
+        const options = { matchedTurnsOnly: aiExportMatchedOnly }
+        closeAiExportModal()
         const btn = document.getElementById("convAiExportBtn")
         const oldHtml = btn ? btn.innerHTML : ""
         convAiExporting = true
@@ -27042,7 +27181,7 @@
           unlistenProgress = null
         }
         try {
-          const res = await window.backend.exportConversationsForAi(args)
+          const res = await window.backend.exportConversationsForAi(args, options)
           if (!res || res.canceled) return
           if (!res.ok) {
             showImportToast("error", "Export canceled or failed.")

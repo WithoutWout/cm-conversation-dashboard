@@ -6983,17 +6983,54 @@ const AI_EXPORT_LARGE_TOKENS: i64 = 200_000;
 /// A `record_type: "export_header"` first line. Everything that is identical for
 /// the whole export lives here instead of being repeated on every session line,
 /// and the legend documents the fields a reader would otherwise have to guess at.
+/// What to put in the file, beyond which conversations.
+///
+/// A struct of its own rather than fields on `GetSessionsArgs`, which is the
+/// Insights scope-cache fingerprint: an export preference has no business
+/// dropping a resolved result set.
+#[derive(Deserialize, Default, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AiExportOptions {
+    /// Only the interactions the search actually matched, rather than every
+    /// turn of every matching conversation.
+    ///
+    /// Honoured only when something *did* narrow the search — see
+    /// `SessionFilterQuery::match_rows`. With no query and no pill every
+    /// interaction is a match, and "matched turns only" would silently mean
+    /// "everything" under a label claiming otherwise.
+    #[serde(default)]
+    matched_turns_only: bool,
+}
+
+/// The temp table of matching `log_id`s, when the export is narrowed to them.
+///
+/// Deliberately not `insight_matches`: Insights holds that one on the same
+/// connection across calls, and an export writing into it would quietly
+/// replace the result set a dashboard is drawn from.
+const AI_EXPORT_MATCH_TABLE: &str = "CREATE TEMP TABLE IF NOT EXISTS ai_export_matches (\
+     log_id INTEGER PRIMARY KEY\
+ )";
+
 fn ai_export_header(
     exported_at: &str,
     search_context: &serde_json::Value,
     session_count: usize,
+    matched_turns_only: bool,
 ) -> serde_json::Value {
     serde_json::json!({
         "record_type": "export_header",
-        "schema_version": 4,
+        "schema_version": 5,
         "exported_at": exported_at,
         "session_count": session_count,
         "search_context": search_context,
+        // Stated rather than left to be inferred: the same search produces two
+        // very different files, and a model reading one has no way to tell
+        // which without being told.
+        "interaction_scope": if matched_turns_only {
+            "matched_turns"
+        } else {
+            "whole_conversations"
+        },
         "legend": {
             "format": "JSONL. This header is line 1; each following line is one conversation, as record_type 'session' with a 0-based session_index. Conversations are ordered newest first; turns within a conversation are oldest first.",
             "completeness": "session_count is how many conversation lines to expect. Fewer means the file was truncated.",
@@ -7006,6 +7043,7 @@ fn ai_export_header(
             "entity_matches": "Entities the recognizer found in the user's text, with the text that matched.",
             "feedback_targets": "Each thumbs up/down already joined to the answer it rated, so this join does not need redoing. target_resolution says how certain that join is: 'originatingInteractionId' = the log stated it; 'previousBotOutputFallback' = inferred from the preceding answer, so treat it as probable rather than certain.",
             "is_feedback_target": "Present as true only on turns that received feedback; absent on all others.",
+            "interaction_scope": "whole_conversations = every turn of each matching conversation. matched_turns = only the turns that satisfied the search, so a conversation's chat_trace is a subset of it and the turns around a match are not present.",
             "conventions": "Empty fields are omitted rather than sent as null, so a missing key means no value. Answer HTML has been stripped to plain text."
         },
     })
@@ -7028,7 +7066,9 @@ async fn export_conversations_for_ai(
     app: AppHandle,
     db_state: State<'_, SharedDbState>,
     args: GetSessionsArgs,
+    options: Option<AiExportOptions>,
 ) -> Result<ConversationAiExportResult, String> {
+    let options = options.unwrap_or_default();
     use tauri_plugin_dialog::DialogExt;
     use tokio::sync::oneshot;
 
@@ -7089,7 +7129,9 @@ async fn export_conversations_for_ai(
     );
 
     let db = db_state.inner().clone();
-    let (sessions, search_mode, planned_turns) = tauri::async_runtime::spawn_blocking(move || {
+    let want_matched = options.matched_turns_only;
+    let (sessions, search_mode, planned_turns, narrowed) =
+        tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
         let filter_query = build_session_filter_query(conn, &args)?;
@@ -7147,11 +7189,65 @@ ORDER BY p.first_ts DESC"#,
             sessions
         };
 
-        let planned_turns = sessions
-            .iter()
-            .filter_map(|s| s.get("interactionCount").and_then(|v| v.as_i64()))
-            .sum::<i64>();
-        Ok::<_, String>((sessions, filter_query.search_mode.clone(), planned_turns))
+        // ── The matching turns, when they were asked for ──
+        //
+        // Honoured only when something actually narrowed the search.
+        // `match_rows` is `None` when no query and no pill was set, and then
+        // every interaction *is* a match — so "matched turns only" would mean
+        // "everything" under a label claiming otherwise. The renderer disables
+        // the option in that case; this is what makes the file honest even if
+        // it is asked for anyway.
+        let narrowed = want_matched && filter_query.match_rows.is_some();
+        if narrowed {
+            let match_rows = filter_query.match_rows.as_deref().unwrap_or("");
+            conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS ai_export_matches; {AI_EXPORT_MATCH_TABLE}"
+            ))
+            .map_err(|e| format!("Export scope error: {e}"))?;
+            let sql = format!(
+                r#"WITH
+base_sessions AS (
+    SELECT s.*
+    FROM session_summary s
+    {base_where}
+)
+{search_cte},
+filtered_sessions AS (
+    {filtered_from}
+)
+INSERT OR IGNORE INTO ai_export_matches (log_id)
+SELECT m.match_log_id
+FROM ({match_rows}) m
+JOIN filtered_sessions p ON p.session_uuid = m.session_uuid
+WHERE m.match_log_id IS NOT NULL"#,
+                base_where = filter_query.base_where.as_str(),
+                search_cte = filter_query.search_cte.as_str(),
+                filtered_from = filter_query.filtered_from.as_str(),
+            );
+            conn.execute(&sql, params_ref.as_slice())
+                .map_err(|e| format!("Export scope error: {e}"))?;
+        } else {
+            // A previous narrowed export on this connection would otherwise
+            // still be there, and the writer decides by table name alone.
+            conn.execute_batch("DROP TABLE IF EXISTS ai_export_matches")
+                .map_err(|e| format!("Export scope error: {e}"))?;
+        }
+
+        let planned_turns = if narrowed {
+            conn.query_row("SELECT COUNT(*) FROM ai_export_matches", [], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+        } else {
+            sessions
+                .iter()
+                .filter_map(|s| s.get("interactionCount").and_then(|v| v.as_i64()))
+                .sum::<i64>()
+        };
+        Ok::<_, String>((
+            sessions,
+            filter_query.search_mode.clone(),
+            planned_turns,
+            narrowed,
+        ))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -7208,7 +7304,13 @@ ORDER BY p.first_ts DESC"#,
         let file = fs::File::create(&jsonl_path_for_work)
             .map_err(|e| format!("Cannot create export file: {e}"))?;
         let mut out = std::io::BufWriter::new(file);
-        let counts = write_ai_export(conn, &sessions, &search_context, &mut out)?;
+        let counts = write_ai_export(
+            conn,
+            &sessions,
+            &search_context,
+            if narrowed { Some("ai_export_matches") } else { None },
+            &mut out,
+        )?;
 
         out.flush()
             .map_err(|e| format!("Cannot finish export file: {e}"))?;
@@ -7244,6 +7346,11 @@ fn write_ai_export(
     conn: &Connection,
     sessions: &[serde_json::Value],
     search_context: &serde_json::Value,
+    // `match_table`: when set, the name of a temp table of matching `log_id`s
+    // to restrict each conversation's turns to. Passed in rather than
+    // re-derived here, so this stays a plain function over a `Connection` and
+    // remains testable without a save dialog.
+    match_table: Option<&str>,
     out: &mut impl Write,
 ) -> Result<AiExportCounts, String> {
     let exported_at = now_iso();
@@ -7252,23 +7359,39 @@ fn write_ai_export(
 
     // Line 1 carries everything that is constant for the export, so the
     // session lines below hold only what actually varies.
-    let header = ai_export_header(&exported_at, search_context, sessions.len());
+    let header = ai_export_header(
+        &exported_at,
+        search_context,
+        sessions.len(),
+        match_table.is_some(),
+    );
     serde_json::to_writer(&mut *out, &header)
         .map_err(|e| format!("Cannot write export header: {e}"))?;
     writeln!(out).map_err(|e| format!("Cannot write export file: {e}"))?;
 
     {
         // Prepared once; re-run per session instead of re-parsing the SQL.
+        //
+        // The join to the match table is the only difference between the two
+        // scopes. `idx_session_ts` still drives, and the table is a
+        // `log_id`-keyed temp table, so the restriction is a point lookup per
+        // row rather than a second scan.
+        let narrow = match match_table {
+            Some(t) => format!(" AND log_id IN (SELECT log_id FROM {t})"),
+            None => String::new(),
+        };
         let mut inter_stmt = conn
             .prepare_cached(
-                r#"SELECT
+                &format!(
+                    r#"SELECT
                 log_id, interaction_uuid, timestamp_start,
                 main_interaction_type, interaction_value, output_text,
                 article_ids, dialog_paths, recognition_type, recognition_quality,
                 articles, feedback_info, recognition_details
             FROM interactions
-            WHERE session_uuid = ?1
-            ORDER BY log_id ASC"#,
+            WHERE session_uuid = ?1{narrow}
+            ORDER BY log_id ASC"#
+                ),
             )
             .map_err(|e| format!("Prepare interactions export error: {e}"))?;
         for (session_index, session) in sessions.iter().enumerate() {
@@ -10781,7 +10904,8 @@ mod tests {
 
         let mut buf: Vec<u8> = Vec::new();
         let counts =
-            write_ai_export(&conn, &sessions, &search_context, &mut buf).expect("write export");
+            write_ai_export(&conn, &sessions, &search_context, None, &mut buf)
+                .expect("write export");
         assert_eq!(counts.interaction_count, 3);
         assert_eq!(counts.feedback_count, 1);
 
@@ -10839,13 +10963,79 @@ mod tests {
         assert_eq!(s_a["chat_trace"][0]["turn_kind"], "user_and_bot");
     }
 
+    /// "Matched turns only" has to actually narrow the file, and has to leave
+    /// the conversation list alone: the same conversations, each carrying
+    /// fewer turns. A scope that dropped conversations would be a different
+    /// search wearing an export option's label.
+    #[test]
+    fn a_narrowed_export_keeps_every_conversation_and_drops_the_unmatched_turns() {
+        let conn = test_conn();
+        let insert = |log_id: i64, session: &str, ts: &str, value: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, timestamp_end, culture, interaction_value, output_text, \
+                 main_interaction_type, all_interaction_types, feedback_info, \
+                 recognition_quality, recognition_type, contexts, imported_at) \
+                 VALUES (?1,?2,?3,?4,?4,'nl',?5,'Antwoord.','QA','QA','',88.0,'Entity Recognition','',0)",
+                params![log_id, format!("uuid-{log_id}"), session, ts, value],
+            )
+            .expect("insert interaction");
+        };
+        insert(1, "s-a", "2026-03-25T09:30:00", "Openingstijden?");
+        insert(2, "s-a", "2026-03-25T09:31:00", "En het parkeren?");
+        insert(3, "s-a", "2026-03-25T09:32:00", "Dank u");
+
+        // Stand in for the match relation the search would have produced.
+        conn.execute_batch(AI_EXPORT_MATCH_TABLE).expect("temp table");
+        conn.execute("INSERT INTO ai_export_matches (log_id) VALUES (2)", [])
+            .expect("seed match");
+
+        let sessions = vec![serde_json::json!({
+            "sessionUuid": "s-a", "firstTs": "2026-03-25T09:30:00",
+            "lastTs": "2026-03-25T09:32:00", "interactionCount": 3,
+            "culture": "nl", "firstUserMessage": "Openingstijden?",
+        })];
+        let ctx = serde_json::json!({ "query": "parkeren" });
+
+        let whole = {
+            let mut buf: Vec<u8> = Vec::new();
+            write_ai_export(&conn, &sessions, &ctx, None, &mut buf).expect("whole");
+            String::from_utf8(buf).expect("utf8")
+        };
+        let narrowed = {
+            let mut buf: Vec<u8> = Vec::new();
+            write_ai_export(&conn, &sessions, &ctx, Some("ai_export_matches"), &mut buf)
+                .expect("narrowed");
+            String::from_utf8(buf).expect("utf8")
+        };
+
+        let trace = |text: &str| -> Vec<serde_json::Value> {
+            let line: serde_json::Value =
+                serde_json::from_str(text.lines().nth(1).expect("a session line")).unwrap();
+            line["chat_trace"].as_array().cloned().unwrap_or_default()
+        };
+        assert_eq!(trace(&whole).len(), 3);
+        assert_eq!(trace(&narrowed).len(), 1, "the scope did not narrow the turns");
+        assert_eq!(trace(&narrowed)[0]["user_text"], "En het parkeren?");
+
+        // Same conversation either way — the option changes what is in a
+        // conversation, never which conversations there are.
+        assert_eq!(whole.lines().count(), narrowed.lines().count());
+        // And the file says which of the two it is.
+        let head = |t: &str| -> serde_json::Value {
+            serde_json::from_str(t.lines().next().unwrap()).unwrap()
+        };
+        assert_eq!(head(&whole)["interaction_scope"], "whole_conversations");
+        assert_eq!(head(&narrowed)["interaction_scope"], "matched_turns");
+    }
+
     #[test]
     fn header_carries_the_constant_fields_and_documents_the_rest() {
         let search_context = serde_json::json!({ "query": "openingstijden", "lowRecogThreshold": 60 });
-        let header = ai_export_header("2026-07-25T10:00:00Z", &search_context, 42);
+        let header = ai_export_header("2026-07-25T10:00:00Z", &search_context, 42, false);
 
         assert_eq!(header["record_type"], "export_header");
-        assert_eq!(header["schema_version"], 4);
+        assert_eq!(header["schema_version"], 5);
         // The count is what lets a reader detect a truncated file.
         assert_eq!(header["session_count"], 42);
         assert_eq!(header["search_context"]["query"], "openingstijden");
@@ -10859,6 +11049,7 @@ mod tests {
             "triggered_content",
             "feedback_targets",
             "is_feedback_target",
+            "interaction_scope",
             "conventions",
         ] {
             assert!(
@@ -10866,6 +11057,14 @@ mod tests {
                 "legend is missing {key}"
             );
         }
+        // The same search produces two very different files, and a model
+        // reading one has no way to tell which without being told.
+        assert_eq!(header["interaction_scope"], "whole_conversations");
+        assert_eq!(
+            ai_export_header("2026-07-25T10:00:00Z", &search_context, 42, true)
+                ["interaction_scope"],
+            "matched_turns"
+        );
         // The header survives pruning intact.
         assert_eq!(
             prune_empty_json(header.clone()).as_ref(),

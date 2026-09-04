@@ -127,7 +127,7 @@ There are also Conversations DB commands exposed through `window.backend` for im
 
 `import_interactions_csv(filePath, maxAgeDays, delimiter?, deferFinalize?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it. `deferFinalize` defaults to false; both real callers pass `true` and bracket their loop with `begin_import_run` / `finalize_import_run` — see `docs/import.md`.
 
-`export_conversations_for_ai` writes the whole current result set as `.jsonl`; its schema and the reasoning behind it are in `docs/ai-export.md`.
+`export_conversations_for_ai(args, options)` writes the current result set as `.jsonl`. `options.matchedTurnsOnly` narrows each conversation to the turns the search matched, reusing `SessionFilterQuery::match_rows`; it is a struct of its own rather than a field on `GetSessionsArgs`, which is the Insights scope-cache fingerprint. Its schema and the reasoning behind it are in `docs/ai-export.md`.
 
 ## Events (Rust → renderer)
 
