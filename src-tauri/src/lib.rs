@@ -3961,6 +3961,14 @@ struct GetSessionsArgs {
     query_ids_only: Option<bool>, // search ONLY article_ids and dialog_paths, not message text
     query_id_type: Option<String>, // "article" | "dialog" — "dialog" accepts "<dialog>-<node>"
     low_recog_threshold: Option<i64>, // threshold for "low recognition" filter (default 60, range 1–99)
+    /// Entity names a conversation must have triggered — OR within the list,
+    /// AND with everything else.
+    ///
+    /// A *filter*, unlike `query_entities`, which is a boolean saying that
+    /// `query` should also be matched against entity text. Picking three
+    /// entities by name is a different question from searching for a word that
+    /// might appear in one.
+    entity_filters: Option<Vec<String>>,
     context_filters: Option<Vec<ContextFilter>>, // [{name, value}] filter by context values
     metadata_filters: Option<Vec<ContextFilter>>, // same shape, against OutputMetadata pairs
 }
@@ -4083,6 +4091,21 @@ fn fts_tokens(term: &str) -> Vec<String> {
 /// diacritic-insensitive matching the tokenizer gives us for free.
 fn term_needs_exact_check(term: &str) -> bool {
     term.chars().any(|c| !c.is_alphanumeric() && !c.is_whitespace())
+}
+
+/// Does this database have that table (or view) yet?
+///
+/// Lifted out of `build_session_filter_query` when `get_entity_options` became
+/// its second caller. Both ask the same question for the same reason: a
+/// database imported by an older build may predate `entity_index`, and the
+/// answer has to be "no rows" rather than an error.
+fn table_exists(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?1",
+        params![name],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
 }
 
 fn build_session_filter_query(
@@ -4257,6 +4280,37 @@ fn build_session_filter_query(
         }
     }
 
+    // Entity pills. One `EXISTS` with an `IN`, rather than the per-name grouping
+    // above: an entity has no key/value shape, so there is nothing to AND
+    // across — picking three entities means "any of these three".
+    //
+    // Names are stored lowercased (`entity_index_rows` lowercases both the
+    // display name and the matched text), and the picker's values come from
+    // that same column, so they arrive already in the right case. Lowercased
+    // again here rather than trusted, because these cross the bridge.
+    if let Some(entities) = &args.entity_filters {
+        let wanted: Vec<String> = entities
+            .iter()
+            .map(|e| e.trim().to_lowercase())
+            .filter(|e| !e.is_empty())
+            .collect();
+        if !wanted.is_empty() && table_exists(conn, "entity_index") {
+            let placeholders = wanted
+                .iter()
+                .map(|e| {
+                    let pv = next_param(&mut param_idx);
+                    param_values.push(Box::new(e.clone()));
+                    pv
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            base_conditions.push(format!(
+                "EXISTS (SELECT 1 FROM entity_index ei \
+                 WHERE ei.session_uuid = s.session_uuid AND ei.name IN ({placeholders}))"
+            ));
+        }
+    }
+
     let base_where = format!("WHERE {}", base_conditions.join(" AND "));
     let mut search_mode = "none".to_string();
     let mut search_cte = String::new();
@@ -4400,15 +4454,6 @@ fn build_session_filter_query(
     } else {
         row_filter
     };
-
-    fn table_exists(conn: &Connection, name: &str) -> bool {
-        conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?1",
-            params![name],
-            |_| Ok(true),
-        )
-        .unwrap_or(false)
-    }
 
     /// `col LIKE '%term%'` over one or more columns, escaping the wildcards a
     /// user can type. Backslash is escaped first, or escaping the others would
@@ -7084,6 +7129,7 @@ async fn export_conversations_for_ai(
         "queryIdType": args.query_id_type.clone(),
         "dateFrom": args.date_from.clone(),
         "dateTo": args.date_to.clone(),
+        "entityFilters": args.entity_filters.clone(),
         "contextFilters": args.context_filters.clone(),
         "metadataFilters": args.metadata_filters.clone(),
         "lowRecogThreshold": args.low_recog_threshold.unwrap_or(60).clamp(1, 99),
@@ -7517,6 +7563,75 @@ async fn get_context_options(
     db_state: State<'_, SharedDbState>,
 ) -> Result<Vec<ContextOption>, String> {
     tag_options(db_state, "context_index").await
+}
+
+/// Enough entities for a searchable picker, and a bound on the payload.
+///
+/// A real export runs to a few hundred; the cap is there so a pathological
+/// database cannot send tens of thousands of rows across the bridge, not
+/// because anyone is expected to reach it. Ordered by conversation count, so
+/// what is dropped is what nobody has ever searched for.
+const ENTITY_OPTION_LIMIT: i64 = 2000;
+
+/// One entity, with how many conversations triggered it — and its CM.com id.
+///
+/// Two features off one scan. The conversation-search filter wants the names
+/// and their counts; the Content tab wants the id, because an entity export CSV
+/// has no id column at all and this is the only place in the app one exists.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EntityOption {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entity_id: Option<i64>,
+    count: i64,
+}
+
+/// Every entity the imported conversations have ever triggered.
+///
+/// `entity_index` deliberately carries **no secondary index** — see its schema
+/// comment: every extra b-tree there is a per-row tax on import, and this is
+/// the only query that would want one. So this is a full scan, run once when
+/// the picker is first opened and cached in the renderer, exactly as the
+/// context and metadata options already are.
+///
+/// `MIN(entity_id)` rather than a group key: the id is a property of the
+/// entity, not of the row, but a null in one row must not split the group or
+/// lose the id the other rows carry.
+#[tauri::command]
+async fn get_entity_options(
+    db_state: State<'_, SharedDbState>,
+) -> Result<Vec<EntityOption>, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        if !table_exists(conn, "entity_index") {
+            return Ok(Vec::new());
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT name, MIN(entity_id), COUNT(DISTINCT session_uuid) AS c \
+                 FROM entity_index \
+                 WHERE name != '' \
+                 GROUP BY name \
+                 ORDER BY c DESC, name ASC \
+                 LIMIT ?1",
+            )
+            .map_err(|e| format!("Entity options error: {e}"))?;
+        let rows = stmt
+            .query_map([ENTITY_OPTION_LIMIT], |row| {
+                Ok(EntityOption {
+                    name: row.get::<_, String>(0)?,
+                    entity_id: row.get::<_, Option<i64>>(1)?,
+                    count: row.get::<_, i64>(2)?,
+                })
+            })
+            .map_err(|e| format!("Entity options error: {e}"))?;
+        Ok(rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The same aggregate over `metadata_index`, feeding the Metadata filter.
@@ -8979,6 +9094,7 @@ pub fn run() {
             get_session_interactions,
             get_date_range,
             get_context_options,
+            get_entity_options,
             get_metadata_options,
             get_db_daily_stats,
             get_db_hour_coverage,
@@ -13319,6 +13435,63 @@ mod conv_search {
     }
 
     /// The recognizer stores the entity it matched, not the words the user
+    /// Picking entities by name is a filter, not a search.
+    ///
+    /// `query_entities` says "also match `query` against entity text", which is
+    /// a different question from "these three entities". They have to compose
+    /// with everything else the way the tag pills do — OR within the list, AND
+    /// with the rest — or a pill would quietly widen a search instead of
+    /// narrowing it.
+    #[test]
+    fn entity_pills_filter_rather_than_search() {
+        let conn = search_conn();
+        let ent = |name: &str, id: i64| {
+            format!(
+                r#"{{"entityMatches": [{{"name": "{name}_1", "match": "x", "entityId": {id}, "displayName": "{name}"}}]}}"#
+            )
+        };
+        let wine = ent("WIJN", 1);
+        let park = ent("PARKEREN", 2);
+        add(&conn, Turn { log_id: 1, session: "a", user: "een fles rood", bot: "nee", recognition_details: &wine, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "b", user: "waar parkeer ik", bot: "hier", recognition_details: &park, ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "c", user: "niets bijzonders", bot: "ok", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let pills = |names: &[&str]| GetSessionsArgs {
+            entity_filters: Some(names.iter().map(|n| n.to_string()).collect()),
+            ..Default::default()
+        };
+        // Stored lowercased, and the picker's values come from that column —
+        // but the case is normalised here rather than trusted.
+        assert_eq!(found(&conn, &pills(&["wijn"])), vec!["a"]);
+        assert_eq!(found(&conn, &pills(&["WIJN"])), vec!["a"]);
+        // OR within the list.
+        assert_eq!(found(&conn, &pills(&["wijn", "parkeren"])), vec!["a", "b"]);
+        // A conversation that triggered no entity is never included.
+        assert_eq!(found(&conn, &pills(&["onbekend"])), Vec::<String>::new());
+        // An empty list is not a filter at all — it must not exclude everything.
+        assert_eq!(
+            found(&conn, &GetSessionsArgs { entity_filters: Some(vec![]), ..Default::default() }),
+            vec!["a", "b", "c"]
+        );
+
+        // AND with a text query, not OR: the pill narrows what the search found.
+        let both = GetSessionsArgs {
+            query: Some("parkeer".to_string()),
+            query_scope: Some("user".to_string()),
+            entity_filters: Some(vec!["parkeren".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &both), vec!["b"]);
+        let conflicting = GetSessionsArgs {
+            query: Some("parkeer".to_string()),
+            query_scope: Some("user".to_string()),
+            entity_filters: Some(vec!["wijn".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &conflicting), Vec::<String>::new());
+    }
+
     /// typed, so an entity search finds conversations whose message text does
     /// not contain the search term at all.
     #[test]

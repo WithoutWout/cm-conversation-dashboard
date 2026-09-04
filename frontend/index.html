@@ -10706,6 +10706,9 @@
               id="ctxKindCountMetadata"
             ></span>
           </button>
+          <button class="ctx-kind-tab" data-ctx-kind="entity">
+            Entities<span class="ctx-kind-count" id="ctxKindCountEntity"></span>
+          </button>
         </div>
         <div class="ctx-modal-search">
           <input
@@ -10992,6 +10995,7 @@
             invoke("get_session_interactions", { sessionUuid }),
           getDateRange: () => invoke("get_date_range"),
           getContextOptions: () => invoke("get_context_options"),
+          getEntityOptions: () => invoke("get_entity_options"),
           getMetadataOptions: () => invoke("get_metadata_options"),
           getDbDailyStats: () => invoke("get_db_daily_stats"),
           // sinceDate ("YYYY-MM-DD") bounds an otherwise full-table aggregate.
@@ -11147,6 +11151,8 @@
         window.backend.getSessionInteractions = () => Promise.resolve([])
       if (!window.backend.getContextOptions)
         window.backend.getContextOptions = () => Promise.resolve([])
+      if (!window.backend.getEntityOptions)
+        window.backend.getEntityOptions = () => Promise.resolve([])
       if (!window.backend.getMetadataOptions)
         window.backend.getMetadataOptions = () => Promise.resolve([])
       if (!window.backend.getDbDailyStats)
@@ -11357,6 +11363,15 @@
       let convContextFilters = [] // [{name, value}] — active context filters
       let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
+      // Entities the imported conversations have triggered, shaped like a tag
+      // set so they can share the chip UI: one group, one chip per entity.
+      let entityOptions = []
+      let entityOptionsLoaded = false
+      let convEntityFilters = [] // [{name: "Entities", value: <entity name>}]
+      // Lowercased entity name → CM.com entity id. The content export's CSV has
+      // no id column at all, so this is the only place in the app one exists —
+      // see `cmLink("entity", …)`.
+      let entityIdMap = new Map()
       let contextPanelOpen = false
       // The bot-side counterpart of the context filters: the OutputMetadata
       // pairs an answer carried. Same shape, same semantics, its own tab in
@@ -11595,13 +11610,31 @@
       function extLinkSvg() {
         return '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
       }
+      /// The CM.com id for an entity, if any conversation has ever triggered it.
+      ///
+      /// The EntitiesExport CSV has no id column at all, so the only place an
+      /// entity id exists in this app is `entity_index`, harvested from
+      /// imported interaction logs. An entity that has never fired therefore
+      /// has no deep link — the list page is the honest fallback, and
+      /// `_entityLinkTitle` says why rather than leaving a link that looks
+      /// broken.
+      function entityIdFor(name) {
+        if (!name) return null
+        return entityIdMap.get(String(name).toLowerCase()) ?? null
+      }
+      function _entityLinkTitle(name) {
+        return entityIdFor(name)
+          ? "Open this Entity in CM.com"
+          : "Open Entities in CM.com — this one has no direct link, because its id comes from imported conversations and it has not been triggered in any"
+      }
+
       function cmLink(type, id) {
         if (!cmBaseUrl) return ""
         const path =
           type === "article"
             ? cmBaseUrl + "/articles/" + id
             : type === "entity"
-            ? cmBaseUrl + "/entities/"
+            ? cmBaseUrl + "/entities/" + (id == null ? "" : id)
             : type === "tdialog"
             ? cmBaseUrl + "/dialogs/transactional/" + id
             : cmBaseUrl + "/dialogs/" + id
@@ -11631,7 +11664,7 @@
             type === "article"
               ? cmBaseUrl + "/articles/" + id
               : type === "entity"
-              ? cmBaseUrl + "/entities/"
+              ? cmBaseUrl + "/entities/" + (id == null ? "" : id)
               : type === "tdialog"
               ? cmBaseUrl + "/dialogs/transactional/" + id
               : cmBaseUrl + "/dialogs/" + id
@@ -14941,11 +14974,69 @@
           "</div></div>" +
           xrefHtml +
           '<div class="card-actions">' +
+          entityOpenButton(entity.name) +
           entityConvButton(entity.name) +
           "</div>" +
           "</div>" +
           "</div>"
         )
+      }
+
+      /// Load the entity id map once, without needing the picker opened.
+      ///
+      /// The map rides along with the conversation-search entity options, but
+      /// the Content tab wants the ids too and may never open that picker.
+      /// Guarded so the scan happens once per database either way.
+      let _entityIdsLoading = false
+      async function ensureEntityIdMap() {
+        if (entityOptionsLoaded || _entityIdsLoading || !convDbPath) return
+        _entityIdsLoading = true
+        try {
+          entityOptions = await _loadEntityOptions()
+          entityOptionsLoaded = true
+        } catch (e) {
+          // No database, or one imported before `entity_index` existed. The
+          // list-page fallback is already what is rendered.
+        } finally {
+          _entityIdsLoading = false
+        }
+      }
+
+      /// "Open in CM.com" for one entity, deep-linked where we have an id.
+      ///
+      /// Rendered by name and marked with `data-entity-open`, so
+      /// `_refreshEntityLinks` can upgrade it in place once the id map arrives
+      /// — the map is loaded lazily with the entity picker, which may well
+      /// happen after these cards were drawn.
+      function entityOpenButton(name) {
+        if (!cmBaseUrl) return ""
+        const id = entityIdFor(name)
+        return (
+          '<a class="btn-open-url" data-entity-open="' +
+          esc(name) +
+          '" href="' +
+          esc(cmBaseUrl + "/entities/" + (id == null ? "" : id)) +
+          '" title="' +
+          esc(_entityLinkTitle(name)) +
+          '" target="_blank">' +
+          extLinkSvg() +
+          " Open in CM.com</a>"
+        )
+      }
+
+      /// Point every rendered entity link at its id, once we have one.
+      ///
+      /// The id map arrives with the entity picker rather than at load, so a
+      /// card drawn before that would otherwise keep the list-page fallback for
+      /// the rest of the session.
+      function _refreshEntityLinks() {
+        if (!cmBaseUrl) return
+        for (const a of document.querySelectorAll("[data-entity-open]")) {
+          const name = a.getAttribute("data-entity-open")
+          const id = entityIdFor(name)
+          a.setAttribute("href", cmBaseUrl + "/entities/" + (id == null ? "" : id))
+          a.setAttribute("title", _entityLinkTitle(name))
+        }
       }
 
       /// A name inside a single-quoted inline `onclick`.
@@ -14971,6 +15062,9 @@
 
       function renderEntityList() {
         const el = document.getElementById("entityList")
+        // Unawaited: the cards render now with the list-page fallback, and
+        // `_refreshEntityLinks` upgrades them in place when the ids land.
+        ensureEntityIdMap()
         if (!allEntities.length) {
           el.innerHTML =
             '<div class="empty-state"><p>No EntitiesExport CSV file found in the selected folder.</p></div>'
@@ -15436,7 +15530,7 @@
           " word" +
           (entity.words.length !== 1 ? "s" : "")
         document.getElementById("entity-info-actions").innerHTML =
-          cmOpenButton("entity", null) + entityConvButton(entity.name)
+          entityOpenButton(entity.name) + entityConvButton(entity.name)
 
         const artRefs = entityArticleXrefs(entity)
         const dlgRefs = entityDialogXrefs(entity)
@@ -20316,6 +20410,8 @@
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
           updateConvDbStatus()
           contextOptionsLoaded = false // reset when DB changes
+          entityOptionsLoaded = false
+          entityIdMap = new Map()
           metadataOptionsLoaded = false
           convDatePickerInited = false // re-initialise picker defaults for new DB
           // Fetch available date range to constrain the calendar picker
@@ -26976,6 +27072,12 @@
           queryIdType: convIdType,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
+          // Names only: an entity has no key/value shape, and the group name
+          // is a presentational device for the shared chip list.
+          entityFilters:
+            convEntityFilters.length > 0
+              ? convEntityFilters.map((f) => f.value)
+              : null,
           contextFilters:
             convContextFilters.length > 0 ? convContextFilters : null,
           metadataFilters:
@@ -27916,13 +28018,49 @@
           empty:
             "No answer metadata found.<br>Only answers configured with metadata carry any.",
         },
+        // Entities have no key/value shape — an entity is a name — so they are
+        // presented as one group with a chip each. That is what lets them reuse
+        // the chip list, its search box and its counts rather than being a
+        // fourth renderer that drifts from the other three.
+        entity: {
+          options: () => entityOptions,
+          setOptions: (v) => {
+            entityOptions = v
+          },
+          loaded: () => entityOptionsLoaded,
+          setLoaded: (v) => {
+            entityOptionsLoaded = v
+          },
+          load: () => _loadEntityOptions(),
+          filters: () => convEntityFilters,
+          empty:
+            "No entities found.<br>Import interaction data first — entities come from what the recognizer matched.",
+        },
+      }
+
+      /// The entity list, and the id map that rides along with it.
+      ///
+      /// One scan serves both: the picker wants names and counts, and the
+      /// Content tab wants the id, because an entity export CSV has no id
+      /// column and this is the only place one exists.
+      async function _loadEntityOptions() {
+        const rows = (await window.backend.getEntityOptions()) || []
+        entityIdMap = new Map()
+        for (const r of rows) {
+          if (r.entityId != null) entityIdMap.set(String(r.name).toLowerCase(), r.entityId)
+        }
+        _refreshEntityLinks()
+        return rows.map((r) => ({ name: "Entities", value: r.name, count: r.count }))
       }
 
       function _updateCtxFilterBadge() {
         const badge = document.getElementById("ctxFilterBadge")
         // The button's badge is the total across both tabs — a filter left on
         // in the tab you aren't looking at still narrows the results.
-        const count = convContextFilters.length + convMetadataFilters.length
+        const count =
+          convContextFilters.length +
+          convMetadataFilters.length +
+          convEntityFilters.length
         badge.textContent = count
         badge.style.display = count > 0 ? "" : "none"
         document
@@ -27932,15 +28070,18 @@
           "ctxKindCount",
           convContextFilters.length,
           convMetadataFilters.length,
+          convEntityFilters.length,
         )
       }
 
       /// Per-tab counts, shared by both popovers.
-      function _setCtxKindCounts(prefix, contextCount, metadataCount) {
+      function _setCtxKindCounts(prefix, contextCount, metadataCount, entityCount) {
         const c = document.getElementById(prefix + "Context")
         const m = document.getElementById(prefix + "Metadata")
+        const e = document.getElementById(prefix + "Entity")
         if (c) c.textContent = contextCount > 0 ? contextCount : ""
         if (m) m.textContent = metadataCount > 0 ? metadataCount : ""
+        if (e) e.textContent = entityCount > 0 ? entityCount : ""
       }
 
       /**
@@ -28057,7 +28198,10 @@
         )
         // Clear all clears both sets, so it shows whenever either is active.
         document.getElementById("ctxClearBtn").style.display =
-          convContextFilters.length + convMetadataFilters.length > 0
+          convContextFilters.length +
+            convMetadataFilters.length +
+            convEntityFilters.length >
+          0
             ? ""
             : "none"
         document.querySelectorAll("[data-ctx-kind]").forEach((b) => {
@@ -28144,6 +28288,7 @@
       function clearContextFilters() {
         convContextFilters = []
         convMetadataFilters = []
+        convEntityFilters = []
         _updateCtxFilterBadge()
         _renderCtxModal()
         convPage = 1

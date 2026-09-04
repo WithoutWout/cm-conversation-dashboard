@@ -67,6 +67,34 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - Ranges are merged before insertion, longest-first at a given start: two terms can cover the same span, and `<mark>` nested in `<mark>` renders wrong. `opening | openingstijden` produces one mark, not `[opening][stijden]`.
 - Regex mode is deliberately **not** folded — the user wrote a pattern, and the backend's regex path does not fold either.
 
+## Entity pills are a filter, not a search
+
+`query_entities` is a boolean saying "also match `query` against entity name,
+matched text and id". `entity_filters` is a different thing: a list of entity
+names a conversation must have triggered, OR within the list and AND with
+everything else — exactly how the Context and Metadata pills compose.
+
+Picking three entities by name is not the same question as searching for a word
+that might appear in one, and `entity_pills_filter_rather_than_search` pins the
+difference, including that an empty list filters nothing rather than everything.
+
+- **`get_entity_options` is one full scan of `entity_index`.** That table
+  deliberately carries no secondary index — every extra b-tree there is a
+  per-row tax on import, and this is the only query that would want one — so
+  the scan is run once when the picker is first opened and cached in the
+  renderer, exactly as the context and metadata options already are.
+- **Names are stored lowercased** (`entity_index_rows` lowercases the display
+  name and the matched text). The picker's values come from that same column, so
+  they arrive in the right case already; the filter lowercases again rather than
+  trusting what crossed the bridge.
+- **The renderer models an entity as `{name: "Entities", value: <name>}`** so it
+  can reuse `_buildTagChipsHtml`, its search box and its counts. An entity has no
+  key/value shape, so it is one group with a chip each — a presentational device,
+  and `buildConvSessionArgs` sends the names alone.
+- **The same scan carries `entityId`**, which is the only place in the app an
+  entity id exists — see `docs/collections.md` and `cmLink("entity", …)`. The
+  EntitiesExport CSV has no id column at all.
+
 ## The date filter is an instant, not a day
 
 `date_from` / `date_to` are compared as plain strings against
