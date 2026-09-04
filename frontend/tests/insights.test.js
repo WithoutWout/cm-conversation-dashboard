@@ -589,10 +589,26 @@ test("every chart has a table twin carrying all of its values", () => {
       }
       // A pasted spreadsheet column has to say what it counted; a bare number
       // in a cell has no other way of telling the reader which reading it is.
+      // Located by name rather than by position: a chart may carry an extra
+      // descriptive column (the day series carries the weekday), and which
+      // column the count lands in is not what this is about.
+      const head = rows[0].split("\t").map((h) => h.toLowerCase())
       assert.ok(
-        rows[0].split("\t")[1].toLowerCase() === card.spec.unit,
+        head.includes(card.spec.unit),
         card.id + ": the table header does not name the unit — " + rows[0],
       )
+      // The weekend is a band and a tick colour on the picture, and a
+      // spreadsheet keeps neither — so the day series has to say it in words.
+      if (card.spec.weekdayColumn) {
+        assert.ok(head.includes("weekday"), card.id + ": no weekday column")
+        const at = head.indexOf("weekday")
+        for (const r of rows.slice(1)) {
+          assert.ok(
+            /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/.test(r.split("\t")[at]),
+            card.id + ": a day row carries no weekday — " + r,
+          )
+        }
+      }
       for (const b of card.spec.data) {
         assert.ok(
           rows.some((r) => r.startsWith(b.label + "\t") && r.includes("\t" + b.value + "\t")),
@@ -627,6 +643,52 @@ test("the slice is always stated, including when nothing was filtered", () => {
   assert.ok(text.includes("2026-06-01 → latest"), text)
   assert.ok(text.includes("park not set"), text)
   assert.ok(text.includes("nochat = true"), text)
+})
+
+// A weekend is not a property of the numbers, so nothing in the data says
+// where one is — but "why is Tuesday always low?" is unanswerable without it.
+test("the weekend is visible in the picture and named in the table", () => {
+  const volume = insBuildCards(CONVS, INS_THEME_SCREEN).find((c) => c.id === "volume")
+  assert.ok(volume, "no volume card")
+  const at = new Map(volume.spec.data.map((d) => [d.label, d]))
+  // 2026-06-01 is a Monday, 06 a Saturday, 07 a Sunday.
+  assert.strictEqual(at.get("2026-06-06").band, "weekend", "Saturday is not banded")
+  assert.strictEqual(at.get("2026-06-07").band, "weekend", "Sunday is not banded")
+  assert.strictEqual(at.get("2026-06-01").band, undefined, "Monday is banded")
+
+  // A datum names a palette token and never a colour. One spec object is drawn
+  // in both palettes — `insCardHtml` in the screen one, `insChartCanvas` in the
+  // export one — so a literal would paint the dark wash onto a white surface.
+  for (const d of volume.spec.data) {
+    assert.ok(!/^#/.test(d.band || ""), d.label + ": a literal band colour")
+    assert.ok(!/^#/.test(d.tickColor || ""), d.label + ": a literal tick colour")
+  }
+  const dark = insRenderChart(volume.spec, INS_THEME_SCREEN).svg
+  const light = insRenderChart(volume.spec, INS_THEME_EXPORT).svg
+  assert.notStrictEqual(INS_THEME_SCREEN.weekend, INS_THEME_EXPORT.weekend)
+  assert.ok(dark.includes(INS_THEME_SCREEN.weekend), "no weekend band on screen")
+  assert.ok(light.includes(INS_THEME_EXPORT.weekend), "no weekend band in the export")
+
+  // The band and the tick colour both vanish into a spreadsheet and into a
+  // screen reader, so the day says which one it is in words too.
+  assert.ok(at.get("2026-06-07").tip.endsWith("Sun"), at.get("2026-06-07").tip)
+  assert.ok(insChartTsv(volume.spec).includes("2026-06-07\tSun\t"))
+})
+
+// The bounds the picker sends are always midnight and one second to midnight,
+// which is the one part of that chip carrying no information.
+test("the dates chip names days, and keeps the exact bounds for the hover", () => {
+  const [chip] = insSearchSummary({
+    dateFrom: "2026-06-01T00:00:00",
+    dateTo: "2026-06-30T23:59:59",
+  })
+  assert.strictEqual(chip.value, "2026-06-01 → 2026-06-30")
+  assert.strictEqual(chip.title, "2026-06-01T00:00:00 → 2026-06-30T23:59:59")
+  // A bound with nothing to trim carries no hover: a tooltip repeating the text
+  // underneath it is a tooltip that says nothing.
+  const [plain] = insSearchSummary({ dateFrom: "2026-06-01" })
+  assert.strictEqual(plain.value, "2026-06-01 → latest")
+  assert.strictEqual(plain.title, undefined)
 })
 
 // The timezone is stated once, not on every card.

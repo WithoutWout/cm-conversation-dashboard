@@ -7401,6 +7401,11 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      /* The exact bound lives in the title, so the chip has to look askable.
+         Same affordance as the `.ins-tz` badge beside it. */
+      .ins-chip[title] {
+        cursor: help;
+      }
       .ins-chip em {
         color: var(--muted);
         font-style: normal;
@@ -10062,7 +10067,7 @@
                 is what made the old always-load-everything behaviour feel like
                 the only option.
               -->
-              <button id="insSetupBtn" onclick="insShowSetup()"
+              <button class="btn-secondary" id="insSetupBtn" onclick="insShowSetup()"
                 title="Choose what to count and which sections to build">
                 <svg class=ui-icon><use href=#i-sliders /></svg> Choose data
               </button>
@@ -20445,6 +20450,11 @@
         serious: "#ec835a",
         critical: "#d03b3b",
         neutral: "#8892a6",
+        // The weekend wash behind a day column. A bare tint off the surface,
+        // the same discipline as `ramp[0]`: it has to be visible as a band and
+        // must never read as a value, so it is a step off the background rather
+        // than a step on any scale.
+        weekend: "#272c42",
       }
       const INS_THEME_EXPORT = {
         name: "export",
@@ -20469,6 +20479,7 @@
         serious: "#ec835a",
         critical: "#d03b3b",
         neutral: "#6b7280",
+        weekend: "#f3f4f6",
       }
 
       // Never the app's own `-apple-system` stack. An exported SVG is
@@ -20639,6 +20650,15 @@
         const y0 = padT + plotH
         let out = insOpen(w, h, theme)
 
+        const band = plotW / Math.max(1, data.length)
+        // Bands first, under the gridlines and the axis. Drawn in the data loop
+        // they would paint over both, and a weekend would read as a gap in the
+        // grid rather than as a wash behind it.
+        data.forEach((d, i) => {
+          const bandFill = insToneOf(d.band, theme)
+          if (bandFill) out += insRect(padL + band * i, padT, band, plotH, bandFill)
+        })
+
         if (!labelDirect) {
           for (const t of ticks) {
             const y = y0 - (t / scaleMax) * plotH
@@ -20652,7 +20672,6 @@
         }
         out += insLine(padL, y0, padL + plotW, y0, theme.axis)
 
-        const band = plotW / Math.max(1, data.length)
         // Capped rather than filling the band: the leftover is the air that
         // keeps a 24-column chart from reading as a solid block.
         const barW = Math.min(24, band * 0.68)
@@ -20703,12 +20722,12 @@
                 `<text transform="translate(${cx.toFixed(2)},${(
                   y0 + 12
                 ).toFixed(2)}) rotate(-40)" fill="${insAttr(
-                  theme.muted,
+                  insToneOf(d.tickColor, theme) || theme.muted,
                 )}" font-family="${INS_FONT}" font-size="10" text-anchor="end">` +
                 `${esc(insFitText(label, padB * 1.6, 10))}</text>`
             } else {
               out += insText(cx, y0 + 14, insFitText(label, band + 6, 10), {
-                fill: theme.muted,
+                fill: insToneOf(d.tickColor, theme) || theme.muted,
                 size: 10,
                 anchor: "middle",
               })
@@ -20893,10 +20912,31 @@
         }
         for (let d = 0; d < 7; d++) {
           const y = padT + d * (cellH + gap)
+          // The grid is Monday-first, so the last two rows are the weekend.
+          // A rule above Saturday and a brighter label say where the working
+          // week ends — the cells themselves cannot, since their colour is the
+          // value scale and nothing else may borrow it.
+          const isWeekend = d >= 5
+          if (d === 5) {
+            // Through the label gutter as well as the grid: a rule that starts
+            // at the first cell reads as a border on the cells, where one that
+            // starts before the names reads as a division of the week.
+            out += insLine(
+              6,
+              y - gap / 2,
+              padL + 24 * (cellW + gap) - gap,
+              y - gap / 2,
+              theme.ink2,
+            )
+          }
+          // `ink`, not `ink2`: against `muted` those two are three steps apart
+          // and the difference does not survive being looked at quickly, which
+          // is the only way anyone looks at a row label.
           out += insText(padL - 6, y + cellH / 2 + 3.5, days[d], {
-            fill: theme.muted,
+            fill: isWeekend ? theme.ink : theme.muted,
             size: 10,
             anchor: "end",
+            weight: isWeekend ? "600" : undefined,
           })
           for (let hr = 0; hr < 24; hr++) {
             const v = grid[d * 24 + hr] || 0
@@ -20933,6 +20973,19 @@
         return { svg: out + "</svg>", width: w, height: h }
       }
 
+      /// Resolve a palette token name to the colour this palette gives it.
+      ///
+      /// A spec is built once and drawn twice — `insCardHtml` renders it in the
+      /// screen palette and `insChartCanvas` re-renders the very same object in
+      /// the export one — so a datum naming `"weekend"` gets the right wash on
+      /// a dark surface and on a white one. A literal colour still passes
+      /// through, which is what keeps `insRecogColor`'s status hues working:
+      /// those are deliberately identical in both palettes.
+      function insToneOf(tone, theme) {
+        if (!tone) return ""
+        return theme[tone] || tone
+      }
+
       /// A value's step on the sequential ramp. Zero always takes step 0, which
       /// is the surface — an empty hour must read as empty, not as "a little".
       function insRampColor(v, max, theme) {
@@ -20963,6 +21016,17 @@
           padL + (data.length <= 1 ? plotW / 2 : (i / (data.length - 1)) * plotW)
         const yAt = (v) => y0 - ((v || 0) / scaleMax) * plotH
         let out = insOpen(w, h, theme)
+        // Under the gridlines, like the column form's. Clamped to the plot,
+        // because the first and last points sit on its edges and half a band
+        // either side of them is outside it.
+        const slot = plotW / Math.max(1, data.length)
+        data.forEach((d, i) => {
+          const bandFill = insToneOf(d.band, theme)
+          if (!bandFill) return
+          const bx = Math.max(padL, xAt(i) - slot / 2)
+          const bw = Math.min(padL + plotW, xAt(i) + slot / 2) - bx
+          if (bw > 0) out += insRect(bx, padT, bw, plotH, bandFill)
+        })
         for (const t of ticks) {
           const y = y0 - (t / scaleMax) * plotH
           out += insLine(padL, y, padL + plotW, y, theme.grid)
@@ -21013,16 +21077,15 @@
           data.forEach((d, i) => {
             if (i % every === 0 || i === data.length - 1) {
               out += insText(xAt(i), y0 + 15, d.tick || d.label, {
-                fill: theme.muted,
+                fill: insToneOf(d.tickColor, theme) || theme.muted,
                 size: 9,
                 anchor: i === 0 ? "start" : i === data.length - 1 ? "end" : "middle",
               })
             }
-            const band = plotW / Math.max(1, data.length)
             out += insHit(
-              xAt(i) - band / 2,
+              Math.max(0, xAt(i) - slot / 2),
               padT,
-              band,
+              slot,
               plotH,
               `${d.tip || d.label}: ${insPlural(d.value, "conversations")}`,
             )
@@ -21049,6 +21112,10 @@
       function insChartTsv(spec) {
         const unit = spec.unit || "Conversations"
         const head = (h) => h.charAt(0).toUpperCase() + h.slice(1)
+        // The weekend is a band and a tick colour on the picture; in a
+        // spreadsheet neither survives, so the day series carries the weekday
+        // as its own column rather than losing the distinction on the way out.
+        const wd = spec.weekdayColumn ? (l) => "\t" + insWeekdayShort(l) : null
         if (spec.kind === "heatmap") {
           const grid = spec.grid || []
           const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -21066,10 +21133,21 @@
         const total =
           spec.total || data.reduce((a, d) => a + (d.value || 0), 0) || 0
         const rows = [
-          (spec.axisLabel || "Label") + "\t" + head(unit) + "\tShare",
+          (spec.axisLabel || "Label") +
+            (wd ? "\tWeekday" : "") +
+            "\t" +
+            head(unit) +
+            "\tShare",
         ]
         for (const d of data) {
-          rows.push(d.label + "\t" + (d.value || 0) + "\t" + insPct(d.value, total))
+          rows.push(
+            d.label +
+              (wd ? wd(d.label) : "") +
+              "\t" +
+              (d.value || 0) +
+              "\t" +
+              insPct(d.value, total),
+          )
         }
         return rows.join("\n")
       }
@@ -21265,6 +21343,33 @@
         return theme.neutral
       }
 
+      // Three letters, from a constant — not `toLocaleDateString`. These end
+      // up in a copied table and in a chart pasted into someone else's email,
+      // where a name that changed with the reader's locale would make two
+      // copies of one export disagree.
+      const INS_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+      /// The weekday of a `YYYY-MM-DD` label, or -1 when it is not one.
+      ///
+      /// Calendar arithmetic on the string through `Date.UTC`, never the
+      /// host-local getters: the label is already the day the reader is being
+      /// shown, and re-reading it through a local offset is how a Sunday
+      /// becomes a Saturday east of Greenwich.
+      function insWeekdayOf(label) {
+        const s = String(label || "")
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return -1
+        const t = Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10))
+        return Number.isNaN(t) ? -1 : new Date(t).getUTCDay()
+      }
+      function insWeekdayShort(label) {
+        const wd = insWeekdayOf(label)
+        return wd < 0 ? "" : INS_WEEKDAYS[wd]
+      }
+      function insIsWeekend(label) {
+        const wd = insWeekdayOf(label)
+        return wd === 0 || wd === 6
+      }
+
       /// A day series is a column chart while the columns are readable and a
       /// line once they are not. 62 is where a 640px chart stops giving each
       /// day enough width to be a mark rather than a hairline.
@@ -21276,14 +21381,27 @@
         const oneYear =
           filled.length > 0 &&
           filled.every((b) => b.label.slice(0, 4) === filled[0].label.slice(0, 4))
-        const data = oneYear
-          ? filled.map((b) => ({ ...b, tick: b.label.slice(5) }))
-          : filled
+        // Bands stop earning their keep once they are hairlines: past ~120
+        // days a wash every five pixels is a texture over the whole plot, which
+        // says less than no band at all. The weekday stays in the tooltip and
+        // in the copied table either way.
+        const banded = filled.length <= 120
+        const data = filled.map((b) => {
+          const weekend = insIsWeekend(b.label)
+          return {
+            ...b,
+            tick: oneYear ? b.label.slice(5) : b.label,
+            tip: b.label + " · " + insWeekdayShort(b.label),
+            band: weekend && banded ? "weekend" : undefined,
+            tickColor: weekend ? "ink2" : undefined,
+          }
+        })
         return {
           kind: filled.length > 62 ? "area" : "columns",
           data,
           unit: "conversations",
           axisLabel: "Day",
+          weekdayColumn: true,
           rotateLabels: filled.length > 12 && filled.length <= 62,
           tickEvery:
             filled.length > 31 ? Math.ceil(filled.length / 16) : undefined,
@@ -21730,6 +21848,17 @@
       /// The charts are meaningless without it — "43% thumbs down" is alarming
       /// or unremarkable depending entirely on what was searched for — and it
       /// is the first thing that has to survive into a pasted email.
+      /// The day out of a bound the date filter was given.
+      ///
+      /// A plain slice, never `new Date`: these strings are compared to the
+      /// stored timestamp as strings, and parsing one into an instant to format
+      /// it back out is how a bound comes to name a different day than the one
+      /// the query used.
+      function insDayOf(stamp) {
+        const s = String(stamp || "")
+        return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : s
+      }
+
       function insSearchSummary(args) {
         const a = args || {}
         const out = []
@@ -21758,10 +21887,18 @@
         }
         if (FILTERS[a.filter]) out.push({ label: "Filter", value: FILTERS[a.filter] })
         if (a.dateFrom || a.dateTo) {
-          out.push({
-            label: "Dates",
-            value: (a.dateFrom || "start") + " → " + (a.dateTo || "latest"),
-          })
+          // The bounds the picker sends are always `T00:00:00` and `T23:59:59`
+          // — the exact boundaries of the days that were clicked, and so the
+          // one part of the chip that carries no information at all. Twenty-two
+          // characters of it, in a chip that ellipsises at 340px, next to the
+          // search terms that do carry information. The full bound stays one
+          // hover away, because it is what the query actually compared against.
+          const from = a.dateFrom || "start"
+          const to = a.dateTo || "latest"
+          const chip = { label: "Dates", value: insDayOf(from) + " → " + insDayOf(to) }
+          const exact = from + " → " + to
+          if (exact !== chip.value) chip.title = exact
+          out.push(chip)
         }
         for (const f of a.contextFilters || []) {
           out.push({ label: "Context", value: insTagFilterText(f) })
@@ -21854,7 +21991,7 @@
                 .map(
                   (u) => `<button class="ins-setup-unit${
                     insUnit === u ? " active" : ""
-                  }" onclick="insSetUnit('${u}')">
+                  }" data-ins-setup-unit="${u}" onclick="insSetUnit('${u}')">
                     <strong>${u === "interactions" ? "Interactions" : "Conversations"}</strong>
                     <span>${
                       u === "interactions"
@@ -21869,15 +22006,16 @@
 
           <div class="ins-setup-group">
             <span class="ins-setup-legend">Sections
-              <button class="ins-setup-all" onclick="insSetAllSections(${
-                chosen.length === INS_SECTIONS.length ? "false" : "true"
-              })">${chosen.length === INS_SECTIONS.length ? "Select none" : "Select all"}</button>
+              <button class="ins-setup-all" id="insSetupAllBtn"
+                onclick="insSetAllSections()">${
+                chosen.length === INS_SECTIONS.length ? "Select none" : "Select all"
+              }</button>
             </span>
             <div class="ins-setup-list">
               ${INS_SECTIONS.map(
                 (sec) => `<label class="ins-setup-item${
                   insSections[sec.key] ? " on" : ""
-                }">
+                }" data-ins-setup-item="${sec.key}">
                   <input type="checkbox" ${insSections[sec.key] ? "checked" : ""}
                     onchange="insToggleSection('${sec.key}')">
                   <span class="ins-setup-item-text">
@@ -21900,7 +22038,7 @@
                   : "Choose at least one section"
               }
             </button>
-            <span class="ins-setup-note">${
+            <span class="ins-setup-note" id="insSetupNote">${
               chosen.length
                 ? esc(chosen.map((c) => c.name).join(" · "))
                 : "Nothing selected."
@@ -21909,21 +22047,74 @@
         </div>`
       }
 
-      /// Toggle one section in the chooser.
+      /// Bring the chooser back in line with `insSections`, in place.
       ///
-      /// The whole panel re-renders rather than just the row: the Build button
-      /// names the count, the footer names the sections, and "Select all" flips
-      /// to "Select none" — all of which are wrong the moment one box changes.
+      /// Four things change when a box is ticked — the Build button's count,
+      /// the footer naming the chosen sections, the "Select all" / "Select none"
+      /// label, and the row's own state — and every one of them is a text node
+      /// or a class. Re-rendering the pane for that replaced the whole subtree
+      /// *and* restarted `.ins-setup`'s 160ms entrance animation, so ticking one
+      /// checkbox flashed the entire form it belongs to.
+      ///
+      /// It falls back to a full render when the pane is not the chooser, so a
+      /// caller can never leave the dashboard on screen with stale controls.
+      function insSyncSetup() {
+        const body = document.getElementById("insBody")
+        if (!body) return
+        const setup = body.querySelector(".ins-setup")
+        if (!setup) return insRenderSetup()
+        const chosen = INS_SECTIONS.filter((sec) => insSections[sec.key])
+
+        for (const btn of setup.querySelectorAll("[data-ins-setup-unit]")) {
+          btn.classList.toggle("active", btn.dataset.insSetupUnit === insUnit)
+        }
+        for (const label of setup.querySelectorAll("[data-ins-setup-item]")) {
+          const on = !!insSections[label.dataset.insSetupItem]
+          label.classList.toggle("on", on)
+          const box = label.querySelector("input[type=checkbox]")
+          // Left alone when it is already right: writing `checked` back onto
+          // the box the user just clicked is what interrupts its own tick.
+          if (box && box.checked !== on) box.checked = on
+        }
+
+        const all = setup.querySelector("#insSetupAllBtn")
+        if (all) {
+          all.textContent =
+            chosen.length === INS_SECTIONS.length ? "Select none" : "Select all"
+        }
+        const build = setup.querySelector("#insBuildBtn")
+        if (build) {
+          build.disabled = !chosen.length
+          build.textContent = chosen.length
+            ? "Build " + chosen.length + " section" + (chosen.length === 1 ? "" : "s")
+            : "Choose at least one section"
+        }
+        const note = setup.querySelector("#insSetupNote")
+        if (note) {
+          note.textContent = chosen.length
+            ? chosen.map((c) => c.name).join(" · ")
+            : "Nothing selected."
+        }
+      }
+
+      /// Toggle one section in the chooser.
       function insToggleSection(key) {
         insSections[key] = !insSections[key]
         insSaveSections()
-        insRenderSetup()
+        insSyncSetup()
       }
 
+      /// Select all, or none. Called from the chooser with no argument, so the
+      /// direction is read off the current state rather than baked into an
+      /// inline handler that would then have to be rewritten on every sync.
       function insSetAllSections(on) {
-        for (const sec of INS_SECTIONS) insSections[sec.key] = !!on
+        const want =
+          typeof on === "boolean"
+            ? on
+            : !INS_SECTIONS.every((sec) => insSections[sec.key])
+        for (const sec of INS_SECTIONS) insSections[sec.key] = want
         insSaveSections()
-        insRenderSetup()
+        insSyncSetup()
       }
 
       function insBuild() {
@@ -21951,7 +22142,7 @@
           }
           insRenderHeader()
           insSyncUnitToggle()
-          insRenderSetup()
+          insSyncSetup()
           return
         }
         // Deliberately live mid-read. The whole point of being able to stop a
@@ -22216,7 +22407,9 @@
           chips.innerHTML = insSearchSummary(insArgs)
             .map(
               (c) =>
-                `<span class="ins-chip"><em>${esc(c.label)}</em>${esc(c.value)}</span>`,
+                `<span class="ins-chip"${
+                  c.title ? ` title="${esc(c.title)}"` : ""
+                }><em>${esc(c.label)}</em>${esc(c.value)}</span>`,
             )
             .join("")
         }
@@ -22847,7 +23040,7 @@
               (c) =>
                 `<tr><td style="padding:2px 10px 2px 0;color:#6b7280;white-space:nowrap">${esc(
                   c.label,
-                )}</td><td style="padding:2px 0">${esc(c.value)}</td></tr>`,
+                )}</td><td style="padding:2px 0">${esc(c.title || c.value)}</td></tr>`,
             )
             .join("") +
           `</table>`
@@ -22939,7 +23132,11 @@
               : ""),
           "",
         ]
-        for (const c of insSearchSummary(insArgs)) lines.push(c.label + ": " + c.value)
+        // The exact bound, not the chip's trimmed one: a pasted report has no
+        // hover to recover it from.
+        for (const c of insSearchSummary(insArgs)) {
+          lines.push(c.label + ": " + (c.title || c.value))
+        }
         lines.push("")
         for (const t of insTiles(d)) {
           lines.push(t.label + "\t" + t.value + (t.sub ? "\t" + t.sub : ""))

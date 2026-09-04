@@ -234,6 +234,32 @@ never used for series identity.
   `withKey − shown` then goes *negative*. Found against the real Interaction Log,
   not imagined. How many values were folded away goes in the note, and where the
   bars do add up to more than their denominator the note says so.
+- **The weekend is drawn, because nothing in the data says where it is.**
+  "Why is Tuesday always low?" cannot be asked of a day series whose days are
+  anonymous, and counting columns from a `06-01` tick to find out is not
+  reading a chart. `insWeekdayOf` derives it from the `YYYY-MM-DD` label with
+  `Date.UTC`, so no host-local offset can turn a Sunday into a Saturday.
+  - **A wash behind the column, not a colour on it.** Colouring the bar would
+    spend the identity channel on something bar length already shows, and would
+    collide with the status scale. The band is a bare tint off the surface —
+    the same discipline as `ramp[0]` — and the tick goes to `ink2`.
+  - **A datum names a palette token (`"weekend"`), never a colour.** One spec
+    object is drawn twice: `insCardHtml` renders it on `#21253a` and
+    `insChartCanvas` re-renders *the same object* on `#ffffff`. `insToneOf`
+    resolves the name per palette. `insRecogColor`'s literals get away with it
+    only because the status hues are deliberately identical in both.
+  - **Bands stop at 120 days.** Past that a wash every five pixels is a texture
+    over the whole plot, saying less than no band would.
+  - **The band and the tick colour both vanish into a spreadsheet**, so the day
+    series carries a `Weekday` column in its table twin, and the tooltip names
+    the day. `INS_WEEKDAYS` is a constant, not `toLocaleDateString`: two copies
+    of one export must not disagree because their readers have different
+    locales.
+  - **The heatmap needs none of it** — its rows are already named — but it
+    still marks where the working week ends: a rule through the label gutter
+    above Saturday, and `ink` on the two weekend labels. `ink2` against `muted`
+    is three steps, which does not survive the speed at which a row label is
+    read.
 - **Missing days are filled with zeros.** The query returns only days that have
   conversations, so a quiet week would close up and read as uninterrupted
   activity at a steady rate. `insFillDays` is string arithmetic over UTC dates —
@@ -280,6 +306,14 @@ the end of it.
   rasterise in about a tenth of a second, and a toast replaced by the success
   toast inside that window is the flicker every other loading affordance in this
   file exists to avoid.
+- **The dates chip names days; the exact bounds are one hover away.** The
+  picker always sends `T00:00:00` and `T23:59:59` — the boundaries of the days
+  that were clicked, and so the one part of that chip carrying no information,
+  twenty-two characters of it in a chip that ellipsises at 340px. `insDayOf` is
+  a slice and never `new Date`: those strings are compared to the stored
+  timestamp *as strings*, and parsing one into an instant to format it back out
+  is how a bound comes to name a different day than the query used. Both reports
+  print `c.title || c.value`, since neither travels with a hover.
 - **The search description is not decoration.** "43% thumbs down" is alarming or
   unremarkable depending entirely on what was searched for, so `insSearchSummary`
   is in the header, in the HTML report and in the plain-text report — and it
@@ -338,6 +372,15 @@ it is the whole difference between 88 ms and 12 ms.)
 - **The header's unit toggle works in both stages**, and in the chooser it is a
   choice rather than a refetch: nothing has been read, so it costs nothing and
   simply redraws.
+- **Ticking a box syncs the chooser; it does not re-render it.** `insRenderSetup`
+  built the pane and every handler called it again, which replaced the whole
+  subtree *and* restarted `.ins-setup`'s 160ms `fade-in` — so one checkbox
+  flashed the form it belongs to. `insSyncSetup` writes the four things that
+  actually change (the Build button's count, the footer naming the sections, the
+  Select all / Select none label, and the row's own state) and falls back to a
+  full render when the pane is not the chooser. It leaves a checkbox alone when
+  it is already right: writing `checked` back onto the box the user just clicked
+  is what interrupts its own tick.
 - The selection is remembered in `cm-insights-sections`, read key by key so a
   file written by an older build cannot introduce one and a hand-edited one
   cannot introduce any. All-false falls back to the default — it is not a state
