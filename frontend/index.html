@@ -20656,6 +20656,11 @@
       // good→critical scale, never used as series identity.
       const INS_THEME_SCREEN = {
         name: "screen",
+        // Nav attributes are emitted only under this palette. An exported SVG
+        // carries none: they would be inert markup in an `<img>` and dead
+        // weight in a file, and `an exported chart depends on nothing outside
+        // itself` is easier to keep true the fewer things it carries.
+        interactive: true,
         surface: "#21253a",
         ink: "#e2e8f0",
         ink2: "#a4b0c4",
@@ -20833,15 +20838,15 @@
       /// (see `insBindTooltips`) rather than by a listener per mark — a heatmap
       /// is 168 cells. The `<title>` beside it is what survives into the
       /// exported SVG and what a screen reader reads; it costs nothing.
-      function insHit(x, y, w, h, tip) {
+      function insHit(x, y, w, h, tip, nav) {
         if (!(w > 0) || !(h > 0)) return ""
         return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(
           2,
         )}" height="${h.toFixed(
           2,
-        )}" fill="transparent" data-tip="${insAttr(tip)}"><title>${esc(
-          tip,
-        )}</title></rect>`
+        )}" fill="transparent" data-tip="${insAttr(tip)}"${
+          nav ? ` data-ins-nav="${insAttr(nav)}" style="cursor:pointer"` : ""
+        }><title>${esc(tip)}</title></rect>`
       }
 
       function insOpen(w, h, theme) {
@@ -21056,6 +21061,7 @@
             `${d.tip || d.label}: ${insPlural(value, spec.unit || "conversations")}${
               spec.total ? " (" + insPct(value, spec.total) + ")" : ""
             }`,
+            theme.interactive ? d.nav : "",
           )
         })
         return { svg: out + "</svg>", width: w, height: h }
@@ -22323,7 +22329,7 @@
           w.byTurn
             ? "The entity the recognizer matched on the interaction itself, not the wording that triggered it."
             : "The entity the recognizer matched, not the wording that triggered it.",
-          counted({ kind: "bars", data: insToData(d.entities), axisLabel: "Entity" }),
+          counted({ kind: "bars", data: insLinkBuckets("entities", d.entities), axisLabel: "Entity" }),
         )
         // Conversation-only for the same reason as feedback: the opening
         // question is a fact about the conversation and has no per-turn reading.
@@ -22347,7 +22353,7 @@
           w.byTurn
             ? "Matching interactions this Article produced."
             : "Conversations in which this Article produced an answer.",
-          counted({ kind: "bars", data: insToData(d.articles), axisLabel: "Article" }),
+          counted({ kind: "bars", data: insLinkBuckets("articles", d.articles), axisLabel: "Article" }),
         )
         push(
           "Content",
@@ -22356,14 +22362,14 @@
           w.byTurn
             ? "Matching interactions that passed through the Dialog, whether or not it answered."
             : "Conversations that passed through the Dialog, whether or not it answered.",
-          counted({ kind: "bars", data: insToData(d.dialogs), axisLabel: "Dialog" }),
+          counted({ kind: "bars", data: insLinkBuckets("dialogs", d.dialogs), axisLabel: "Dialog" }),
         )
         push(
           "Content",
           "dialogNodes",
           "Dialog nodes that answered",
           "The specific node an answer came from.",
-          counted({ kind: "bars", data: insToData(d.dialogNodes), axisLabel: "Dialog node" }),
+          counted({ kind: "bars", data: insLinkBuckets("dialogNodes", d.dialogNodes), axisLabel: "Dialog node" }),
         )
         // Only when there is a comparison to make: one culture is a fact about
         // the database, not a distribution.
@@ -22375,6 +22381,98 @@
           }))
         }
         return cards
+      }
+
+      /// What a Content bucket label refers to — parsing only, no lookup.
+      ///
+      /// The identifiers are already in the payload, embedded in the label:
+      /// `qa-1234`, `dn-6391-4`, a bare Dialog id, a lowercased entity name.
+      /// Kept identical to the parsing the chat bubble already does, because
+      /// two readings of `dn-` is how one view comes to link somewhere another
+      /// does not — and pure, so it can be pinned without a content export.
+      function insParseContentLabel(kind, label) {
+        const raw = String(label || "")
+        // `(unnamed)`, `(unknown)`, `(none)` — the backend's fallbacks. They
+        // name no thing and must never resolve to one.
+        if (!raw || raw.startsWith("(")) return null
+        if (kind === "entities") return { kind: "entity", name: raw }
+        if (kind === "articles") {
+          const m = /^qa-(\d+)$/.exec(raw)
+          return m ? { kind: "article", id: +m[1] } : null
+        }
+        if (kind === "dialogs") {
+          return /^\d+$/.test(raw) ? { kind: "dialog", id: +raw } : null
+        }
+        if (kind === "dialogNodes") {
+          const m = /^dn-(\d+)-(\d+)$/.exec(raw)
+          return m ? { kind: "dialogNode", id: +m[1], node: +m[2] } : null
+        }
+        return null
+      }
+
+      /// The content export's id maps, or `null` when there is no export.
+      ///
+      /// Read through a function rather than referenced directly: the Insights
+      /// block is evaluated on its own under Node by
+      /// `frontend/tests/insights.test.js`, where these globals do not exist —
+      /// and "no content export is loaded" is the same answer, which is the
+      /// normal case when the app is used for conversations alone.
+      function insContentMaps() {
+        try {
+          return {
+            entity: entityMap,
+            article: articleMap,
+            dialog: dialogMap,
+            tdialog: tDialogMap,
+          }
+        } catch (e) {
+          return null
+        }
+      }
+
+      /// Name what a bar points at, and make it clickable when it resolves.
+      ///
+      /// `qa-1234` is an identifier, not an answer to "which Article?". The
+      /// resolved name goes into the tooltip; a bar that resolves also gets a
+      /// destination. With no export loaded nothing resolves, and the chart
+      /// keeps the bare id and simply is not clickable.
+      function insLinkBuckets(kind, buckets) {
+        const maps = insContentMaps()
+        return insToData(buckets).map((b) => {
+          const ref = maps && insParseContentLabel(kind, b.label)
+          if (!ref) return b
+          let name = null
+          let nav = null
+          if (ref.kind === "entity") {
+            const e = maps.entity.get(ref.name.toUpperCase())
+            if (e) {
+              name = e.name
+              nav = "entity:" + e.name
+            }
+          } else if (ref.kind === "article") {
+            const a = maps.article.get(ref.id)
+            if (a) {
+              name = a._faqQ || ""
+              nav = "article:" + ref.id
+            }
+          } else if (ref.kind === "dialog") {
+            const d = maps.dialog.get(ref.id)
+            const t = d ? null : maps.tdialog.get(ref.id)
+            if (d || t) {
+              name = (d || t).name || ""
+              nav = (d ? "dialog:" : "tdialog:") + ref.id
+            }
+          } else if (ref.kind === "dialogNode") {
+            const d = maps.dialog.get(ref.id)
+            if (d) {
+              const node = (d.nodes || []).find((n) => n.id === ref.node)
+              name = (node && node.name ? node.name + " · " : "") + (d.name || "")
+              nav = "dialog:" + ref.id
+            }
+          }
+          if (!nav) return b
+          return { ...b, tip: name ? b.label + " · " + name : b.label, nav }
+        })
       }
 
       /// "interactions" → "interaction". Only ever applied to the nouns above.
@@ -23738,6 +23836,38 @@
         root.addEventListener("scroll", insHideTooltip, true)
       }
 
+      /// Follow a bar to the thing it names.
+      ///
+      /// One delegated listener beside the tooltip one, rather than a handler
+      /// per mark: a Content section is four charts of fifteen bars.
+      function insBindChartNav(root) {
+        root.addEventListener("click", (e) => {
+          const hit = e.target.closest ? e.target.closest("[data-ins-nav]") : null
+          if (!hit) return
+          const nav = hit.getAttribute("data-ins-nav") || ""
+          const at = nav.indexOf(":")
+          if (at < 0) return
+          insFollowNav(nav.slice(0, at), nav.slice(at + 1))
+        })
+      }
+
+      /// Leave Insights and land on the thing itself.
+      ///
+      /// The same cross-view idiom the chat bubbles use: the Content view has
+      /// to be the active one before its modals mean anything, and
+      /// `_navReturnView` is what puts the back button where it was.
+      function insFollowNav(kind, value) {
+        closeConversationInsights()
+        _navReturnView = "conversations"
+        switchView("content")
+        setTimeout(() => {
+          if (kind === "article") goToArticle(+value)
+          else if (kind === "dialog") jumpToDialog(+value, false)
+          else if (kind === "tdialog") jumpToDialog(+value, true)
+          else if (kind === "entity") jumpToEntity(value)
+        }, 100)
+      }
+
       function insShowTooltip(text, x, y) {
         let el = document.getElementById("insTooltip")
         if (!el) {
@@ -24411,6 +24541,7 @@
         if (e.target === e.currentTarget) insCloseExport()
       })
       insBindTooltips(document.getElementById("insBody"))
+      insBindChartNav(document.getElementById("insBody"))
       for (const btn of document.querySelectorAll("#insUnitToggle button")) {
         btn.addEventListener("click", () => insSetUnit(btn.dataset.insUnit))
       }

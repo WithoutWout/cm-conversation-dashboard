@@ -338,6 +338,40 @@ never used for series identity.
 - **Every tooltip ends in a counted noun** via `insPlural` — `1 conversations`
   reads as a bug in the number rather than in the sentence.
 
+## The Content charts point at what they name
+
+`qa-1234` is an identifier, not an answer to "which Article?" — and the four
+"what answered" charts were fifteen bars of them each. The identifiers are
+already in the payload, embedded in the bucket label, so nothing new is read:
+the label is parsed, looked up in the content export's own maps, and the
+resolved name goes into the tooltip while the bar gains a destination.
+
+- **Parsing is split from lookup, and only the parsing is pinned.**
+  `insParseContentLabel` is pure — no maps, no DOM — because it is the fragile
+  half: `dn-` prefixes a Dialog node and `qa-` an Article, and reading one as
+  the other still produces a plausible number. `a bucket label is parsed as the
+  thing it actually names` asserts both directions, and that the backend's
+  `(unnamed)` / `(unknown)` fallbacks resolve to nothing at all.
+- **It is the same parsing the chat bubble already does.** Two readings of
+  `dn-` is how one view comes to link somewhere another does not.
+- **The maps are reached through `insContentMaps()`, not referenced directly.**
+  The Insights block is evaluated on its own under Node, where those globals do
+  not exist — and "no content export is loaded" is the same answer, which is the
+  normal case when the app is used for conversations alone. A bar that does not
+  resolve keeps its bare id and is simply not clickable; it never claims a name
+  it does not have.
+- **A Dialog id is looked up in both maps**, so a Transactional Dialog gets its
+  own destination rather than a dead link into `/dialogs/`.
+- **`data-ins-nav` is emitted only under `INS_THEME_SCREEN`.** In an exported
+  SVG it would be inert inside an `<img>` and dead weight in a file, and
+  `an exported chart depends on nothing outside itself` is easier to keep true
+  the fewer things the picture carries. `a destination is drawn for the screen
+  and never for an export` pins both halves.
+- **One delegated `click` on `#insBody`**, beside the tooltip listener — a
+  Content section is four charts of fifteen bars. Following one closes Insights
+  and uses the same cross-view idiom the chat bubbles do, `_navReturnView`
+  included, so the way back is where it was.
+
 ## Exporting
 
 Six forms, all of them the point of the feature rather than a convenience on

@@ -69,6 +69,8 @@ const EXPORTS = [
   "insZoneStampToUtc",
   "insZoneDayOf",
   "insCacheDecide",
+  "insLinkBuckets",
+  "insParseContentLabel",
   "INS_CAP_MAX_LINES",
   "INS_CAP_MAX_ROWS",
   "insChartMarkdown",
@@ -106,6 +108,8 @@ const {
   insZoneStampToUtc,
   insZoneDayOf,
   insCacheDecide,
+  insLinkBuckets,
+  insParseContentLabel,
   INS_CAP_MAX_LINES,
   INS_CAP_MAX_ROWS,
   insChartMarkdown,
@@ -874,6 +878,71 @@ test("the zone label is a place, never an offset", () => {
   // An offset would be right for half the year and wrong for the other half,
   // and a chart spanning both has no single correct one to print.
   assert.ok(!/[+-]\d/.test(insZoneLabel("Europe/Amsterdam")))
+})
+
+// ── Content charts point at the things they name ───────────────────────────
+//
+// `qa-1234` is an identifier, not an answer to "which Article?". The parsing
+// is the fragile half — `dn-` prefixes a Dialog node and `qa-` an Article, and
+// reading one as the other still produces a plausible number.
+test("a bucket label is parsed as the thing it actually names", () => {
+  assert.deepStrictEqual(insParseContentLabel("articles", "qa-1234"), {
+    kind: "article",
+    id: 1234,
+  })
+  assert.deepStrictEqual(insParseContentLabel("dialogNodes", "dn-6391-4"), {
+    kind: "dialogNode",
+    id: 6391,
+    node: 4,
+  })
+  assert.deepStrictEqual(insParseContentLabel("dialogs", "6391"), {
+    kind: "dialog",
+    id: 6391,
+  })
+  assert.deepStrictEqual(insParseContentLabel("entities", "parkeren"), {
+    kind: "entity",
+    name: "parkeren",
+  })
+
+  // A `dn-` id must never read as an Article, in either direction.
+  assert.strictEqual(insParseContentLabel("articles", "dn-6391-4"), null)
+  assert.strictEqual(insParseContentLabel("dialogNodes", "qa-1234"), null)
+  // A Dialog id is a bare number; a prefixed one is a different kind of thing.
+  assert.strictEqual(insParseContentLabel("dialogs", "dn-6391-4"), null)
+  assert.strictEqual(insParseContentLabel("dialogNodes", "dn-6391"), null)
+
+  // The backend's fallback labels name no thing and must not resolve to one.
+  for (const empty of ["(unnamed)", "(unknown)", "(none)", "(empty)", ""]) {
+    for (const kind of ["entities", "articles", "dialogs", "dialogNodes"]) {
+      assert.strictEqual(insParseContentLabel(kind, empty), null, kind + " " + empty)
+    }
+  }
+})
+
+test("with no content export loaded, a bar keeps its id and is not clickable", () => {
+  // The normal case when the app is used for conversations alone. Nothing
+  // resolves, so nothing claims to.
+  const data = insLinkBuckets("articles", [{ label: "qa-1234", count: 9 }])
+  assert.deepStrictEqual(data, [{ label: "qa-1234", value: 9 }])
+  assert.strictEqual(data[0].nav, undefined)
+})
+
+test("a destination is drawn for the screen and never for an export", () => {
+  const spec = {
+    kind: "bars",
+    unit: "conversations",
+    total: 10,
+    data: [{ label: "qa-1234", value: 9, tip: "qa-1234 · Openingstijden", nav: "article:1234" }],
+  }
+  const screen = insRenderChart(spec, INS_THEME_SCREEN).svg
+  const exported = insRenderChart(spec, INS_THEME_EXPORT).svg
+  assert.ok(screen.includes('data-ins-nav="article:1234"'), "no destination on screen")
+  // An exported SVG carries none: inert inside an `<img>`, dead weight in a
+  // file, and one fewer thing for the standalone assertion to police.
+  assert.ok(!/data-ins-nav/.test(exported), "a destination leaked into the export")
+  assert.ok(!/cursor:pointer/.test(exported), "a cursor style leaked into the export")
+  // The resolved name reaches the tooltip and the table either way.
+  assert.ok(screen.includes("qa-1234 · Openingstijden"))
 })
 
 // ── The caption block ──────────────────────────────────────────────────────
