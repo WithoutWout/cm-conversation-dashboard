@@ -150,6 +150,25 @@ its words come from `entityMap`.
   number or by name, with the whole Dialog still offered first. The node half of
   the "Dialog / Node ID" search was previously reachable only by already knowing
   the number.
+- **A Dialog bubble opens its own node list when you click it.** A Dialog is a
+  question you are half-way through asking — "these conversations touched 6391"
+  is usually a step towards "…and reached *this* node of it", and re-typing the
+  whole thing was the only way to say the second one. The list is anchored under
+  the bubble, leads with **whole dialog** so the narrowing is undoable from the
+  same menu that did it, and marks the row the bubble already carries — it opens
+  on that row, so the arrow keys move from where you are.
+  - It is the *same* popover, opened from a second place
+    (`_convSuggestShow`), so the keyboard handling, the dismissal rules and the
+    row markup cannot drift between the two. `_convSuggestEditIdx` is what says
+    a pick replaces a bubble instead of adding one, and `closeConvSuggest`
+    clears it.
+  - **Only when the nodes are actually held.** An Article has none, a
+    Transactional Dialog carries none in the export (`tDialogs` is `{id, name}`
+    and nothing else), and without a content export there is nothing to offer —
+    all three stay plain, non-clickable chips, because a chip that looks
+    clickable and does nothing is worse than one that does not.
+  - Narrowing two bubbles onto the same node would leave them ORing with
+    themselves, so the list is deduplicated after a replace; first one wins.
 - **`#ID` no longer switches itself off when you type a letter.** That rule
   existed because a letter could not be part of an id; typing a *name* in `#ID`
   mode is now the point, and the rule undid it mid-word.

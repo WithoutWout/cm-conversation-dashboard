@@ -18,6 +18,7 @@ const NAMES = [
   "_convWordStart",
   "_convSuggestRank",
   "_convNodeSuggest",
+  "convTokenNodeRows",
   "_convSuggestVia",
   "convSuggestFor",
   "_convMarkSuggest",
@@ -71,6 +72,17 @@ vm.runInContext(
     _convEntityIndexSrc = null
   }
   function labelsFor(q) { return convSuggestFor(q).map((r) => r.idText || r.value) }
+  function tokens() { return convIdTokens.map((t) => t.idText) }
+  function tokenAt(i) { return convIdTokens[i] }
+  // The real replaceConvToken also closes the popover and re-runs the search;
+  // this is the array surgery, which is the part that can be wrong.
+  function replaceToken(i, idText) {
+    const cand = convTokenNodeRows(convIdTokens[i]).find((r) => r.idText === idText)
+    convIdTokens[i] = { kind: cand.kind, idText: cand.idText, label: cand.label || "" }
+    convIdTokens = convIdTokens.filter(
+      (t, j) => convIdTokens.findIndex((u) => u.idText === t.idText) === j,
+    )
+  }
 `,
   ctx,
 )
@@ -313,6 +325,72 @@ ok(
 ctx.setUp({ entities: CAMPER_ENTITIES })
 eq("with no content export loaded, names still match", ctx.labelsFor("camper"), ["camper", "camperplaats"])
 eq("…and a word-only query finds nothing rather than erroring", ctx.labelsFor("caravan"), [])
+
+// ── Narrowing a Dialog bubble to one of its nodes ────────────────────────────
+// A Dialog bubble is a question you are half-way through asking. Re-typing the
+// whole thing was the only way to add the node.
+console.log("\nThe node picker on an existing bubble:")
+ctx.setUp({
+  articles: ARTICLES,
+  dialogs: DIALOGS,
+  idMode: true,
+  idTokens: [{ kind: "dialog", idText: "dn-6391", label: "Parkeren en bereikbaarheid" }],
+})
+eq(
+  "a Dialog bubble offers the whole dialog first, then its nodes",
+  ctx.convTokenNodeRows(ctx.tokenAt(0)).map((r) => r.idText),
+  ["dn-6391", "dn-6391-2", "dn-6391-15", "dn-6391-4"],
+)
+eq(
+  "…and marks the one the bubble already carries",
+  ctx.convTokenNodeRows(ctx.tokenAt(0)).filter((r) => r.isCurrent).map((r) => r.idText),
+  ["dn-6391"],
+)
+eq(
+  "a bubble already narrowed to a node marks that node instead",
+  ctx
+    .convTokenNodeRows({ kind: "node", idText: "dn-6391-15" })
+    .filter((r) => r.isCurrent)
+    .map((r) => r.idText),
+  ["dn-6391-15"],
+)
+// The three cases where the bubble must stay a plain, non-clickable chip.
+ok("an Article bubble has no nodes to pick", ctx.convTokenNodeRows({ kind: "article", idText: "qa-1418" }) === null)
+ok(
+  "a Transactional Dialog carries no nodes in the export",
+  ctx.convTokenNodeRows({ kind: "tdialog", idText: "dn-5803" }) === null,
+)
+ok(
+  "a dialog we do not hold offers nothing rather than an empty menu",
+  ctx.convTokenNodeRows({ kind: "dialog", idText: "dn-9999" }) === null,
+)
+// Narrowing, and then widening again from the same menu.
+ctx.setUp({
+  dialogs: DIALOGS,
+  idMode: true,
+  idTokens: [{ kind: "dialog", idText: "dn-6391", label: "" }],
+})
+ctx.replaceToken(0, "dn-6391-15")
+eq("picking a node narrows the bubble in place", ctx.tokens(), ["dn-6391-15"])
+ctx.replaceToken(0, "dn-6391")
+eq("…and 'whole dialog' widens it back", ctx.tokens(), ["dn-6391"])
+// Two bubbles converging on the same node would OR with themselves.
+ctx.setUp({
+  dialogs: DIALOGS,
+  idMode: true,
+  idTokens: [
+    { kind: "node", idText: "dn-6391-15", label: "" },
+    { kind: "dialog", idText: "dn-6391", label: "" },
+  ],
+})
+ctx.replaceToken(1, "dn-6391-15")
+eq("narrowing onto a node another bubble holds leaves one, not two", ctx.tokens(), ["dn-6391-15"])
+
+ctx.setUp({ idMode: true })
+ok(
+  "with no content export loaded a Dialog bubble is not clickable",
+  ctx.convTokenNodeRows({ kind: "dialog", idText: "dn-6391" }) === null,
+)
 
 // ── Marking ──────────────────────────────────────────────────────────────────
 console.log("\nHighlighting the typed run:")

@@ -4202,6 +4202,26 @@
         /* Long enough for `dn-6391-4` or a readable entity name, short enough
            that four bubbles still leave room to type. */
         max-width: 132px;
+        /* It is a <button> on a Dialog bubble and a <span> everywhere else, so
+           the button's own chrome has to be taken back off. */
+        background: none;
+        border: none;
+        padding: 0;
+        margin: 0;
+        color: inherit;
+        font: inherit;
+        white-space: nowrap;
+      }
+      /* A Dialog bubble opens its node list; the caret is what says so. */
+      .conv-token.is-pickable .conv-token-label {
+        cursor: pointer;
+      }
+      .conv-token.is-pickable:hover {
+        filter: brightness(1.25);
+      }
+      .conv-token-caret {
+        opacity: 0.7;
+        font-size: 0.6rem;
       }
       .conv-token-x {
         background: none;
@@ -4355,6 +4375,23 @@
       }
       .conv-suggest-row.active .conv-suggest-via mark {
         color: #fff;
+      }
+      /* Which row the bubble already carries — the list is an edit, not a
+         fresh set of choices. */
+      .conv-suggest-cur {
+        flex-shrink: 0;
+        font-size: 0.6rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        padding: 0 4px;
+        color: var(--muted);
+      }
+      .conv-suggest-row.active .conv-suggest-cur {
+        border-color: rgba(255, 255, 255, 0.35);
+        color: rgba(255, 255, 255, 0.85);
       }
       .conv-suggest-meta {
         flex-shrink: 0;
@@ -29214,6 +29251,8 @@
       let convIdTokens = [] // [{kind, idText, label}]
       let _convSuggestRows = []
       let _convSuggestIdx = -1
+      // Which bubble the popover is editing; -1 while it is the type-ahead.
+      let _convSuggestEditIdx = -1
       let _convContentIndex = null // invalidated by loadData
       let _convEntityIndex = null
       let _convEntityIndexSrc = null
@@ -29475,17 +29514,27 @@
       }
 
       function openConvSuggest(rawInput) {
+        // The first row is preselected, so Enter is one key rather than two.
+        _convSuggestEditIdx = -1
+        _convSuggestShow(convSuggestFor(rawInput), rawInput, 0, null)
+      }
+
+      /// Paint the popover and put it on screen.
+      ///
+      /// Shared by the type-ahead and the node picker, so the two cannot drift
+      /// on keyboard handling, dismissal or row markup — the list *is* one
+      /// list, opened from two places and anchored differently.
+      function _convSuggestShow(rows, rawInput, activeIdx, anchor) {
         const pop = document.getElementById("convSuggest")
         const list = document.getElementById("convSuggestList")
         const input = document.getElementById("convSearch")
         if (!pop || !list) return
-        _convSuggestRows = convSuggestFor(rawInput)
+        _convSuggestRows = rows
         if (!_convSuggestRows.length) {
           closeConvSuggest()
           return
         }
-        // The first row is preselected, so Enter is one key rather than two.
-        _convSuggestIdx = 0
+        _convSuggestIdx = activeIdx
         const raw = (rawInput || "").trim()
         list.innerHTML = _convSuggestRows
           .map((c, i) => {
@@ -29503,9 +29552,15 @@
                 _convMarkSuggest(via, raw) +
                 "</span>"
               : ""
+            // Only the node picker sets this: it says which node the bubble
+            // already carries, so the list reads as an edit rather than as a
+            // fresh set of choices.
+            const curHtml = c.isCurrent
+              ? '<span class="conv-suggest-cur">current</span>'
+              : ""
             return (
               '<button class="conv-suggest-row' +
-              (i === 0 ? " active" : "") +
+              (i === activeIdx ? " active" : "") +
               '" role="option" onmousemove="_convSuggestHover(' +
               i +
               ')" onclick="_convSuggestTake(' +
@@ -29520,17 +29575,96 @@
               name +
               "</span>" +
               viaHtml +
+              curHtml +
               '<span class="conv-suggest-meta">' +
               esc(meta) +
               "</span></button>"
             )
           })
           .join("")
+        const wrap = document.querySelector(".conv-search-wrap")
+        // Anchored under the bubble it is editing, or spanning the whole field
+        // when it is the type-ahead. Cleared every time, or a picker opened
+        // once would leave the type-ahead narrow for the rest of the session.
+        if (anchor && wrap) {
+          const a = anchor.getBoundingClientRect()
+          const w = wrap.getBoundingClientRect()
+          const width = Math.max(240, Math.min(320, w.width))
+          // Clamped so a bubble near the right edge does not open off the side
+          // of the field.
+          const left = Math.max(0, Math.min(a.left - w.left, w.width - width))
+          pop.style.left = left + "px"
+          pop.style.right = "auto"
+          pop.style.width = width + "px"
+        } else {
+          pop.style.left = ""
+          pop.style.right = ""
+          pop.style.width = ""
+        }
         pop.hidden = false
-        document
-          .querySelector(".conv-search-wrap")
-          .classList.add("is-suggesting")
+        if (wrap) wrap.classList.add("is-suggesting")
         if (input) input.setAttribute("aria-expanded", "true")
+      }
+
+      /// The rows for "which node of this Dialog?", or null when the bubble is
+      /// not a Dialog whose nodes we hold.
+      ///
+      /// An Article has no nodes, a Transactional Dialog carries none in the
+      /// export (`tDialogs` is `{id, name}` and nothing else), and without a
+      /// content export loaded there is nothing to offer — all three return
+      /// null so the bubble stays a plain, non-clickable chip.
+      function convTokenNodeRows(tok) {
+        if (!tok || (tok.kind !== "dialog" && tok.kind !== "node")) return null
+        const m = /^dn-(\d+)(?:-(\d+))?$/.exec(tok.idText || "")
+        if (!m) return null
+        const dialog = dialogMap.get(Number(m[1]))
+        if (!dialog || !dialog.nodes || !dialog.nodes.length) return null
+        const cur = tok.idText
+        const whole = "dn-" + dialog.id
+        // "Whole dialog" leads, so narrowing to a node is undoable from the
+        // same menu that did it.
+        const rows = [
+          {
+            key: whole,
+            kind: "dialog",
+            idText: whole,
+            num: String(dialog.id),
+            label: dialog.name || "",
+            isCurrent: cur === whole,
+          },
+        ]
+        for (const n of dialog.nodes) {
+          const idText = "dn-" + dialog.id + "-" + n.id
+          rows.push({
+            key: idText,
+            kind: "node",
+            idText,
+            num: String(n.id),
+            label: n.name || "",
+            isCurrent: cur === idText,
+          })
+        }
+        return rows
+      }
+
+      /// Open the node picker on the bubble at `i`.
+      ///
+      /// A Dialog bubble is a question you are half-way through asking — "these
+      /// conversations touched dialog 6391" is usually a step towards "…and
+      /// reached *this* node of it". Re-typing the whole thing to add the node
+      /// was the only way to say the second one.
+      function openConvNodePicker(i) {
+        const tok = convIdTokens[i]
+        const rows = convTokenNodeRows(tok)
+        if (!rows) return
+        const anchor = document.querySelector(
+          '#convTokens .conv-token[data-token-index="' + i + '"]',
+        )
+        _convSuggestEditIdx = i
+        // Opens on what the bubble already says, so the arrow keys move from
+        // where you are — the ordinary behaviour of a menu that edits a value.
+        const at = Math.max(0, rows.findIndex((r) => r.isCurrent))
+        _convSuggestShow(rows, "", at, anchor)
       }
 
       function closeConvSuggest() {
@@ -29538,6 +29672,7 @@
         const input = document.getElementById("convSearch")
         _convSuggestRows = []
         _convSuggestIdx = -1
+        _convSuggestEditIdx = -1
         if (pop) pop.hidden = true
         const wrap = document.querySelector(".conv-search-wrap")
         if (wrap) wrap.classList.remove("is-suggesting")
@@ -29571,7 +29706,33 @@
 
       function _convSuggestTake(i) {
         const cand = _convSuggestRows[i == null ? _convSuggestIdx : i]
-        if (cand) addConvToken(cand)
+        if (!cand) return
+        if (_convSuggestEditIdx >= 0) replaceConvToken(_convSuggestEditIdx, cand)
+        else addConvToken(cand)
+      }
+
+      /// Narrow (or widen) the bubble at `i` to what the picker chose.
+      function replaceConvToken(i, cand) {
+        const tok = convIdTokens[i]
+        if (!tok) return
+        // Picking what it already says is a no-op, not a fresh search.
+        if (tok.idText === cand.idText) {
+          closeConvSuggest()
+          return
+        }
+        convIdTokens[i] = {
+          kind: cand.kind,
+          idText: cand.idText,
+          label: cand.label || "",
+        }
+        // Narrowing onto a node another bubble already carries would leave two
+        // identical bubbles ORing with themselves. First one wins.
+        convIdTokens = convIdTokens.filter(
+          (t, j) => convIdTokens.findIndex((u) => u.idText === t.idText) === j,
+        )
+        closeConvSuggest()
+        convHasSearched = true
+        _afterConvTokenChange(true)
       }
 
       /// The keys already taken, so a bubble is never offered twice.
@@ -29644,26 +29805,51 @@
         // not what this field is about. The funnel badge is where they stay
         // visible, which is where they lived before bubbles existed.
         const items = convSearchIds
-          ? convIdTokens.map((t) => ({
-              cls: t.kind === "node" ? "dialog" : t.kind,
-              text: t.idText,
-              title: t.label ? t.idText + " — " + t.label : t.idText,
-            }))
-          : convEntityFilters.map((f) => ({
+          ? convIdTokens.map((t, i) => {
+              // A Dialog bubble can be narrowed to one of its nodes in place.
+              // Only when we actually hold the nodes: without the content
+              // export there is nothing to open, and a chip that looks
+              // clickable and does nothing is worse than a plain one.
+              const nodes = convTokenNodeRows(t)
+              return {
+                cls: t.kind === "node" ? "dialog" : t.kind,
+                text: t.idText,
+                title: nodes
+                  ? (t.label ? t.idText + " — " + t.label : t.idText) +
+                    " · click to pick a node"
+                  : t.label
+                  ? t.idText + " — " + t.label
+                  : t.idText,
+                pickable: !!nodes,
+                idx: i,
+              }
+            })
+          : convEntityFilters.map((f, i) => ({
               cls: "entity",
               text: f.value,
               title: "Entity: " + f.value,
+              pickable: false,
+              idx: i,
             }))
         host.innerHTML = items
           .map(
             (t, i) =>
               '<span class="conv-token is-' +
               esc(t.cls) +
+              (t.pickable ? " is-pickable" : "") +
+              '" data-token-index="' +
+              i +
               '" title="' +
               esc(t.title) +
-              '"><span class="conv-token-label">' +
-              esc(t.text) +
-              '</span><button class="conv-token-x" title="Remove" onclick="event.stopPropagation();removeConvToken(' +
+              '">' +
+              (t.pickable
+                ? '<button class="conv-token-label" onclick="event.stopPropagation();openConvNodePicker(' +
+                  i +
+                  ')">' +
+                  esc(t.text) +
+                  ' <span class="conv-token-caret">&#x25BE;</span></button>'
+                : '<span class="conv-token-label">' + esc(t.text) + "</span>") +
+              '<button class="conv-token-x" title="Remove" onclick="event.stopPropagation();removeConvToken(' +
               i +
               ')">&#x2715;</button></span>',
           )

@@ -425,6 +425,8 @@ The orientation map for the whole window. It says what is on screen and where;
   [#ID] | token field | search submit | [.*] | [U] [B] [E]
     the token field holds bubbles + the caret: entity bubbles when #ID is off
     and E is on, Article/Dialog/node bubbles when it is on
+    a Dialog bubble carries a ▾ and opens its node list in place — the same
+    popover, anchored under the bubble, "whole dialog" first
     typing opens #convSuggest under it — badge · name (typed run marked) ·
     id or conversation count; ↑↓ select, Enter/Tab add, Esc close,
     Backspace on an empty field eats the last bubble
