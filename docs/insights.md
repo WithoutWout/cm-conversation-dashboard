@@ -119,7 +119,24 @@ its own offset.
   and `an autumn-back day counts the hour that happened twice` pin both ends.
 - **It costs a query rather than adding one.** `by_day` and `hour_weekday` were
   two statements; they are one `GROUP BY substr(ts,1,10), substr(ts,12,2)` with
-  no `strftime` at all. A year is 366 rows of 24 numbers, ~40 KB — an order of
+  no `strftime` at all. Measured with `perf::insights_cost` against a real
+  149,761-interaction / 18,337-conversation database, best-of-three per phase:
+
+  | | `by_day` + `hour_weekday` | `day_hours` |
+  | --- | --- | --- |
+  | no filter, conversations | 9.0 ms | **5.6 ms** |
+  | no filter, interactions | 135.4 ms | **66.5 ms** |
+  | a search term, conversations | 0.9 ms | **0.5 ms** |
+  | a search term, interactions | 24.3 ms | **14.0 ms** |
+  | zero-recognition pill, conversations | 0.9 ms | **0.6 ms** |
+  | zero-recognition pill, interactions | 24.7 ms | **14.5 ms** |
+
+  Roughly half in every case. **Only this phase is comparable between the two
+  runs** — untouched phases swung 4-6x in both directions across them
+  (`headline` 1516 ms against 260 ms, `recognition_types` 166 ms against
+  656 ms), so the harness's `all` and `one section` totals say nothing here.
+  That is the noise the harness takes best-of-three to survive, and the reason
+  a claim about this change has to be made per phase. A year is 366 rows of 24 numbers, ~40 KB — an order of
   magnitude less than the dashboard copy already puts on the clipboard, where
   one object per hour would repeat the date 8,784 times.
 - **The offset is resolved per `(zone, day)`, not per bucket.** It is read at
