@@ -67,6 +67,111 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - Ranges are merged before insertion, longest-first at a given start: two terms can cover the same span, and `<mark>` nested in `<mark>` renders wrong. `opening | openingstijden` produces one mark, not `[opening][stijden]`.
 - Regex mode is deliberately **not** folded — the user wrote a pattern, and the backend's regex path does not fold either.
 
+## The search bar's bubbles
+
+The conversations bar knows about two things you otherwise had to already know
+the answer to: which entities the imported conversations triggered, and which
+Article or Dialog you mean. Typing offers them and taking one turns it into a
+removable bubble sitting in the field.
+
+**Two kinds, never mixed** — the `#ID` toggle already partitions the bar:
+
+- **`#ID` off, `E` on → an entity filter.** A bubble is an entry in
+  `convEntityFilters`, *the same array the funnel's Entities tab writes to*. One
+  state, two views: they cannot disagree, and `_updateCtxFilterBadge` — which
+  every change from either side already routes through — is where the bubbles
+  are redrawn. The semantics are the ones above: OR within the list, AND with a
+  typed query, resolved by an indexed `EXISTS`.
+- **`#ID` on → one `IdTarget` each, OR-ed together.**
+
+**The id bubbles travel in the existing `query` string, spelled in the app's own
+vocabulary** — `qa-1418 | dn-6391 | dn-6391-4`. Nothing was added to
+`GetSessionsArgs`, and that is deliberate: it is the Insights scope-cache
+fingerprint, and `lastConvSearchArgs`, the AI export and the chat query mirror
+all read it, so a new field would have had to be threaded through four places to
+say something the query string could already carry.
+
+- **`IdTarget::parse` reads the prefix first, `id_type` only after.** A prefixed
+  segment names its own kind, so a query can hold an Article and a Dialog at
+  once — which one `query_id_type` cannot express. A bare number still means
+  exactly what it meant before, which is what leaves the "Search by:" pill row
+  in charge of anything typed and submitted without picking a suggestion.
+- **`parse_all` splits on `|` and drops what it cannot read**, rather than
+  failing the whole query: with three bubbles up, one typo must not silently
+  turn the other two off. Nothing parseable at all still becomes the explicit
+  `WHERE 0`, never a text search the user did not ask for.
+- **One SELECT per target, `UNION ALL`-ed** — which is already how
+  `match_selects` means OR. Each keeps its own FTS narrowing, so N bubbles cost
+  N of the 1–3 ms narrow-then-decide rather than one widened scan, and
+  `qa-123` still does not match `qa-1234` with a second bubble present.
+- **`cai_id_hit` takes the target's index as a third argument.**
+  `create_scalar_function` keys on (name, arity), so N two-argument closures
+  would silently overwrite each other and every bubble would end up searching
+  for the last one. `several_id_bubbles_or_together` is what catches that.
+- `convIdSegmentValid` is the renderer's mirror of `IdTarget::parse`, and
+  `frontend/tests/search-bubbles.test.js` asserts that every segment
+  `convIdQueryString` writes is a segment it accepts.
+
+**Both feeds are already in memory, so a keystroke costs no IPC.** The content
+index is built once per `loadData` from `allCombinedItems` (~4100 rows, 4.2 ms)
+and invalidated with it; entities come from the cached `entityOptions` plus
+their export trigger words, warmed on first focus by the existing idempotent
+`ensureEntityIdMap`. A query is 0.06–0.7 ms and about 1 ms for a single letter
+matching nearly everything, so it runs synchronously on `input` with no
+debounce. Both indexes are invalidated by `loadData` — the entity one too, since
+its words come from `entityMap`.
+
+- **The warm re-offers when the scan lands.** `get_entity_options` is a full
+  scan, and on a real database the first keystroke of a cold open beat it —
+  which showed as *nothing*, indistinguishable from "this database has no
+  entities". It now re-runs the suggestion once the options arrive, if the field
+  still holds what was typed while waiting.
+- **The field's `space = AND · | = OR` hover tooltip is suppressed while the
+  list is open** (`.conv-search-wrap.is-suggesting`). It hangs below the field,
+  which is exactly where the list now opens, and it landed on the first row.
+
+- **Every typed token must hit, but the ranking uses the whole typed string.**
+  "park hotel" narrows; "park" still puts *parkeren* above *zonnepark*, because
+  what someone means by typing is "starts with this" and a token split throws
+  that away.
+- **An entity is offered by the words that fire it, not only by its name.**
+  `caravan` is not the CAMPER entity's name — it is one of the twenty words the
+  recognizer fires CAMPER on, and it is what someone types when looking for
+  those conversations. The words come from the content export
+  (`entityMap`, keyed by upper-cased name, which is also what bridges the two
+  spellings: `entity_index` stores the lower-cased *display* name and the export
+  carries the internal one). With no export loaded this degrades to name-only.
+  - **Every name match ranks above every word match**, so typing `camper` cannot
+    bury the CAMPER entity beneath whatever else happens to list it as a word.
+  - **The row says which word it matched on** (`camper · via caravan`). Offering
+    *camper* for `caravan` with nothing else on it reads as a bug rather than as
+    a synonym.
+- **A Dialog written with a `-` switches the list to that dialog's nodes**, by
+  number or by name, with the whole Dialog still offered first. The node half of
+  the "Dialog / Node ID" search was previously reachable only by already knowing
+  the number.
+- **`#ID` no longer switches itself off when you type a letter.** That rule
+  existed because a letter could not be part of an id; typing a *name* in `#ID`
+  mode is now the point, and the rule undid it mid-word.
+- **`_convMarkSuggest` is not `hl()`.** `hl` is built from the *content* search
+  bar's `Aa` / `\b` / `.*` toggles, which have nothing to do with this list and
+  would make the same keystroke highlight differently depending on a control in
+  another view. It also refuses to mark a string that changes length when
+  lowercased — an index into the folded copy is only an index into the original
+  while the two are the same length, the same trap `foldDiacritics` documents.
+- **The opened chat is told why the conversation is in the list.**
+  `chatMatchEntities` now also turns on for entity *bubbles*, and with nothing
+  typed the bubble names become `chatQuery`, so `turnMatches` finds the turn
+  through `rowEntityFields` and the chip is marked `.is-hit`. Without it,
+  filtering by an entity opened a forty-turn chat with nothing marked, which
+  reads as the chat being broken. Id bubbles lose their `qa-`/`dn-` prefix on
+  the way in, because the chat tests `articleIds` and `dialogPaths` directly and
+  a Dialog's evidence there is a bare `6391:2/15` — exactly what the raw number
+  in the box produced before bubbles existed.
+- **`searchConvsForEntity` is deliberately untouched.** It still runs an
+  entity-only *search*, whose substring matching over entity names is a genuinely
+  different question from an exact-name filter — see the note above.
+
 ## Entity pills are a filter, not a search
 
 `query_entities` is a boolean saying "also match `query` against entity name,
@@ -77,6 +182,26 @@ everything else — exactly how the Context and Metadata pills compose.
 Picking three entities by name is not the same question as searching for a word
 that might appear in one, and `entity_pills_filter_rather_than_search` pins the
 difference, including that an empty list filters nothing rather than everything.
+
+**The filter is an `IN`, not a correlated `EXISTS` — the same lesson the
+feedback filter learned, for the same reason.** `entity_index` deliberately
+carries no secondary index, so `ei.session_uuid = s.session_uuid` has nothing to
+seek on and the subquery re-scanned the whole table *once per candidate
+session*. Measured on a real database: **23.4 s** over 8395 sessions × 81647
+rows, and **11.9 s** over 6064 × 81647. As an uncorrelated `IN`, SQLite scans
+`entity_index` once, builds one ephemeral index plus a bloom filter, and probes
+it: **8–9 ms**, the same rows.
+
+- That is why picking an entity by name was two thousand times slower than
+  *searching* for the same name, which had always gone down the one-scan path
+  and returned the same conversations. The two readings of "conversations that
+  fired WIJN" disagreed only in how long you waited.
+- `an_entity_filter_never_rescans_the_index_per_session` pins the plan rather
+  than a duration — a timing threshold in a test is a flake waiting to happen.
+  It asserts positively (`LIST SUBQUERY` over `entity_index`), because the plan
+  carries an unrelated correlated subquery of its own — the per-page
+  `user_message_preview` lookup — so "no CORRELATED anywhere" would be
+  asserting something else entirely.
 
 - **`get_entity_options` is one full scan of `entity_index`.** That table
   deliberately carries no secondary index — every extra b-tree there is a

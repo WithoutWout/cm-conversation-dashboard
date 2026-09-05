@@ -4110,28 +4110,284 @@
         min-width: 0;
         position: relative;
       }
+      /* The `space = AND · | = OR` hint is a hover tooltip hanging below the
+         field, which is exactly where the type-ahead now opens — it landed on
+         top of the first row. The list is the more useful thing while it is
+         up, and the hint is still there the moment it closes. */
+      .conv-search-wrap.is-suggesting::after {
+        display: none !important;
+      }
+      /* The token field. The border moved off the <input> and onto this
+         wrapper, because the bubbles sit *inside* the field beside the caret —
+         so the wrapper is what the user reads as "the search box" now. */
       .conv-search-inner {
         position: relative;
         flex: 1;
         min-width: 0;
-      }
-      .conv-search {
-        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
         background: var(--bg);
         border: 1px solid var(--border);
         border-right: none;
         border-radius: 6px 0 0 6px;
-        color: var(--text);
-        padding: 6px 26px 6px 10px;
-        font-size: 0.8rem;
-        outline: none;
+        padding: 3px 26px 3px 6px;
+        /* Clicking the padding focuses the input, so the whole field behaves
+           like the plain input it replaced. */
+        cursor: text;
         transition: border-color 0.15s;
       }
-      .conv-search:focus {
+      .conv-search-inner:focus-within {
         border-color: var(--accent);
+      }
+      .conv-tokens {
+        display: contents;
+      }
+      .conv-search {
+        /* `flex: 1 1 70px` rather than `width: 100%`: the input shares the line
+           with however many bubbles are up, and wraps to its own row when
+           there is no room left for a word. */
+        flex: 1 1 70px;
+        min-width: 70px;
+        width: auto;
+        background: none;
+        border: none;
+        border-radius: 0;
+        color: var(--text);
+        padding: 3px 4px;
+        font-size: 0.8rem;
+        outline: none;
       }
       .conv-search::placeholder {
         color: var(--muted);
+      }
+      /* One bubble: an entity to filter by, or an Article/Dialog/node to
+         search for. Coloured by kind, matching the card border-left and badge
+         colours the Content tab already uses for the same three things. */
+      .conv-token {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        max-width: 100%;
+        background: rgba(124, 106, 247, 0.15);
+        border: 1px solid var(--accent);
+        border-radius: 4px;
+        color: var(--accent);
+        font-size: 0.69rem;
+        font-weight: 600;
+        line-height: 1.5;
+        padding: 1px 2px 1px 6px;
+        white-space: nowrap;
+        animation: token-in 0.12s ease-out;
+      }
+      .conv-token.is-article {
+        background: rgba(96, 165, 250, 0.15);
+        border-color: var(--blue);
+        color: var(--blue);
+      }
+      .conv-token.is-tdialog {
+        background: rgba(45, 212, 191, 0.15);
+        border-color: var(--teal);
+        color: var(--teal);
+      }
+      .conv-token.is-entity {
+        background: rgba(74, 222, 128, 0.15);
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .conv-token-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* Long enough for `dn-6391-4` or a readable entity name, short enough
+           that four bubbles still leave room to type. */
+        max-width: 132px;
+      }
+      .conv-token-x {
+        background: none;
+        border: none;
+        color: inherit;
+        cursor: pointer;
+        font-size: 0.72rem;
+        line-height: 1;
+        opacity: 0.6;
+        padding: 2px 3px;
+        border-radius: 3px;
+      }
+      .conv-token-x:hover {
+        opacity: 1;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      @keyframes token-in {
+        from {
+          opacity: 0;
+          transform: scale(0.85);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      /* The type-ahead. Anchored on .conv-search-wrap, which is already
+         position:relative, so it needs no measuring — unlike .ins-keypop,
+         which is `position: fixed` inside a scrolling modal body. */
+      .conv-suggest[hidden] {
+        display: none;
+      }
+      .conv-suggest {
+        position: absolute;
+        top: calc(100% + 5px);
+        left: 0;
+        right: 0;
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+        max-height: 292px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+        animation: pop-in 0.12s ease-out;
+      }
+      .conv-suggest-list {
+        overflow-y: auto;
+        /* Same reason as .ins-keypop-list: the list is refiltered on every
+           keystroke, so it crosses the scrollable threshold constantly and
+           every row would shift sideways without the gutter. */
+        scrollbar-gutter: stable;
+        padding: 5px;
+      }
+      .conv-suggest-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        background: none;
+        border: none;
+        border-radius: 5px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.74rem;
+        padding: 5px 7px;
+        text-align: left;
+      }
+      .conv-suggest-row:hover {
+        background: var(--surface2);
+      }
+      .conv-suggest-row.active {
+        background: var(--accent);
+        color: #fff;
+      }
+      .conv-suggest-badge {
+        flex-shrink: 0;
+        font-size: 0.6rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        border-radius: 3px;
+        padding: 1px 5px;
+        border: 1px solid transparent;
+      }
+      .conv-suggest-badge.is-article {
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--blue);
+        border-color: rgba(96, 165, 250, 0.25);
+      }
+      .conv-suggest-badge.is-dialog,
+      .conv-suggest-badge.is-node {
+        background: rgba(124, 106, 247, 0.12);
+        color: var(--accent);
+        border-color: rgba(124, 106, 247, 0.25);
+      }
+      .conv-suggest-badge.is-tdialog {
+        background: rgba(45, 212, 191, 0.12);
+        color: var(--teal);
+        border-color: rgba(45, 212, 191, 0.25);
+      }
+      .conv-suggest-badge.is-entity {
+        background: rgba(74, 222, 128, 0.12);
+        color: var(--green);
+        border-color: rgba(74, 222, 128, 0.25);
+      }
+      /* The row's own colours win while it is selected, or a green badge on
+         the accent fill reads as a second, unrelated highlight. */
+      .conv-suggest-row.active .conv-suggest-badge {
+        background: rgba(255, 255, 255, 0.18);
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.28);
+      }
+      .conv-suggest-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .conv-suggest-name mark {
+        background: none;
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .conv-suggest-row.active .conv-suggest-name mark {
+        color: #fff;
+        text-decoration: underline;
+      }
+      /* Why this row is here, when the name alone does not say so. */
+      .conv-suggest-via {
+        flex-shrink: 0;
+        max-width: 45%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.66rem;
+        font-style: italic;
+        color: var(--muted);
+      }
+      .conv-suggest-row.active .conv-suggest-via {
+        color: rgba(255, 255, 255, 0.72);
+      }
+      .conv-suggest-via mark {
+        background: none;
+        color: var(--green);
+        font-style: normal;
+        font-weight: 700;
+      }
+      .conv-suggest-row.active .conv-suggest-via mark {
+        color: #fff;
+      }
+      .conv-suggest-meta {
+        flex-shrink: 0;
+        font-size: 0.66rem;
+        color: var(--muted);
+      }
+      .conv-suggest-row.active .conv-suggest-meta {
+        color: rgba(255, 255, 255, 0.75);
+      }
+      .conv-suggest-empty {
+        color: var(--muted);
+        font-size: 0.72rem;
+        padding: 14px 8px;
+        text-align: center;
+      }
+      .conv-suggest-hint {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-shrink: 0;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.63rem;
+        padding: 5px 8px;
+      }
+      .conv-suggest-hint kbd {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 0.6rem;
+        padding: 0 3px;
+        margin-right: 2px;
       }
       .conv-search-submit {
         flex-shrink: 0;
@@ -5017,7 +5273,7 @@
         color: var(--muted);
       }
       .chat-search.regex-error,
-      #convSearch.regex-error {
+      .conv-search-inner.regex-error {
         border-color: var(--red) !important;
       }
       .chat-sopt {
@@ -6652,6 +6908,8 @@
         .msg-meta-overlay.open .msg-meta-pop,
         .msg-meta-overlay.closing .msg-meta-pop,
         .ins-keypop,
+        .conv-suggest,
+        .conv-token,
         .pane-loading,
         .app-loading-overlay.open,
         .conv-search-loading-overlay.visible,
@@ -8949,7 +9207,10 @@
                 class="conv-search-wrap"
                 data-tooltip='space = AND · | = OR · "..." = exact phrase'
               >
-                <div class="conv-search-inner">
+                <div class="conv-search-inner" id="convSearchInner">
+                  <!-- display:contents, so the bubbles are flex children of the
+                       field itself and text always flows after them. -->
+                  <span class="conv-tokens" id="convTokens"></span>
                   <input
                     type="text"
                     class="conv-search"
@@ -8957,6 +9218,10 @@
                     placeholder="Search…"
                     autocomplete="off"
                     spellcheck="false"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded="false"
+                    aria-controls="convSuggestList"
                   />
                   <button class="clear-btn" id="convClearSearch">
                     &#x2715;
@@ -8981,6 +9246,18 @@
                   </svg>
                   <div class="conv-submit-spinner"></div>
                 </button>
+                <div class="conv-suggest" id="convSuggest" hidden>
+                  <div
+                    class="conv-suggest-list"
+                    id="convSuggestList"
+                    role="listbox"
+                  ></div>
+                  <div class="conv-suggest-hint">
+                    <span><kbd>↑</kbd><kbd>↓</kbd> select</span>
+                    <span><kbd>Enter</kbd> add</span>
+                    <span><kbd>Esc</kbd> close</span>
+                  </div>
+                </div>
               </div>
               <button
                 class="sopt"
@@ -15217,23 +15494,46 @@
         openArticleInfoModal(id)
       }
 
+      /// Content tab → Conversations, for one Article or Dialog.
+      ///
+      /// Lands as a bubble rather than a raw number in the box, so a jump from
+      /// a card and a search built by hand end up in the same shape — and so a
+      /// second jump adds to the first instead of silently replacing it.
       function searchConvsForId(id, idType) {
         switchView("conversations")
-        convQuery = String(id)
+        convQuery = ""
         const input = document.getElementById("convSearch")
-        if (input) input.value = convQuery
+        if (input) input.value = ""
         const clearBtn = document.getElementById("convClearSearch")
-        if (clearBtn) clearBtn.classList.add("visible")
-        if (!convSearchIds || (idType && idType !== convIdType)) {
+        if (clearBtn) clearBtn.classList.remove("visible")
+        if (!convSearchIds) {
           convSearchIds = true
           convSearchRegex = false
           document.getElementById("convOptRegex").classList.remove("on")
-          if (idType) setConvIdType(idType)
           syncIdMode()
         }
+        if (idType) setConvIdType(idType)
+        const idText =
+          (idType === "article" ? "qa-" : "dn-") + String(id).trim()
+        if (!convIdTokens.some((t) => t.idText === idText)) {
+          convIdTokens.push({
+            kind: idType === "article" ? "article" : "dialog",
+            idText,
+            label: _convLabelForId(idText),
+          })
+        }
+        renderConvTokens()
+        closeConvSuggest()
         convPage = 1
         convHasSearched = true
         loadSessions()
+      }
+
+      /// The title a bubble shows in its tooltip, when the content export
+      /// happens to be loaded. Absent, the id alone still searches.
+      function _convLabelForId(idText) {
+        const hit = convContentIndex().find((c) => c.idText === idText)
+        return hit ? hit.label : ""
       }
 
       // Entities tab → Conversations, showing every conversation the recognizer
@@ -19017,6 +19317,11 @@
           })
           _chipEntityCache = new Map()
           _entityRefIndex = null
+          // The search bar's type-ahead indexes are projections of this
+          // export — the entity one too, since it reads its trigger words
+          // from `entityMap`, which is rebuilt just above.
+          _convContentIndex = null
+          _convEntityIndex = null
 
           // The worker's "Used in Articles" / "Used in Dialogs" pills must
           // filter on the same relationship the Entities cards and modal show,
@@ -27107,7 +27412,13 @@
         return {
           page,
           filter: convSessionFilter,
-          query: convQuery || null,
+          // In `#ID` mode the bubbles *are* the query, written in the app's own
+          // vocabulary and `|`-separated exactly as OR groups already are — see
+          // `IdTarget::parse_all`. Nothing new on the wire, which matters:
+          // these args are the Insights scope-cache fingerprint.
+          query: convSearchIds
+            ? convIdQueryString() || null
+            : convQuery || null,
           queryRegex: convSearchIds ? false : convSearchRegex,
           queryScope: convSearchIds ? "both" : convSearchScope,
           queryEntities: convSearchIds ? false : convSearchEntities,
@@ -27131,15 +27442,22 @@
       }
 
       async function loadSessions() {
-        const convSearchEl = document.getElementById("convSearch")
+        // The border is the wrapper's now — the bubbles sit inside the field,
+        // so the input no longer draws the box.
+        const convSearchEl = document.getElementById("convSearchInner")
         const idWarning = document.getElementById("convIdWarning")
 
-        // In #ID mode: validate format based on the active id type. A Dialog
-        // accepts a node after a "-"; an Article has no nodes to name.
-        if (convSearchIds && convQuery) {
-          const valid = (
-            convIdType === "dialog" ? /^\d+(-\d+)?$/ : /^\d+$/
-          ).test(convQuery)
+        // In #ID mode: validate every `|` segment. A bubble spells its own kind
+        // and is valid by construction; a bare segment is whatever the
+        // "Search by:" row says — a Dialog accepts a node after a "-", an
+        // Article has no nodes to name.
+        const _idQuery = convSearchIds ? convIdQueryString() : ""
+        if (convSearchIds && _idQuery) {
+          const valid = _idQuery
+            .split("|")
+            .map((seg) => seg.trim())
+            .filter(Boolean)
+            .every((seg) => convIdSegmentValid(seg, convIdType))
           if (valid) {
             idWarning.classList.remove("visible")
             convSearchEl.classList.remove("regex-error")
@@ -27173,6 +27491,7 @@
         }
 
         const args = buildConvSessionArgs(convPage)
+        closeConvSuggest()
         const _submitBtn = document.getElementById("convSearchSubmit")
         _submitBtn.classList.add("loading")
         setConvDbBusy(true)
@@ -28098,6 +28417,10 @@
       }
 
       function _updateCtxFilterBadge() {
+        // The bar's entity bubbles and the funnel's Entities tab are two views
+        // of `convEntityFilters`, and this runs on every change to it from
+        // either side — so it is where they are kept in step.
+        renderConvTokens()
         const badge = document.getElementById("ctxFilterBadge")
         // The button's badge is the total across both tabs — a filter left on
         // in the tab you aren't looking at still narrows the results.
@@ -28859,6 +29182,574 @@
         convPage = 1
       })
 
+      // ── Search-bar bubbles ──────────────────────────────────────────
+      //
+      // The conversations bar knows about two things you otherwise have to
+      // already know the answer to: which entities the imported conversations
+      // triggered, and which Article or Dialog you mean. Typing offers them,
+      // and taking one turns it into a removable bubble.
+      //
+      // Two kinds, never mixed — the `#ID` toggle already partitions the bar:
+      //
+      //   `#ID` off, E on → an **entity filter**. A bubble is an entry in
+      //     `convEntityFilters`, the *same array* the funnel's Entities tab
+      //     writes to, so the two views cannot disagree and the funnel badge
+      //     counts bar bubbles for free. See `docs/search.md` → "Entity pills
+      //     are a filter, not a search": OR within the list, AND with a typed
+      //     query, resolved by an indexed EXISTS rather than a scan.
+      //
+      //   `#ID` on → one `IdTarget` each, OR-ed. They travel in the existing
+      //     `query` string, spelled in the app's own vocabulary
+      //     (`qa-1418 | dn-6391 | dn-6391-4`), which is why no field had to be
+      //     added to `GetSessionsArgs` — that struct is the Insights scope-cache
+      //     fingerprint, and `lastConvSearchArgs`, the AI export and the chat
+      //     query mirror all read it.
+      //
+      // Both feeds are already in memory (`allCombinedItems`, and the cached
+      // `entityOptions`), so a keystroke costs an in-memory scan of a few
+      // thousand short strings and no IPC at all.
+
+      // The `#ID` bubbles. Entity bubbles have no array of their own on
+      // purpose — they live in `convEntityFilters`.
+      let convIdTokens = [] // [{kind, idText, label}]
+      let _convSuggestRows = []
+      let _convSuggestIdx = -1
+      let _convContentIndex = null // invalidated by loadData
+      let _convEntityIndex = null
+      let _convEntityIndexSrc = null
+
+      const CONV_SUGGEST_MAX = 8
+
+      /// Every Article, Dialog and Transactional Dialog, flattened for the
+      /// type-ahead.
+      ///
+      /// Built once per data load and cached: ~4200 short strings, which is a
+      /// few hundred microseconds to scan and not worth a worker hop. An
+      /// Article's title is the precomputed `_faqQ` rather than a fresh scan of
+      /// `Questions`, for the same reason the cards use it.
+      function convContentIndex() {
+        if (_convContentIndex) return _convContentIndex
+        const out = []
+        for (const a of allArticles) {
+          const label = a._faqQ || ""
+          const idText = "qa-" + a.Id
+          out.push({
+            key: idText,
+            kind: "article",
+            idText,
+            num: String(a.Id),
+            label,
+            hay: (idText + " " + label).toLowerCase(),
+          })
+        }
+        for (const d of allDialogsCombined) {
+          const label = d.name || ""
+          const idText = "dn-" + d.id
+          out.push({
+            key: idText,
+            // `dn-` prefixes both, and both search the same way; the badge is
+            // what tells them apart, exactly as on the Share Content rows.
+            kind: d._kind === "tdialog" ? "tdialog" : "dialog",
+            idText,
+            num: String(d.id),
+            label,
+            hay: (idText + " " + label).toLowerCase(),
+          })
+        }
+        _convContentIndex = out
+        return out
+      }
+
+      /// The entities the imported conversations actually triggered.
+      ///
+      /// Reshaped from the cached `entityOptions` — cached against the array
+      /// itself, so opening a different database rebuilds it without a flag of
+      /// its own.
+      function convEntityIndex() {
+        if (_convEntityIndex && _convEntityIndexSrc === entityOptions)
+          return _convEntityIndex
+        _convEntityIndexSrc = entityOptions
+        _convEntityIndex = entityOptions.map((o) => {
+          // The entity's configured trigger words, when the content export is
+          // loaded. `caravan` is not the CAMPER entity's *name* — it is one of
+          // the twenty words that fire it, and it is what someone actually
+          // types when looking for those conversations. Searching only the
+          // name meant the entity you wanted was findable only if you already
+          // knew what it was called.
+          //
+          // `entityMap` is keyed by upper-cased name, which is also what makes
+          // this work across the two spellings: `entity_index` stores the
+          // lower-cased display name and the export carries the internal one.
+          const exported = entityMap.get(String(o.value).toUpperCase())
+          const words = exported
+            ? exported.words.map((w) => String(w.text).toLowerCase())
+            : []
+          return {
+            key: "e:" + o.value,
+            kind: "entity",
+            value: o.value,
+            label: o.value,
+            num: "",
+            idText: "",
+            weight: o.count || 0,
+            words,
+            hay: (String(o.value) + " " + words.join(" ")).toLowerCase(),
+          }
+        })
+        return _convEntityIndex
+      }
+
+      /// Does `needle` start a word in `hay`? "park" starting *"parkeren"* is a
+      /// better answer than "park" buried inside *"zonnepark"*, and ranking
+      /// them alike buries the one the user meant.
+      function _convWordStart(hay, needle) {
+        if (!needle) return false
+        let i = hay.indexOf(needle)
+        while (i > -1) {
+          if (i === 0 || /[\s\-_/,.:;!?()[\]]/.test(hay[i - 1])) return true
+          i = hay.indexOf(needle, i + 1)
+        }
+        return false
+      }
+
+      /// How good a candidate is, lower being better; -1 is "not a match".
+      ///
+      /// Every typed token has to appear somewhere, so "park uur" narrows.
+      /// The *ranking* then uses the whole typed string rather than the tokens:
+      /// what someone means by typing is "starts with this", and splitting it
+      /// throws that away.
+      function _convSuggestRank(cand, tokens, raw) {
+        for (const t of tokens) if (!cand.hay.includes(t)) return -1
+        const label = (cand.label || "").toLowerCase()
+        if (cand.idText === raw || cand.num === raw) return 0
+        if (cand.idText.startsWith(raw) || (cand.num && cand.num.startsWith(raw)))
+          return 1
+        if (label === raw) return 2
+        if (label.startsWith(raw)) return 3
+        if (_convWordStart(label, raw)) return 4
+        if (label.includes(raw)) return 5
+        // Found through one of the entity's trigger words rather than its
+        // name. Under every name match, because the name is the thing being
+        // picked — typing `camper` must not bury the CAMPER entity beneath
+        // whatever else happens to list it as a word.
+        if (cand.words && cand.words.length) {
+          if (cand.words.some((w) => w === raw)) return 6
+          if (cand.words.some((w) => w.startsWith(raw))) return 7
+          return 8
+        }
+        return 5
+      }
+
+      /// Which of the entity's words the typed text found — empty when the
+      /// name itself carries it.
+      ///
+      /// A row has to say why it is there: offering *camper* for `caravan`
+      /// with nothing else on it reads as a bug, not as a synonym.
+      function _convSuggestVia(cand, raw) {
+        if (!cand.words || !cand.words.length) return ""
+        if ((cand.label || "").toLowerCase().includes(raw)) return ""
+        return (
+          cand.words.find((w) => w === raw) ||
+          cand.words.find((w) => w.startsWith(raw)) ||
+          cand.words.find((w) => w.includes(raw)) ||
+          ""
+        )
+      }
+
+      /// A Dialog written with a node — `6391-`, `6391-4`, `dn-6391-park`.
+      ///
+      /// The node half of the "Dialog / Node ID" search is the part you could
+      /// only reach by already knowing the number; a node has a name in the
+      /// export, so it can be offered by it. Returns `null` when the text is
+      /// not of that shape, which is what leaves the normal pool in charge.
+      function _convNodeSuggest(raw) {
+        const m = /^(?:dn-)?(\d+)-(.*)$/i.exec(raw)
+        if (!m) return null
+        const dialog = dialogMap.get(Number(m[1]))
+        if (!dialog || !dialog.nodes) return null
+        const part = m[2].trim().toLowerCase()
+        const rows = []
+        // The whole Dialog stays on offer: having typed the `-` you may still
+        // have meant every node of it.
+        rows.push({
+          key: "dn-" + dialog.id,
+          kind: "dialog",
+          idText: "dn-" + dialog.id,
+          num: String(dialog.id),
+          label: dialog.name || "",
+          rank: 1,
+        })
+        for (const n of dialog.nodes) {
+          const label = n.name || ""
+          const num = String(n.id)
+          if (part && !num.startsWith(part) && !label.toLowerCase().includes(part))
+            continue
+          rows.push({
+            key: "dn-" + dialog.id + "-" + n.id,
+            kind: "node",
+            idText: "dn-" + dialog.id + "-" + n.id,
+            num,
+            label,
+            rank: num === part ? 0 : num.startsWith(part) ? 2 : 3,
+          })
+        }
+        return rows
+      }
+
+      /// The rows to offer for what is currently typed.
+      function convSuggestFor(rawInput) {
+        const raw = (rawInput || "").trim().toLowerCase()
+        if (!raw) return []
+        const taken = new Set(_convTokenKeys())
+        const nodeRows = convSearchIds ? _convNodeSuggest(raw) : null
+        if (nodeRows) {
+          return nodeRows
+            .filter((r) => !taken.has(r.key))
+            .sort(
+              (a, b) =>
+                a.rank - b.rank ||
+                Number(a.num) - Number(b.num) ||
+                a.label.localeCompare(b.label),
+            )
+            .slice(0, CONV_SUGGEST_MAX)
+        }
+        // Entities are offered only when E is on: the toggle is what says
+        // entities are part of this search at all.
+        const pool = convSearchIds
+          ? convContentIndex()
+          : convSearchEntities
+          ? convEntityIndex()
+          : []
+        const tokens = raw.split(/\s+/).filter(Boolean)
+        const hits = []
+        for (const c of pool) {
+          if (taken.has(c.key)) continue
+          const rank = _convSuggestRank(c, tokens, raw)
+          if (rank < 0) continue
+          hits.push({ c, rank })
+        }
+        hits.sort(
+          (a, b) =>
+            a.rank - b.rank ||
+            (b.c.weight || 0) - (a.c.weight || 0) ||
+            (a.c.label || "").length - (b.c.label || "").length ||
+            (a.c.label || "").localeCompare(b.c.label || ""),
+        )
+        return hits.slice(0, CONV_SUGGEST_MAX).map((h) => h.c)
+      }
+
+      /// Escape `text` and mark the typed run inside it.
+      ///
+      /// Not `hl()`: that one is built from the *content* search bar's Aa / \b
+      /// / .* toggles, which have nothing to do with this list and would make
+      /// the same keystroke highlight differently depending on a control in
+      /// another view.
+      function _convMarkSuggest(text, raw) {
+        const t = String(text == null ? "" : text)
+        const q = (raw || "").trim().toLowerCase()
+        if (!q) return esc(t)
+        const lower = t.toLowerCase()
+        // A few characters get *longer* when lowercased (`İ` becomes two), and
+        // an index into a string of a different length is an index into the
+        // wrong place — the same trap `foldDiacritics` documents. Marking
+        // nothing is the safe answer; the row is still correct and still
+        // clickable.
+        if (lower.length !== t.length) return esc(t)
+        const at = lower.indexOf(q)
+        if (at < 0) return esc(t)
+        return (
+          esc(t.slice(0, at)) +
+          "<mark>" +
+          esc(t.slice(at, at + q.length)) +
+          "</mark>" +
+          esc(t.slice(at + q.length))
+        )
+      }
+
+      const CONV_SUGGEST_BADGES = {
+        article: "Article",
+        dialog: "Dialog",
+        tdialog: "T. Dialog",
+        node: "Node",
+        entity: "Entity",
+      }
+
+      function openConvSuggest(rawInput) {
+        const pop = document.getElementById("convSuggest")
+        const list = document.getElementById("convSuggestList")
+        const input = document.getElementById("convSearch")
+        if (!pop || !list) return
+        _convSuggestRows = convSuggestFor(rawInput)
+        if (!_convSuggestRows.length) {
+          closeConvSuggest()
+          return
+        }
+        // The first row is preselected, so Enter is one key rather than two.
+        _convSuggestIdx = 0
+        const raw = (rawInput || "").trim()
+        list.innerHTML = _convSuggestRows
+          .map((c, i) => {
+            const badge = CONV_SUGGEST_BADGES[c.kind] || ""
+            const meta =
+              c.kind === "entity"
+                ? insPlural(c.weight || 0, "conversations")
+                : c.idText
+            const name = c.label
+              ? _convMarkSuggest(c.label, raw)
+              : '<span style="color:var(--muted)">(no title)</span>'
+            const via = _convSuggestVia(c, raw.toLowerCase())
+            const viaHtml = via
+              ? '<span class="conv-suggest-via">via ' +
+                _convMarkSuggest(via, raw) +
+                "</span>"
+              : ""
+            return (
+              '<button class="conv-suggest-row' +
+              (i === 0 ? " active" : "") +
+              '" role="option" onmousemove="_convSuggestHover(' +
+              i +
+              ')" onclick="_convSuggestTake(' +
+              i +
+              ')" title="' +
+              esc((c.idText ? c.idText + " — " : "") + (c.label || "")) +
+              '"><span class="conv-suggest-badge is-' +
+              esc(c.kind) +
+              '">' +
+              esc(badge) +
+              '</span><span class="conv-suggest-name">' +
+              name +
+              "</span>" +
+              viaHtml +
+              '<span class="conv-suggest-meta">' +
+              esc(meta) +
+              "</span></button>"
+            )
+          })
+          .join("")
+        pop.hidden = false
+        document
+          .querySelector(".conv-search-wrap")
+          .classList.add("is-suggesting")
+        if (input) input.setAttribute("aria-expanded", "true")
+      }
+
+      function closeConvSuggest() {
+        const pop = document.getElementById("convSuggest")
+        const input = document.getElementById("convSearch")
+        _convSuggestRows = []
+        _convSuggestIdx = -1
+        if (pop) pop.hidden = true
+        const wrap = document.querySelector(".conv-search-wrap")
+        if (wrap) wrap.classList.remove("is-suggesting")
+        if (input) input.setAttribute("aria-expanded", "false")
+      }
+
+      function convSuggestIsOpen() {
+        const pop = document.getElementById("convSuggest")
+        return !!pop && !pop.hidden
+      }
+
+      function _convSuggestHover(i) {
+        if (i === _convSuggestIdx) return
+        _convSuggestIdx = i
+        _convSuggestPaint()
+      }
+
+      function _convSuggestPaint() {
+        const rows = document.querySelectorAll("#convSuggestList .conv-suggest-row")
+        rows.forEach((r, i) => r.classList.toggle("active", i === _convSuggestIdx))
+        const active = rows[_convSuggestIdx]
+        if (active) active.scrollIntoView({ block: "nearest" })
+      }
+
+      function _convSuggestMove(delta) {
+        if (!_convSuggestRows.length) return
+        const n = _convSuggestRows.length
+        _convSuggestIdx = (_convSuggestIdx + delta + n) % n
+        _convSuggestPaint()
+      }
+
+      function _convSuggestTake(i) {
+        const cand = _convSuggestRows[i == null ? _convSuggestIdx : i]
+        if (cand) addConvToken(cand)
+      }
+
+      /// The keys already taken, so a bubble is never offered twice.
+      function _convTokenKeys() {
+        return convSearchIds
+          ? convIdTokens.map((t) => t.idText)
+          : convEntityFilters.map((f) => "e:" + f.value)
+      }
+
+      function addConvToken(cand) {
+        if (convSearchIds) {
+          if (convIdTokens.some((t) => t.idText === cand.idText)) return
+          convIdTokens.push({
+            kind: cand.kind,
+            idText: cand.idText,
+            label: cand.label || "",
+          })
+          // The "Search by:" row still governs a bare number typed and
+          // submitted without picking anything, so keep it saying what the
+          // last bubble was rather than letting the two disagree.
+          setConvIdType(cand.kind === "article" ? "article" : "dialog")
+        } else {
+          if (convEntityFilters.some((f) => f.value === cand.value)) return
+          convEntityFilters.push({ name: "Entities", value: cand.value })
+          _updateCtxFilterBadge()
+          _syncCtxModalIfOpen()
+        }
+        const input = document.getElementById("convSearch")
+        if (input) {
+          input.value = ""
+          input.focus()
+        }
+        const clearBtn = document.getElementById("convClearSearch")
+        if (clearBtn) clearBtn.classList.remove("visible")
+        closeConvSuggest()
+        // Adding a bubble *is* asking the question — a bubble sitting there
+        // over a stale list would read as broken.
+        convHasSearched = true
+        _afterConvTokenChange(true)
+      }
+
+      function removeConvToken(i) {
+        if (convSearchIds) {
+          convIdTokens.splice(i, 1)
+        } else {
+          convEntityFilters.splice(i, 1)
+          _updateCtxFilterBadge()
+          _syncCtxModalIfOpen()
+        }
+        _afterConvTokenChange(false)
+      }
+
+      /// Keep the funnel's chip list in step when the bar changes the shared
+      /// entity filters underneath it.
+      function _syncCtxModalIfOpen() {
+        const overlay = document.getElementById("ctxModalOverlay")
+        if (overlay && overlay.classList.contains("open")) _renderCtxModal()
+      }
+
+      function _afterConvTokenChange(force) {
+        renderConvTokens()
+        convPage = 1
+        if (force || convHasSearched) loadSessions()
+      }
+
+      function renderConvTokens() {
+        const host = document.getElementById("convTokens")
+        if (!host) return
+        // In `#ID` mode the entity filters are still applied — they just are
+        // not what this field is about. The funnel badge is where they stay
+        // visible, which is where they lived before bubbles existed.
+        const items = convSearchIds
+          ? convIdTokens.map((t) => ({
+              cls: t.kind === "node" ? "dialog" : t.kind,
+              text: t.idText,
+              title: t.label ? t.idText + " — " + t.label : t.idText,
+            }))
+          : convEntityFilters.map((f) => ({
+              cls: "entity",
+              text: f.value,
+              title: "Entity: " + f.value,
+            }))
+        host.innerHTML = items
+          .map(
+            (t, i) =>
+              '<span class="conv-token is-' +
+              esc(t.cls) +
+              '" title="' +
+              esc(t.title) +
+              '"><span class="conv-token-label">' +
+              esc(t.text) +
+              '</span><button class="conv-token-x" title="Remove" onclick="event.stopPropagation();removeConvToken(' +
+              i +
+              ')">&#x2715;</button></span>',
+          )
+          .join("")
+      }
+
+      /// The `query` an `#ID` search sends: every bubble, plus anything typed
+      /// and committed by hand, `|`-separated the way OR groups already are.
+      function convIdQueryString() {
+        const parts = convIdTokens.map((t) => t.idText)
+        if (convQuery) parts.push(convQuery)
+        return parts.join(" | ")
+      }
+
+      /// One `#ID` segment, in either spelling — the renderer's mirror of
+      /// `IdTarget::parse`. A prefixed segment names its own kind; a bare one
+      /// means whatever the "Search by:" row says.
+      function convIdSegmentValid(seg, idType) {
+        const s = String(seg).trim()
+        if (/^qa-\d+$/i.test(s)) return true
+        if (/^dn-\d+(-\d+)?$/i.test(s)) return true
+        return (idType === "dialog" ? /^\d+(-\d+)?$/ : /^\d+$/).test(s)
+      }
+
+      /// What the opened chat should search for, given what put the
+      /// conversation in the list.
+      ///
+      /// The chat's matcher is a substring test over the turn's own fields, so
+      /// the bubbles have to be handed to it in the shape those fields are in:
+      ///
+      /// - Entity bubbles carry no text of their own, so with no typed query
+      ///   they *are* the query — `turnMatches` already tests `rowEntityFields`
+      ///   and the chip is already marked `.is-hit`.
+      /// - Id bubbles lose their `qa-`/`dn-` prefix, because the chat tests
+      ///   `articleIds` and `dialogPaths` directly and a Dialog's evidence
+      ///   there is a bare `6391:2/15`. This is exactly what the raw number
+      ///   typed into the box did before bubbles existed.
+      function _convChatQuery() {
+        if (convSearchIds) {
+          return convIdQueryString().replace(/\b(?:qa|dn)-/gi, "")
+        }
+        if (convQuery) return convQuery
+        return convEntityFilters.map((f) => f.value).join(" | ")
+      }
+
+      /// Warm the entity list so the first keystroke has something to offer.
+      /// `ensureEntityIdMap` is idempotent and already guarded on the database,
+      /// so this needs no flag of its own.
+      function _convWarmSuggestSources() {
+        if (convSearchIds || !convSearchEntities) return
+        if (entityOptionsLoaded) return
+        // `get_entity_options` is one full scan of `entity_index`, which on a
+        // real database is not instant — and the first keystroke of a cold
+        // open beats it. Silence there reads as "this database has no
+        // entities", so re-offer once the scan lands if the field still holds
+        // what was typed while waiting.
+        Promise.resolve(ensureEntityIdMap()).then(() => {
+          const input = document.getElementById("convSearch")
+          if (!input || document.activeElement !== input) return
+          if (!input.value.trim() || convSearchIds || !convSearchEntities) return
+          openConvSuggest(input.value)
+        })
+      }
+
+      // Clicking the field's padding focuses the input, so the token field
+      // behaves like the plain input it replaced.
+      document
+        .getElementById("convSearchInner")
+        .addEventListener("mousedown", (e) => {
+          if (e.target.closest(".conv-token, .clear-btn")) return
+          if (e.target.id === "convSearch") return
+          e.preventDefault()
+          document.getElementById("convSearch").focus()
+        })
+
+      document
+        .getElementById("convSearch")
+        .addEventListener("focus", _convWarmSuggestSources)
+
+      // Outside click closes the type-ahead, mirroring the Insights key picker.
+      document.addEventListener("mousedown", (e) => {
+        if (!convSuggestIsOpen()) return
+        if (e.target.closest("#convSuggest, .conv-search-wrap")) return
+        closeConvSuggest()
+      })
+
       // Conv search
       document.getElementById("convSearch").addEventListener("input", (e) => {
         const val = e.target.value
@@ -28866,22 +29757,56 @@
         document
           .getElementById("convClearSearch")
           .classList.toggle("visible", val.length > 0)
-        // Auto-exit #ID mode when the user types something that can't be a valid ID
-        // (IDs are numeric; node IDs are digits-digits)
-        if (convSearchIds && val.length > 0) {
-          const looksLikeId = /^[\d-]*$/.test(val)
-          if (!looksLikeId) {
-            convSearchIds = false
-            syncIdMode()
-          }
-        }
+        // `#ID` mode used to switch itself off the moment you typed a letter,
+        // because a letter could not be part of an id. Typing a *name* in `#ID`
+        // mode is now the point — it is how you find the id you don't know — so
+        // the rule that quietly undid it mid-word is gone.
+        if (val.trim()) openConvSuggest(val)
+        else closeConvSuggest()
       })
 
       document.getElementById("convSearch").addEventListener("keydown", (e) => {
+        // Every one of these keys keeps its old meaning when the type-ahead is
+        // closed, which is what stops a new list from redefining Enter and
+        // Escape for someone who never uses it.
+        if (convSuggestIsOpen()) {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault()
+            _convSuggestMove(e.key === "ArrowDown" ? 1 : -1)
+            return
+          }
+          if (e.key === "Enter" || e.key === "Tab") {
+            e.preventDefault()
+            _convSuggestTake()
+            return
+          }
+          if (e.key === "Escape") {
+            // Closes the list and stops there — it must not fall through to
+            // cancelling a search that is not running.
+            e.preventDefault()
+            e.stopPropagation()
+            closeConvSuggest()
+            return
+          }
+        }
+        // Backspace into the bubbles: the last one is what the caret is
+        // sitting against, so that is what it deletes.
+        if (
+          e.key === "Backspace" &&
+          !e.target.value &&
+          (convSearchIds ? convIdTokens.length : convEntityFilters.length)
+        ) {
+          e.preventDefault()
+          removeConvToken(
+            (convSearchIds ? convIdTokens.length : convEntityFilters.length) - 1,
+          )
+          return
+        }
         if (e.key === "Enter") {
           convQuery = e.target.value.trim()
           convPage = 1
           convHasSearched = true
+          closeConvSuggest()
           loadSessions()
         } else if (e.key === "Escape") {
           document.getElementById("convSearchCancel").click()
@@ -28894,6 +29819,7 @@
           convQuery = document.getElementById("convSearch").value.trim()
           convPage = 1
           convHasSearched = true
+          closeConvSuggest()
           loadSessions()
         })
 
@@ -28904,6 +29830,7 @@
           document.getElementById("convClearSearch").classList.remove("visible")
           convQuery = ""
           convPage = 1
+          closeConvSuggest()
         })
 
       document
@@ -28964,6 +29891,10 @@
           // Hide warning when leaving ID mode
           document.getElementById("convIdWarning").classList.remove("visible")
         }
+        // The field shows a different set of bubbles either side of this
+        // toggle, and neither set is discarded — so every route into the mode,
+        // a jump from a Content card included, has to redraw it.
+        renderConvTokens()
       }
 
       // Conv search regex toggle — no-op when #ID mode is active
@@ -28987,6 +29918,7 @@
         }
         convPage = 1
         syncIdMode()
+        closeConvSuggest()
       })
 
       // The buttons are the state; this reads them back. Keeping one direction
@@ -29030,6 +29962,10 @@
           btn.classList.toggle("active")
           _syncConvScopeFromButtons()
           convPage = 1
+          // E is what says entities are part of this search, so it governs
+          // whether they are offered as you type too.
+          if (convSearchEntities) _convWarmSuggestSources()
+          else closeConvSuggest()
         })
       })
 
@@ -29417,9 +30353,10 @@
         })
         // Pre-fill chat search from the active session-list query so matched
         // Q&A turns are shown automatically when opening a result
-        if (convQuery) {
-          chatQuery = convQuery
-          document.getElementById("chatSearch").value = convQuery
+        const _chatMirror = _convChatQuery()
+        if (_chatMirror) {
+          chatQuery = _chatMirror
+          document.getElementById("chatSearch").value = _chatMirror
           document.getElementById("chatClearSearch").classList.add("visible")
         } else {
           chatQuery = ""
@@ -29430,7 +30367,10 @@
         chatSearchRegex = !!convSearchRegex
         // …and the entity scope with it, so the turns the chat shows as matched
         // are the same turns that put this conversation in the result list.
-        chatMatchEntities = !convSearchIds && !!convSearchEntities
+        // Entity *bubbles* count too: filtering by an entity and then opening a
+        // forty-turn chat with nothing marked reads as the chat being broken.
+        chatMatchEntities =
+          !convSearchIds && (!!convSearchEntities || convEntityFilters.length > 0)
         // …and the metadata filters, for the same reason: a tag filter is a
         // reason this conversation is in the list, so the chat has to be able
         // to say which message carries it.

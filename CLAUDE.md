@@ -68,7 +68,8 @@ frontend/
     settings-backup.test.js, metadata-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
-    db-migration-progress.test.js                    — `npm run test:frontend`
+    db-migration-progress.test.js, search-bubbles.test.js
+                                                     — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
 ```
@@ -347,7 +348,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 Three distinct search types:
 
 1. **Content search** — searches Dialogs and Articles and their content. Main search bar under the Content tab.
-2. **Conversations search** — searches conversations and their context (e.g. filter by context). Can be very resource-intensive; use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter.
+2. **Conversations search** — searches conversations and their context (e.g. filter by context). Can be very resource-intensive; use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter. The search bar offers what it can search for as you type — entities, Articles, Dialogs and their nodes — and each pick becomes a bubble in the field; see `docs/search.md` → "The search bar's bubbles".
 3. **Chat search** — searches within a single chat. A chat is first found and opened via Conversations search; Chat search then operates within that opened conversation.
 
 The semantics of all three — and of the Context · Metadata tag filters that
@@ -421,8 +422,14 @@ The orientation map for the whole window. It says what is on screen and where;
   while reading: a Cancel button under the spinner; the unit toggle stays live
 
 <div.conv-sidebar-header>
-  [#ID] | search input | search submit | [.*] | [U] [B] [E]
+  [#ID] | token field | search submit | [.*] | [U] [B] [E]
+    the token field holds bubbles + the caret: entity bubbles when #ID is off
+    and E is on, Article/Dialog/node bubbles when it is on
+    typing opens #convSuggest under it — badge · name (typed run marked) ·
+    id or conversation count; ↑↓ select, Enter/Tab add, Esc close,
+    Backspace on an empty field eats the last bubble
   "Search by:" pills, only in #ID mode: Article ID | Dialog / Node ID
+    (a bubble sets these; they still govern a bare number typed by hand)
   date range button | tag filter button (Context · Metadata)
   filter pills (GenAI / feedback / Low % / Zero %)
 

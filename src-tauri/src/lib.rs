@@ -3994,6 +3994,16 @@ fn json_quoted_items(s: &str) -> impl Iterator<Item = &str> {
     s.split('"').skip(1).step_by(2)
 }
 
+/// `s` without a leading `prefix`, ignoring ASCII case.
+///
+/// `get` rather than a slice: a prefix length that lands mid-character would
+/// panic, and the ids this reads are typed by hand.
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = s.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &s[prefix.len()..])
+}
+
 /// What an `#ID` search is looking for, resolved once per search.
 ///
 /// Matching is exact rather than the substring `LIKE` it replaced: `qa-123`
@@ -4010,9 +4020,29 @@ enum IdTarget {
 }
 
 impl IdTarget {
-    /// Read the `#ID` query box. A `-` separates a Dialog from one of its
+    /// Read one `#ID` segment. A `-` separates a Dialog from one of its
     /// nodes, which is what lets Dialog and Node be one filter.
+    ///
+    /// A segment may also name its own kind — `qa-1418`, `dn-6391`,
+    /// `dn-6391-4` — which is how the search bar's bubbles spell themselves.
+    /// The app's own vocabulary is the wire format, so nothing new had to be
+    /// added to `GetSessionsArgs`; `id_type` (the "Search by:" pills) is then
+    /// only what a *bare* number means.
     fn parse(query: &str, id_type: &str) -> Option<IdTarget> {
+        let query = query.trim();
+        if let Some(rest) = strip_prefix_ci(query, "qa-") {
+            return Some(IdTarget::Article(rest.trim().parse().ok()?));
+        }
+        if let Some(rest) = strip_prefix_ci(query, "dn-") {
+            // `dn-` prefixes Dialogs and Transactional Dialogs alike, and both
+            // are searched the same way.
+            return Self::parse_bare(rest, "dialog");
+        }
+        Self::parse_bare(query, id_type)
+    }
+
+    /// The un-prefixed spelling, whose meaning comes from `id_type`.
+    fn parse_bare(query: &str, id_type: &str) -> Option<IdTarget> {
         let query = query.trim();
         if let Some((left, right)) = query.split_once('-') {
             let (d, n) = (left.trim().parse().ok()?, right.trim().parse().ok()?);
@@ -4028,6 +4058,21 @@ impl IdTarget {
             "article" => IdTarget::Article(id),
             _ => IdTarget::Dialog(id),
         })
+    }
+
+    /// Every target one `#ID` query names, OR-ed together.
+    ///
+    /// `|` separates bubbles exactly as it separates OR groups in a text
+    /// search, so one character means one thing in both modes. An unparseable
+    /// segment is dropped rather than failing the whole query — with three
+    /// bubbles up, one typo should not silently turn the other two off.
+    fn parse_all(query: &str, id_type: &str) -> Vec<IdTarget> {
+        query
+            .split('|')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| Self::parse(s, id_type))
+            .collect()
     }
 
     /// FTS5 MATCH expression that narrows the scan to plausible rows. It is a
@@ -4314,9 +4359,24 @@ fn build_session_filter_query(
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
+            // An `IN`, not a correlated `EXISTS` — the same lesson the
+            // feedback filter learned, and for the same reason.
+            //
+            // `entity_index` deliberately carries no secondary index (see its
+            // schema comment: every extra b-tree is a per-row tax on import),
+            // so `ei.session_uuid = s.session_uuid` has nothing to seek on and
+            // the subquery was re-scanning the whole table *per candidate
+            // session*. On a real 8.4k-session database that is 8395 × 81647
+            // row visits: **23.4 s**. As an uncorrelated `IN`, SQLite scans
+            // `entity_index` once, builds one ephemeral index plus a bloom
+            // filter and probes it: **8 ms**, same rows.
+            //
+            // This is why picking an entity by name was two thousand times
+            // slower than *searching* for it, which had always gone down the
+            // one-scan path.
             base_conditions.push(format!(
-                "EXISTS (SELECT 1 FROM entity_index ei \
-                 WHERE ei.session_uuid = s.session_uuid AND ei.name IN ({placeholders}))"
+                "s.session_uuid IN (SELECT session_uuid FROM entity_index \
+                 WHERE name IN ({placeholders}))"
             ));
         }
     }
@@ -4545,28 +4605,45 @@ fn build_session_filter_query(
 
     if !query.is_empty() && query_ids_only {
         search_mode = "id".to_string();
-        match IdTarget::parse(&query, &query_id_type) {
+        let targets = IdTarget::parse_all(&query, &query_id_type);
+        if targets.is_empty() {
             // A malformed id matches nothing. Saying so explicitly beats
             // falling through to a text search the user did not ask for.
-            None => match_selects
-                .push("SELECT '' AS session_uuid, NULL AS match_log_id WHERE 0".to_string()),
-            Some(target) => {
-                let matcher = target.clone();
-                conn.create_scalar_function(
-                    "cai_id_hit",
-                    2,
-                    rusqlite::functions::FunctionFlags::SQLITE_UTF8
-                        | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
-                    move |ctx: &rusqlite::functions::Context<'_>| {
-                        let article_ids = ctx.get_raw(0).as_str().unwrap_or("");
-                        let dialog_paths = ctx.get_raw(1).as_str().unwrap_or("");
-                        Ok(matcher.matches(article_ids, dialog_paths) as i32)
-                    },
-                )
-                .ok();
-                // The FTS lookup narrows the scan from every interaction to the
-                // handful mentioning the number; the function then decides
-                // exactly, so `qa-123` can no longer match `qa-1234`.
+            match_selects
+                .push("SELECT '' AS session_uuid, NULL AS match_log_id WHERE 0".to_string());
+        } else {
+            // One function for every target, chosen by position, because
+            // `create_scalar_function` keys on (name, arity): registering N
+            // two-argument closures would silently overwrite each other and
+            // every bubble would end up searching for the last one.
+            let matchers = targets.clone();
+            conn.create_scalar_function(
+                "cai_id_hit",
+                3,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8
+                    | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+                move |ctx: &rusqlite::functions::Context<'_>| {
+                    let article_ids = ctx.get_raw(0).as_str().unwrap_or("");
+                    let dialog_paths = ctx.get_raw(1).as_str().unwrap_or("");
+                    let idx = ctx.get_raw(2).as_i64().unwrap_or(-1);
+                    let hit = usize::try_from(idx)
+                        .ok()
+                        .and_then(|i| matchers.get(i))
+                        .map_or(false, |m| m.matches(article_ids, dialog_paths));
+                    Ok(hit as i32)
+                },
+            )
+            .ok();
+            // One SELECT per target — `match_selects` is UNION ALL-ed, so that
+            // *is* how this list means OR. Each keeps its own FTS narrowing
+            // rather than being widened into one scan, so N bubbles cost N of
+            // the measured 1-3 ms narrow-then-decide.
+            //
+            // The FTS lookup narrows from every interaction to the handful
+            // mentioning the number; the function then decides exactly, so
+            // `qa-123` can no longer match `qa-1234` — with a second bubble up
+            // any more than with one.
+            for (i, target) in targets.iter().enumerate() {
                 let (from, mut conds) = if fts_available {
                     param_idx += 1;
                     param_values.push(Box::new(target.fts_match()));
@@ -4577,7 +4654,7 @@ fn build_session_filter_query(
                 } else {
                     (interactions_from, Vec::new())
                 };
-                conds.push("cai_id_hit(i.article_ids, i.dialog_paths)".to_string());
+                conds.push(format!("cai_id_hit(i.article_ids, i.dialog_paths, {i})"));
                 match_selects.push(format!(
                     "SELECT i.session_uuid, i.log_id AS match_log_id \
                      FROM {from} WHERE {}{row_filter}",
@@ -13426,6 +13503,128 @@ mod conv_search {
         assert_eq!(found(&conn, &id_args("6391-4", "dialog")), vec!["node-4"]);
         // The node number alone must not pull in a different dialog's node 4.
         assert_eq!(found(&conn, &id_args("5803-4", "dialog")), vec!["other-dialog"]);
+    }
+
+    /// Picking an entity must never re-scan `entity_index` per session.
+    ///
+    /// A plan, not a duration — a timing threshold in a test is a flake
+    /// waiting to happen. But the duration is the whole point: that table
+    /// carries no index on `session_uuid`, so the correlated `EXISTS` this
+    /// replaced scanned all 81k rows for every candidate session — 23.4 s on a
+    /// real 8.4k-session database, against 8 ms for the same rows here.
+    #[test]
+    fn an_entity_filter_never_rescans_the_index_per_session() {
+        let conn = search_conn();
+        let wine = r#"{"entityMatches": [{"name": "WIJN_1", "match": "rood", "entityId": 1, "displayName": "WIJN"}]}"#;
+        add(&conn, Turn { log_id: 1, session: "a", user: "een fles rood", recognition_details: wine, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "b", user: "niets", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = GetSessionsArgs {
+            entity_filters: Some(vec!["wijn".to_string()]),
+            ..Default::default()
+        };
+        // Still the right rows — a faster plan that admits the wrong sessions
+        // would be worse than the slow one.
+        assert_eq!(found(&conn, &args), vec!["a"]);
+
+        let plan = plan_for(&conn, &args);
+        // Resolved into one list the outer query probes. Asserted positively,
+        // the way the feedback test asserts `MATERIALIZE feedback_origins` —
+        // the plan carries an unrelated correlated subquery of its own (the
+        // per-page `user_message_preview` lookup), so "no CORRELATED anywhere"
+        // would be asserting something else entirely.
+        assert!(
+            plan.contains("LIST SUBQUERY") && plan.contains("SCAN entity_index"),
+            "the entity filter must be resolved once into a list:\n{plan}"
+        );
+        // `ei` only exists in the correlated spelling; scanning it per
+        // candidate session is what made picking an entity two thousand times
+        // slower than searching for one.
+        assert!(
+            !plan.contains("SCAN ei"),
+            "entity_index must never be re-scanned per session:\n{plan}"
+        );
+    }
+
+    /// A bubble spells its own kind, so a query can name an Article and a
+    /// Dialog at once — which `query_id_type` alone cannot express.
+    #[test]
+    fn a_prefixed_id_names_its_own_kind() {
+        // The pill row is what a bare number means, and only that.
+        assert_eq!(IdTarget::parse("1234", "article"), Some(IdTarget::Article(1234)));
+        assert_eq!(IdTarget::parse("1234", "dialog"), Some(IdTarget::Dialog(1234)));
+        // A prefix outranks it, in either direction.
+        assert_eq!(IdTarget::parse("qa-1418", "dialog"), Some(IdTarget::Article(1418)));
+        assert_eq!(IdTarget::parse("dn-6391", "article"), Some(IdTarget::Dialog(6391)));
+        assert_eq!(IdTarget::parse("dn-6391-4", "article"), Some(IdTarget::Node(6391, 4)));
+        assert_eq!(IdTarget::parse("QA-1418", "dialog"), Some(IdTarget::Article(1418)));
+        // `qa-` carries no node, so this stays a typo rather than becoming one.
+        assert_eq!(IdTarget::parse("qa-1418-2", "dialog"), None);
+        assert_eq!(IdTarget::parse("dn-", "dialog"), None);
+        // A prefix that lands mid-character must not panic.
+        assert_eq!(IdTarget::parse("qé", "dialog"), None);
+    }
+
+    /// `|` separates bubbles exactly as it separates OR groups in a text
+    /// search. A single un-prefixed segment has to stay byte-for-byte what it
+    /// was before bubbles existed.
+    #[test]
+    fn parse_all_reads_every_bubble() {
+        assert_eq!(
+            IdTarget::parse_all("qa-1 | dn-2 | dn-2-3", "article"),
+            vec![IdTarget::Article(1), IdTarget::Dialog(2), IdTarget::Node(2, 3)]
+        );
+        // …and the same list regardless of what the pill row says.
+        assert_eq!(
+            IdTarget::parse_all("qa-1 | dn-2 | dn-2-3", "dialog"),
+            vec![IdTarget::Article(1), IdTarget::Dialog(2), IdTarget::Node(2, 3)]
+        );
+        assert_eq!(IdTarget::parse_all("1234", "article"), vec![IdTarget::Article(1234)]);
+        // One typo must not turn the other two bubbles off.
+        assert_eq!(
+            IdTarget::parse_all("qa-1 | nonsense | dn-2", "article"),
+            vec![IdTarget::Article(1), IdTarget::Dialog(2)]
+        );
+        // Nothing parseable at all is still nothing — the caller turns that
+        // into an explicit "matches nothing" rather than a text search.
+        assert!(IdTarget::parse_all("nonsense | ", "article").is_empty());
+    }
+
+    /// Several bubbles are the union of each on its own — and the whole-id
+    /// exactness the single-target search has must survive the UNION.
+    #[test]
+    fn several_id_bubbles_or_together() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "article-123", user: "a", article_ids: r#"["qa-123"]"#, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "article-1234", user: "b", article_ids: r#"["qa-1234"]"#, ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "dialog-6391", user: "c", article_ids: r#"["dn-6391-4"]"#, dialog_paths: r#"{"EndedOrInProgress" : "6391:2/15/4"}"#, ..Default::default() });
+        add(&conn, Turn { log_id: 4, session: "untouched", user: "d", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let ids = |q: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            query_ids_only: Some(true),
+            // Deliberately the wrong pill for both bubbles: a prefixed segment
+            // must not depend on it.
+            query_id_type: Some("article".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(found(&conn, &ids("qa-123")), vec!["article-123"]);
+        assert_eq!(found(&conn, &ids("dn-6391")), vec!["dialog-6391"]);
+        // The union, and nothing else — `qa-1234` is still not `qa-123`.
+        assert_eq!(
+            found(&conn, &ids("qa-123 | dn-6391")),
+            vec!["article-123", "dialog-6391"]
+        );
+        // Every bubble gets its own matcher: with one function per query the
+        // last target would have decided for all of them, and this would have
+        // returned `dialog-6391` twice over or `article-123` not at all.
+        assert_eq!(
+            found(&conn, &ids("qa-123 | qa-1234 | dn-6391")),
+            vec!["article-123", "article-1234", "dialog-6391"]
+        );
     }
 
     /// A dialog path visited through, but not answered from, still counts —
