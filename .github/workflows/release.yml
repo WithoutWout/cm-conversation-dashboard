@@ -91,52 +91,23 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### The conversations search bar now offers what you can search for
+            ### Narrow a Dialog to one of its nodes, without retyping it
 
-            Start typing and a list appears under the box. Pick something and it
-            becomes a small removable tag in the field — click the ✕, or press
-            Backspace, to take it off again.
+            When you search conversations by **#ID**, a Dialog you have picked
+            now shows a small ▾. Click it and you get that Dialog's nodes, by
+            name — *Camper of caravan*, *Elektrische auto's*, *Hotels &
+            Resorts* — so you can go from "conversations that touched this
+            Dialog" to "conversations that reached *this node* of it" in one
+            click.
 
-            **Entities.** Typing `park` lists the entities your conversations
-            actually triggered, with how many conversations each one covers, so
-            you can filter to exactly those without hunting through the tag
-            panel.
+            On a real database that took one search from **48 conversations
+            down to the 1** that actually reached the node.
 
-            **Entities are found by the words that fire them, not just by their
-            name.** `caravan` is not the name of any entity — it is one of the
-            twenty words that fire **CAMPER**. Type `caravan` and CAMPER is
-            offered, and the row tells you why: *via caravan*.
-
-            **Articles and Dialogs, by name.** Switch on **#ID** and type
-            `parkeer`: you get *Parkeerticket qa-1697*, *parkeerautomaat
-            qa-1831* and the rest, so you no longer have to look an ID up on the
-            Content tab first. Typing a Dialog followed by a dash — `6391-` —
-            lists that Dialog's nodes by name.
-
-            You can add several at once, and they combine as "any of these".
-
-            ### Filtering by an entity took 23 seconds. It now takes 8 thousandths of one.
-
-            Picking an entity and searching for the same entity's name returned
-            the same conversations, but one of them took a fraction of a second
-            and the other took the better part of half a minute. The filter was
-            re-reading the whole entity table once for every conversation it
-            considered — on a real database, 8,395 conversations against 81,647
-            entity rows.
-
-            It now reads that table once. **23.4 seconds to 8 milliseconds**, the
-            same conversations either way.
-
-            ### Smaller things
-
-            - **#ID mode no longer switches itself off when you type a letter.**
-              It used to, because a letter cannot be part of an ID — which is
-              precisely what stopped you searching for an Article by name.
-            - Opening a conversation you found by entity now highlights the turn
-              that fired it, instead of showing you forty messages with nothing
-              marked.
-            - Jumping to Conversations from an Article or Dialog card lands as a
-              tag, so a second jump adds to the first instead of replacing it.
+            **Whole dialog** sits at the top of the same list, so widening back
+            out is one click too, and the entry you are currently on is marked
+            so the list reads as a choice you are editing rather than a fresh
+            one. Articles and Transactional Dialogs have no nodes, so those tags
+            stay plain — nothing looks clickable unless it does something.
 
             ---
 
