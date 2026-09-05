@@ -91,23 +91,54 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Narrow a Dialog to one of its nodes, without retyping it
+            ### One search bar that can ask the whole question
 
-            When you search conversations by **#ID**, a Dialog you have picked
-            now shows a small ▾. Click it and you get that Dialog's nodes, by
-            name — *Camper of caravan*, *Elektrische auto's*, *Hotels &
-            Resorts* — so you can go from "conversations that touched this
-            Dialog" to "conversations that reached *this node* of it" in one
-            click.
+            The conversations search bar used to be two halves that could not
+            meet. **#ID** on searched Article and Dialog ids and nothing else;
+            **#ID** off searched text and Entities and nothing else. "Which
+            conversations went through the parking Dialog *and* had someone
+            complaining?" was two searches you had to intersect in your head.
 
-            On a real database that took one search from **48 conversations
-            down to the 1** that actually reached the node.
+            **#ID is gone.** One field now holds everything — words, Entities,
+            Articles, Dialogs and Dialog nodes — and you join them yourself:
 
-            **Whole dialog** sits at the top of the same list, so widening back
-            out is one click too, and the entry you are currently on is marked
-            so the list reads as a choice you are editing rather than a fresh
-            one. Articles and Transactional Dialogs have no nodes, so those tags
-            stay plain — nothing looks clickable unless it does something.
+            - Between any two things a small **and** appears. Click it to change
+              it to **or**, or to **not** to exclude what follows.
+            - **( )** opens a bracket, so `(Article A or Dialog B) and boos` is
+              one search. Typing `(` does the same.
+            - The whole thing reads **left to right**, exactly as it looks —
+              there is no hidden precedence to learn.
+
+            Typing a sentence and pressing Enter works exactly as it always did.
+            In fact it works better: the suggestion list no longer pre-selects
+            its first row, so pressing Enter after typing a word that happens to
+            match an Entity now searches for the word instead of quietly turning
+            it into a filter.
+
+            ### Everything is offered at once
+
+            One list, whatever you are after. Type `park` and you get the
+            Entity, the Dialog *Parkeren en bereikbaarheid* and the Article
+            *Waar kan ik parkeren?* side by side, each badged so you can tell
+            them apart. Type `caravan` and you still get the **camper** Entity,
+            because that is one of the words that fires it.
+
+            Ids work without a content export loaded, too — type `qa-1418` or
+            just `1418` and both readings are offered.
+
+            ### Smaller things
+
+            - A text condition can be **clicked and edited in place**, so fixing
+              a typo in the first of five conditions is an edit rather than a
+              retype.
+            - Dialog conditions keep their ▾ node picker from v0.18.1.
+            - The Entities tab has moved out of the funnel and into the search
+              bar, where it can be combined with everything else. Context and
+              Metadata stay where they were.
+            - Two searches that were quietly wrong are fixed: a rare
+              punctuation-heavy search combined with a GenAI or recognition
+              filter matched too much, and two regular expressions in one search
+              both looked for the second one.
 
             ---
 
