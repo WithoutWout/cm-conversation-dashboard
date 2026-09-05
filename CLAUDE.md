@@ -125,7 +125,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `get_insight_tag_values` | `getInsightTagValues(args, unit, kind, name)` | One tag key's values, for switching the Context or Metadata chart |
 | `cancel_db_query`     | `cancelDbQuery()`                | Interrupts whatever the conversations database is running — a session search or an Insights read. A no-op when nothing is running |
 
-`get_entity_options` returns every entity the imported conversations have triggered — `{name, entityId, count}` — feeding both the conversation-search Entity pills and the only entity ids this app has (the EntitiesExport CSV carries none). See `docs/search.md` → "Entity pills are a filter, not a search".
+`get_entity_options` returns every entity the imported conversations have triggered — `{name, entityId, count}` — feeding both the conversation search bar's type-ahead and the only entity ids this app has (the EntitiesExport CSV carries none). See `docs/search.md` → "An entity is a leaf, not a filter".
 
 There are also Conversations DB commands exposed through `window.backend` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context and metadata options (`get_context_options` / `get_metadata_options`, both thin wrappers over `tag_options`), daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
@@ -348,7 +348,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 Three distinct search types:
 
 1. **Content search** — searches Dialogs and Articles and their content. Main search bar under the Content tab.
-2. **Conversations search** — searches conversations and their context (e.g. filter by context). Can be very resource-intensive; use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter. The search bar offers what it can search for as you type — entities, Articles, Dialogs and their nodes — and each pick becomes a bubble in the field; see `docs/search.md` → "The search bar's bubbles".
+2. **Conversations search** — searches conversations and their context (e.g. filter by context). Can be very resource-intensive; use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter. The search bar is **one boolean expression** over text, entities, Articles, Dialogs and their nodes, joined by AND / OR / AND NOT and grouped with brackets; it travels in the `query` string and `parse_search_expr` in `lib.rs` reads it. See `docs/search.md` → "The search bar is one expression".
 3. **Chat search** — searches within a single chat. A chat is first found and opened via Conversations search; Chat search then operates within that opened conversation.
 
 The semantics of all three — and of the Context · Metadata tag filters that
@@ -422,16 +422,18 @@ The orientation map for the whole window. It says what is on screen and where;
   while reading: a Cancel button under the spinner; the unit toggle stays live
 
 <div.conv-sidebar-header>
-  [#ID] | token field | search submit | [.*] | [U] [B] [E]
-    the token field holds bubbles + the caret: entity bubbles when #ID is off
-    and E is on, Article/Dialog/node bubbles when it is on
-    a Dialog bubble carries a ▾ and opens its node list in place — the same
-    popover, anchored under the bubble, "whole dialog" first
+  [( )] | expression field | search submit | [.*] | [U] [B] [E]
+    the field is one boolean expression, read strictly left to right:
+    chips for text, entities, Articles, Dialogs and nodes, an operator chip
+    between each pair (click cycles and / or / and not), and bracket pairs
+    drawn as one nested band. A dashed, faint leading "not" toggle excludes
+    the whole search. Committing puts what is typed into a chip.
+    a Dialog chip carries a ▾ and opens its node list in place — the same
+    popover, anchored under the chip, "whole dialog" first
     typing opens #convSuggest under it — badge · name (typed run marked) ·
-    id or conversation count; ↑↓ select, Enter/Tab add, Esc close,
-    Backspace on an empty field eats the last bubble
-  "Search by:" pills, only in #ID mode: Article ID | Dialog / Node ID
-    (a bubble sets these; they still govern a bare number typed by hand)
+    id or conversation count; ↑↓ select, Tab adds, Enter searches until a
+    row is selected, Esc closes, Backspace on an empty field eats the last chip
+    [( )] opens a group, or closes the one that is open (disabled under .*)
   date range button | tag filter button (Context · Metadata)
   filter pills (GenAI / feedback / Low % / Zero %)
 

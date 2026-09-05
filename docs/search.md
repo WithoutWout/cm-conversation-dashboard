@@ -20,9 +20,9 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 
 ## Conversations search semantics
 
-`build_session_filter_query` in `lib.rs` is the single source of truth. Every text, ID and entity search resolves to a list of SELECTs producing `(session_uuid, match_log_id)`, UNIONed into one `search_sessions` CTE — that list is what lets one query look in more than one place at once (message text *and* the entities that text triggered) and lets a single OR group carry its own extra WHERE clause. `conv_search` in `lib.rs` is the test module; every test there is a bug that was invisible in the SQL and only showed up in the rows that came back.
+`build_session_filter_query` in `lib.rs` is the single source of truth. The search bar's contents are one boolean expression (see "The search bar is one expression" below); every leaf of it — a text run, an entity, an Article, a Dialog, a node — resolves to a relation producing `(session_uuid, match_log_id)`, and the operators compose those relations. `conv_search` in `lib.rs` is the test module; every test there is a bug that was invisible in the SQL and only showed up in the rows that came back.
 
-**A column filter always applies to a parenthesized expression.** In FTS5 `interaction_value : a OR b` binds the filter to `a` alone and lets `b` match any column — which is why a **U**-scoped (user) search kept returning conversations where only the bot had said the word. `fts_columns()` is the only place a colspec is built and it always emits `{cols} : (expr)`. "Both" is a column filter too: with none at all, a plain query also matched `article_ids`/`dialog_paths` and a number found conversations by their dialog path. Those two columns are only in scope when `queryIds` is on.
+**A column filter always applies to a parenthesized expression.** In FTS5 `interaction_value : a OR b` binds the filter to `a` alone and lets `b` match any column — which is why a **U**-scoped (user) search kept returning conversations where only the bot had said the word. `fts_columns()` is the only place a colspec is built and it always emits `{cols} : (expr)`. "Both" is a column filter too: with none at all, a plain query also matched `article_ids`/`dialog_paths` and a number found conversations by their dialog path. Those two columns are an id leaf's business now and never a text leaf's, so `fts_columns` no longer takes a flag for them at all.
 
 **Search terms are never emitted as FTS5 barewords.** `www.efteling.nl` or `qa-1234` unquoted is an FTS5 **syntax error**, so the whole search failed rather than the one term. Terms are tokenized (`fts_tokens`) and re-emitted as a quoted phrase, with the trailing `*` kept for single-word prefix matching.
 
@@ -32,9 +32,10 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 
 - **The exact re-check is per OR group, which is why groups get their own SELECT.** Folded into one MATCH it would either be skipped for rows that matched a different group or wrongly applied to them. The single-MATCH fast path is still taken when no group needs a re-check, which is the common case.
 
-**`#ID` search is FTS-narrowed and then decided exactly.** The FTS lookup is a *filter*, not the answer: `IdTarget::matches` compares whole ids, so `qa-123` no longer also matches `qa-1234` and `dn-6391-4` no longer matches `dn-6391-42`. Measured on a real 110k-interaction database: **5.0 s → 3 ms** for an Article id and **1.4 s → 1 ms** for a Dialog id. `an_id_search_on_a_real_database_matches_an_exhaustive_scan` (needs `CAI_TEST_DB`) pins the narrow+decide pair against a boundary-exact full scan; `search_perf::search_cost` is the timing harness.
+**An id leaf is FTS-narrowed and then decided exactly.** The FTS lookup is a *filter*, not the answer: `IdTarget::matches` compares whole ids, so `qa-123` no longer also matches `qa-1234` and `dn-6391-4` no longer matches `dn-6391-42`. Measured on a real 110k-interaction database: **5.0 s → 3 ms** for an Article id and **1.4 s → 1 ms** for a Dialog id. `an_id_search_on_a_real_database_matches_an_exhaustive_scan` (needs `CAI_TEST_DB`) pins the narrow+decide pair against a boundary-exact full scan; `search_perf::search_cost` is the timing harness.
 
-- **Dialog and Node are one filter, and the `-` is what tells them apart.** `IdTarget::parse` reads `6391` as a Dialog and `6391-4` as one of its nodes; an Article has no nodes, so a `-` there is a typo rather than a node search. The old UI made the user pick between three pills to say something the query text already said.
+- **Dialog and Node are one leaf, and the `-` is what tells them apart.** `IdTarget::parse` reads `dn-6391` as a Dialog and `dn-6391-4` as one of its nodes; an Article has no nodes, so a `-` after `qa-` is a typo rather than a node search.
+- **The prefix is mandatory.** There used to be a bare spelling whose meaning came from a "Search by:" pill row, which is how `1418` could mean an Article. In one field holding text and ids at once a bare number can only be text — the suggestion list offers `qa-1418` and `dn-1418` for it instead, which is a question rather than a guess.
 - A Dialog matches an interaction that answered from one of its nodes (`article_ids`, `dn-<dialog>-<node>`) **or** merely walked through it (`dialog_paths`, `<dialog>:<node>/<node>/…`). `path_has_node` checks the dialog and the node together, so a second path in the same cell cannot contribute the dialog while another contributes the node.
 
 **Entities are a search field, not a subset of the text.** The recognizer stores the entity it matched, not the wording that triggered it, so "mag ik een fles rood meenemen" is found by searching the entity `WIJN`. The **E** toggle sits with **U**/**B** and is independent of them; turning both message toggles off sends `queryScope: "none"`, which means entity-only. Nothing at all selected falls back to searching the text — an empty result set would read as "no matches" rather than "you switched it off".
@@ -67,80 +68,263 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - Ranges are merged before insertion, longest-first at a given start: two terms can cover the same span, and `<mark>` nested in `<mark>` renders wrong. `opening | openingstijden` produces one mark, not `[opening][stijden]`.
 - Regex mode is deliberately **not** folded — the user wrote a pattern, and the backend's regex path does not fold either.
 
-## The search bar's bubbles
+## The search bar is one expression
 
-The conversations bar knows about two things you otherwise had to already know
-the answer to: which entities the imported conversations triggered, and which
-Article or Dialog you mean. Typing offers them and taking one turns it into a
-removable bubble sitting in the field.
+The conversations bar holds free text, entities, Articles, Dialogs and Dialog
+nodes at once, joined by operator chips you can click and grouped with brackets.
+"Conversations that walked through the parking Dialog and where someone was
+angry" is one search rather than two you intersect in your head.
 
-**Two kinds, never mixed** — the `#ID` toggle already partitions the bar:
+It used to be two mutually exclusive halves. `#ID` on searched ids and nothing
+else; `#ID` off searched text and entities and nothing else. Underneath, the
+reason was structural: `base_conditions.join(" AND ")` was the only AND and
+`match_selects.join(" UNION ALL ")` was the only OR, and they sat on opposite
+sides of the join between them — so a text predicate and an id predicate could
+never meet.
 
-- **`#ID` off, `E` on → an entity filter.** A bubble is an entry in
-  `convEntityFilters`, *the same array the funnel's Entities tab writes to*. One
-  state, two views: they cannot disagree, and `_updateCtxFilterBadge` — which
-  every change from either side already routes through — is where the bubbles
-  are redrawn. The semantics are the ones above: OR within the list, AND with a
-  typed query, resolved by an indexed `EXISTS`.
-- **`#ID` on → one `IdTarget` each, OR-ed together.**
+### The grammar
 
-**The id bubbles travel in the existing `query` string, spelled in the app's own
-vocabulary** — `qa-1418 | dn-6391 | dn-6391-4`. Nothing was added to
-`GetSessionsArgs`, and that is deliberate: it is the Insights scope-cache
-fingerprint, and `lastConvSearchArgs`, the AI export and the chat query mirror
-all read it, so a new field would have had to be threaded through four places to
-say something the query string could already carry.
+```
+expr   := term ( op term )*                 -- left to right, no precedence
+op     := "AND" | "OR" | "AND NOT" | "NOT"  -- a bare NOT between terms is AND NOT
+term   := "(" expr ")" | "NOT" term | leaf
+leaf   := qa-<n> | dn-<n> | dn-<d>-<n>      -- an IdTarget, unquoted
+        | entity:<word> | entity:"<phrase>"
+        | <text>                            -- the term grammar above, verbatim
+```
 
-- **`IdTarget::parse` reads the prefix first, `id_type` only after.** A prefixed
-  segment names its own kind, so a query can hold an Article and a Dialog at
-  once — which one `query_id_type` cannot express. A bare number still means
-  exactly what it meant before, which is what leaves the "Search by:" pill row
-  in charge of anything typed and submitted without picking a suggestion.
-- **`parse_all` splits on `|` and drops what it cannot read**, rather than
-  failing the whole query: with three bubbles up, one typo must not silently
-  turn the other two off. Nothing parseable at all still becomes the explicit
-  `WHERE 0`, never a text search the user did not ask for.
-- **One SELECT per target, `UNION ALL`-ed** — which is already how
-  `match_selects` means OR. Each keeps its own FTS narrowing, so N bubbles cost
-  N of the 1–3 ms narrow-then-decide rather than one widened scan, and
-  `qa-123` still does not match `qa-1234` with a second bubble present.
-- **`cai_id_hit` takes the target's index as a third argument.**
-  `create_scalar_function` keys on (name, arity), so N two-argument closures
-  would silently overwrite each other and every bubble would end up searching
-  for the last one. `several_id_bubbles_or_together` is what catches that.
-- `convIdSegmentValid` is the renderer's mirror of `IdTarget::parse`, and
-  `frontend/tests/search-bubbles.test.js` asserts that every segment
-  `convIdQueryString` writes is a segment it accepts.
+**Evaluation is strictly left to right; brackets override.** `qa-1 OR qa-2 AND
+boos` is `((qa-1 OR qa-2) AND boos)` — what someone reading a row of chips left
+to right means. There is no precedence to learn, and it does not collide with the
+older `a b | c d` rule, because that rule lives *inside* one text leaf, a layer
+below these operators. `parse_search_expr` folds a run of one operator into a
+single n-ary node, so three Articles are one `UNION ALL` and not two nested ones.
 
-**Both feeds are already in memory, so a keystroke costs no IPC.** The content
-index is built once per `loadData` from `allCombinedItems` (~4100 rows, 4.2 ms)
-and invalidated with it; entities come from the cached `entityOptions` plus
-their export trigger words, warmed on first focus by the existing idempotent
+- **The keywords are upper-case only.** `and` is a word people search for in both
+  languages this app sees, and a case-insensitive keyword would quietly turn half
+  of "brood and boter" into an operator. Quoting escapes anything in either
+  direction: `"AND"`, `"dn-6391"` and `"(gratis)"` are all text.
+- **`|` is not an expression operator.** It stays the OR separator *within* one
+  text leaf, because for pure text the two are the same relation — so nothing is
+  lost and one character keeps one meaning.
+- **The renderer serialises with explicit brackets** even though its model is
+  flat, so the string in the Insights chip and in an AI export says what it means
+  without the reader knowing the left-to-right rule.
+- **Malformed input is read as generously as possible**, never rejected: a
+  dangling operator is dropped, an unclosed `(` closes at the end, a stray `)` is
+  ignored. With five chips up, one typo must not silently turn the other four
+  off. The renderer's field cannot produce any of these, but a pasted string can.
+- **`GetSessionsArgs` gained nothing.** It is the Insights scope-cache
+  fingerprint, and `lastConvSearchArgs`, the AI export and the chat query mirror
+  all read it, so a tree-shaped field would have had to be threaded through four
+  places to say what the query string could already carry. What it *lost* is
+  `query_ids`, `query_ids_only`, `query_id_type` and `entity_filters` — the
+  expression says all four. The AI export header is `schema_version` 6 and its
+  legend states the grammar; a file that does not describe its own filter
+  language is misleading to the model reading it.
+
+### AND is conversation-level
+
+`dn-6391 AND boos` means the conversation walked through 6391 *and* some turn
+says "boos" — not necessarily the same turn. The operators combine **searches**,
+and a search returns conversations; requiring both in one interaction would
+answer a much rarer question and return almost nothing.
+
+Several words *inside one text leaf* keep their old meaning — one message holding
+all of them, FTS implicit AND — because that is a term, not two searches.
+`a_dialog_and_a_word_need_not_share_a_turn` pins the distinction.
+
+Exclusion is the mirror of it: `parkeer AND NOT duur` removes the whole
+conversation, not the turn. "Conversations about parking that never mention the
+price" is meaningless read turn by turn.
+
+### One CTE per node
+
+Each node of the tree is emitted as a named CTE producing
+`(session_uuid, match_log_id)`, which is what makes the operators composable at
+all: **OR is `UNION ALL`**, **AND is that union filtered by an `IN` per
+conjunct**, and **NOT is the complement within `base_sessions`**.
+
+- **Negation is carried, not materialised.** `A AND NOT B` becomes one `NOT IN`
+  on A's rows rather than a scan of every conversation minus B. It only becomes a
+  relation of its own where it has to be — inside an OR, or as the whole search,
+  where `base_sessions` is the universe and no other case needs a special rule.
+- **A node read twice is written once, and marked `AS MATERIALIZED`.** An AND
+  reads each conjunct once for its rows and once to intersect on; inlined,
+  SQLite would re-run that leaf's FTS match per row of the other side — the same
+  n × m shape that made `feedback_origins` unfinishable.
+  `a_conjunct_is_never_recomputed_per_row` asserts the plan rather than a
+  duration, because a timing threshold in a test is a flake waiting to happen.
+- **A single un-negated leaf is spliced inline instead**, which reproduces the
+  SQL this file emitted before expressions existed — statement-cache key and
+  query plan included. Every pre-existing search takes that path, so "nothing
+  changed for a plain search" is a property of the code rather than of thirty
+  tests that happen to agree. `one_leaf_compiles_to_the_sql_it_always_did` pins
+  it from both sides.
+- **`match_rows` is now a reference to the root**, not a second textual copy of
+  the whole search sharing its `?N` numbering by hand. Each node's parameters are
+  allocated exactly once, which retires that trick entirely.
+  - It is `None` when the tree holds no positive leaf. Only a positive leaf can
+    point at a particular interaction — no turn is the reason a conversation
+    *lacks* a word — and Insights would otherwise read "zero matching
+    interactions" where the truth is "nothing singled any of them out".
+- **Every leaf's WHERE is parenthesised before the row filter is appended.**
+  `WHERE {conds}{row_filter}` only works while `{conds}` is an AND-chain, and it
+  already was not in the `like` branch: `WHERE (a) OR (b) AND <row filter>` bound
+  the `AND` to the last disjunct alone. That was a live precedence bug with a
+  GenAI or recognition pill plus an unindexable term.
+- **The per-leaf scalar functions are indexed.** `create_scalar_function` keys on
+  **(name, arity)**, so one closure per leaf silently overwrites its predecessor
+  and every leaf ends up searching for the last one. `cai_id_hit` learned this
+  when one query string first carried several ids; `regexp` had exactly the same
+  shape with its pattern baked in, and is now `cai_regexp(idx, text)` over a
+  tree-global vector. `two_regex_leaves_do_not_collide` is what catches it.
+
+### An entity is a leaf, not a filter
+
+`query_entities` (the **E** toggle) is a boolean saying "also match this text
+against entity name, matched text and id" — a substring search over *typed
+words*. `entity:camper` is the exact label the recognizer assigned. Picking an
+entity by name is not the same question as searching for a word that might
+appear in one, and `an_entity_leaf_is_exact_where_the_e_toggle_is_a_substring`
+pins the difference.
+
+**E is not redundant now that `entity:` exists, and it is not always on in
+effect.** On a real 150k-interaction database it widens a text search by 8–35%
+— `parkeren` goes 335 → 452 user-scoped, `openingstijden` 149 → 191 — and
+turning it off is the only way to ask what people actually *typed*. It is also
+what `searchConvsForEntity` uses, with `query_scope: "none"`, to answer "which
+conversations fired this entity?" from an entity card.
+`the_entity_toggle_still_changes_what_a_text_leaf_matches` pins both halves.
+
+- **The suggestions are deliberately *not* gated on it.** An `entity:` condition
+  works whatever E says, so gating the type-ahead on E left the field unable to
+  offer a chip that would have worked perfectly well once placed — E off meant
+  no entity could be *found*, while one already there kept filtering. The
+  toggle governs what a typed word matches, and nothing else.
+- **U / B / E are a property of the search, not of one condition**, so every
+  text leaf reads them. `the_scope_toggles_still_govern_every_text_leaf` asks
+  that of the compiled tree, which is the path that could have dropped it; the
+  single-leaf path is spliced inline and covered by
+  `a_user_scoped_search_never_matches_the_bot_side`.
+- **They still do not re-run the search on their own**, unlike `.*` and the
+  operator chips. That is deliberate and predates the expression: setting a
+  scope is usually two clicks (U off, B on), and firing a search on each would
+  run an intermediate query nobody asked for.
+
+Entities used to be `entity_filters`, an `IN` in `base_where` written from a
+funnel tab. As a leaf they can be ORed, ANDed, grouped and excluded like anything
+else — and the funnel's Entities tab is gone, because a list you scroll cannot
+do any of that and the bar's type-ahead already outranks it.
+
+- **The leaf is a single uncorrelated pass over `entity_index`**, which is the
+  whole reason it is fast. That table deliberately carries no secondary index —
+  every extra b-tree is a per-row tax on import — so a correlated
+  `ei.session_uuid = s.session_uuid` had nothing to seek on and re-scanned all
+  81k rows *per candidate session*: **23.4 s** over 8395 sessions, against
+  **8 ms** for the same rows in one pass. `an_entity_leaf_never_rescans_the_index_per_session`
+  counts the scans rather than looking for one, because "scanned once" is the
+  property and "scanned" is not.
+- **It also says which turn fired the entity**, which the `IN`-shaped filter
+  never could: the leaf carries a `match_log_id`, so the preview and the opened
+  chat can point at the turn instead of falling back to the first message.
+- Names are stored lower-cased (`entity_index_rows` lowercases the display name
+  and the matched text) and the suggestions come from that same column, so they
+  arrive in the right case already; the leaf lower-cases again rather than
+  trusting what crossed the bridge.
+- **`get_entity_options` is still one full scan of `entity_index`**, run once
+  when the field is first focused and cached in the renderer, exactly as the
+  context and metadata options already are. The same scan carries `entityId`,
+  which is the only place in the app an entity id exists — the EntitiesExport CSV
+  has no id column at all. See `docs/collections.md` and `cmLink("entity", …)`.
+
+### The field
+
+The renderer's model is a flat, ordered list of exactly what is on screen —
+chips, the operator between each pair, and bracket tokens — and the wire string
+is its serialisation. It never builds a tree; `parse_search_expr` does that on
+the far side. `normalizeConvExpr` is what keeps the list readable (one operator
+between adjacent conditions, none against a bracket it cannot join across, no
+empty groups, no closer without an opener), which is why the search runs with no
+validation step in front of it.
+
+- **Committing puts the typed text in a chip.** One rule with no exceptions: the
+  field always shows the committed search, and the box is always "what's next".
+  Typing a sentence and pressing Enter is the same two keystrokes it always was
+  and returns the same rows; the words simply land in a chip you can click to
+  edit in place, which is what makes fixing a typo in the first of five
+  conditions an edit rather than a retype.
+- **Enter no longer takes the first suggestion.** The list used to open with row
+  0 highlighted, so typing a word that happens to name an entity and pressing
+  Enter added a chip instead of searching — the plain-sentence case this field
+  has to keep cheap. Nothing is highlighted until you move: `Enter` searches,
+  `↓`/`Tab` then Enter picks, and the hint line says which of the two Enter is
+  about to do.
+- **The operator chip appears by itself between adjacent conditions** and cycles
+  `and → or → and not`. Nobody has to insert one; everybody can change one. It is
+  drawn lower-case and quiet because it is connective tissue — set in caps it
+  shouted over the chips it joins.
+  - **The default is guessed from the kinds either side**: two Articles, or two
+    entities, almost always mean OR; a Dialog and a word almost always mean AND.
+    Guessing is worth doing because it is one click to undo.
+  - **A leading exclusion is a separate, dashed, nearly transparent toggle.**
+    Drawn like the operators beside it, it read as *already applied*, which is
+    the one thing it must not do. It is only needed when the whole search is a
+    negation — an exclusion anywhere else can be written after the thing it
+    narrows, and AND commutes.
+- **A matched bracket pair is drawn as one nested band**, rebuilt from the flat
+  list on every render: which conditions are *inside* the group is the whole
+  question a bracket answers. The brackets themselves stay visible because that
+  is what someone asked for when they asked for parentheses.
+- **The `( )` button opens a group, or closes the one that is open**, and typing
+  `(` or `)` at a term boundary does the same. Groups are built as you go rather
+  than wrapped around chips after the fact — with left-to-right evaluation the
+  only shape that needs one is `a AND (b OR c)`, and that is exactly the order
+  you type it in.
+- **Under `.*` the brackets belong to the pattern.** `a(b|c)` is a group the
+  *user* wrote, and reading it as ours would silently search for two different
+  things. The operators still apply, so an id or entity leaf can sit beside a
+  pattern; only grouping is unavailable, and the `( )` button says so by being
+  disabled. A group already built is dropped when `.*` goes on, rather than left
+  to serialise brackets the pattern would then swallow.
+
+### The suggestions
+
+Both feeds are already in memory, so a keystroke costs no IPC. The content index
+is built once per `loadData` from `allCombinedItems` (~4100 rows, 4.2 ms) and
+invalidated with it; entities come from the cached `entityOptions` plus their
+export trigger words, warmed on first focus by the existing idempotent
 `ensureEntityIdMap`. A query is 0.06–0.7 ms and about 1 ms for a single letter
-matching nearly everything, so it runs synchronously on `input` with no
-debounce. Both indexes are invalidated by `loadData` — the entity one too, since
-its words come from `entityMap`.
+matching nearly everything, so it runs synchronously on `input` with no debounce.
 
+- **Both pools are searched at once and ranked together.** There is no mode to be
+  in any more, and the badge on each row is what says which kind it is.
+- **An id spelled in full is always offered, with or without a content export**,
+  and a bare number offers `qa-<n>` and `dn-<n>`. Only the *label* needs the
+  export — without this, removing `#ID` would have taken away the only way to
+  search by id on a machine that has a database but no export folder. With an
+  export loaded those guesses rank below every row that has a real title behind
+  it: a nameless "Dialog 1418" outranking the Article actually called *Waar kan
+  ik parkeren?* is exactly backwards.
 - **The warm re-offers when the scan lands.** `get_entity_options` is a full
-  scan, and on a real database the first keystroke of a cold open beat it —
-  which showed as *nothing*, indistinguishable from "this database has no
-  entities". It now re-runs the suggestion once the options arrive, if the field
-  still holds what was typed while waiting.
-- **The field's `space = AND · | = OR` hover tooltip is suppressed while the
-  list is open** (`.conv-search-wrap.is-suggesting`). It hangs below the field,
-  which is exactly where the list now opens, and it landed on the first row.
-
+  scan, and on a real database the first keystroke of a cold open beat it — which
+  showed as *nothing*, indistinguishable from "this database has no entities". It
+  now re-runs the suggestion once the options arrive, if the field still holds
+  what was typed while waiting.
+- **The field's hover tooltip is suppressed while the list is open**
+  (`.conv-search-wrap.is-suggesting`). It hangs below the field, which is exactly
+  where the list opens, and it landed on the first row.
 - **Every typed token must hit, but the ranking uses the whole typed string.**
   "park hotel" narrows; "park" still puts *parkeren* above *zonnepark*, because
   what someone means by typing is "starts with this" and a token split throws
   that away.
 - **An entity is offered by the words that fire it, not only by its name.**
   `caravan` is not the CAMPER entity's name — it is one of the twenty words the
-  recognizer fires CAMPER on, and it is what someone types when looking for
-  those conversations. The words come from the content export
-  (`entityMap`, keyed by upper-cased name, which is also what bridges the two
-  spellings: `entity_index` stores the lower-cased *display* name and the export
-  carries the internal one). With no export loaded this degrades to name-only.
+  recognizer fires CAMPER on, and it is what someone types when looking for those
+  conversations. The words come from the content export (`entityMap`, keyed by
+  upper-cased name, which is also what bridges the two spellings: `entity_index`
+  stores the lower-cased *display* name and the export carries the internal one).
+  With no export loaded this degrades to name-only.
   - **Every name match ranks above every word match**, so typing `camper` cannot
     bury the CAMPER entity beneath whatever else happens to list it as a word.
   - **The row says which word it matched on** (`camper · via caravan`). Offering
@@ -148,96 +332,62 @@ its words come from `entityMap`.
     a synonym.
 - **A Dialog written with a `-` switches the list to that dialog's nodes**, by
   number or by name, with the whole Dialog still offered first. The node half of
-  the "Dialog / Node ID" search was previously reachable only by already knowing
-  the number.
-- **A Dialog bubble opens its own node list when you click it.** A Dialog is a
+  an id search was previously reachable only by already knowing the number.
+- **A Dialog chip opens its own node list when you click it.** A Dialog is a
   question you are half-way through asking — "these conversations touched 6391"
   is usually a step towards "…and reached *this* node of it", and re-typing the
   whole thing was the only way to say the second one. The list is anchored under
-  the bubble, leads with **whole dialog** so the narrowing is undoable from the
-  same menu that did it, and marks the row the bubble already carries — it opens
-  on that row, so the arrow keys move from where you are.
-  - It is the *same* popover, opened from a second place
-    (`_convSuggestShow`), so the keyboard handling, the dismissal rules and the
-    row markup cannot drift between the two. `_convSuggestEditIdx` is what says
-    a pick replaces a bubble instead of adding one, and `closeConvSuggest`
-    clears it.
+  the chip, leads with **whole dialog** so the narrowing is undoable from the same
+  menu that did it, and opens on the row the chip already carries so the arrow
+  keys move from where you are.
+  - It is the *same* popover, opened from a second place (`_convSuggestShow`), so
+    the keyboard handling, the dismissal rules and the row markup cannot drift
+    between the two. `_convSuggestEditIdx` is what says a pick replaces a chip
+    instead of adding one, and `closeConvSuggest` clears it.
   - **Only when the nodes are actually held.** An Article has none, a
     Transactional Dialog carries none in the export (`tDialogs` is `{id, name}`
     and nothing else), and without a content export there is nothing to offer —
-    all three stay plain, non-clickable chips, because a chip that looks
-    clickable and does nothing is worse than one that does not.
-  - Narrowing two bubbles onto the same node would leave them ORing with
+    all three stay plain, non-clickable chips, because one that looks clickable
+    and does nothing is worse than one that does not.
+  - Narrowing two chips onto the same node would leave them ORing with
     themselves, so the list is deduplicated after a replace; first one wins.
-- **`#ID` no longer switches itself off when you type a letter.** That rule
-  existed because a letter could not be part of an id; typing a *name* in `#ID`
-  mode is now the point, and the rule undid it mid-word.
 - **`_convMarkSuggest` is not `hl()`.** `hl` is built from the *content* search
   bar's `Aa` / `\b` / `.*` toggles, which have nothing to do with this list and
   would make the same keystroke highlight differently depending on a control in
   another view. It also refuses to mark a string that changes length when
-  lowercased — an index into the folded copy is only an index into the original
+  lower-cased — an index into the folded copy is only an index into the original
   while the two are the same length, the same trap `foldDiacritics` documents.
-- **The opened chat is told why the conversation is in the list.**
-  `chatMatchEntities` now also turns on for entity *bubbles*, and with nothing
-  typed the bubble names become `chatQuery`, so `turnMatches` finds the turn
-  through `rowEntityFields` and the chip is marked `.is-hit`. Without it,
-  filtering by an entity opened a forty-turn chat with nothing marked, which
-  reads as the chat being broken. Id bubbles lose their `qa-`/`dn-` prefix on
-  the way in, because the chat tests `articleIds` and `dialogPaths` directly and
-  a Dialog's evidence there is a bare `6391:2/15` — exactly what the raw number
-  in the box produced before bubbles existed.
-- **`searchConvsForEntity` is deliberately untouched.** It still runs an
-  entity-only *search*, whose substring matching over entity names is a genuinely
-  different question from an exact-name filter — see the note above.
+- **`_convEscapeText` and `_convEntityToken` avoid a `"` inside a regex
+  literal.** `frontend/tests/extract.js` is a brace matcher that does not model
+  regex literals, and one containing a quote runs its scan off the end of the
+  function — which would silently take that function out of the tests.
 
-## Entity pills are a filter, not a search
+### What the opened chat is told
 
-`query_entities` is a boolean saying "also match `query` against entity name,
-matched text and id". `entity_filters` is a different thing: a list of entity
-names a conversation must have triggered, OR within the list and AND with
-everything else — exactly how the Context and Metadata pills compose.
+`_convChatQuery` hands the chat the **union of every positive condition**, not
+their intersection: the chat's job is "why is this conversation here", and a turn
+that satisfied any one of them answers it, where an AND would open a chat with
+nothing marked at all. An excluded condition is no reason a conversation is here,
+so it is left out.
 
-Picking three entities by name is not the same question as searching for a word
-that might appear in one, and `entity_pills_filter_rather_than_search` pins the
-difference, including that an empty list filters nothing rather than everything.
-
-**The filter is an `IN`, not a correlated `EXISTS` — the same lesson the
-feedback filter learned, for the same reason.** `entity_index` deliberately
-carries no secondary index, so `ei.session_uuid = s.session_uuid` has nothing to
-seek on and the subquery re-scanned the whole table *once per candidate
-session*. Measured on a real database: **23.4 s** over 8395 sessions × 81647
-rows, and **11.9 s** over 6064 × 81647. As an uncorrelated `IN`, SQLite scans
-`entity_index` once, builds one ephemeral index plus a bloom filter, and probes
-it: **8–9 ms**, the same rows.
-
-- That is why picking an entity by name was two thousand times slower than
-  *searching* for the same name, which had always gone down the one-scan path
-  and returned the same conversations. The two readings of "conversations that
-  fired WIJN" disagreed only in how long you waited.
-- `an_entity_filter_never_rescans_the_index_per_session` pins the plan rather
-  than a duration — a timing threshold in a test is a flake waiting to happen.
-  It asserts positively (`LIST SUBQUERY` over `entity_index`), because the plan
-  carries an unrelated correlated subquery of its own — the per-page
-  `user_message_preview` lookup — so "no CORRELATED anywhere" would be
-  asserting something else entirely.
-
-- **`get_entity_options` is one full scan of `entity_index`.** That table
-  deliberately carries no secondary index — every extra b-tree there is a
-  per-row tax on import, and this is the only query that would want one — so
-  the scan is run once when the picker is first opened and cached in the
-  renderer, exactly as the context and metadata options already are.
-- **Names are stored lowercased** (`entity_index_rows` lowercases the display
-  name and the matched text). The picker's values come from that same column, so
-  they arrive in the right case already; the filter lowercases again rather than
-  trusting what crossed the bridge.
-- **The renderer models an entity as `{name: "Entities", value: <name>}`** so it
-  can reuse `_buildTagChipsHtml`, its search box and its counts. An entity has no
-  key/value shape, so it is one group with a chip each — a presentational device,
-  and `buildConvSessionArgs` sends the names alone.
-- **The same scan carries `entityId`**, which is the only place in the app an
-  entity id exists — see `docs/collections.md` and `cmLink("entity", …)`. The
-  EntitiesExport CSV has no id column at all.
+- `chatMatchEntities` turns on for the **E** toggle *or* an `entity:` chip.
+  Without it, naming an entity opened a forty-turn chat with nothing marked,
+  which reads as the chat being broken.
+- Id chips lose their `qa-`/`dn-` prefix on the way in, because the chat tests
+  `articleIds` and `dialogPaths` directly and a Dialog's evidence there is a bare
+  `6391:2/15` — exactly what the raw number in the box produced before any of
+  this existed. Those two fields are in scope for the chat exactly when the
+  search named an id.
+- **The session-list preview highlight is given the text conditions only**
+  (`convTextTerms`), never the expression: `hl()` would otherwise mark `AND` and
+  `entity:` in every preview.
+- **`searchConvsForEntity` is deliberately untouched.** The 💬 Conversations
+  button on an entity card still runs an entity-only *text* search, whose
+  substring matching over entity names is a genuinely different — usually much
+  wider — question from the exact label. It sets a single text chip.
+- **`searchConvsForId` appends rather than replaces**, and the same-kind default
+  makes a second jump from a Content card OR with the first, which is what
+  appending has always meant here.
 
 ## The date filter is an instant, not a day
 
