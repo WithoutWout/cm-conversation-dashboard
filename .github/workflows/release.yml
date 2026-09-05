@@ -91,47 +91,52 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Insights is between 3x and 39x faster
+            ### The conversations search bar now offers what you can search for
 
-            The charts that say which Articles and Dialogs your conversations
-            went through used to be worked out from scratch every time you
-            opened Insights, by reading through every stored message. That was
-            most of the wait — and, oddly, a **narrower** search was slower than
-            no search at all.
+            Start typing and a list appears under the box. Pick something and it
+            becomes a small removable tag in the field — click the ✕, or press
+            Backspace, to take it off again.
 
-            Those facts are now worked out once, when data is imported. On a
-            database of 150,000 interactions, Insights over a typical search
-            went from **6.3 seconds to 0.2 seconds**. Every combination we
-            measured is now under a second, and most are under a quarter of one.
+            **Entities.** Typing `park` lists the entities your conversations
+            actually triggered, with how many conversations each one covers, so
+            you can filter to exactly those without hunting through the tag
+            panel.
 
-            Searching for a Dialog by ID got the same treatment: **1.5 seconds
-            to 0.03 seconds**.
+            **Entities are found by the words that fire them, not just by their
+            name.** `caravan` is not the name of any entity — it is one of the
+            twenty words that fire **CAMPER**. Type `caravan` and CAMPER is
+            offered, and the row tells you why: *via caravan*.
 
-            ### Your database gets about 30% smaller
+            **Articles and Dialogs, by name.** Switch on **#ID** and type
+            `parkeer`: you get *Parkeerticket qa-1697*, *parkeerautomaat
+            qa-1831* and the rest, so you no longer have to look an ID up on the
+            Content tab first. Typing a Dialog followed by a dash — `6391-` —
+            lists that Dialog's nodes by name.
 
-            The context of a conversation was being stored again in full on
-            every single message of it. On a real 824 MB database that was
-            173 MB — a fifth of the whole file — repeating the same 15,000
-            values over and over.
+            You can add several at once, and they combine as "any of these".
 
-            It is now stored once and referenced. That database came out at
-            **596 MB**, and one with a lot of deleted history in it went from
-            **758 MB to 306 MB**. A smaller file is a faster one: this is
-            part of why the numbers above are what they are.
+            ### Filtering by an entity took 23 seconds. It now takes 8 thousandths of one.
 
-            Nothing you can see changes — every conversation, context and chart
-            reads exactly as it did before. We checked that literally, comparing
-            all 149,761 stored contexts before and after.
+            Picking an entity and searching for the same entity's name returned
+            the same conversations, but one of them took a fraction of a second
+            and the other took the better part of half a minute. The filter was
+            re-reading the whole entity table once for every conversation it
+            considered — on a real database, 8,395 conversations against 81,647
+            entity rows.
 
-            ### The first launch after this update takes a minute
+            It now reads that table once. **23.4 seconds to 8 milliseconds**, the
+            same conversations either way.
 
-            Your existing database is reorganised once, in place. Depending on
-            its size that takes anywhere from twenty seconds to about a minute,
-            and the app now tells you what it is doing while it works rather
-            than sitting on a spinner. **This happens once.** Every launch after
-            it is back to under a second.
+            ### Smaller things
 
-            Importing is unaffected — very slightly faster, if anything.
+            - **#ID mode no longer switches itself off when you type a letter.**
+              It used to, because a letter cannot be part of an ID — which is
+              precisely what stopped you searching for an Article by name.
+            - Opening a conversation you found by entity now highlights the turn
+              that fired it, instead of showing you forty messages with nothing
+              marked.
+            - Jumping to Conversations from an Article or Dialog card lands as a
+              tag, so a second jump adds to the first instead of replacing it.
 
             ---
 
