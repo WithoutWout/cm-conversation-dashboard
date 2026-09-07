@@ -8270,6 +8270,171 @@
         color: var(--red);
         background: var(--surface2);
       }
+      /* A line the arrangement keeps that this range has no numbers for. Muted
+         rather than hidden: a preset applied to a quiet month has to leave a
+         visible hole, or the report silently gets shorter. */
+      tr.ins-table-value.missing th,
+      tr.ins-table-value.missing td {
+        color: var(--muted);
+      }
+      tr.ins-table-gap td {
+        height: 12px;
+        padding: 0;
+      }
+      .ins-seg-flag {
+        font-style: normal;
+        font-size: 0.6rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 0 4px;
+        margin-left: 8px;
+      }
+      .ins-seg-flag.new {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .ins-seg-ghost {
+        color: var(--muted);
+        font-size: 0.64rem;
+        font-style: italic;
+      }
+      /* The handle, not the row, is what starts a drag — see `insSegGrip`. */
+      .ins-seg-grip {
+        cursor: grab;
+        color: var(--muted);
+        letter-spacing: -2px;
+        margin-right: 8px;
+        user-select: none;
+      }
+      .ins-seg-grip:hover {
+        color: var(--text);
+      }
+      table.ins-table.editing tr.dragging {
+        opacity: 0.4;
+      }
+      table.ins-table.editing tr.drop-before td,
+      table.ins-table.editing tr.drop-before th {
+        box-shadow: inset 0 -2px 0 var(--accent);
+      }
+      /* The name is edited where it is read. A borderless field until it is
+         touched, so an editable table still looks like a table. */
+      input.ins-seg-name {
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: inherit;
+        font: inherit;
+        padding: 1px 4px;
+        min-width: 120px;
+        max-width: 280px;
+      }
+      input.ins-seg-name:hover {
+        border-color: var(--border);
+      }
+      input.ins-seg-name:focus {
+        border-color: var(--accent);
+        outline: none;
+        background: var(--surface);
+      }
+      td.ins-seg-act {
+        padding-right: 0;
+        width: 1px;
+      }
+      td.ins-seg-act button {
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      td.ins-seg-act button:hover {
+        color: var(--red);
+        background: var(--surface);
+      }
+      .ins-seg-bar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .ins-seg-bar button {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.67rem;
+        padding: 3px 8px;
+      }
+      .ins-seg-bar button:hover {
+        border-color: var(--accent);
+      }
+      .ins-seg-note {
+        color: var(--muted);
+        font-size: 0.66rem;
+        flex: 1;
+        min-width: 200px;
+      }
+      .ins-act.on {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      /* A preset is two buttons in one chip: its name reads it back, the ✕
+         forgets it. Splitting them is what keeps "load" a single click. */
+      .ins-segchip.preset {
+        padding-left: 0;
+      }
+      .ins-segchip.preset.active {
+        border-color: var(--accent);
+      }
+      .ins-segchip-load {
+        background: none;
+        border: 0;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+        padding: 3px 2px 3px 9px;
+        border-radius: 6px;
+      }
+      .ins-segchip-load:hover {
+        color: var(--accent);
+      }
+      .ins-segchip-load i {
+        font-style: normal;
+        color: var(--orange);
+        font-size: 0.55rem;
+        margin-left: 5px;
+        vertical-align: middle;
+      }
+      .ins-preset-bar {
+        margin-top: -4px;
+      }
+      .ins-seg-naming {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ins-seg-naming input {
+        background: var(--surface);
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.72rem;
+        padding: 4px 9px;
+        width: 200px;
+      }
+      .ins-seg-naming button {
+        font-size: 0.68rem;
+        padding: 4px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
       .ins-keypop-group {
         color: var(--muted);
         font-size: 0.62rem;
@@ -23102,7 +23267,7 @@
         // A table, not a chart, so it is pushed directly rather than through
         // `push` — which decides emptiness by looking for a non-zero datum, a
         // question this card's shape cannot answer.
-        const segTable = d.segments ? insSegmentTable(d.segments) : null
+        const segTable = d.segments ? insSegmentTable(d.segments, insSegLayout) : null
         if (segTable && d.segments.total.interactions) {
           cards.push({
             section: "Segments",
@@ -23462,6 +23627,11 @@
         insMetaKey = null
         insData = null
         insSpecs = new Map()
+        // The arrangement and the loaded preset persist — they are the setup,
+        // not this session's state. What does not is being *mid-edit*: an Edit
+        // mode restored on open is a table full of controls nobody asked for.
+        insSegEditing = false
+        insSegNaming = false
         overlay.classList.add("open")
         // Deliberately no read. Opening used to fire every aggregate at once,
         // so the first thing this modal did was make the user wait for charts
@@ -23482,6 +23652,8 @@
         // in the middle of changing.
         insData = null
         insSpecs = new Map()
+        insSegEditing = false
+        insSegNaming = false
         // The payload cache is deliberately *kept*. `insData` is cleared here
         // so Copy dashboard cannot act on a dashboard that is no longer on
         // screen; a cache entry is not on screen and cannot be acted on, and
@@ -24216,7 +24388,7 @@
           const tag = tagSections.find((t) => t[0] === section.name)
           if (tag) html += insTagKeyBar(tag[1], tag[2], tag[3])
           const seg = section.name === "Segments"
-          if (seg) html += insSegKeyBar()
+          if (seg) html += insSegKeyBar() + insSegPresetBar()
           html += `<div class="ins-grid${seg ? " ins-grid-wide" : ""}">${section.cards
             .map((c) => insCardHtml(c))
             .join("")}</div>`
@@ -24448,54 +24620,246 @@
         return (b.kind === "context" ? "Context · " : "Metadata · ") + b.name
       }
 
-      /// The payload as a table: headers, and one row per line of it.
+      // ── The layout ───────────────────────────────────────────────────
+      //
+      // The natural table is grouped: Total, then a heading and its rows per
+      // breakdown. The report people actually keep is not — it is a flat run of
+      // rows in an order they chose, under labels they chose, with the values
+      // they do not report simply gone.
+      //
+      // So the table is **an ordered list of lines**, and the grouping is only
+      // its default arrangement. A line is a data row, a heading, or a blank —
+      // all three are draggable, renameable and removable, which is what makes
+      // "exactly the way I had it" reachable without a second concept.
+
+      /// The separator inside a row id. A unit separator rather than `|` or
+      /// `:`, because a context value can legitimately contain either.
+      const INS_SEG_SEP = String.fromCharCode(31)
+
+      /// What identifies a data row across two reads of two different date
+      /// ranges.
       ///
-      /// Pure — no DOM, no globals — so the screen, the TSV, the CSV, the
-      /// Markdown and the HTML report are all renderings of *this* object
-      /// rather than five walks of the payload that can drift apart.
-      function insSegmentTable(seg) {
-        if (!seg || !seg.total) return null
-        const cells = (row) => ({
-          cells: INS_SEGMENT_COLUMNS.map((c) => c.text(row)),
-          data: INS_SEGMENT_COLUMNS.map((c) => String(c.data(row))),
-        })
-        const rows = [
-          { kind: "total", label: "Total", ...cells(seg.total) },
-        ]
-        for (const g of seg.groups || []) {
-          const notes = []
-          // Stated, never silently dropped: a table that is missing rows and
-          // does not say so is read as a complete one.
-          if (g.foldedValues > 0) {
-            notes.push(insPlural(g.foldedValues, "more values") + " not shown")
-          }
-          // A conversation whose context changed mid-way carries two values of
-          // one key, so its interactions are counted under both — which is
-          // correct, and makes the rows sum to more than the Total above them.
-          if (g.overlapping) {
-            notes.push("some conversations set two values, so these rows overlap")
-          }
-          rows.push({
-            kind: "head",
-            label: insSegKeyLabel(g),
-            note: notes.join(" · "),
-            cells: [],
-            data: [],
-          })
-          for (const r of g.rows || []) {
-            rows.push({ kind: "value", label: r.label, ...cells(r) })
-          }
-          if (!(g.rows || []).length) {
-            rows.push({
-              kind: "head",
-              label: "— nothing recorded for this key in this result —",
-              note: "",
-              cells: [],
-              data: [],
+      /// The value string, never its position: a saved arrangement is applied
+      /// to *next month's* numbers, where the rows come back in a different
+      /// order and some of them do not come back at all.
+      function insSegRowId(kind, name, value) {
+        return kind + INS_SEG_SEP + name + INS_SEG_SEP + value
+      }
+
+      function insSegGroupId(g) {
+        return g.kind + INS_SEG_SEP + (g.name || "")
+      }
+
+      /// The value a row id names — what a row is called until it is renamed.
+      function insSegLabelOf(id) {
+        const at = String(id).lastIndexOf(INS_SEG_SEP)
+        return at === -1 ? String(id) : String(id).slice(at + 1)
+      }
+
+      /// Read entry by entry, so a file written by an older build or edited by
+      /// hand cannot introduce a line kind this does not know how to draw.
+      function insSegNormalizeLayout(raw) {
+        if (!raw || typeof raw !== "object" || !Array.isArray(raw.entries)) return null
+        const entries = []
+        for (const e of raw.entries) {
+          if (!e || typeof e !== "object") continue
+          if (e.t === "total" || e.t === "gap") {
+            entries.push({ t: e.t, label: e.label == null ? null : String(e.label) })
+          } else if (e.t === "head") {
+            entries.push({
+              t: "head",
+              gid: e.gid == null ? null : String(e.gid),
+              label: e.label == null ? null : String(e.label),
+            })
+          } else if (e.t === "row" && e.id) {
+            entries.push({
+              t: "row",
+              id: String(e.id),
+              label: e.label == null ? null : String(e.label),
             })
           }
         }
-        return { headers: ["Segment", ...INS_SEGMENT_COLUMNS.map((c) => c.label)], rows }
+        if (!entries.length) return null
+        const dropped = Array.isArray(raw.dropped) ? raw.dropped.map(String) : []
+        return { entries, dropped }
+      }
+
+      /// The arrangement, or `null` for "however the data comes back".
+      ///
+      /// `null` is a real state and not an empty object: it means the table
+      /// follows the breakdowns, so adding a key simply works. It becomes a
+      /// layout the first moment something is actually edited.
+      let insSegLayout = (() => {
+        try {
+          return insSegNormalizeLayout(
+            JSON.parse(localStorage.getItem("cm-insights-segment-layout") || "null"),
+          )
+        } catch (e) {
+          return null
+        }
+      })()
+
+      function insSaveSegLayout() {
+        try {
+          if (insSegLayout) {
+            localStorage.setItem(
+              "cm-insights-segment-layout",
+              JSON.stringify(insSegLayout),
+            )
+          } else {
+            localStorage.removeItem("cm-insights-segment-layout")
+          }
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the edit */
+        }
+      }
+
+      /// The arrangement the data itself implies: Total, then a heading and its
+      /// rows per breakdown, in the order the breakdown chips are in.
+      function insSegNaturalLayout(seg) {
+        const entries = [{ t: "total", label: null }]
+        for (const g of seg.groups || []) {
+          entries.push({ t: "head", gid: insSegGroupId(g), label: null })
+          for (const r of g.rows || []) {
+            entries.push({
+              t: "row",
+              id: insSegRowId(g.kind, g.name || "", r.label),
+              label: null,
+            })
+          }
+        }
+        return { entries, dropped: [] }
+      }
+
+      /// Marry a saved arrangement to the numbers that just came back.
+      ///
+      /// Three cases, and each is a decision rather than a fallback:
+      ///
+      /// - **A row the arrangement has and the data does not** is kept, drawn
+      ///   with dashes and marked. That is the entire point of a preset: last
+      ///   month's table, this month's numbers — a channel that went quiet has
+      ///   to leave a visible hole rather than silently shortening the report.
+      /// - **A row the data has and the arrangement does not** is appended at
+      ///   the end and marked new. Slotting it back into its old block would
+      ///   bury it in the middle of an order nobody put it in; at the bottom it
+      ///   is obvious, and one drag from wherever it belongs.
+      /// - **A row removed by hand stays removed**, which is what `dropped` is
+      ///   for — without it every read would put it back.
+      function insSegResolve(seg, layout) {
+        const byId = new Map()
+        const groups = new Map()
+        for (const g of seg.groups || []) {
+          groups.set(insSegGroupId(g), g)
+          for (const r of g.rows || []) {
+            byId.set(insSegRowId(g.kind, g.name || "", r.label), r)
+          }
+        }
+        const base = layout || insSegNaturalLayout(seg)
+        const dropped = new Set(base.dropped || [])
+        const seen = new Set()
+        const out = []
+        for (const e of base.entries) {
+          if (e.t === "row") {
+            if (dropped.has(e.id)) continue
+            seen.add(e.id)
+            out.push({ ...e, row: byId.get(e.id) || null })
+            continue
+          }
+          if (e.t === "head") {
+            out.push({ ...e, group: (e.gid && groups.get(e.gid)) || null })
+            continue
+          }
+          out.push({ ...e })
+        }
+        const added = []
+        for (const [id, row] of byId) {
+          if (seen.has(id) || dropped.has(id)) continue
+          added.push({ t: "row", id, label: null, row, isNew: true })
+        }
+        return { entries: out.concat(added), added: added.length }
+      }
+
+      /// The payload as a table: headers, and one line per line of it.
+      ///
+      /// Pure — no DOM, no globals — so the screen, the TSV, the CSV, the
+      /// Markdown and the HTML report are all renderings of *this* object
+      /// rather than five walks of the payload that can drift apart. The
+      /// arrangement is a parameter for the same reason: an export has to be
+      /// able to ask for the one on screen without reading a global.
+      function insSegmentTable(seg, layout) {
+        if (!seg || !seg.total) return null
+        const cells = (row) =>
+          row
+            ? {
+                cells: INS_SEGMENT_COLUMNS.map((c) => c.text(row)),
+                data: INS_SEGMENT_COLUMNS.map((c) => String(c.data(row))),
+              }
+            : // A row the arrangement keeps but this result has nothing for.
+              // Dashes rather than zeros: "no conversations here in this range"
+              // and "zero feedback among the ones there were" are different
+              // answers, and a row of zeros claims the second.
+              {
+                cells: INS_SEGMENT_COLUMNS.map(() => "—"),
+                data: INS_SEGMENT_COLUMNS.map(() => ""),
+              }
+        const resolved = insSegResolve(seg, layout)
+        const rows = []
+        resolved.entries.forEach((e, at) => {
+          if (e.t === "gap") {
+            rows.push({ kind: "gap", at, label: "", cells: [], data: [] })
+            return
+          }
+          if (e.t === "total") {
+            rows.push({
+              kind: "total",
+              at,
+              label: e.label == null ? "Total" : e.label,
+              ...cells(seg.total),
+            })
+            return
+          }
+          if (e.t === "head") {
+            const g = e.group
+            const notes = []
+            // Stated, never silently dropped: a table that is missing rows and
+            // does not say so is read as a complete one.
+            if (g && g.foldedValues > 0) {
+              notes.push(insPlural(g.foldedValues, "more values") + " not shown")
+            }
+            // A conversation whose context changed mid-way carries two values
+            // of one key, so its interactions are counted under both — which is
+            // correct, and makes the rows sum to more than the Total above.
+            if (g && g.overlapping) {
+              notes.push("some conversations set two values, so these rows overlap")
+            }
+            if (g && !(g.rows || []).length) {
+              notes.push("nothing recorded for this key in this result")
+            }
+            rows.push({
+              kind: "head",
+              at,
+              label: e.label != null ? e.label : g ? insSegKeyLabel(g) : "",
+              note: notes.join(" · "),
+              cells: [],
+              data: [],
+            })
+            return
+          }
+          rows.push({
+            kind: "value",
+            at,
+            id: e.id,
+            label: e.label != null ? e.label : insSegLabelOf(e.id),
+            missing: !e.row,
+            isNew: !!e.isNew,
+            ...cells(e.row),
+          })
+        })
+        return {
+          headers: ["Segment", ...INS_SEGMENT_COLUMNS.map((c) => c.label)],
+          rows,
+          added: resolved.added,
+        }
       }
 
       /// The same table, tab-separated — what gets pasted into the sheet this
@@ -24508,6 +24872,11 @@
         if (!table) return ""
         const out = [table.headers.join("\t")]
         for (const r of table.rows) {
+          // A blank line the arrangement asks for is a blank row in the sheet.
+          if (r.kind === "gap") {
+            out.push("")
+            continue
+          }
           if (r.kind === "head") {
             out.push("")
             out.push(r.note ? r.label + "\t" + r.note : r.label)
@@ -24518,26 +24887,481 @@
         return out.join("\n")
       }
 
-      function insSegmentTableHtml(table) {
+      /// The table on screen. `editing` adds the controls and nothing else —
+      /// the rows, their order and their labels are already decided by
+      /// `insSegmentTable`, so what is edited is provably what is exported.
+      function insSegmentTableHtml(table, editing) {
         if (!table) return ""
-        const span = table.headers.length
-        let html = `<div class="ins-table-wrap"><table class="ins-table"><thead><tr>${table.headers
+        const span = table.headers.length + (editing ? 1 : 0)
+        const grip = (at) =>
+          `<span class="ins-seg-grip" title="Drag to move this line"
+             onmousedown="insSegGrip(this)">&#8942;&#8942;</span>`
+        const kill = (at, what) =>
+          `<td class="ins-seg-act"><button title="${esc(what)}"
+             onclick="insSegDropLine(${at})">&#10005;</button></td>`
+        let html = `<div class="ins-table-wrap"><table class="ins-table${
+          editing ? " editing" : ""
+        }"${
+          editing
+            ? ` ondragover="insSegDragOver(event)" ondrop="insSegDrop(event)"`
+            : ""
+        }><thead><tr>${table.headers
           .map((h) => `<th>${esc(h)}</th>`)
-          .join("")}</tr></thead><tbody>`
+          .join("")}${editing ? "<th></th>" : ""}</tr></thead><tbody>`
         for (const r of table.rows) {
-          if (r.kind === "head") {
-            html += `<tr class="ins-table-head"><td colspan="${span}">${esc(r.label)}${
-              r.note ? `<em>${esc(r.note)}</em>` : ""
-            }</td></tr>`
+          const drag = editing
+            ? ` data-at="${r.at}" ondragstart="insSegDragStart(event)"
+                 ondragend="insSegDragEnd(event)"`
+            : ""
+          if (r.kind === "gap") {
+            html += `<tr class="ins-table-gap"${drag}><td colspan="${
+              span - (editing ? 1 : 0)
+            }">${
+              editing
+                ? grip(r.at) + `<span class="ins-seg-ghost">blank line</span>`
+                : "&nbsp;"
+            }</td>${editing ? kill(r.at, "Remove this blank line") : ""}</tr>`
             continue
           }
-          html += `<tr class="ins-table-${esc(r.kind)}"><th scope="row" title="${esc(
-            r.label,
-          )}">${esc(r.label)}</th>${r.cells
+          if (r.kind === "head") {
+            html += `<tr class="ins-table-head"${drag}><td colspan="${
+              span - (editing ? 1 : 0)
+            }">${
+              editing
+                ? grip(r.at) +
+                  `<input class="ins-seg-name" value="${esc(r.label)}"
+                     placeholder="Heading" onchange="insSegRename(${r.at}, this.value)">`
+                : esc(r.label)
+            }${r.note ? `<em>${esc(r.note)}</em>` : ""}</td>${
+              editing ? kill(r.at, "Remove this heading") : ""
+            }</tr>`
+            continue
+          }
+          // A row the arrangement keeps that this result has no numbers for,
+          // and a value that has turned up since it was saved. Both are marked
+          // rather than left to be inferred from a line of dashes.
+          const flag = r.missing
+            ? `<em class="ins-seg-flag" title="This result has no conversations for this value">no data</em>`
+            : r.isNew
+            ? `<em class="ins-seg-flag new" title="This value was not in the saved arrangement">new</em>`
+            : ""
+          html += `<tr class="ins-table-${esc(r.kind)}${
+            r.missing ? " missing" : ""
+          }"${drag}><th scope="row" title="${esc(r.label)}">${
+            editing
+              ? grip(r.at) +
+                `<input class="ins-seg-name" value="${esc(r.label)}"
+                   onchange="insSegRename(${r.at}, this.value)">`
+              : esc(r.label)
+          }${flag}</th>${r.cells
             .map((c) => `<td>${esc(c)}</td>`)
-            .join("")}</tr>`
+            .join("")}${
+            editing ? kill(r.at, "Remove this row from the table") : ""
+          }</tr>`
         }
         return html + `</tbody></table></div>`
+      }
+
+      // ── Editing the arrangement ──────────────────────────────────────
+      //
+      // Every action addresses a line by its **index** in the resolved list and
+      // re-renders, so an index can never be stale: there is no moment between
+      // an edit and the redraw in which one is held.
+
+      /// Whether the table is showing its controls.
+      let insSegEditing = false
+
+      /// Take the arrangement currently on screen and make it editable.
+      ///
+      /// Until something is edited the layout is `null` — "follow the data" —
+      /// and that state has to survive adding a breakdown. The first edit
+      /// freezes what is on screen into a layout, which is also what makes an
+      /// edit undoable by simply throwing it away.
+      function insSegEnsureLayout() {
+        const seg = insData && insData.segments
+        if (!seg) return null
+        if (!insSegLayout) {
+          insSegLayout = insSegNaturalLayout(seg)
+        }
+        // Re-materialised from what is resolved, so a row appended as new and
+        // then dragged is in the layout at the position it was dragged to.
+        const resolved = insSegResolve(seg, insSegLayout)
+        insSegLayout = {
+          entries: resolved.entries.map((e) =>
+            e.t === "row"
+              ? { t: "row", id: e.id, label: e.label == null ? null : e.label }
+              : e.t === "head"
+              ? { t: "head", gid: e.gid || null, label: e.label == null ? null : e.label }
+              : { t: e.t, label: e.label == null ? null : e.label },
+          ),
+          dropped: (insSegLayout.dropped || []).slice(),
+        }
+        return insSegLayout
+      }
+
+      function insSegSetEditing(on) {
+        insSegEditing = !!on
+        if (insSegEditing) insSegEnsureLayout()
+        insRenderBody()
+      }
+
+      /// Commit an edit: save it, mark the loaded preset as diverged, redraw.
+      function insSegEdited() {
+        insSaveSegLayout()
+        insSegPresetDirty = true
+        insRenderBody()
+      }
+
+      function insSegRename(at, value) {
+        const layout = insSegEnsureLayout()
+        const e = layout && layout.entries[at]
+        if (!e) return
+        const text = String(value == null ? "" : value)
+        // Clearing a name restores the one the data gave it, rather than
+        // leaving a nameless row — an empty first column reads as a fault.
+        e.label = text.trim() === "" && e.t !== "head" ? null : text
+        insSaveSegLayout()
+        insSegPresetDirty = true
+        // Deliberately no re-render: the input the user is typing in already
+        // shows the new name, and replacing it would take the caret with it.
+        insSegSyncBar()
+      }
+
+      /// Remove a line. A data row is remembered as dropped so the next read
+      /// does not put it back; a heading or a blank is simply gone.
+      function insSegDropLine(at) {
+        const layout = insSegEnsureLayout()
+        const e = layout && layout.entries[at]
+        if (!e) return
+        if (e.t === "row") (layout.dropped = layout.dropped || []).push(e.id)
+        layout.entries.splice(at, 1)
+        insSegEdited()
+      }
+
+      function insSegAddLine(kind) {
+        const layout = insSegEnsureLayout()
+        if (!layout) return
+        layout.entries.push(
+          kind === "head" ? { t: "head", gid: null, label: "Heading" } : { t: "gap", label: null },
+        )
+        insSegEdited()
+      }
+
+      /// Put every removed row back, and forget it was ever removed.
+      function insSegRestoreDropped() {
+        const layout = insSegEnsureLayout()
+        if (!layout) return
+        layout.dropped = []
+        insSegEdited()
+      }
+
+      /// Back to whatever the breakdowns imply. Not a preset action: it clears
+      /// the arrangement, and the preset it came from is left untouched on
+      /// disk, which is the difference between undoing and deleting.
+      function insSegResetLayout() {
+        insSegLayout = null
+        insSegPresetDirty = !!insSegPresetId
+        insSaveSegLayout()
+        insRenderBody()
+      }
+
+      // ── Dragging a line ──────────────────────────────────────────────
+      //
+      // The handle turns its row draggable on mousedown and turns it off again
+      // on dragend. Marking the row `draggable` outright would make the name
+      // input inside it un-selectable — dragging a word out of a text field is
+      // the browser's own gesture, and it wins.
+
+      let insSegDragFrom = null
+
+      function insSegGrip(el) {
+        const tr = el.closest("tr")
+        if (tr) tr.draggable = true
+      }
+
+      function insSegDragStart(e) {
+        const tr = e.currentTarget
+        insSegDragFrom = Number(tr.dataset.at)
+        tr.classList.add("dragging")
+        // Firefox refuses to start a drag without data on the transfer.
+        try {
+          e.dataTransfer.setData("text/plain", String(insSegDragFrom))
+          e.dataTransfer.effectAllowed = "move"
+        } catch (err) {
+          /* the drag still works where this is not settable */
+        }
+      }
+
+      function insSegDragEnd(e) {
+        e.currentTarget.draggable = false
+        e.currentTarget.classList.remove("dragging")
+        for (const el of document.querySelectorAll(".ins-table tr.drop-before"))
+          el.classList.remove("drop-before")
+        insSegDragFrom = null
+      }
+
+      /// Which line the pointer is over, and which half of it — dropping onto
+      /// the lower half means "after this one", which is the only way to reach
+      /// the very end of the table.
+      function insSegDropTarget(e) {
+        const tr = e.target && e.target.closest ? e.target.closest("tr[data-at]") : null
+        if (!tr) return null
+        const box = tr.getBoundingClientRect()
+        const after = e.clientY > box.top + box.height / 2
+        return { at: Number(tr.dataset.at), after, tr }
+      }
+
+      function insSegDragOver(e) {
+        if (insSegDragFrom === null) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = "move"
+        const target = insSegDropTarget(e)
+        for (const el of document.querySelectorAll(".ins-table tr.drop-before"))
+          el.classList.remove("drop-before")
+        if (target) target.tr.classList.add("drop-before")
+      }
+
+      function insSegDrop(e) {
+        if (insSegDragFrom === null) return
+        e.preventDefault()
+        const target = insSegDropTarget(e)
+        const layout = insSegEnsureLayout()
+        if (!target || !layout) return
+        const from = insSegDragFrom
+        let to = target.at + (target.after ? 1 : 0)
+        if (from === to || from + 1 === to) return
+        const [moved] = layout.entries.splice(from, 1)
+        if (!moved) return
+        if (from < to) to--
+        layout.entries.splice(to, 0, moved)
+        insSegDragFrom = null
+        insSegEdited()
+      }
+
+      // ── Presets ──────────────────────────────────────────────────────
+      //
+      // A reporting table is built once and then wanted again every month
+      // against a different date range. The breakdowns and the arrangement are
+      // the whole of that setup and neither depends on the search, so a preset
+      // is exactly those two things under a name — and applying one to a fresh
+      // date range is what the missing-row handling in `insSegResolve` exists
+      // for.
+      //
+      // Deliberately **not** the date range itself. A preset that carried its
+      // own dates would answer last month's question every time it was opened,
+      // which is the one thing this is for not doing.
+
+      const INS_SEG_MAX_PRESETS = 40
+
+      /// Entry by entry, like every other stored preference here: a file from
+      /// an older build, or one edited by hand, cannot introduce a preset this
+      /// cannot apply.
+      function insSegNormalizePresets(raw) {
+        if (!Array.isArray(raw)) return []
+        const out = []
+        for (const p of raw) {
+          if (!p || typeof p !== "object") continue
+          const name = String(p.name || "").trim()
+          if (!name) continue
+          const breakdowns = []
+          for (const b of Array.isArray(p.breakdowns) ? p.breakdowns : []) {
+            if (!b || typeof b !== "object") continue
+            const kind = b.kind
+            if (kind !== "culture" && kind !== "context" && kind !== "metadata") continue
+            const bname = kind === "culture" ? "" : String(b.name || "")
+            if (kind !== "culture" && !bname) continue
+            if (breakdowns.some((x) => x.kind === kind && x.name === bname)) continue
+            breakdowns.push({ kind, name: bname })
+          }
+          out.push({
+            id: String(p.id || "p" + out.length + "-" + Date.now()),
+            name,
+            breakdowns,
+            layout: insSegNormalizeLayout(p.layout),
+          })
+          if (out.length >= INS_SEG_MAX_PRESETS) break
+        }
+        return out
+      }
+
+      let insSegPresets = (() => {
+        try {
+          return insSegNormalizePresets(
+            JSON.parse(localStorage.getItem("cm-insights-segment-presets") || "null"),
+          )
+        } catch (e) {
+          return []
+        }
+      })()
+
+      /// Which preset is loaded, and whether it still describes the screen.
+      ///
+      /// Two variables rather than comparing the setup to the stored one on
+      /// every render: the comparison is a deep one over an arrangement of
+      /// forty lines, and "I changed something" is a fact the edit already
+      /// knows.
+      let insSegPresetId = null
+      let insSegPresetDirty = false
+      /// Whether the name field is open. A field rather than `prompt()`, which
+      /// a Tauri webview is entitled to refuse outright.
+      let insSegNaming = false
+
+      function insSaveSegPresets() {
+        try {
+          localStorage.setItem(
+            "cm-insights-segment-presets",
+            JSON.stringify(insSegPresets),
+          )
+        } catch (e) {
+          showImportToast("error", "Could not save the preset — the browser store refused it.")
+        }
+      }
+
+      function insSegPresetOf(id) {
+        return insSegPresets.find((p) => p.id === id) || null
+      }
+
+      /// Apply a preset: its breakdowns, its arrangement, and a fresh read.
+      ///
+      /// The read is what makes this useful — the same table, over whatever
+      /// date range the search behind Insights is currently on.
+      function insSegLoadPreset(id) {
+        const preset = insSegPresetOf(id)
+        if (!preset) return
+        insSegKeys = preset.breakdowns.map((b) => ({ kind: b.kind, name: b.name }))
+        insSegLayout = preset.layout ? JSON.parse(JSON.stringify(preset.layout)) : null
+        insSegPresetId = preset.id
+        insSegPresetDirty = false
+        insSegNaming = false
+        insSaveSegKeys()
+        insSaveSegLayout()
+        // Before the render, so the table paints as pending rather than showing
+        // the previous breakdowns under the new preset's name.
+        insEnsureSegments()
+        insRenderBody()
+      }
+
+      /// Save what is on screen under a new name.
+      function insSegSavePreset(name) {
+        const text = String(name || "").trim()
+        if (!text) return
+        if (insSegPresets.length >= INS_SEG_MAX_PRESETS) {
+          showImportToast("error", "That is as many presets as this keeps — delete one first.")
+          return
+        }
+        const preset = {
+          id: "p" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+          name: text,
+          breakdowns: insSegKeys.map((b) => ({ kind: b.kind, name: b.name })),
+          layout: insSegLayout ? JSON.parse(JSON.stringify(insSegLayout)) : null,
+        }
+        insSegPresets.push(preset)
+        insSaveSegPresets()
+        insSegPresetId = preset.id
+        insSegPresetDirty = false
+        insSegNaming = false
+        insRenderBody()
+        showImportToast("success", "Saved “" + text + "”.")
+      }
+
+      /// Write the current setup back into the preset it came from.
+      function insSegUpdatePreset() {
+        const preset = insSegPresetOf(insSegPresetId)
+        if (!preset) return
+        preset.breakdowns = insSegKeys.map((b) => ({ kind: b.kind, name: b.name }))
+        preset.layout = insSegLayout ? JSON.parse(JSON.stringify(insSegLayout)) : null
+        insSaveSegPresets()
+        insSegPresetDirty = false
+        insRenderBody()
+        showImportToast("success", "Updated “" + preset.name + "”.")
+      }
+
+      function insSegDeletePreset(id) {
+        const at = insSegPresets.findIndex((p) => p.id === id)
+        if (at === -1) return
+        const [gone] = insSegPresets.splice(at, 1)
+        insSaveSegPresets()
+        if (insSegPresetId === id) {
+          // The setup on screen is untouched — only its name is gone. Deleting
+          // a preset must not also throw away the table it produced.
+          insSegPresetId = null
+          insSegPresetDirty = false
+        }
+        insRenderBody()
+        showImportToast("success", "Deleted “" + gone.name + "”.")
+      }
+
+      function insSegStartNaming(on) {
+        insSegNaming = !!on
+        insRenderBody()
+        if (insSegNaming) {
+          const el = document.getElementById("insSegPresetName")
+          if (el) el.focus()
+        }
+      }
+
+      function insSegNameKey(e) {
+        if (e.key === "Enter") insSegSavePreset(e.currentTarget.value)
+        else if (e.key === "Escape") insSegStartNaming(false)
+      }
+
+      /// The presets row: one chip per saved setup, and the way to make one.
+      function insSegPresetBar() {
+        const chips = insSegPresets
+          .map(
+            (p) => `<span class="ins-segchip preset${
+              p.id === insSegPresetId ? " active" : ""
+            }" title="Read this setup over the current search">
+              <button class="ins-segchip-load" onclick="insSegLoadPreset('${esc(
+                p.id,
+              )}')">${esc(p.name)}${
+              p.id === insSegPresetId && insSegPresetDirty
+                ? `<i title="Changed since it was saved">&#9679;</i>`
+                : ""
+            }</button>
+              <button onclick="insSegDeletePreset('${esc(
+                p.id,
+              )}')" title="Delete this preset">&#10005;</button></span>`,
+          )
+          .join("")
+        const save = insSegNaming
+          ? `<span class="ins-seg-naming">
+              <input id="insSegPresetName" placeholder="Name this setup"
+                maxlength="60" onkeydown="insSegNameKey(event)">
+              <button class="btn-primary"
+                onclick="insSegSavePreset(document.getElementById('insSegPresetName').value)">Save</button>
+              <button onclick="insSegStartNaming(false)">Cancel</button>
+            </span>`
+          : `<button class="ins-keypick" onclick="insSegStartNaming(true)"
+               title="Save these breakdowns and this arrangement under a name">
+              <span class="ins-keypick-name">Save setup…</span>
+            </button>`
+        const update =
+          insSegPresetId && insSegPresetDirty && !insSegNaming
+            ? `<button class="ins-keypick" onclick="insSegUpdatePreset()"
+                 title="Write the current setup back into this preset">
+                <span class="ins-keypick-name">Update “${esc(
+                  (insSegPresetOf(insSegPresetId) || {}).name || "",
+                )}”</span>
+              </button>`
+            : ""
+        return `<div class="ins-keybar ins-preset-bar" id="insSegPresetBar">
+          <span class="ins-keybar-note">Presets</span>
+          ${chips || `<span class="ins-keybar-note">none yet</span>`}
+          ${save}${update}
+          <span class="ins-keybar-note">A preset holds the breakdowns and the
+            arrangement, never the dates — apply it to any date range.</span>
+        </div>`
+      }
+
+      /// Repaint just the bars, for an edit that must not disturb the table.
+      ///
+      /// Renaming a row happens in an input the user is still in: re-rendering
+      /// the body would take the caret with it, but the "changed since saved"
+      /// dot above still has to appear.
+      function insSegSyncBar() {
+        const bar = document.getElementById("insSegPresetBar")
+        if (bar) bar.outerHTML = insSegPresetBar()
       }
 
       /// The breakdown bar: one chip per slice, and the picker that adds more.
@@ -24597,6 +25421,7 @@
           insSegKeys.push({ kind, name })
         }
         insSaveSegKeys()
+        insSegPresetDirty = true
         // Started before the render, so the table paints as pending rather than
         // showing the previous breakdowns as though they were the answer.
         insEnsureSegments()
@@ -24656,6 +25481,58 @@
         return `<div class="ins-tag-pending">Nothing to compare in this result.</div>`
       }
 
+      /// What sits above the table: the state of the arrangement, and — while
+      /// editing — the lines that cannot be dragged into existence.
+      ///
+      /// Shown outside edit mode too, because "three values are new" and "two
+      /// rows have no data in this range" are facts about the numbers on screen
+      /// and not about editing them.
+      function insSegEditBar(table) {
+        const dropped = ((insSegLayout && insSegLayout.dropped) || []).length
+        const missing = table.rows.filter((r) => r.missing).length
+        const notes = []
+        if (table.added) {
+          notes.push(
+            insPlural(table.added, "values") +
+              " turned up that this arrangement did not have — added at the end",
+          )
+        }
+        if (missing) {
+          notes.push(
+            insPlural(missing, "rows") + " have no conversations in this date range",
+          )
+        }
+        if (!insSegEditing) {
+          return notes.length
+            ? `<div class="ins-seg-bar"><span class="ins-seg-note">${esc(
+                notes.join(" · "),
+              )}</span></div>`
+            : ""
+        }
+        return `<div class="ins-seg-bar editing">
+          <button onclick="insSegAddLine('head')">+ Heading</button>
+          <button onclick="insSegAddLine('gap')">+ Blank line</button>
+          ${
+            dropped
+              ? `<button onclick="insSegRestoreDropped()">Restore ${insPlural(
+                  dropped,
+                  "removed rows",
+                )}</button>`
+              : ""
+          }
+          ${
+            insSegLayout
+              ? `<button onclick="insSegResetLayout()"
+                   title="Back to one block per breakdown, in the order the data comes back">Reset arrangement</button>`
+              : ""
+          }
+          <span class="ins-seg-note">Drag a line by its handle to move it;
+            type over a name to rename it.${
+              notes.length ? " " + esc(notes.join(" · ")) + "." : ""
+            }</span>
+        </div>`
+      }
+
       /// A card's numbers, whichever kind of card it is.
       ///
       /// One function so every export path — the per-card menu, the plain-text
@@ -24669,7 +25546,7 @@
 
       function insCardHtml(card) {
         const body = card.table
-          ? insSegmentTableHtml(card.table)
+          ? insSegEditBar(card.table) + insSegmentTableHtml(card.table, insSegEditing)
           : `<div class="ins-chart">${
               insRenderChart(card.spec, INS_THEME_SCREEN).svg
             }</div>`
@@ -24680,6 +25557,16 @@
               ${card.note ? `<p>${esc(card.note)}</p>` : ""}
             </div>
             <div class="ins-card-actions">
+              ${
+                card.table
+                  ? `<button class="ins-act${insSegEditing ? " on" : ""}"
+                       onclick="insSegSetEditing(${!insSegEditing})"
+                       title="Reorder, rename and remove the lines of this table">
+                       <svg class=ui-icon><use href=#i-pencil /></svg> ${
+                         insSegEditing ? "Done" : "Edit layout"
+                       }</button>`
+                  : ""
+              }
               <button class="ins-act" onclick="insOpenExport('${esc(
                 card.id,
               )}')" title="${
@@ -25729,6 +26616,10 @@
             .join("") +
           `</tr>`
         for (const r of table.rows) {
+          if (r.kind === "gap") {
+            html += `<tr><td colspan="${table.headers.length}" style="height:10px"></td></tr>`
+            continue
+          }
           if (r.kind === "head") {
             html +=
               `<tr><td colspan="${table.headers.length}" style="${td};text-align:left;` +

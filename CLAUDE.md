@@ -425,6 +425,12 @@ The orientation map for the whole window. It says what is on screen and where;
                recognition rate · recognition quality · interactions ·
                conversations. Always counts every interaction of the matched
                conversations, in both readings
+               a presets row (chip per saved setup · Save setup… · Update)
+               Edit layout — every line draggable by its handle, renameable in
+               place and removable; + Heading · + Blank line · Restore removed ·
+               Reset arrangement. A row the range has no data for is kept and
+               dashed; a value new since the arrangement was saved is appended
+               and marked
     Not loaded — one button per section left out, to add it in place
   every card: title · what it counts · Export (a table card offers its
               numbers only — there is no picture of one)
@@ -576,6 +582,8 @@ Always use these terms in the UI:
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
 | `cm-insights-export-caption` | `"0"` to leave the caption off an exported chart image; anything else, including absent, includes it |
 | `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content, segments}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
+| `cm-insights-segment-layout` | JSON `{entries, dropped}` — the Segments table as an ordered list of lines (`{t:"total"\|"row"\|"head"\|"gap", id?, gid?, label?}`) plus the row ids removed by hand. Absent means "follow the breakdowns", which is a real state and not an empty object. Read entry by entry |
+| `cm-insights-segment-presets` | JSON array of `{id, name, breakdowns, layout}` — saved Segments setups. Holds the breakdowns and the arrangement, never a date range: a preset is applied to whatever the current search covers. See `docs/insights.md` → "A preset is the setup, never the dates" |
 | `cm-insights-segments`     | JSON array of `{kind, name}` (`kind`: `"culture"` \| `"context"` \| `"metadata"`) — which slices the Insights Segments table compares. Read entry by entry, so a hand-edited file cannot introduce an unknown kind or a duplicate row. An empty array is a legitimate state: the Total row alone is still an answer |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 

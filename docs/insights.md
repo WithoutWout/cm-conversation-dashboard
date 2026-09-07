@@ -655,6 +655,77 @@ being a table you can read across.
   from the segments read *finishing* — long after the click that opened the
   popover. Restoring at the click site alone left the button unstyled every time.
 
+### The arrangement
+
+The natural table is grouped: Total, then a heading and its rows per breakdown.
+The report people actually keep is not — it is a flat run of rows in an order
+they chose, under labels they chose, with the values they do not report simply
+gone. So **the table is an ordered list of lines**, and the grouping is only its
+default arrangement.
+
+A line is a data row, a heading, or a blank, and all three are draggable,
+renameable and removable. One concept, not three: "exactly the way I had it" is
+reachable without a second model of the table.
+
+- **`insSegLayout` is `null` until something is edited**, and that is a real
+  state rather than an empty object: it means *follow the data*, so adding a
+  breakdown simply works. The first edit freezes what is on screen into a
+  layout — which is also what makes an edit undoable by throwing the layout
+  away (`insSegResetLayout`).
+- **A row is identified by its value, never by its position.** `insSegRowId` is
+  `kind ␟ name ␟ value`, joined with a unit separator because a context value
+  can legitimately contain `|`, `:` or a comma — `Stoppen, Faciliteitenkaart` is
+  a real one. `String.fromCharCode(31)` rather than the character itself, so no
+  invisible control byte lives in the source.
+- **Every edit addresses a line by its index and re-renders**, so an index can
+  never be stale: there is no moment between an edit and the redraw in which one
+  is held.
+- **Renaming deliberately does not re-render.** The input the user is typing in
+  already shows the new name; replacing it would take the caret with it.
+  `insSegSyncBar` repaints the one thing that does have to change — the
+  "changed since it was saved" dot above.
+- **The handle turns its row draggable on mousedown, not the row itself.** A
+  permanently `draggable` row makes the name field inside it un-selectable:
+  dragging a word out of a text input is the browser's own gesture and it wins.
+- **Dropping onto the lower half of a line means "after it"**, which is the only
+  way to reach the very end of the table.
+
+### A preset is the setup, never the dates
+
+`insSegResolve` marrying a saved arrangement to numbers that just came back is
+the whole feature, and each of its three cases is a decision:
+
+| | |
+| --- | --- |
+| the arrangement has a row, the data does not | **kept**, drawn with dashes, marked *no data* |
+| the data has a row, the arrangement does not | **appended at the end**, marked *new* |
+| a row was removed by hand | **stays removed** — that is what `dropped` is for |
+
+A report that silently gets shorter when a channel goes quiet is the failure the
+first row prevents; dashes rather than zeros, because "no conversations here in
+this range" and "zero feedback among the ones there were" are different answers
+and a row of zeros claims the second. A new value slotted back into its old block
+would be buried in the middle of an order nobody put it in; at the bottom it is
+obvious and one drag from wherever it belongs. Both are counted in the line above
+the table, in both modes — they are facts about the numbers, not about editing.
+
+**A preset is the breakdowns plus the arrangement, under a name, and deliberately
+not the date range.** One that carried its own dates would answer last month's
+question every time it was opened, which is precisely what this is for not doing.
+Loading one re-reads over whatever the search behind Insights is currently on.
+
+- **Two variables, `insSegPresetId` and `insSegPresetDirty`**, rather than
+  comparing the setup to the stored one on every render: that comparison is a
+  deep one over forty lines, and "I changed something" is a fact the edit already
+  knows.
+- **Deleting a preset leaves the table alone.** Only its name is gone — throwing
+  away the arrangement it produced as well would make a delete unrecoverable.
+- **A name field, not `prompt()`**, which a Tauri webview is entitled to refuse.
+- Both stores are read **entry by entry** (`insSegNormalizeLayout`,
+  `insSegNormalizePresets`), so a file written by an older build or edited by
+  hand cannot introduce a line kind that cannot be drawn or a breakdown kind
+  that cannot be read.
+
 ### Where it sits
 
 Last in the section order, and full-bleed across the grid (`.ins-grid-wide`).

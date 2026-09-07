@@ -89,6 +89,12 @@ const EXPORTS = [
   "insCardTsv",
   "INS_SEGMENT_COLUMNS",
   "INS_SEGMENT_MAX_KEYS",
+  "insSegRowId",
+  "insSegLabelOf",
+  "insSegNaturalLayout",
+  "insSegNormalizeLayout",
+  "insSegNormalizePresets",
+  "insSegResolve",
 ]
 const {
   INS_THEME_SCREEN,
@@ -139,6 +145,12 @@ const {
   insCardTsv,
   INS_SEGMENT_COLUMNS,
   INS_SEGMENT_MAX_KEYS,
+  insSegRowId,
+  insSegLabelOf,
+  insSegNaturalLayout,
+  insSegNormalizeLayout,
+  insSegNormalizePresets,
+  insSegResolve,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -814,6 +826,149 @@ test("the Segments card is a table, and every export path reaches it", () => {
   const mail = insReportTableHtml(card.table)
   assert.ok(!/class=/.test(mail), "the mail table carries a class")
   assert.ok(!/<style/.test(mail), "the mail table carries a stylesheet")
+})
+
+// ── The arrangement ──────────────────────────────────────────────────
+//
+// A preset is applied to *next month's* numbers, which is the case none of the
+// above covers: rows that no longer come back, rows that were not there when it
+// was saved, and rows somebody removed on purpose. All three produce a
+// plausible-looking table if they are got wrong — one that is quietly shorter,
+// or quietly missing the value that mattered.
+
+test("a row id survives a value that contains the obvious separators", () => {
+  for (const value of ["web", "Stoppen, Faciliteitenkaart", "a|b", "x:y", ""]) {
+    const id = insSegRowId("context", "chan|nel", value)
+    assert.strictEqual(insSegLabelOf(id), value, "round-trip failed for " + value)
+  }
+})
+
+test("an arrangement keeps rows the data lost and appends ones it gained", () => {
+  const saved = insSegNaturalLayout(SEGMENTS)
+  // Renamed, reordered and one row taken out by hand.
+  saved.entries = saved.entries.filter((e) => e.t !== "head")
+  const nl = saved.entries.find((e) => e.t === "row" && e.id.endsWith("nl"))
+  nl.label = "NL"
+  saved.dropped = [insSegRowId("culture", "", "en")]
+  saved.entries = saved.entries.filter((e) => e.id !== saved.dropped[0])
+
+  // Next month: `web` is gone, `kiosk` is new, everything else moved.
+  const next = JSON.parse(JSON.stringify(SEGMENTS))
+  next.groups[1].rows = [
+    next.groups[1].rows[1],
+    { label: "kiosk", sessions: 5, interactions: 20, feedback: 1, feedbackPos: 1, recognized: 18, unrecognized: 1, qualitySum: 1500 },
+  ]
+
+  const table = insSegmentTable(next, saved)
+  const labels = table.rows.map((r) => r.label)
+  assert.deepStrictEqual(labels, ["Total", "NL", "web", "app | phone", "kiosk"])
+
+  // The order the arrangement chose is untouched, and the rename with it.
+  const row = (l) => table.rows.find((r) => r.label === l)
+  assert.strictEqual(row("NL").missing, false, "nl still has numbers")
+  // `web` no longer comes back: kept, dashed, and marked rather than dropped —
+  // a report that silently gets shorter is the failure this prevents.
+  assert.strictEqual(row("web").missing, true)
+  assert.deepStrictEqual(row("web").cells, ["—", "—", "—", "—", "—", "—"])
+  assert.deepStrictEqual(row("web").data, ["", "", "", "", "", ""])
+  // `kiosk` was not in the arrangement: appended at the end and marked, where
+  // it is obvious, rather than slotted into a block nobody put it in.
+  assert.strictEqual(row("kiosk").isNew, true)
+  assert.strictEqual(table.added, 1)
+  // …and the row this fixture dropped by hand is simply not there.
+  assert.strictEqual(row("en"), undefined)
+})
+
+test("a row removed by hand stays removed on the next read", () => {
+  const saved = insSegNaturalLayout(SEGMENTS)
+  const id = insSegRowId("culture", "", "en")
+  saved.entries = saved.entries.filter((e) => e.id !== id)
+  saved.dropped = [id]
+  const table = insSegmentTable(SEGMENTS, saved)
+  assert.ok(
+    !table.rows.some((r) => r.label === "en"),
+    "a row taken out came back on the next read",
+  )
+  assert.strictEqual(table.added, 0, "and it was not counted as a new value either")
+})
+
+test("the arrangement decides the export, line for line", () => {
+  const saved = {
+    entries: [
+      { t: "total", label: "Total (nochat false)" },
+      { t: "gap", label: null },
+      { t: "head", gid: null, label: "Channels" },
+      { t: "row", id: insSegRowId("context", "chan, nel", "web"), label: "Web" },
+    ],
+    dropped: [
+      insSegRowId("context", "chan, nel", "app | phone"),
+      insSegRowId("culture", "", "nl"),
+      insSegRowId("culture", "", "en"),
+    ],
+  }
+  const table = insSegmentTable(SEGMENTS, saved)
+  const tsv = insTableTsv(table)
+  const lines = tsv.split("\n")
+  assert.strictEqual(lines[1], [
+    "Total (nochat false)", "40", "57.50%", "93.75%", "80.00%", "412", "100",
+  ].join("\t"))
+  // A blank line asked for is a blank row in the sheet, and a heading with no
+  // group behind it keeps the name it was given.
+  assert.strictEqual(lines[2], "")
+  assert.ok(lines.includes("Channels"), tsv)
+  assert.ok(tsv.includes("Web\t"), tsv)
+  assert.ok(!tsv.includes("app | phone"), "a dropped row reached the export")
+  // Every text twin renders the same lines.
+  assert.ok(insTsvToCsv(tsv).includes('"Total (nochat false)"') || insTsvToCsv(tsv).includes("Total (nochat false)"))
+  const width = table.headers.length
+  for (const line of insTsvToMarkdown(tsv).split("\n")) {
+    if (!line.startsWith("|")) continue
+    assert.strictEqual(line.replace(/\\\|/g, "").split("|").length - 2, width, line)
+  }
+})
+
+test("a stored arrangement or preset cannot introduce something undrawable", () => {
+  assert.strictEqual(insSegNormalizeLayout(null), null)
+  assert.strictEqual(insSegNormalizeLayout({ entries: "nope" }), null)
+  assert.strictEqual(insSegNormalizeLayout({ entries: [] }), null)
+  // Unknown line kinds and rows with no id are dropped, not drawn.
+  const layout = insSegNormalizeLayout({
+    entries: [
+      { t: "spell" },
+      { t: "row" },
+      { t: "row", id: "contextkv", label: 7 },
+      { t: "head" },
+      { t: "gap" },
+    ],
+    dropped: "not an array",
+  })
+  assert.deepStrictEqual(layout.entries.map((e) => e.t), ["row", "head", "gap"])
+  assert.strictEqual(layout.entries[0].label, "7", "a label is coerced to text")
+  assert.deepStrictEqual(layout.dropped, [])
+
+  assert.deepStrictEqual(insSegNormalizePresets(null), [])
+  const presets = insSegNormalizePresets([
+    { name: "  " },
+    null,
+    {
+      id: "p1",
+      name: "Monthly",
+      breakdowns: [
+        { kind: "culture" },
+        { kind: "sorcery", name: "x" },
+        { kind: "context", name: "" },
+        { kind: "context", name: "channel" },
+        { kind: "context", name: "channel" },
+      ],
+      layout: { entries: [{ t: "total" }] },
+    },
+  ])
+  assert.strictEqual(presets.length, 1, "an unnamed preset is not a preset")
+  assert.deepStrictEqual(presets[0].breakdowns, [
+    { kind: "culture", name: "" },
+    { kind: "context", name: "channel" },
+  ])
+  assert.strictEqual(presets[0].layout.entries.length, 1)
 })
 
 test("no Segments card is built when the section was not read", () => {
