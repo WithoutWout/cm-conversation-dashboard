@@ -5818,7 +5818,29 @@ const IS_SCORED_ROW: &str = "(i.recognition_quality > 0 \
 const INSIGHT_DROP_TEMP: &str = "\
 DROP TABLE IF EXISTS temp.insight_sessions;\
 DROP TABLE IF EXISTS temp.insight_matches;\
-DROP TABLE IF EXISTS temp.insight_weights;";
+DROP TABLE IF EXISTS temp.insight_weights;\
+DROP TABLE IF EXISTS temp.insight_segment_stats;";
+
+/// A turn that carries a thumbs rating at all, and one that carries a positive
+/// one.
+///
+/// Spelled exactly as `session_summary_insert_sql` spells them, including the
+/// two forms of the JSON separator that CM.com emits and the `NOT LIKE` guard
+/// that stops a blob holding both ratings counting as positive. Two readings of
+/// "did anyone rate this turn?" is how the Segments table and the Feedback card
+/// would come to disagree about the same rows.
+///
+/// Per *turn*, where `session_summary` folds them into per-conversation flags:
+/// the Segments table counts the ratings themselves, which is the number the
+/// portal reports and the reason a conversation-level flag will not do.
+const FEEDBACK_ROW: &str = "(i.feedback_info LIKE '%\"score\": 1%' \
+     OR i.feedback_info LIKE '%\"score\":1%' \
+     OR i.feedback_info LIKE '%\"score\": -1%' \
+     OR i.feedback_info LIKE '%\"score\":-1%')";
+const FEEDBACK_POS_ROW: &str = "((i.feedback_info LIKE '%\"score\": 1%' \
+     OR i.feedback_info LIKE '%\"score\":1%') \
+     AND i.feedback_info NOT LIKE '%\"score\": -1%' \
+     AND i.feedback_info NOT LIKE '%\"score\":-1%')";
 
 /// What one conversation is worth to a chart keyed by conversation: 1, or the
 /// number of its turns that matched.
@@ -6085,6 +6107,482 @@ fn insight_tag_values(
     }
     Ok(out)
 }
+
+// ── Segments ─────────────────────────────────────────────────────────────────
+//
+// The dashboard answers "what is in this result set?" one distribution at a
+// time. The Segments table answers a different question — "how do these slices
+// of it compare on the same five measures?" — which is the shape of the report
+// people keep rebuilding by hand in a spreadsheet: a Total row, then a block of
+// rows per breakdown, every row carrying feedback volume, positive share,
+// recognition rate, recognition quality and interaction count.
+//
+// It is deliberately **not** a chart. Five measures at four orders of magnitude
+// do not share an axis, and the deliverable is a table someone pastes into a
+// sheet beside last month's.
+
+/// How many values one breakdown key contributes before the tail is folded
+/// away.
+///
+/// Far above `INSIGHT_TAG_VALUES_PER_NAME`, and for the opposite reason: that
+/// one feeds a chart, where 40 bars communicate nothing. This feeds a table
+/// that is scrolled and pasted, where a missing row is a missing row.
+const INSIGHT_SEGMENT_VALUES_PER_KEY: i64 = 50;
+
+/// Per conversation, the five measures the Segments table adds up.
+///
+/// A rollup table rather than a join per breakdown, and that is the whole
+/// performance story here. Every breakdown is otherwise a fresh pass over
+/// `interactions` — by far the largest thing in the file — once per key the
+/// user ticked. Rolled up once into a narrow per-session table, each breakdown
+/// becomes a join of that table against `context_index`/`metadata_index`,
+/// which is the same idiom `insight_weights` exists for.
+///
+/// `quality_sum` rather than an average: an average cannot be re-averaged over
+/// a group without its weight, and every row of this table is summed into
+/// several different groups.
+const INSIGHT_SEGMENT_TABLE: &str = "\
+DROP TABLE IF EXISTS temp.insight_segment_stats;\
+CREATE TEMP TABLE insight_segment_stats (\
+    session_uuid TEXT PRIMARY KEY,\
+    culture      TEXT NOT NULL DEFAULT '',\
+    interactions INTEGER NOT NULL DEFAULT 0,\
+    feedback     INTEGER NOT NULL DEFAULT 0,\
+    feedback_pos INTEGER NOT NULL DEFAULT 0,\
+    recognized   INTEGER NOT NULL DEFAULT 0,\
+    unrecognized INTEGER NOT NULL DEFAULT 0,\
+    quality_sum  REAL NOT NULL DEFAULT 0\
+);";
+
+/// The seven sums every segment row is made of, over `insight_segment_stats g`.
+///
+/// Written once because the Total row and every breakdown row must be the same
+/// arithmetic — a total that is not the sum of its parts is the one failure
+/// this table cannot survive.
+const INSIGHT_SEGMENT_SUMS: &str = "COUNT(*), \
+     COALESCE(SUM(g.interactions), 0), \
+     COALESCE(SUM(g.feedback), 0), \
+     COALESCE(SUM(g.feedback_pos), 0), \
+     COALESCE(SUM(g.recognized), 0), \
+     COALESCE(SUM(g.unrecognized), 0), \
+     COALESCE(SUM(g.quality_sum), 0)";
+
+/// One row of the Segments table.
+///
+/// Counters, never percentages. The three shares the table shows are each a
+/// ratio of two of these, and computing them here as well as in the renderer is
+/// two spellings of one number — which is how a cell and its own column header
+/// come to disagree. `qualitySum` is sent for the same reason: the renderer
+/// divides it by `recognized`, and a pre-divided average could not be summed
+/// into anything.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSegmentRow {
+    label: String,
+    sessions: i64,
+    interactions: i64,
+    /// Turns carrying a thumbs rating.
+    feedback: i64,
+    /// Of those, the ones rating the answer positively.
+    feedback_pos: i64,
+    /// Turns the recognizer scored above zero.
+    recognized: i64,
+    /// Turns it attempted and scored zero. `recognized + unrecognized` is the
+    /// denominator of the recognition rate — GenAI answers and turns the
+    /// recognizer never saw are in neither.
+    unrecognized: i64,
+    /// `SUM(recognition_quality)` over the recognized turns, 0–100 each.
+    quality_sum: f64,
+}
+
+/// One breakdown: a key, and the rows its values produced.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSegmentGroup {
+    /// `"culture"`, `"context"` or `"metadata"`.
+    kind: String,
+    /// The key name. Empty for `culture`, which is not a key.
+    name: String,
+    rows: Vec<InsightSegmentRow>,
+    /// Values past the cap, folded away. Stated rather than silently dropped.
+    folded_values: i64,
+    /// Whether any conversation carried two values of this key — which is
+    /// legitimate and means the rows sum to more than the total. The renderer
+    /// says so rather than leaving a table that visibly does not add up.
+    overlapping: bool,
+}
+
+/// Which breakdown the renderer is asking for.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSegmentBreakdown {
+    kind: String,
+    #[serde(default)]
+    name: String,
+}
+
+/// A key the Segments picker can offer, with what it covers here.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSegmentKey {
+    name: String,
+    /// Conversations in this result set that set the key at all.
+    sessions: i64,
+    /// Distinct values it takes here — a key with eight hundred is as much a
+    /// dead end as one set on four conversations, and neither is visible from
+    /// a name.
+    distinct_values: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InsightSegments {
+    total: InsightSegmentRow,
+    groups: Vec<InsightSegmentGroup>,
+    context_keys: Vec<InsightSegmentKey>,
+    metadata_keys: Vec<InsightSegmentKey>,
+    /// Distinct cultures in the result set. One culture is a fact about the
+    /// database rather than a comparison, and the picker says so.
+    culture_values: i64,
+}
+
+/// Roll every interaction of the resolved result set up into one row per
+/// conversation.
+///
+/// One pass over the scope's interactions, however many breakdowns follow.
+fn build_insight_segment_stats(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(INSIGHT_SEGMENT_TABLE).map_err(insight_err)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO insight_segment_stats \
+               (session_uuid, culture, interactions, feedback, feedback_pos, \
+                recognized, unrecognized, quality_sum) \
+             SELECT s.session_uuid, s.culture, COUNT(*), \
+                    COALESCE(SUM(CASE WHEN {FEEDBACK_ROW} THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN {IS_SCORED_ROW} THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN {IS_ZERO_RECOG_ROW} THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN {IS_SCORED_ROW} \
+                                      THEN i.recognition_quality ELSE 0 END), 0) \
+             FROM insight_sessions s \
+             JOIN interactions i ON i.session_uuid = s.session_uuid \
+             GROUP BY s.session_uuid"
+        ),
+        [],
+    )
+    .map_err(insight_err)?;
+    Ok(())
+}
+
+/// Read a `(label, …sums)` query into segment rows.
+fn insight_segment_rows(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn ToSql],
+    fallback: &str,
+) -> Result<Vec<InsightSegmentRow>, String> {
+    let mut stmt = conn.prepare(sql).map_err(insight_err)?;
+    let rows = stmt
+        .query_map(params, |r| {
+            Ok(InsightSegmentRow {
+                label: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                sessions: r.get(1)?,
+                interactions: r.get(2)?,
+                feedback: r.get(3)?,
+                feedback_pos: r.get(4)?,
+                recognized: r.get(5)?,
+                unrecognized: r.get(6)?,
+                quality_sum: r.get(7)?,
+            })
+        })
+        .map_err(insight_err)?;
+    let mut out = Vec::new();
+    for row in rows {
+        let mut row = row.map_err(insight_err)?;
+        // "Set, with no value" is a real state and a different one from the key
+        // being absent — the tag charts and the filter chips spell it the same
+        // way, and a blank row reads as a rendering fault.
+        if row.label.trim().is_empty() {
+            row.label = fallback.to_string();
+        }
+        out.push(row);
+    }
+    Ok(out)
+}
+
+/// The whole result set as one row — the table's first line.
+fn insight_segment_total(conn: &Connection) -> Result<InsightSegmentRow, String> {
+    let rows = insight_segment_rows(
+        conn,
+        &format!(
+            "SELECT '' AS label, {INSIGHT_SEGMENT_SUMS} FROM insight_segment_stats g"
+        ),
+        &[],
+        "Total",
+    )?;
+    Ok(rows.into_iter().next().unwrap_or(InsightSegmentRow {
+        label: "Total".to_string(),
+        sessions: 0,
+        interactions: 0,
+        feedback: 0,
+        feedback_pos: 0,
+        recognized: 0,
+        unrecognized: 0,
+        quality_sum: 0.0,
+    }))
+}
+
+/// Which context/metadata keys this result set actually has, and what they
+/// cover.
+///
+/// The same covering-index shape `insight_tag_groups` uses — a `GROUP BY (name,
+/// session)` rather than the `SELECT DISTINCT` it reads like, because
+/// `idx_ctx_name_session` is `(name, session_uuid)` and grouping in that order
+/// has nothing to sort.
+///
+/// Deliberately not `insight_tag_groups` itself: that one reads
+/// `insight_weights`, which is the *unit's* weight, and the Segments table
+/// always counts conversations.
+fn insight_segment_keys(
+    conn: &Connection,
+    table: &str,
+) -> Result<Vec<InsightSegmentKey>, String> {
+    let mut totals: BTreeMap<String, (i64, i64)> = BTreeMap::new();
+    {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT name, COUNT(*) FROM (\
+                   SELECT t.name AS name, t.session_uuid \
+                   FROM insight_sessions s JOIN {table} t \
+                     ON t.session_uuid = s.session_uuid \
+                   GROUP BY t.name, t.session_uuid\
+                 ) GROUP BY name"
+            ))
+            .map_err(insight_err)?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .map_err(insight_err)?;
+        for row in rows {
+            let (name, sessions) = row.map_err(insight_err)?;
+            if name.trim().is_empty() {
+                continue;
+            }
+            totals.insert(name, (sessions, 0));
+        }
+    }
+    {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT name, COUNT(*) FROM (\
+                   SELECT t.name AS name, t.value AS value \
+                   FROM insight_sessions s JOIN {table} t \
+                     ON t.session_uuid = s.session_uuid \
+                   GROUP BY t.name, t.value\
+                 ) GROUP BY name"
+            ))
+            .map_err(insight_err)?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .map_err(insight_err)?;
+        for row in rows {
+            let (name, distinct) = row.map_err(insight_err)?;
+            if let Some(entry) = totals.get_mut(&name) {
+                entry.1 = distinct;
+            }
+        }
+    }
+    let mut out: Vec<InsightSegmentKey> = totals
+        .into_iter()
+        .map(|(name, (sessions, distinct_values))| InsightSegmentKey {
+            name,
+            sessions,
+            distinct_values,
+        })
+        .collect();
+    out.sort_by(|a, b| b.sessions.cmp(&a.sessions).then_with(|| a.name.cmp(&b.name)));
+    Ok(out)
+}
+
+/// One breakdown's rows.
+fn insight_segment_group(
+    conn: &Connection,
+    breakdown: &InsightSegmentBreakdown,
+) -> Result<InsightSegmentGroup, String> {
+    let table = match breakdown.kind.as_str() {
+        // Never interpolated from the wire: the table name cannot be a bound
+        // parameter, so it is chosen from a fixed set here.
+        "context" => Some("context_index"),
+        "metadata" => Some("metadata_index"),
+        "culture" => None,
+        other => return Err(format!("Unknown breakdown kind: {other}")),
+    };
+    let (rows, distinct, overlapping) = match table {
+        // Grouped by the *conversation's* culture, not the turn's, so a segment
+        // is a set of conversations in every breakdown here. Mixing a
+        // session-keyed block with a turn-keyed one in one table is exactly how
+        // two rows of it come to mean different things.
+        None => {
+            let rows = insight_segment_rows(
+                conn,
+                &format!(
+                    "SELECT g.culture AS label, {INSIGHT_SEGMENT_SUMS} \
+                     FROM insight_segment_stats g \
+                     GROUP BY g.culture \
+                     ORDER BY COALESCE(SUM(g.interactions), 0) DESC, g.culture ASC \
+                     LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
+                ),
+                &[],
+                "(none)",
+            )?;
+            let distinct: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM (SELECT culture FROM insight_segment_stats \
+                     GROUP BY culture)",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(insight_err)?;
+            (rows, distinct, false)
+        }
+        Some(table) => {
+            let rows = insight_segment_rows(
+                conn,
+                &format!(
+                    "SELECT t.value AS label, {INSIGHT_SEGMENT_SUMS} \
+                     FROM insight_segment_stats g JOIN {table} t \
+                       ON t.session_uuid = g.session_uuid \
+                     WHERE t.name = ?1 \
+                     GROUP BY t.value \
+                     ORDER BY COALESCE(SUM(g.interactions), 0) DESC, t.value ASC \
+                     LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
+                ),
+                &[&breakdown.name],
+                "(empty)",
+            )?;
+            let (distinct, tagged, sessions): (i64, i64, i64) = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*), COALESCE(SUM(n), 0), COUNT(DISTINCT session_uuid) FROM (\
+                           SELECT t.value AS value, t.session_uuid AS session_uuid, \
+                                  COUNT(*) AS n \
+                           FROM insight_segment_stats g JOIN {table} t \
+                             ON t.session_uuid = g.session_uuid \
+                           WHERE t.name = ?1 \
+                           GROUP BY t.value, t.session_uuid\
+                         )"
+                    ),
+                    params![breakdown.name],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .map_err(insight_err)?;
+            // A conversation whose context changed mid-way legitimately carries
+            // two values of one key, so its interactions are counted under
+            // both. Found against the real Interaction Log, not imagined — and
+            // it is why there is no "Other" row here either.
+            (rows, distinct, tagged > sessions)
+        }
+    };
+    let folded_values = (distinct - rows.len() as i64).max(0);
+    Ok(InsightSegmentGroup {
+        kind: breakdown.kind.clone(),
+        name: breakdown.name.clone(),
+        rows,
+        folded_values,
+        overlapping,
+    })
+}
+
+/// Every number the Segments table shows, over one resolved result set.
+///
+/// Split out of the command — as `conversation_insights` is — so it can be run
+/// against a real `Connection` in a test without a Tauri `State`. What goes
+/// wrong in here is never "it fails to run": it is a join quietly counting the
+/// wrong rows, and that is only visible in the numbers that come back.
+///
+/// `fresh_stats` says whether `insight_segment_stats` already describes the
+/// session set now in `insight_sessions`; the caller owns that flag because it
+/// owns the scope cache.
+fn conversation_segments(
+    conn: &Connection,
+    breakdowns: &[InsightSegmentBreakdown],
+    fresh_stats: bool,
+) -> Result<InsightSegments, String> {
+    if !fresh_stats {
+        build_insight_segment_stats(conn)?;
+    }
+    let total = insight_segment_total(conn)?;
+    let mut groups = Vec::new();
+    for breakdown in breakdowns {
+        groups.push(insight_segment_group(conn, breakdown)?);
+    }
+    let culture_values: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM (SELECT culture FROM insight_segment_stats GROUP BY culture)",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(insight_err)?;
+    Ok(InsightSegments {
+        total,
+        groups,
+        context_keys: insight_segment_keys(conn, "context_index")?,
+        metadata_keys: insight_segment_keys(conn, "metadata_index")?,
+        culture_values,
+    })
+}
+
+/// The Segments table, over the same result set every other Insights read uses.
+///
+/// Its own command rather than a section of the dashboard read for the reason
+/// the tag sections are: it is a separate cost, and it is re-read whenever a
+/// breakdown is ticked without anything else on the screen changing.
+#[tauri::command]
+async fn get_insight_segments(
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+    unit: Option<String>,
+    breakdowns: Option<Vec<InsightSegmentBreakdown>>,
+) -> Result<Option<InsightSegments>, String> {
+    let db = db_state.inner().clone();
+    let breakdowns = breakdowns.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let DbState { conn, insight_scope, .. } = &mut *state;
+        let conn = conn.as_ref().ok_or("No database open.")?;
+        // The unit is passed through untouched even though every number here
+        // counts conversations: it is the scope cache's key, and resolving the
+        // same search under the other unit would throw away `insight_matches`
+        // that the dashboard behind this table is still using.
+        let out = resolve_insight_scope(
+            conn,
+            &args,
+            InsightUnit::parse(unit.as_deref()),
+            insight_scope,
+        )
+        .and_then(|_| {
+            let fresh = insight_scope.segment_stats;
+            let out = conversation_segments(conn, &breakdowns, fresh);
+            // Recorded only on success: a rollup that failed part-way through
+            // describes nothing, and reusing it would chart rows that are not
+            // the result of this search.
+            insight_scope.segment_stats = out.is_ok();
+            insight_scope.restamp(conn);
+            out
+        });
+        if out.is_err() {
+            let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+            insight_scope.clear();
+        }
+        match out {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// `None` means the read was cancelled — `cancel_db_query` interrupted it.
 ///
 /// A cancelled read is an outcome the user asked for, so it is not an `Err`:
@@ -6413,11 +6911,38 @@ struct InsightScopeCache {
     matched_interactions: i64,
     matches_are_narrowed: bool,
     search_mode: String,
+    /// Whether `insight_segment_stats` is built and describes the session set
+    /// currently in `insight_sessions`.
+    ///
+    /// A third flag rather than a third fingerprint: the rollup is derived from
+    /// `insight_sessions` alone, so it survives exactly what that table
+    /// survives — a unit switch keeps it, a different search does not. Ticking
+    /// another breakdown key then costs a join of a narrow table instead of
+    /// another pass over `interactions`.
+    segment_stats: bool,
 }
 
 impl InsightScopeCache {
     fn clear(&mut self) {
         *self = Self::default();
+    }
+
+    /// Re-read the safety catch after writing to the temp tables ourselves.
+    ///
+    /// `changes` is recorded once the tables are built, precisely so an
+    /// *outside* write moves it and the cache stops matching. Building the
+    /// segment rollup is a write of our own, several thousand rows of it, and
+    /// leaving the counter behind would make the very next read look like
+    /// somebody else's import — dropping a result set that is still perfectly
+    /// good and re-running the search to rebuild it.
+    ///
+    /// Safe for the same reason the original stamp is: one connection behind
+    /// one mutex, so nothing else can have written between those rows landing
+    /// and this line.
+    fn restamp(&mut self, conn: &Connection) {
+        if self.sessions_sig.is_some() {
+            self.changes = insight_data_stamp(conn);
+        }
     }
 
     /// The scope this read wants, or `None` if it has to be built.
@@ -6495,6 +7020,7 @@ fn resolve_insight_scope(
     let sessions_reusable = cache.sessions_sig.as_deref() == Some(sig.as_str())
         && stamp.is_some()
         && cache.changes == stamp;
+    let cache_had_segments = cache.segment_stats;
     if !sessions_reusable {
         cache.clear();
     }
@@ -6506,6 +7032,9 @@ fn resolve_insight_scope(
         matched_interactions: scope.matched_interactions,
         matches_are_narrowed: scope.matches_are_narrowed,
         search_mode: scope.search_mode.clone(),
+        // The rollup is derived from `insight_sessions`, so it is still good
+        // for exactly as long as that table is.
+        segment_stats: sessions_reusable && cache_had_segments,
     };
     Ok(scope)
 }
@@ -9725,6 +10254,7 @@ pub fn run() {
             release_insight_scope,
             get_insight_tags,
             get_insight_tag_values,
+            get_insight_segments,
             export_conversations_for_ai,
             cancel_db_query,
             get_session_interactions,
@@ -13188,6 +13718,253 @@ mod insights {
         assert_eq!(bucket(&i.dialogs, "77"), 1);
         assert_eq!(bucket(&i.dialog_status, "EndedOrInProgress"), 2);
         assert_eq!(bucket(&i.dialog_status, "DropOut"), 1);
+    }
+
+    /// One turn of the Segments fixture, spelled out so every number below is
+    /// countable by hand.
+    struct Turn<'a> {
+        session: &'a str,
+        culture: &'a str,
+        feedback: &'a str,
+        recog_type: &'a str,
+        quality: f64,
+        main_type: &'a str,
+    }
+
+    fn seed_segments(turns: &[Turn], tags: &[(&str, &str, &str)]) -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite");
+        conn.execute_batch(DB_SCHEMA).expect("schema");
+        conn.execute_batch(FTS_SCHEMA).expect("fts schema");
+        for (n, t) in turns.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, timestamp_end, culture, main_interaction_type, \
+                 all_interaction_types, interaction_value, output_text, \
+                 recognition_type, recognition_quality, feedback_info, imported_at) \
+                 VALUES (?1,'u'||?1,?2,'2026-06-01T09:00:00','2026-06-01T09:00:00',?3,?4,?4,\
+                         'hoe laat open je','om tien uur',?5,?6,?7,0)",
+                params![
+                    n as i64 + 1,
+                    t.session,
+                    t.culture,
+                    t.main_type,
+                    t.recog_type,
+                    t.quality,
+                    t.feedback,
+                ],
+            )
+            .expect("insert interaction");
+        }
+        for (name, value, session) in tags {
+            conn.execute(
+                "INSERT OR IGNORE INTO context_index (name, value, session_uuid) \
+                 VALUES (?1, ?2, ?3)",
+                params![name, value, session],
+            )
+            .expect("insert context");
+        }
+        rebuild_session_summary(&conn).expect("summary");
+        conn
+    }
+
+    fn segments(conn: &Connection, breakdowns: &[(&str, &str)]) -> InsightSegments {
+        let want: Vec<InsightSegmentBreakdown> = breakdowns
+            .iter()
+            .map(|(kind, name)| InsightSegmentBreakdown {
+                kind: kind.to_string(),
+                name: name.to_string(),
+            })
+            .collect();
+        resolve_insight_scope(
+            conn,
+            &GetSessionsArgs::default(),
+            InsightUnit::Conversations,
+            &mut InsightScopeCache::default(),
+        )
+        .expect("scope");
+        conversation_segments(conn, &want, false).expect("segments")
+    }
+
+    fn seg_row<'a>(group: &'a InsightSegmentGroup, label: &str) -> &'a InsightSegmentRow {
+        group
+            .rows
+            .iter()
+            .find(|r| r.label == label)
+            .unwrap_or_else(|| panic!("no row {label} in {}", group.name))
+    }
+
+    /// The five measures, counted by hand against a fixture small enough to
+    /// count.
+    ///
+    /// Nothing in here fails loudly when a predicate is wrong: a GenAI turn
+    /// counted as unrecognised, or a thumbs-down counted as a thumbs-up, still
+    /// produces a plausible percentage. Only known answers tell them apart —
+    /// and these are the same predicates `session_summary_insert_sql` uses, so
+    /// a drift in either spelling shows up here.
+    #[test]
+    fn a_segment_row_counts_feedback_and_recognition_as_the_summary_does() {
+        let conn = seed_segments(
+            &[
+                // s1 · nl · web — one recognised turn, one zero-recognition
+                // turn that got a thumbs up.
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s1", culture: "nl", feedback: r#"{"score": 1}"#, recog_type: "Article", quality: 0.0, main_type: "Question" },
+                // s2 · nl · web — recognised, thumbs down.
+                Turn { session: "s2", culture: "nl", feedback: r#"{"score": -1}"#, recog_type: "Article", quality: 80.0, main_type: "Question" },
+                // s3 · en · app — a GenAI answer, which the recognizer never
+                // scored: it is in neither half of the recognition rate.
+                Turn { session: "s3", culture: "en", feedback: "", recog_type: "", quality: 0.0, main_type: "GenerativeAI" },
+                Turn { session: "s3", culture: "en", feedback: "", recog_type: "Article", quality: 60.0, main_type: "Question" },
+                // s4 · en · no channel at all — a key is not a partition.
+                Turn { session: "s4", culture: "en", feedback: "", recog_type: "Article", quality: 0.0, main_type: "Question" },
+            ],
+            &[
+                ("channel", "web", "s1"),
+                ("channel", "web", "s2"),
+                ("channel", "app", "s3"),
+            ],
+        );
+        let out = segments(&conn, &[("culture", ""), ("context", "channel")]);
+
+        let t = &out.total;
+        assert_eq!((t.sessions, t.interactions), (4, 6));
+        assert_eq!((t.feedback, t.feedback_pos), (2, 1), "one up, one down");
+        assert_eq!(
+            (t.recognized, t.unrecognized),
+            (3, 2),
+            "the GenAI turn is in neither half of the rate"
+        );
+        assert_eq!(t.quality_sum, 230.0, "90 + 80 + 60, over the scored turns only");
+
+        // Culture partitions the result set, so its rows must add back up to it.
+        let cultures = &out.groups[0];
+        assert_eq!(cultures.kind, "culture");
+        assert!(!cultures.overlapping);
+        assert_eq!(cultures.folded_values, 0);
+        assert_eq!(
+            cultures.rows.iter().map(|r| r.interactions).sum::<i64>(),
+            t.interactions
+        );
+        assert_eq!(cultures.rows.iter().map(|r| r.sessions).sum::<i64>(), t.sessions);
+        let nl = seg_row(cultures, "nl");
+        assert_eq!((nl.sessions, nl.interactions), (2, 3));
+        assert_eq!((nl.feedback, nl.feedback_pos), (2, 1));
+        assert_eq!((nl.recognized, nl.unrecognized), (2, 1));
+        assert_eq!(nl.quality_sum, 170.0);
+        let en = seg_row(cultures, "en");
+        assert_eq!((en.recognized, en.unrecognized), (1, 1));
+        assert_eq!(en.feedback, 0);
+
+        // A context key is *not* a partition — s4 set none — and the table has
+        // to be readable as such rather than as a total that fails to add up.
+        let channel = &out.groups[1];
+        assert_eq!((channel.kind.as_str(), channel.name.as_str()), ("context", "channel"));
+        assert!(!channel.overlapping);
+        assert_eq!(
+            channel.rows.iter().map(|r| r.interactions).sum::<i64>(),
+            5,
+            "the conversation with no channel is in no row"
+        );
+        let web = seg_row(channel, "web");
+        assert_eq!((web.sessions, web.interactions), (2, 3));
+        assert_eq!((web.feedback, web.feedback_pos), (2, 1));
+        let app = seg_row(channel, "app");
+        assert_eq!((app.sessions, app.interactions), (1, 2));
+        assert_eq!((app.recognized, app.unrecognized), (1, 0));
+
+        // The picker's own list, over this result set rather than the database.
+        assert_eq!(out.culture_values, 2);
+        let key = out
+            .context_keys
+            .iter()
+            .find(|k| k.name == "channel")
+            .expect("channel offered");
+        assert_eq!((key.sessions, key.distinct_values), (3, 2));
+        assert!(out.metadata_keys.is_empty());
+    }
+
+    /// A conversation whose context changed mid-way carries two values of one
+    /// key, so its interactions are counted under both and the rows sum to more
+    /// than the total. That is correct and it is why there is no "Other" row —
+    /// but a table that visibly does not add up has to say so itself.
+    #[test]
+    fn a_key_one_conversation_set_twice_is_reported_as_overlapping() {
+        let conn = seed_segments(
+            &[
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+            ],
+            &[
+                ("step", "start", "s1"),
+                ("step", "done", "s1"),
+                ("step", "start", "s2"),
+                ("park", "efteling", "s1"),
+                ("park", "efteling", "s2"),
+            ],
+        );
+        let out = segments(&conn, &[("context", "step"), ("context", "park")]);
+        let step = &out.groups[0];
+        assert!(step.overlapping, "s1 carries two values of `step`");
+        assert_eq!(
+            step.rows.iter().map(|r| r.interactions).sum::<i64>(),
+            3,
+            "s1 is counted under both of its values"
+        );
+        assert!(out.total.interactions < 3);
+        let park = &out.groups[1];
+        assert!(!park.overlapping, "one value per conversation is not an overlap");
+        assert_eq!(park.rows.iter().map(|r| r.interactions).sum::<i64>(), out.total.interactions);
+    }
+
+    /// The rollup is derived from `insight_sessions`, so ticking another
+    /// breakdown key must not cost another pass over `interactions` — and a
+    /// *different* search must not be answered out of the previous one's rows.
+    #[test]
+    fn the_segment_rollup_is_reused_across_breakdowns_and_dropped_on_a_new_search() {
+        let conn = seed_segments(
+            &[
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s2", culture: "en", feedback: "", recog_type: "Article", quality: 0.0, main_type: "Question" },
+            ],
+            &[("channel", "web", "s1"), ("channel", "app", "s2")],
+        );
+        let mut cache = InsightScopeCache::default();
+        let args = GetSessionsArgs::default();
+        resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
+            .expect("scope");
+        let first = conversation_segments(&conn, &[], false).expect("segments");
+        cache.segment_stats = true;
+        // The rollup's own inserts move `total_changes()`, and the safety catch
+        // reads exactly that counter — without the restamp the next resolve
+        // would mistake our own writes for somebody else's import and throw the
+        // result set away.
+        cache.restamp(&conn);
+        assert_eq!(first.total.interactions, 2);
+
+        // The same search again: the rollup is still describing it, and asking
+        // for a second breakdown reads it rather than rebuilding it.
+        resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
+            .expect("scope");
+        assert!(cache.segment_stats, "an unchanged search keeps its rollup");
+        let again = conversation_segments(
+            &conn,
+            &[InsightSegmentBreakdown { kind: "context".into(), name: "channel".into() }],
+            cache.segment_stats,
+        )
+        .expect("segments");
+        assert_eq!(again.total.interactions, 2);
+        assert_eq!(again.groups[0].rows.len(), 2);
+
+        // A different search resolves a different session set, and the rollup
+        // has to go with it — reusing it would report the old result's rows
+        // under the new search, with nothing on screen to say so.
+        let narrowed =
+            GetSessionsArgs { filter: Some("zero_recog".into()), ..Default::default() };
+        resolve_insight_scope(&conn, &narrowed, InsightUnit::Conversations, &mut cache)
+            .expect("scope");
+        assert!(!cache.segment_stats, "a different search drops the rollup");
+        let after = conversation_segments(&conn, &[], cache.segment_stats).expect("segments");
+        assert_eq!(after.total.interactions, 1, "only the zero-recognition conversation");
     }
 
     /// A value's share is of the sessions that carry the key at all. Against

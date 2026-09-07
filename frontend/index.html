@@ -8160,6 +8160,123 @@
            its 11px labels bigger than the card title above them. */
         max-width: 760px;
       }
+      /* The Segments table is one card across the whole grid. Seven columns of
+         numbers do not fit a 480px cell, and a comparison split over two rows
+         of the grid is the one thing a comparison must not be. */
+      .ins-grid-wide {
+        grid-template-columns: 1fr;
+      }
+      /* The table scrolls inside its own card rather than widening the body:
+         a horizontal scrollbar on the modal would move every chart with it. */
+      .ins-table-wrap {
+        overflow-x: auto;
+      }
+      table.ins-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.72rem;
+      }
+      table.ins-table th,
+      table.ins-table td {
+        padding: 4px 12px 4px 0;
+        text-align: right;
+        white-space: nowrap;
+      }
+      /* Numbers right, names left — the only alignment in which a column of
+         figures can be compared by eye at all. */
+      /* The name column absorbs every pixel of slack, so the six numeric
+         columns pack together on the right. Distributed evenly they sit a
+         hand's width apart, and comparing a figure with the one two rows down
+         is then a saccade rather than a glance — which is the only thing this
+         card is for. */
+      table.ins-table thead th:first-child,
+      table.ins-table tbody th {
+        text-align: left;
+        padding-right: 18px;
+        width: 100%;
+      }
+      table.ins-table thead th {
+        color: var(--muted);
+        font-weight: 600;
+        font-size: 0.64rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 6px;
+        vertical-align: bottom;
+      }
+      table.ins-table tbody th {
+        font-weight: 500;
+        color: var(--text);
+        max-width: 320px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      table.ins-table tbody td {
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+      }
+      /* The result set itself, and every block below is a slice of it — so it
+         reads as the line the rest is measured against, not as one more row. */
+      tr.ins-table-total th,
+      tr.ins-table-total td {
+        font-weight: 700;
+        padding-bottom: 7px;
+      }
+      tr.ins-table-head td {
+        color: var(--muted);
+        font-size: 0.66rem;
+        text-align: left;
+        padding-top: 12px;
+        padding-bottom: 3px;
+        border-top: 1px solid var(--border);
+      }
+      tr.ins-table-head em {
+        font-style: normal;
+        color: var(--orange);
+        margin-left: 8px;
+      }
+      tr.ins-table-value th {
+        padding-left: 12px;
+      }
+      table.ins-table tbody tr.ins-table-value:hover td,
+      table.ins-table tbody tr.ins-table-value:hover th {
+        background: var(--surface);
+      }
+      /* One chip per breakdown the table is comparing, each removable where it
+         is read. The picker adds them; taking one away should not need it. */
+      .ins-segchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.68rem;
+        padding: 3px 4px 3px 9px;
+      }
+      .ins-segchip button {
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.68rem;
+        line-height: 1;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .ins-segchip button:hover {
+        color: var(--red);
+        background: var(--surface2);
+      }
+      .ins-keypop-group {
+        color: var(--muted);
+        font-size: 0.62rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 8px 10px 3px;
+      }
       /* Which context or metadata key the section is showing.
          One button and a popover, not a row of chips: a real export has around
          forty keys of each, which as chips was four wrapped lines of buttons
@@ -11326,6 +11443,8 @@
             invoke("get_insight_tags", { args, unit, keys }),
           getInsightTagValues: (args, unit, kind, name) =>
             invoke("get_insight_tag_values", { args, unit, kind, name }),
+          getInsightSegments: (args, unit, breakdowns) =>
+            invoke("get_insight_segments", { args, unit, breakdowns }),
           getConversationInsights: (args, unit, sections) =>
             invoke("get_conversation_insights", { args, unit, sections }),
           // Frees the resolved result set the Insights temp tables hold. Called
@@ -11484,6 +11603,8 @@
           Promise.resolve({ contexts: [], metadata: [] })
       if (!window.backend.getInsightTagValues)
         window.backend.getInsightTagValues = () => Promise.resolve([])
+      if (!window.backend.getInsightSegments)
+        window.backend.getInsightSegments = () => Promise.resolve(null)
       if (!window.backend.releaseInsightScope)
         window.backend.releaseInsightScope = () => Promise.resolve()
       if (!window.backend.exportConversationsForAi)
@@ -22048,11 +22169,18 @@
       /// the tab-separated twin never needed to be. RFC 4180: wrap when the
       /// cell holds a comma, a quote or a newline, and double the quotes.
       function insChartCsv(spec) {
+        return insTsvToCsv(insChartTsv(spec))
+      }
+
+      /// Split from `insChartCsv` so the Segments table gets the same quoting.
+      /// A second implementation of RFC 4180 is a second place for a value
+      /// holding a comma to come out as two cells.
+      function insTsvToCsv(tsv) {
         const cell = (v) => {
           const t = String(v == null ? "" : v)
           return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t
         }
-        return insChartTsv(spec)
+        return tsv
           .split("\n")
           .map((row) => row.split("\t").map(cell).join(","))
           .join("\n")
@@ -22061,12 +22189,24 @@
       /// The same table again, as a Markdown pipe table — for Slack, GitHub
       /// and anything else that renders one but will not take a TSV as cells.
       function insChartMarkdown(spec) {
-        const rows = insChartTsv(spec).split("\n").map((r) => r.split("\t"))
+        return insTsvToMarkdown(insChartTsv(spec))
+      }
+
+      /// The Markdown half of the same split. The Segments table's own heading
+      /// rows are short lines with no tabs, and padding them out to the header
+      /// width is what keeps the pipe table a table.
+      function insTsvToMarkdown(tsv) {
+        const rows = tsv.split("\n").map((r) => r.split("\t"))
         if (!rows.length) return ""
+        const width = rows[0].length
         // A `|` inside a cell ends the cell; escaped rather than dropped,
         // because a context value is exactly where one turns up.
         const cell = (v) => String(v == null ? "" : v).replace(/\|/g, "\\|")
-        const line = (cells) => "| " + cells.map(cell).join(" | ") + " |"
+        const line = (cells) => {
+          const padded = cells.slice(0, width)
+          while (padded.length < width) padded.push("")
+          return "| " + padded.map(cell).join(" | ") + " |"
+        }
         const out = [line(rows[0]), "|" + rows[0].map(() => " --- ").join("|") + "|"]
         for (const r of rows.slice(1)) out.push(line(r))
         return out.join("\n")
@@ -22204,6 +22344,13 @@
             "cultures",
           ],
         },
+        {
+          key: "segments",
+          name: "Segments",
+          blurb:
+            "Slices of this result side by side — feedback, recognition and volume per culture, context or metadata value.",
+          cost: "medium",
+        },
       ]
 
       /// The three the dashboard read itself covers. Context and Metadata are
@@ -22228,6 +22375,7 @@
           content: true,
           context: false,
           metadata: false,
+          segments: false,
         }
         try {
           const raw = JSON.parse(localStorage.getItem("cm-insights-sections") || "null")
@@ -22950,6 +23098,20 @@
             axisLabel: "Culture",
           }))
         }
+
+        // A table, not a chart, so it is pushed directly rather than through
+        // `push` — which decides emptiness by looking for a non-zero datum, a
+        // question this card's shape cannot answer.
+        const segTable = d.segments ? insSegmentTable(d.segments) : null
+        if (segTable && d.segments.total.interactions) {
+          cards.push({
+            section: "Segments",
+            id: "segments",
+            title: "Segment comparison",
+            note: INS_SEGMENT_NOTE,
+            table: segTable,
+          })
+        }
         return cards
       }
 
@@ -23641,6 +23803,7 @@
           insRenderHeader()
           insRenderBody()
           insEnsureTagValues()
+          insEnsureSegments()
           return
         }
 
@@ -23726,6 +23889,10 @@
             if (payload.tagsLoaded) insEnsureTagValues()
             else insLoadTags(payload, mySeq)
           }
+          // And so is the Segments table — its own read, over the same result
+          // set, for the same reason: it is a separate cost and it draws below
+          // every chart above it.
+          insEnsureSegments()
         } catch (e) {
           if (mySeq !== insLoadSeq) return
           insSetRefreshing(false)
@@ -23782,6 +23949,13 @@
         insSections[key] = true
         insSaveSections()
         const d = insData
+        // Segments is its own call over the same resolved result set, so
+        // turning it on costs one read and nothing already drawn is touched.
+        if (key === "segments") {
+          insEnsureSegments()
+          insRenderBody()
+          return
+        }
         // The two tag sections are their own call and their own read; turning
         // one on is the same work as the dashboard's follow-up read.
         if (!INS_READ_SECTIONS.includes(key)) {
@@ -24024,22 +24198,34 @@
         for (const [name] of tagSections) {
           if (!sections.some((s) => s.name === name)) sections.push({ name, cards: [] })
         }
+        // Segments renders whether or not it has a table, for the same reason
+        // the tag sections do: its breakdown bar is the control that gets one,
+        // so a section that vanished while it was reading would take the way
+        // out with it.
+        if (insSections.segments && !sections.some((s) => s.name === "Segments")) {
+          sections.push({ name: "Segments", cards: [] })
+        }
         // …in the order the dashboard reads in, not the order they were added.
-        const order = ["Volume", "Quality", "Context", "Metadata", "Content"]
+        // Segments comes last on purpose: it is a full-width table, and above
+        // the charts it would push every one of them below the fold.
+        const order = ["Volume", "Quality", "Context", "Metadata", "Content", "Segments"]
         sections.sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name))
         for (const section of sections) {
           const key = section.name.toLowerCase()
           html += `<div class="ins-section"><h4>${esc(section.name)}</h4>`
           const tag = tagSections.find((t) => t[0] === section.name)
           if (tag) html += insTagKeyBar(tag[1], tag[2], tag[3])
-          html += `<div class="ins-grid">${section.cards
+          const seg = section.name === "Segments"
+          if (seg) html += insSegKeyBar()
+          html += `<div class="ins-grid${seg ? " ins-grid-wide" : ""}">${section.cards
             .map((c) => insCardHtml(c))
             .join("")}</div>`
           if (tag && !section.cards.length) html += insTagPendingHtml(tag)
+          if (seg && !section.cards.length) html += insSegPendingHtml()
           // A section just switched on has its heading before it has its
           // charts. Saying so is the difference between "reading" and "this
           // section is empty", which look identical.
-          if (!tag && !section.cards.length) {
+          if (!tag && !seg && !section.cards.length) {
             html +=
               insAdding === key
                 ? `<div class="ins-tag-pending"><span class="mini-spinner"></span>
@@ -24085,6 +24271,17 @@
             : ""
         }</div>`
         body.innerHTML = html
+        // The breakdown picker's anchor lives inside the HTML just replaced,
+        // and this render can also arrive from the segments read finishing —
+        // long after the click that opened the popover. Put its open state back
+        // here rather than at the call sites, so no path can forget: the
+        // popover itself is fixed and outside this body, and only its anchor
+        // and its tick marks are lost.
+        if (insKeyPopKind === "segments") {
+          const btn = document.getElementById("insSegKeyBtn")
+          if (btn) btn.classList.add("open")
+          insRenderKeyPicker()
+        }
       }
 
       /// What a tag section shows while it has no chart.
@@ -24123,8 +24320,359 @@
           <strong>${esc(group.name)}</strong> in this result.</div>`
       }
 
+      // ── Segments ─────────────────────────────────────────────────────
+      //
+      // Every other card here is one distribution. This is several slices of
+      // the same result set read against the same five measures — the shape of
+      // the report people were rebuilding by hand in a spreadsheet, and the
+      // reason it is a table rather than a chart: a count in the tens of
+      // thousands and a percentage share no axis, and putting five of them on
+      // one would be a picture of nothing.
+      //
+      // It always counts **every interaction of the matched conversations**,
+      // in both readings. A segment is a set of conversations — that is the
+      // only shape context and metadata come in — so a table whose rows meant
+      // "matching turns" under one toggle and "all turns" under another would
+      // be two different reports wearing one title.
+
+      /// More than this and it stops being a table you can read across.
+      const INS_SEGMENT_MAX_KEYS = 8
+
+      /// Two decimals, always — this is the column someone compares against
+      /// last month's figure, where `insPct`'s rounding to a whole number above
+      /// 10% throws away the difference they are looking for.
+      function insSegPct(p) {
+        return (Math.round(Number(p || 0) * 100) / 100).toFixed(2) + "%"
+      }
+
+      /// A share, or an em dash when there is nothing to take a share of.
+      ///
+      /// `0%` of nothing is a claim; a dash is the absence of one. The
+      /// distinction matters most on exactly the rows people ask about — a
+      /// culture with four conversations and no feedback at all.
+      function insSegShare(part, whole) {
+        return whole ? insSegPct((Number(part || 0) / whole) * 100) : "—"
+      }
+
+      /// The columns, in the order the report people already keep has them.
+      ///
+      /// `text` is what a cell says on screen and `data` is what the same cell
+      /// says in an export — the two differ only in thousands separators, which
+      /// a spreadsheet has to parse rather than read. Both are derived from one
+      /// row object, so a figure on screen and the figure pasted out of it
+      /// cannot disagree.
+      const INS_SEGMENT_COLUMNS = [
+        {
+          label: "Feedback interactions",
+          text: (r) => insNum(r.feedback),
+          data: (r) => r.feedback || 0,
+        },
+        {
+          label: "Positive feedback",
+          text: (r) => insSegShare(r.feedbackPos, r.feedback),
+          data: (r) => insSegShare(r.feedbackPos, r.feedback),
+        },
+        {
+          label: "Recognition rate",
+          text: (r) => insSegShare(r.recognized, r.recognized + r.unrecognized),
+          data: (r) => insSegShare(r.recognized, r.recognized + r.unrecognized),
+        },
+        {
+          label: "Recognition quality",
+          text: (r) => (r.recognized ? insSegPct(r.qualitySum / r.recognized) : "—"),
+          data: (r) => (r.recognized ? insSegPct(r.qualitySum / r.recognized) : "—"),
+        },
+        {
+          label: "Interactions",
+          text: (r) => insNum(r.interactions),
+          data: (r) => r.interactions || 0,
+        },
+        {
+          label: "Conversations",
+          text: (r) => insNum(r.sessions),
+          data: (r) => r.sessions || 0,
+        },
+      ]
+
+      /// What the columns mean, said once under the table.
+      ///
+      /// Four of the six are ratios whose *denominator* is the whole question —
+      /// "93% recognition" over which turns? — and a header has no room to
+      /// answer that. Stated in the card note rather than in a tooltip, because
+      /// this table is copied far more often than it is hovered.
+      const INS_SEGMENT_NOTE =
+        "Every interaction of the conversations in each slice, in both readings. " +
+        "Positive feedback is a share of the rated turns; recognition rate is a " +
+        "share of the turns the recognizer scored, so GenAI answers are in " +
+        "neither half of it; recognition quality is the mean score of the turns " +
+        "it matched."
+
+      /// Which slices the table is comparing, remembered between sessions.
+      ///
+      /// Read entry by entry rather than trusted as a whole: a file written by
+      /// an older build, or edited by hand, cannot introduce a kind this does
+      /// not know or a duplicate row. An empty list is a legitimate state — the
+      /// Total row on its own is still an answer — so it is not overridden.
+      let insSegKeys = (() => {
+        const fallback = [{ kind: "culture", name: "" }]
+        try {
+          const raw = JSON.parse(localStorage.getItem("cm-insights-segments") || "null")
+          if (!Array.isArray(raw)) return fallback
+          const out = []
+          for (const b of raw) {
+            if (!b || typeof b !== "object") continue
+            const kind = b.kind
+            if (kind !== "culture" && kind !== "context" && kind !== "metadata") continue
+            const name = kind === "culture" ? "" : String(b.name || "")
+            if (kind !== "culture" && !name) continue
+            if (out.some((x) => x.kind === kind && x.name === name)) continue
+            out.push({ kind, name })
+            if (out.length >= INS_SEGMENT_MAX_KEYS) break
+          }
+          return out
+        } catch (e) {
+          return fallback
+        }
+      })()
+
+      function insSaveSegKeys() {
+        try {
+          localStorage.setItem("cm-insights-segments", JSON.stringify(insSegKeys))
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the choice */
+        }
+      }
+
+      function insSegKeyLabel(b) {
+        if (b.kind === "culture") return "Culture"
+        return (b.kind === "context" ? "Context · " : "Metadata · ") + b.name
+      }
+
+      /// The payload as a table: headers, and one row per line of it.
+      ///
+      /// Pure — no DOM, no globals — so the screen, the TSV, the CSV, the
+      /// Markdown and the HTML report are all renderings of *this* object
+      /// rather than five walks of the payload that can drift apart.
+      function insSegmentTable(seg) {
+        if (!seg || !seg.total) return null
+        const cells = (row) => ({
+          cells: INS_SEGMENT_COLUMNS.map((c) => c.text(row)),
+          data: INS_SEGMENT_COLUMNS.map((c) => String(c.data(row))),
+        })
+        const rows = [
+          { kind: "total", label: "Total", ...cells(seg.total) },
+        ]
+        for (const g of seg.groups || []) {
+          const notes = []
+          // Stated, never silently dropped: a table that is missing rows and
+          // does not say so is read as a complete one.
+          if (g.foldedValues > 0) {
+            notes.push(insPlural(g.foldedValues, "more values") + " not shown")
+          }
+          // A conversation whose context changed mid-way carries two values of
+          // one key, so its interactions are counted under both — which is
+          // correct, and makes the rows sum to more than the Total above them.
+          if (g.overlapping) {
+            notes.push("some conversations set two values, so these rows overlap")
+          }
+          rows.push({
+            kind: "head",
+            label: insSegKeyLabel(g),
+            note: notes.join(" · "),
+            cells: [],
+            data: [],
+          })
+          for (const r of g.rows || []) {
+            rows.push({ kind: "value", label: r.label, ...cells(r) })
+          }
+          if (!(g.rows || []).length) {
+            rows.push({
+              kind: "head",
+              label: "— nothing recorded for this key in this result —",
+              note: "",
+              cells: [],
+              data: [],
+            })
+          }
+        }
+        return { headers: ["Segment", ...INS_SEGMENT_COLUMNS.map((c) => c.label)], rows }
+      }
+
+      /// The same table, tab-separated — what gets pasted into the sheet this
+      /// feature exists to replace.
+      ///
+      /// A heading row keeps its own line with a blank one above it, which is
+      /// exactly the shape the hand-built version has: the block label in the
+      /// first column and nothing beside it.
+      function insTableTsv(table) {
+        if (!table) return ""
+        const out = [table.headers.join("\t")]
+        for (const r of table.rows) {
+          if (r.kind === "head") {
+            out.push("")
+            out.push(r.note ? r.label + "\t" + r.note : r.label)
+            continue
+          }
+          out.push([r.label, ...r.data].join("\t"))
+        }
+        return out.join("\n")
+      }
+
+      function insSegmentTableHtml(table) {
+        if (!table) return ""
+        const span = table.headers.length
+        let html = `<div class="ins-table-wrap"><table class="ins-table"><thead><tr>${table.headers
+          .map((h) => `<th>${esc(h)}</th>`)
+          .join("")}</tr></thead><tbody>`
+        for (const r of table.rows) {
+          if (r.kind === "head") {
+            html += `<tr class="ins-table-head"><td colspan="${span}">${esc(r.label)}${
+              r.note ? `<em>${esc(r.note)}</em>` : ""
+            }</td></tr>`
+            continue
+          }
+          html += `<tr class="ins-table-${esc(r.kind)}"><th scope="row" title="${esc(
+            r.label,
+          )}">${esc(r.label)}</th>${r.cells
+            .map((c) => `<td>${esc(c)}</td>`)
+            .join("")}</tr>`
+        }
+        return html + `</tbody></table></div>`
+      }
+
+      /// The breakdown bar: one chip per slice, and the picker that adds more.
+      ///
+      /// Chips rather than the tag sections' single button, because this
+      /// section's whole point is comparing several keys at once — and a chip
+      /// carries its own way out, so removing one does not need the picker.
+      function insSegKeyBar() {
+        const seg = insData && insData.segments
+        const available =
+          (seg ? (seg.contextKeys || []).length + (seg.metadataKeys || []).length : 0) +
+          (seg && seg.cultureValues > 1 ? 1 : 0)
+        const chips = insSegKeys
+          .map(
+            (b) => `<span class="ins-segchip">${esc(insSegKeyLabel(b))}
+              <button onclick="insToggleSegKey('${esc(b.kind)}', '${insQuoted(
+              b.name,
+            )}')" title="Remove this breakdown">&#10005;</button></span>`,
+          )
+          .join("")
+        return `<div class="ins-keybar">
+          <button class="ins-keypick" id="insSegKeyBtn"
+            onclick="insOpenKeyPicker('segments', this)"
+            title="Choose which slices to compare">
+            <span class="ins-keypick-name">Add a breakdown</span>
+            <span class="ins-keypick-caret">&#9662;</span>
+          </button>
+          ${chips}
+          <span class="ins-keybar-note">${
+            available
+              ? insPlural(available, "keys") + " available in this result"
+              : "Reading which keys this result has…"
+          }</span>
+        </div>`
+      }
+
+      /// Add or remove one breakdown, and read the table again.
+      ///
+      /// The picker stays open, because ticking one key and closing a menu is
+      /// not how a comparison gets built. Its anchor lives inside the body that
+      /// is about to be re-rendered, so the open state is put back afterwards —
+      /// the popover itself is fixed and outside the body, and does not move.
+      function insToggleSegKey(kind, name) {
+        const at = insSegKeys.findIndex((b) => b.kind === kind && b.name === name)
+        if (at >= 0) {
+          insSegKeys.splice(at, 1)
+        } else {
+          if (insSegKeys.length >= INS_SEGMENT_MAX_KEYS) {
+            showImportToast(
+              "error",
+              "Up to " +
+                INS_SEGMENT_MAX_KEYS +
+                " breakdowns at a time — remove one first.",
+            )
+            return
+          }
+          insSegKeys.push({ kind, name })
+        }
+        insSaveSegKeys()
+        // Started before the render, so the table paints as pending rather than
+        // showing the previous breakdowns as though they were the answer.
+        insEnsureSegments()
+        insRenderBody()
+      }
+
+      /// Read the table if what is on screen is not the answer to the current
+      /// breakdowns.
+      ///
+      /// `segmentsSig` is what makes this idempotent: the section is re-entered
+      /// on every cache hit and every unit switch, and re-reading a table that
+      /// is already correct is a database round-trip for nothing.
+      function insEnsureSegments() {
+        const d = insData
+        if (!d || !insSections.segments || d.segmentsPending) return
+        if (d.segments && d.segmentsSig === JSON.stringify(insSegKeys)) return
+        insLoadSegments(d, insLoadSeq)
+      }
+
+      async function insLoadSegments(d, seq) {
+        const sig = JSON.stringify(insSegKeys)
+        const want = insSegKeys.map((b) => ({ kind: b.kind, name: b.name }))
+        d.segmentsPending = true
+        try {
+          const seg = await window.backend.getInsightSegments(insArgs, insUnit, want)
+          // A newer read, a cancellation (`null`), or a payload since replaced:
+          // in all three the answer is no longer this screen's.
+          if (seq !== insLoadSeq || insData !== d) return
+          if (seg) {
+            d.segments = seg
+            d.segmentsSig = sig
+            d.segmentsError = null
+          }
+        } catch (e) {
+          if (seq !== insLoadSeq || insData !== d) return
+          d.segmentsError = String(e)
+        }
+        d.segmentsPending = false
+        insRenderBody()
+      }
+
+      /// What the section shows while it has no table.
+      ///
+      /// The same three situations the tag sections have, and they need the
+      /// same three different sentences: still reading, read and there is
+      /// nothing, or it failed.
+      function insSegPendingHtml() {
+        const d = insData
+        if (d && d.segmentsError) {
+          return `<div class="ins-tag-pending">Could not read the segments.
+            ${esc(d.segmentsError)}</div>`
+        }
+        if (!d || d.segmentsPending || !d.segments) {
+          return `<div class="ins-tag-pending"><span class="mini-spinner"></span>
+            Reading the segments…</div>`
+        }
+        return `<div class="ins-tag-pending">Nothing to compare in this result.</div>`
+      }
+
+      /// A card's numbers, whichever kind of card it is.
+      ///
+      /// One function so every export path — the per-card menu, the plain-text
+      /// report and the clipboard fallback behind a refused image write —
+      /// reaches a table card the same way. Four callers each testing
+      /// `card.table` themselves is how one of them comes to paste an empty
+      /// string.
+      function insCardTsv(card) {
+        return card && card.table ? insTableTsv(card.table) : insChartTsv(card.spec)
+      }
+
       function insCardHtml(card) {
-        const { svg } = insRenderChart(card.spec, INS_THEME_SCREEN)
+        const body = card.table
+          ? insSegmentTableHtml(card.table)
+          : `<div class="ins-chart">${
+              insRenderChart(card.spec, INS_THEME_SCREEN).svg
+            }</div>`
         return `<div class="ins-card">
           <div class="ins-card-head">
             <div class="ins-card-titles">
@@ -24134,12 +24682,16 @@
             <div class="ins-card-actions">
               <button class="ins-act" onclick="insOpenExport('${esc(
                 card.id,
-              )}')" title="Copy or save this chart — as a picture, as a vector, or as its numbers">
+              )}')" title="${
+                card.table
+                  ? "Copy or save this table — for a spreadsheet, for Slack, or as a file"
+                  : "Copy or save this chart — as a picture, as a vector, or as its numbers"
+              }">
                 <svg class=ui-icon><use href=#i-download /></svg> Export
               </button>
             </div>
           </div>
-          <div class="ins-chart">${svg}</div>
+          ${body}
         </div>`
       }
 
@@ -24280,6 +24832,10 @@
         if (!kind) return
         const d = insData
         if (!d) return
+        if (kind === "segments") {
+          insRenderSegmentPicker()
+          return
+        }
         const groups = (kind === "context" ? d.contexts : d.metadata) || []
         const selected = insPickGroup(
           groups,
@@ -24313,6 +24869,78 @@
               </button>`,
           )
           .join("")
+      }
+
+      /// The same popover, multi-select, over all three kinds at once.
+      ///
+      /// One list rather than three pickers because the comparison people
+      /// actually build mixes them — a channel from context, a culture, a flag
+      /// from metadata — and choosing each from a different control would make
+      /// the shape of the table an accident of where its rows came from.
+      ///
+      /// It stays open on a tick, unlike the single-select picker: a menu that
+      /// closed after each key would take four openings to build a four-row
+      /// comparison.
+      function insRenderSegmentPicker() {
+        const seg = (insData && insData.segments) || {}
+        const q = (document.getElementById("insKeyPopSearch").value || "")
+          .trim()
+          .toLowerCase()
+        const list = document.getElementById("insKeyPopList")
+        const on = (kind, name) =>
+          insSegKeys.some((b) => b.kind === kind && b.name === name)
+        const row = (kind, name, label, note) =>
+          `<button class="ins-keyrow${on(kind, name) ? " active" : ""}"
+            onclick="insToggleSegKey('${esc(kind)}', '${insQuoted(name)}')">
+            <span class="ins-keyrow-name">${
+              on(kind, name) ? "&#10003; " : ""
+            }${esc(label)}</span>
+            <em>${esc(note)}</em>
+          </button>`
+        const matches = (label) => !q || label.toLowerCase().includes(q)
+        let html = ""
+        if (seg.cultureValues > 0 && matches("culture")) {
+          html +=
+            `<div class="ins-keypop-group">Culture</div>` +
+            row(
+              "culture",
+              "",
+              "Culture",
+              insPlural(seg.cultureValues, "values"),
+            )
+        }
+        for (const [kind, label, keys] of [
+          ["context", "Context", seg.contextKeys],
+          ["metadata", "Metadata", seg.metadataKeys],
+        ]) {
+          const shown = (keys || []).filter((k) => matches(k.name))
+          if (!shown.length) continue
+          html += `<div class="ins-keypop-group">${esc(label)}</div>`
+          // Coverage *and* distinct values, the same two numbers the tag
+          // picker shows and for the same reason: a key set on four
+          // conversations and a key with eight hundred values are both dead
+          // ends, and neither is visible from a name.
+          html += shown
+            .map((k) =>
+              row(
+                kind,
+                k.name,
+                k.name,
+                insNum(k.sessions) +
+                  " conversations · " +
+                  insPlural(k.distinctValues, "values"),
+              ),
+            )
+            .join("")
+        }
+        list.innerHTML =
+          html ||
+          (q
+            ? `<div class="ins-keypop-empty">No key matches &ldquo;${esc(
+                q,
+              )}&rdquo;.</div>`
+            : `<div class="ins-keypop-empty">No context or metadata was
+                recorded on these conversations.</div>`)
       }
 
       /// A value safe inside the single quotes of an inline `onclick`.
@@ -24715,15 +25343,48 @@
         const scope = `<div class="ins-unit ins-export-scope">
             <button class="${insExportScope === "chart" ? "active" : ""}"
               ${card ? "" : "disabled"}
-              onclick="insSetExportScope('chart')">This chart</button>
+              onclick="insSetExportScope('chart')">${
+                card && card.table ? "This table" : "This chart"
+              }</button>
             <button class="${insExportScope === "dashboard" ? "active" : ""}"
               onclick="insSetExportScope('dashboard')">Whole dashboard</button>
           </div>`
         body.innerHTML =
           scope +
           (insExportScope === "chart" && card
-            ? insExportChartBody(card)
+            ? card.table
+              ? insExportTableBody(card)
+              : insExportChartBody(card)
             : insExportDashboardBody())
+      }
+
+      /// A table's export palette: the numbers, in four shapes, and nothing
+      /// else.
+      ///
+      /// No Image and no Vector group, and no disabled versions of them either.
+      /// There is no picture of this card to export — it is HTML on screen and
+      /// rows everywhere else — and offering a greyed-out "Copy PNG" would
+      /// invite the question it cannot answer. The dashboard scope beside it
+      /// still carries the table, as an HTML table in the rich-text report.
+      function insExportTableBody(card) {
+        return `<div class="ins-export-preview ins-table-wrap"
+            style="max-height:280px;overflow:auto">${insSegmentTableHtml(
+              card.table,
+            )}</div>
+          <div class="ins-export-group">
+            <h4>Numbers</h4>
+            <div class="ins-export-row">
+              <button class="btn-primary" onclick="insExportChartData('tsv', false)">Copy TSV</button>
+              <button class="btn-secondary" onclick="insExportChartData('md', false)">Copy Markdown</button>
+              <button class="btn-secondary" onclick="insExportChartData('csv', true)">Save CSV…</button>
+              <button class="btn-secondary" onclick="insExportChartData('tsv', true)">Save TSV…</button>
+              <p class="hint">
+                TSV pastes into a spreadsheet as cells, one block per breakdown
+                with its heading on its own row — the shape the hand-built
+                version already has.
+              </p>
+            </div>
+          </div>`
       }
 
       function insExportChartBody(card) {
@@ -24838,7 +25499,7 @@
             "“" + card.title + "” copied as an image",
             // An image cannot degrade to text, but the numbers can — and they
             // are what the reader was after.
-            card.title + "\n" + insChartTsv(spec),
+            card.title + "\n" + insCardTsv(card),
           )
           return
         }
@@ -24876,16 +25537,17 @@
       }
 
       function insExportChartData(format, toFile) {
-        const spec = insExportSpec(insExportCardId)
-        if (!spec) return
+        const card = insSpecs.get(insExportCardId)
+        const spec = card && card.table ? null : insExportSpec(insExportCardId)
+        if (!card || (!spec && !card.table)) return
+        const tsv = card.table ? insTableTsv(card.table) : insChartTsv(spec)
         const text =
           format === "csv"
-            ? insChartCsv(spec)
+            ? insTsvToCsv(tsv)
             : format === "md"
-            ? insChartMarkdown(spec)
-            : insChartTsv(spec)
+            ? insTsvToMarkdown(tsv)
+            : tsv
         if (!toFile) {
-          const card = insSpecs.get(insExportCardId)
           insCopyText(text).then(
             () =>
               showImportToast(
@@ -24997,8 +25659,21 @@
               section,
             )}</div>`
           }
-          const canvas = await insChartCanvas(card.spec)
           done++
+          // A table card has no picture to rasterise, and does not want one: a
+          // real HTML table survives a mail client with its numbers selectable,
+          // where a screenshot of one arrives as an image nobody can copy out
+          // of. Every element is styled inline for the same reason the rest of
+          // this report is — `<style>` blocks and classes are stripped.
+          const figure = card.table
+            ? insReportTableHtml(card.table)
+            : `<img src="${(await insChartCanvas(card.spec)).toDataURL(
+                "image/png",
+              )}" width="${INS_CHART_W}" style="display:block;width:100%;max-width:${
+                INS_CHART_W
+              }px;height:auto;border:1px solid #e8eaee;border-radius:6px" alt="${esc(
+                card.title,
+              )}">`
           if (Date.now() - started > LOADING_SHOW_DELAY_MS) {
             showImportToast(
               "progress",
@@ -25015,11 +25690,7 @@
                   card.note,
                 )}</div>`
               : "") +
-            `<img src="${canvas.toDataURL("image/png")}" width="${
-              INS_CHART_W
-            }" style="display:block;width:100%;max-width:${INS_CHART_W}px;height:auto;border:1px solid #e8eaee;border-radius:6px" alt="${esc(
-              card.title,
-            )}">` +
+            figure +
             `</div>`
         }
 
@@ -25031,6 +25702,50 @@
           `Generated by CAI Dashboard${appVersion ? " v" + esc(appVersion) : ""}.` +
           `</div></div>`
         return html
+      }
+
+      /// The Segments table for an email: the same rows, styled inline.
+      ///
+      /// A second renderer of one table object rather than a second walk of the
+      /// payload — `insSegmentTable` has already decided what the rows are, so
+      /// the two cannot disagree about a figure, only about a border.
+      function insReportTableHtml(table) {
+        if (!table) return ""
+        const th =
+          "padding:5px 10px 5px 0;text-align:right;font-size:11px;color:#6b7280;" +
+          "font-weight:600;border-bottom:1px solid #e8eaee;white-space:nowrap"
+        const td =
+          "padding:4px 10px 4px 0;text-align:right;font-size:12px;color:#111827;white-space:nowrap"
+        let html =
+          `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}border-collapse:collapse">` +
+          `<tr>` +
+          table.headers
+            .map(
+              (h, i) =>
+                `<td style="${th}${i ? "" : ";text-align:left;padding-right:18px"}">${esc(
+                  h,
+                )}</td>`,
+            )
+            .join("") +
+          `</tr>`
+        for (const r of table.rows) {
+          if (r.kind === "head") {
+            html +=
+              `<tr><td colspan="${table.headers.length}" style="${td};text-align:left;` +
+              `color:#6b7280;font-size:11px;padding-top:12px;border-top:1px solid #e8eaee">${esc(
+                r.label,
+              )}${r.note ? " — " + esc(r.note) : ""}</td></tr>`
+            continue
+          }
+          const weight = r.kind === "total" ? ";font-weight:700" : ""
+          html +=
+            `<tr><td style="${td};text-align:left;padding-right:18px${weight}${
+              r.kind === "value" ? ";padding-left:12px" : ""
+            }">${esc(r.label)}</td>` +
+            r.cells.map((c) => `<td style="${td}${weight}">${esc(c)}</td>`).join("") +
+            `</tr>`
+        }
+        return html + `</table>`
       }
 
       /// The plain-text half of the same paste.
@@ -25070,7 +25785,7 @@
           }
           lines.push("", card.title)
           if (card.note) lines.push(card.note)
-          lines.push(insChartTsv(card.spec))
+          lines.push(insCardTsv(card))
         }
         return lines.join("\n")
       }

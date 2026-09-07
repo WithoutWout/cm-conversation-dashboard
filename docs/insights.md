@@ -512,6 +512,159 @@ the forced extension comes to differ between them.
   is in the header, in the HTML report and in the plain-text report — and it
   never returns empty (an unfiltered view says so in words).
 
+## The Segments table
+
+Every other card here is one distribution. **Segments** is several slices of the
+same result set read against the same five measures, and it is the one card that
+is a table rather than a chart — a feedback count in the thousands, a share, a
+rate and a mean score have no axis in common, and putting five of them on one
+would be a picture of nothing.
+
+It exists because the report people kept rebuilding by hand in a spreadsheet had
+exactly this shape: a Total row, then a block of rows per breakdown, each row
+carrying feedback volume, positive share, recognition rate, recognition quality
+and interaction count. The dashboard could answer any one of those questions and
+none of the comparisons between them.
+
+### It always counts every interaction of the matched conversations
+
+In **both readings**, and that is the one place this card deliberately ignores
+the unit toggle. A segment is a set of *conversations* — `context_index` and
+`metadata_index` are keyed by `session_uuid` and there is no per-turn context to
+count instead — so a table whose rows meant "matching turns" under one toggle
+and "every turn" under the other would be two different reports wearing one
+title, pasted into the same spreadsheet column. The card note says so in those
+words. `INS_SEGMENT_NOTE` is where it is written, once.
+
+Culture is grouped by the **conversation's** culture (`insight_sessions.culture`)
+rather than the turn's, for the same reason: mixing a session-keyed block with a
+turn-keyed one in one table is how two rows of it come to mean different things.
+
+### The four ratios, and their denominators
+
+A header has no room to say which set a percentage is over, and that is the whole
+question — "93% recognition" of what? Each is stated in the note instead, since
+this table is copied far more often than it is hovered.
+
+| Column | Over |
+| --- | --- |
+| Positive feedback | the turns that were rated at all |
+| Recognition rate | the turns the recognizer *scored* — `recognized + unrecognized`. GenAI answers are in **neither** half |
+| Recognition quality | the mean `recognition_quality` of the turns it matched |
+
+- **`FEEDBACK_ROW` and `FEEDBACK_POS_ROW` are spelled exactly as
+  `session_summary_insert_sql` spells them**, both forms of the JSON separator
+  and the `NOT LIKE` guard included. Two readings of "did anyone rate this
+  turn?" is precisely how this table and the Feedback card would come to
+  disagree about the same rows. They are per *turn* where the summary folds them
+  into per-conversation flags — the ratings themselves are the number the portal
+  reports, and a conversation-level flag cannot produce it.
+- **`IS_SCORED_ROW` / `IS_ZERO_RECOG_ROW` are reused, not re-derived**, so the
+  recognition rate here and the recognition bands two sections up classify a
+  turn identically.
+- **A share of nothing is an em dash, never `0%`.** "0% positive" is a claim
+  about ratings nobody left, and it lands on exactly the rows people ask about —
+  a culture with eight conversations and no feedback at all.
+- **Two decimals, always** (`insSegPct`). This is the column someone compares
+  against last month's figure, and `insPct`'s rounding to a whole number above
+  10% throws away the difference they are looking for.
+
+### The rollup is what makes several breakdowns cheap
+
+`insight_segment_stats` is one row per conversation, built by one pass over the
+scope's interactions. Every breakdown is then a join of that narrow table against
+`context_index` / `metadata_index` — the same idiom `insight_weights` exists for.
+Without it, ticking a fourth key is a fourth pass over `interactions`, by far the
+largest thing in the file.
+
+- **`quality_sum`, not an average.** An average cannot be re-averaged over a
+  group without its weight, and every row of this table is summed into several
+  different groups.
+- **`segment_stats` is a flag on the scope cache, not a third fingerprint.** The
+  rollup is derived from `insight_sessions` alone, so it survives exactly what
+  that table survives: a unit switch keeps it, a different search does not.
+- **`InsightScopeCache::restamp` is required, and its absence was a real bug.**
+  `changes` is `total_changes()`, recorded so an *outside* write invalidates the
+  cache. Building the rollup is a write of our own — several thousand rows — so
+  without re-reading the counter the very next read (the tag follow-up, fired
+  unawaited alongside this one) mistook our own inserts for somebody else's
+  import and threw away a result set that was still perfectly good.
+  `the_segment_rollup_is_reused_across_breakdowns_and_dropped_on_a_new_search`
+  pins both halves.
+- **The `unit` is passed through untouched** even though nothing here counts
+  turns: it is the scope cache's key, and resolving the same search under the
+  other unit would drop the `insight_matches` the dashboard behind this table is
+  still using.
+
+### There is no "Other" row, and the note says why
+
+The same reason a tag chart has none: `context_index` is keyed by `(name, value,
+session_uuid)`, so a conversation whose context changed mid-way carries two
+values of one key and is counted under both. That is correct, and it makes the
+rows sum to more than the Total above them — so the group heading says
+`some conversations set two values, so these rows overlap` rather than leaving a
+table that visibly does not add up. `folded_values` states the tail past
+`INSIGHT_SEGMENT_VALUES_PER_KEY` in the same place.
+
+That cap is 50, far above `INSIGHT_TAG_VALUES_PER_NAME`, and for the opposite
+reason: that one feeds a chart, where 40 bars communicate nothing. This feeds a
+table that is scrolled and pasted, where a missing row is a missing row.
+
+### One table object, five renderings
+
+`insSegmentTable` is pure and decides what the rows are; the screen, the TSV, the
+CSV, the Markdown and the mail report are renderings of *that object*. Five walks
+of the payload is five places for a figure to drift.
+
+- **Each row carries `cells` and `data`.** They differ only in thousands
+  separators — what a reader wants and what a spreadsheet has to parse.
+- **`insCardTsv` is how every export path reaches a table card**: the per-card
+  menu, the plain-text report, and the clipboard fallback behind a refused image
+  write. Four callers each testing `card.table` themselves is how one of them
+  comes to paste an empty string.
+- **`insTsvToCsv` and `insTsvToMarkdown` are split out of the chart twins**, so
+  the RFC 4180 quoting and the `|` escaping are not implemented twice.
+  `Stoppen, Faciliteitenkaart` is a real context value, and so is one with a
+  pipe in it.
+- **A heading row keeps its own line with a blank one above it**, which is
+  exactly the shape the hand-built spreadsheet has: the block label in the first
+  column and nothing beside it. In Markdown those short rows are padded to the
+  header's width, or the pipe table stops rendering as one.
+- **The mail report gets a real HTML table, not a rasterised picture of one.**
+  Numbers stay selectable and copyable, and it is styled inline throughout like
+  everything else in that report.
+- **The export palette shows only the Numbers group** — no Image, no Vector, and
+  no greyed-out versions of them. There is no picture of this card to export,
+  and a disabled "Copy PNG" invites the question it cannot answer.
+
+### The breakdown picker
+
+Chips, not the tag sections' single button: this section's whole point is
+comparing several keys at once, and a chip carries its own way out so removing
+one does not need the picker. Up to `INS_SEGMENT_MAX_KEYS`, past which it stops
+being a table you can read across.
+
+- **One list over all three kinds.** The comparison people actually build mixes
+  them — a channel from context, a culture, a flag from metadata — and choosing
+  each from a separate control would make the shape of the table an accident of
+  where its rows came from.
+- **It stays open on a tick**, unlike the single-select picker, which would take
+  four openings to build a four-row comparison.
+- **Its open state is restored inside `insRenderBody`, not at the call sites.**
+  The anchor lives in the body that is replaced, and a re-render also arrives
+  from the segments read *finishing* — long after the click that opened the
+  popover. Restoring at the click site alone left the button unstyled every time.
+
+### Where it sits
+
+Last in the section order, and full-bleed across the grid (`.ins-grid-wide`).
+Seven columns of numbers do not fit a 480px grid cell, and a comparison split
+over two rows of the grid is the one thing a comparison must not be — while
+above the charts a full-width table would push every one of them below the fold.
+The name column absorbs all the slack so the six numeric columns pack together:
+distributed evenly they sit a hand's width apart, and comparing a figure with
+the one two rows down becomes a saccade rather than a glance.
+
 ## The chooser
 
 Opening Insights used to fire every aggregate at once. On a wide search that is

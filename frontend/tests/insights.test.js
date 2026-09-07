@@ -78,6 +78,17 @@ const EXPORTS = [
   "insCaptionLines",
   "insCaptionLayout",
   "insCacheKey",
+  "insSegmentTable",
+  "insTableTsv",
+  "insTsvToCsv",
+  "insTsvToMarkdown",
+  "insSegPct",
+  "insSegShare",
+  "insSegmentTableHtml",
+  "insReportTableHtml",
+  "insCardTsv",
+  "INS_SEGMENT_COLUMNS",
+  "INS_SEGMENT_MAX_KEYS",
 ]
 const {
   INS_THEME_SCREEN,
@@ -117,6 +128,17 @@ const {
   insCaptionLines,
   insCaptionLayout,
   insCacheKey,
+  insSegmentTable,
+  insTableTsv,
+  insTsvToCsv,
+  insTsvToMarkdown,
+  insSegPct,
+  insSegShare,
+  insSegmentTableHtml,
+  insReportTableHtml,
+  insCardTsv,
+  INS_SEGMENT_COLUMNS,
+  INS_SEGMENT_MAX_KEYS,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -577,7 +599,14 @@ test("a card with no data is not rendered at all", () => {
 // missing section on a screen that has no other way of saying so.
 test("the chooser and the cards agree on what a section is", () => {
   const offered = INS_SECTIONS.map((sec) => sec.key)
-  assert.deepStrictEqual(offered, ["volume", "quality", "context", "metadata", "content"])
+  assert.deepStrictEqual(offered, [
+    "volume",
+    "quality",
+    "context",
+    "metadata",
+    "content",
+    "segments",
+  ])
   const drawn = [...new Set(insBuildCards(CONVS, INS_THEME_SCREEN).map((c) => c.section))]
   for (const name of drawn) {
     assert.ok(
@@ -599,6 +628,208 @@ test("the chooser and the cards agree on what a section is", () => {
       assert.ok(f in CONVS, sec.key + " claims a field the payload has no such key for: " + f)
     }
   }
+})
+
+// ── The Segments table ───────────────────────────────────────────────
+//
+// Five measures, four of which are ratios whose denominator is the whole
+// question. Nothing here fails loudly when one is taken over the wrong set: a
+// recognition rate computed over every interaction instead of the scored ones
+// is simply a smaller plausible percentage, and only known answers tell them
+// apart.
+
+// One payload, counted by hand. `total` deliberately does not equal the sum of
+// the `channel` rows — a context key is not a partition — and `culture` does.
+const SEGMENTS = {
+  total: {
+    label: "",
+    sessions: 100,
+    interactions: 412,
+    feedback: 40,
+    feedbackPos: 23,
+    recognized: 300,
+    unrecognized: 20,
+    qualitySum: 24000,
+  },
+  groups: [
+    {
+      kind: "culture",
+      name: "",
+      foldedValues: 0,
+      overlapping: false,
+      rows: [
+        { label: "nl", sessions: 80, interactions: 330, feedback: 34, feedbackPos: 20, recognized: 250, unrecognized: 15, qualitySum: 20000 },
+        { label: "en", sessions: 20, interactions: 82, feedback: 6, feedbackPos: 3, recognized: 50, unrecognized: 5, qualitySum: 4000 },
+      ],
+    },
+    {
+      kind: "context",
+      name: "chan, nel",
+      foldedValues: 3,
+      overlapping: true,
+      rows: [
+        { label: "web", sessions: 60, interactions: 240, feedback: 0, feedbackPos: 0, recognized: 200, unrecognized: 10, qualitySum: 16000 },
+        { label: "app | phone", sessions: 30, interactions: 120, feedback: 4, feedbackPos: 4, recognized: 0, unrecognized: 0, qualitySum: 0 },
+      ],
+    },
+  ],
+  contextKeys: [{ name: "chan, nel", sessions: 90, distinctValues: 5 }],
+  metadataKeys: [],
+  cultureValues: 2,
+}
+
+test("a segment row's shares are of the rows that could have them", () => {
+  const table = insSegmentTable(SEGMENTS)
+  const row = (label) => table.rows.find((r) => r.label === label)
+  const col = (label) => table.headers.indexOf(label) - 1
+
+  // 23 of 40 rated turns, to two decimals — the column someone compares
+  // against last month's figure, where insPct's whole-number rounding above
+  // 10% throws away exactly the difference they are looking for.
+  assert.strictEqual(row("Total").cells[col("Positive feedback")], "57.50%")
+  // 300 of the 320 turns the recognizer scored — *not* of 412 interactions.
+  assert.strictEqual(row("Total").cells[col("Recognition rate")], "93.75%")
+  // The mean over the matched turns only: 24000 / 300.
+  assert.strictEqual(row("Total").cells[col("Recognition quality")], "80.00%")
+  assert.strictEqual(row("Total").cells[col("Interactions")], insNumOf(412))
+  assert.strictEqual(row("Total").cells[col("Conversations")], insNumOf(100))
+
+  // A share of nothing is a dash, never 0% — "0% positive" is a claim about
+  // ratings nobody left, and it is exactly the row people ask about.
+  assert.strictEqual(row("web").cells[col("Positive feedback")], "—")
+  assert.strictEqual(row("app | phone").cells[col("Recognition rate")], "—")
+  assert.strictEqual(row("app | phone").cells[col("Recognition quality")], "—")
+  assert.strictEqual(insSegShare(0, 0), "—")
+  assert.strictEqual(insSegPct(93.754), "93.75%")
+
+  // Culture partitions the result set; the table has to still add up.
+  const cultureRows = ["nl", "en"].map(row)
+  assert.strictEqual(
+    cultureRows.reduce((a, r) => a + Number(r.data[col("Interactions")]), 0),
+    SEGMENTS.total.interactions,
+  )
+})
+
+// A locale that groups thousands is what a spreadsheet has to parse rather than
+// read, so the two forms of a cell differ — and only in that.
+function insNumOf(n) {
+  return Number(n).toLocaleString()
+}
+
+test("a pasted cell carries the figure without the thousands separators", () => {
+  const table = insSegmentTable(SEGMENTS)
+  const at = table.headers.indexOf("Interactions") - 1
+  const total = table.rows.find((r) => r.label === "Total")
+  assert.strictEqual(total.data[at], "412")
+  assert.strictEqual(
+    total.cells.length,
+    total.data.length,
+    "the two renderings of one row disagree about how many columns it has",
+  )
+  // Every non-heading row, every column.
+  for (const r of table.rows) {
+    if (r.kind === "head") continue
+    assert.strictEqual(r.cells.length, table.headers.length - 1, r.label)
+    assert.strictEqual(r.data.length, table.headers.length - 1, r.label)
+  }
+})
+
+test("a breakdown that hides rows or double-counts them says so", () => {
+  const table = insSegmentTable(SEGMENTS)
+  const head = table.rows.find((r) => r.kind === "head" && r.label.includes("chan"))
+  assert.ok(head, "the context block has no heading")
+  assert.strictEqual(head.label, "Context · chan, nel")
+  assert.ok(head.note.includes("3 more values"), head.note)
+  assert.ok(head.note.includes("overlap"), head.note)
+  // Culture here hides nothing and overlaps nothing, so it claims neither.
+  const culture = table.rows.find((r) => r.kind === "head" && r.label === "Culture")
+  assert.strictEqual(culture.note, "")
+})
+
+test("the table's three text twins carry every value it shows", () => {
+  const table = insSegmentTable(SEGMENTS)
+  const tsv = insTableTsv(table)
+  const lines = tsv.split("\n")
+  assert.strictEqual(lines[0], table.headers.join("\t"))
+  for (const r of table.rows) {
+    if (r.kind === "head") continue
+    for (const v of r.data) {
+      assert.ok(tsv.includes(v), "the TSV is missing " + v + " from " + r.label)
+    }
+  }
+  // A heading keeps a line of its own with a blank one above it — the shape the
+  // hand-built spreadsheet already has.
+  const headAt = lines.indexOf("Culture")
+  assert.ok(headAt > 0, "the heading is not on a line of its own")
+  assert.strictEqual(lines[headAt - 1], "")
+
+  // A label holding a comma has to be quoted in the CSV and left alone in the
+  // TSV; one holding a pipe has to be escaped in the Markdown or it ends its
+  // own cell. Both are real context values.
+  const csv = insTsvToCsv(tsv)
+  assert.ok(csv.includes('"Context · chan, nel"'), csv.slice(0, 400))
+  assert.ok(!tsv.includes('"Context'), "the TSV never needed quoting")
+  const md = insTsvToMarkdown(tsv)
+  assert.ok(md.includes("app \\| phone"), "a pipe inside a cell was not escaped")
+  // Every row of a pipe table is the width of its header, including the short
+  // heading rows — one narrow row and it stops rendering as a table at all.
+  const width = table.headers.length
+  for (const line of md.split("\n")) {
+    if (!line.startsWith("|")) continue
+    // The escaped pipes are cell *content*, not separators — counting them is
+    // how the escaping the line above asserts would read as a wider row.
+    assert.strictEqual(
+      line.replace(/\\\|/g, "").split("|").length - 2,
+      width,
+      "a Markdown row is not the table's width: " + line,
+    )
+  }
+})
+
+test("the Segments card is a table, and every export path reaches it", () => {
+  const cards = insBuildCards({ ...CONVS, segments: SEGMENTS }, INS_THEME_SCREEN)
+  const card = cards.find((c) => c.section === "Segments")
+  assert.ok(card, "no Segments card was built")
+  assert.ok(card.table && !card.spec, "the Segments card is not a chart")
+  assert.strictEqual(insCardTsv(card), insTableTsv(card.table))
+  // The chart cards still go the other way through the same function.
+  const chart = cards.find((c) => c.section === "Volume")
+  assert.strictEqual(insCardTsv(chart), insChartTsv(chart.spec))
+
+  // Both HTML renderings are well-formed and hold every value on screen.
+  for (const html of [insSegmentTableHtml(card.table), insReportTableHtml(card.table)]) {
+    assertWellFormed("<svg>" + html + "</svg>")
+    for (const r of card.table.rows) {
+      if (r.kind === "head") continue
+      for (const v of r.cells) {
+        assert.ok(
+          html.includes(v.replace(/&/g, "&amp;")),
+          "a value on screen is missing from an export: " + v,
+        )
+      }
+    }
+  }
+  // The mail report is styled inline throughout — a class or a <style> block
+  // is stripped by every mail client, and the table would arrive unformatted.
+  const mail = insReportTableHtml(card.table)
+  assert.ok(!/class=/.test(mail), "the mail table carries a class")
+  assert.ok(!/<style/.test(mail), "the mail table carries a stylesheet")
+})
+
+test("no Segments card is built when the section was not read", () => {
+  assert.strictEqual(
+    insBuildCards(CONVS, INS_THEME_SCREEN).some((c) => c.section === "Segments"),
+    false,
+  )
+  // …nor from a payload whose result set is empty, where every share would be
+  // a dash and the table would say nothing at all.
+  const empty = { ...SEGMENTS, total: { ...SEGMENTS.total, interactions: 0 }, groups: [] }
+  assert.strictEqual(
+    insBuildCards({ ...CONVS, segments: empty }, INS_THEME_SCREEN).some(
+      (c) => c.section === "Segments",
+    ),
+    false,
+  )
 })
 
 // A section left out of the chooser must contribute no card at all — including

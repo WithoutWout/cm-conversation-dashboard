@@ -123,6 +123,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `release_insight_scope` | `releaseInsightScope()`         | Frees the resolved result set the Insights temp tables hold. Called when the modal closes — see `docs/insights.md` → "The result set is resolved once, not once per read" |
 | `get_insight_tags`    | `getInsightTags(args, unit, keys)` | The Context and Metadata sections, read *after* the dashboard paints — see `docs/insights.md` → "Why it is two reads, not one". `keys` is `{context, metadata, contextOn, metadataOn}` — which key each section is charting, and whether it was asked for at all |
 | `get_insight_tag_values` | `getInsightTagValues(args, unit, kind, name)` | One tag key's values, for switching the Context or Metadata chart |
+| `get_insight_segments` | `getInsightSegments(args, unit, breakdowns)` | The Segments table: a Total row plus one block per breakdown, each row carrying feedback volume, positive share, recognition rate, recognition quality and interaction count. `breakdowns` is a list of `{kind, name}` where `kind` is `"culture"` \| `"context"` \| `"metadata"`. Always counts **every interaction of the matched conversations**, in both readings — `unit` is passed only to keep the scope cache aligned. Also returns the context/metadata keys this result set has, for the picker. See `docs/insights.md` → "The Segments table" |
 | `cancel_db_query`     | `cancelDbQuery()`                | Interrupts whatever the conversations database is running — a session search or an Insights read. A no-op when nothing is running |
 
 `get_entity_options` returns every entity the imported conversations have triggered — `{name, entityId, count}` — feeding both the conversation search bar's type-ahead and the only entity ids this app has (the EntitiesExport CSV carries none). See `docs/search.md` → "An entity is a leaf, not a filter".
@@ -404,8 +405,8 @@ The orientation map for the whole window. It says what is on screen and where;
   body, on open — the chooser, and nothing is read until it is answered:
     what the current search matched
     Count: Conversations / Interactions, each with what it means
-    Sections: Volume · Quality · Context · Metadata · Content, each with
-              what it answers and what it costs (fast / medium / slower)
+    Sections: Volume · Quality · Context · Metadata · Content · Segments, each
+              with what it answers and what it costs (fast / medium / slower)
     Build N sections
   body, once built (one scrolling canvas, not tabs; section headings are sticky):
     stat tiles (conversations · interactions · median length · GenAI ·
@@ -417,8 +418,16 @@ The orientation map for the whole window. It says what is on screen and where;
     Metadata — one key button (searchable picker) + its values
     Content  — entities · opening questions (conversations only) ·
                Articles · Dialogs · Dialog nodes · cultures
+    Segments — one full-width table, not a chart: a chip per breakdown and a
+               searchable multi-select picker over Culture · context keys ·
+               metadata keys, then Total + one block of rows per breakdown,
+               columns feedback interactions · positive feedback ·
+               recognition rate · recognition quality · interactions ·
+               conversations. Always counts every interaction of the matched
+               conversations, in both readings
     Not loaded — one button per section left out, to add it in place
-  every card: title · what it counts · Image / Data copy buttons
+  every card: title · what it counts · Export (a table card offers its
+              numbers only — there is no picture of one)
   while reading: a Cancel button under the spinner; the unit toggle stays live
 
 <div.conv-sidebar-header>
@@ -566,7 +575,8 @@ Always use these terms in the UI:
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
 | `cm-insights-export-caption` | `"0"` to leave the caption off an exported chart image; anything else, including absent, includes it |
-| `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
+| `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content, segments}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
+| `cm-insights-segments`     | JSON array of `{kind, name}` (`kind`: `"culture"` \| `"context"` \| `"metadata"`) — which slices the Insights Segments table compares. Read entry by entry, so a hand-edited file cannot introduce an unknown kind or a duplicate row. An empty array is a legitimate state: the Total row alone is still an answer |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 
 Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer. A settings backup does export them, and still does not break that rule; see `docs/settings-and-updates.md` → "Settings backup".
