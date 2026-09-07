@@ -91,54 +91,59 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### One search bar that can ask the whole question
+            ### Insights can compare slices of one search
 
-            The conversations search bar used to be two halves that could not
-            meet. **#ID** on searched Article and Dialog ids and nothing else;
-            **#ID** off searched text and Entities and nothing else. "Which
-            conversations went through the parking Dialog *and* had someone
-            complaining?" was two searches you had to intersect in your head.
+            Insights could answer "how much feedback?", "how well did
+            recognition do?" and "how many interactions?" — but never the
+            comparisons between them. The report most people actually keep is a
+            table: a total, then a row per channel, per flag, per culture, each
+            carrying the same handful of figures. That table was being rebuilt
+            by hand in a spreadsheet every month.
 
-            **#ID is gone.** One field now holds everything — words, Entities,
-            Articles, Dialogs and Dialog nodes — and you join them yourself:
+            It is now a section. Open **Insights → Choose data**, tick
+            **Segments**, and pick any mix of **Culture**, context keys and
+            metadata keys from one searchable list. Every row gives you:
 
-            - Between any two things a small **and** appears. Click it to change
-              it to **or**, or to **not** to exclude what follows.
-            - **( )** opens a bracket, so `(Article A or Dialog B) and boos` is
-              one search. Typing `(` does the same.
-            - The whole thing reads **left to right**, exactly as it looks —
-              there is no hidden precedence to learn.
+            - **Feedback interactions** and the **positive** share of them
+            - **Recognition rate** — of the turns the recognizer scored, how many
+              it matched. GenAI answers count in neither half
+            - **Recognition quality** — the average score of the ones it matched
+            - **Interactions** and **conversations**
 
-            Typing a sentence and pressing Enter works exactly as it always did.
-            In fact it works better: the suggestion list no longer pre-selects
-            its first row, so pressing Enter after typing a word that happens to
-            match an Entity now searches for the word instead of quietly turning
-            it into a filter.
+            It reads whatever your current search covers, date range included,
+            and goes out as TSV, CSV, Markdown, a file, or as a real table
+            inside the emailed dashboard report.
 
-            ### Everything is offered at once
+            ### Shape the table, then save it as a preset
 
-            One list, whatever you are after. Type `park` and you get the
-            Entity, the Dialog *Parkeren en bereikbaarheid* and the Article
-            *Waar kan ik parkeren?* side by side, each badged so you can tell
-            them apart. Type `caravan` and you still get the **camper** Entity,
-            because that is one of the words that fires it.
+            **Edit layout** turns the table into a list of lines you arrange
+            yourself. Drag any line by its handle — or click the handle and use
+            the arrow keys — to reorder rows, headings and blank lines. Type
+            over a name to rename it. **✕** removes a row for good, and *Restore
+            removed rows* brings them back.
 
-            Ids work without a content export loaded, too — type `qa-1418` or
-            just `1418` and both readings are offered.
+            Then **Save setup…** under the table keeps the breakdowns *and* the
+            arrangement under a name. A preset deliberately does **not** hold a
+            date range: change the dates, click the preset, and you get the same
+            table over the new period. Two things it handles so that keeps
+            working month to month:
+
+            - A row your table has that the new range has no data for stays put,
+              dashed and marked **no data** — your report never silently gets
+              shorter.
+            - A value that has appeared since you saved is added at the bottom
+              and marked **new**, one drag from wherever it belongs.
 
             ### Smaller things
 
-            - A text condition can be **clicked and edited in place**, so fixing
-              a typo in the first of five conditions is an edit rather than a
-              retype.
-            - Dialog conditions keep their ▾ node picker from v0.18.1.
-            - The Entities tab has moved out of the funnel and into the search
-              bar, where it can be combined with everything else. Context and
-              Metadata stay where they were.
-            - Two searches that were quietly wrong are fixed: a rare
-              punctuation-heavy search combined with a GenAI or recognition
-              filter matched too much, and two regular expressions in one search
-              both looked for the second one.
+            - Settings **Backup** now carries the whole Insights screen,
+              including your saved Segment presets — so a new machine is one
+              import away from the same reports. Six preferences were missing
+              from the backup entirely; three of them had been missing for
+              several releases.
+            - Up to **40 breakdowns** in one table, and adding one after the
+              first read is now roughly ten times faster.
+            - A long Segments read says it is working, and can be cancelled.
 
             ---
 
