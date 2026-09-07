@@ -8301,22 +8301,54 @@
         font-size: 0.64rem;
         font-style: italic;
       }
-      /* The handle, not the row, is what starts a drag — see `insSegGrip`. */
-      .ins-seg-grip {
+      /* The handle is a focusable button, not decoration: the arrow keys move
+         a line without a pointer — see `insSegMoveLine`. */
+      button.ins-seg-grip {
+        background: none;
+        border: 0;
+        border-radius: 4px;
         cursor: grab;
         color: var(--muted);
-        letter-spacing: -2px;
-        margin-right: 8px;
+        font-size: 0.85rem;
+        letter-spacing: -3px;
+        line-height: 1;
+        /* Generous padding, not a bigger glyph: the grip has to be easy to hit
+           with a mouse without becoming the loudest thing in the row. */
+        padding: 5px 7px 5px 4px;
+        margin-right: 2px;
         user-select: none;
       }
-      .ins-seg-grip:hover {
+      button.ins-seg-grip:hover {
         color: var(--text);
       }
-      table.ins-table.editing tr.dragging {
-        opacity: 0.4;
+      button.ins-seg-grip:focus-visible {
+        outline: none;
+        color: var(--text);
+        box-shadow: 0 0 0 2px var(--accent);
       }
+      /* While a line is being moved, nothing else on the page should select or
+         show a text caret — the pointer is outside the row it started in for
+         most of the gesture. */
+      body.ins-seg-dragging {
+        cursor: grabbing;
+        user-select: none;
+      }
+      body.ins-seg-dragging input.ins-seg-name {
+        pointer-events: none;
+      }
+      table.ins-table.editing tr.dragging td,
+      table.ins-table.editing tr.dragging th {
+        opacity: 0.45;
+      }
+      /* The insertion line, on whichever edge the drop would land — an
+         "after" marker on the last row is the only way to see that the line
+         will go to the very end. */
       table.ins-table.editing tr.drop-before td,
       table.ins-table.editing tr.drop-before th {
+        box-shadow: inset 0 2px 0 var(--accent);
+      }
+      table.ins-table.editing tr.drop-after td,
+      table.ins-table.editing tr.drop-after th {
         box-shadow: inset 0 -2px 0 var(--accent);
       }
       /* The name is edited where it is read. A borderless field until it is
@@ -24894,25 +24926,22 @@
         if (!table) return ""
         const span = table.headers.length + (editing ? 1 : 0)
         const grip = (at) =>
-          `<span class="ins-seg-grip" title="Drag to move this line"
-             onmousedown="insSegGrip(this)">&#8942;&#8942;</span>`
+          `<button class="ins-seg-grip" tabindex="0"
+             title="Drag to move this line, or focus it and press the arrow keys"
+             onmousedown="insSegGripDown(event)"
+             onkeydown="insSegGripKey(event)">&#8942;&#8942;</button>`
         const kill = (at, what) =>
           `<td class="ins-seg-act"><button title="${esc(what)}"
              onclick="insSegDropLine(${at})">&#10005;</button></td>`
         let html = `<div class="ins-table-wrap"><table class="ins-table${
           editing ? " editing" : ""
-        }"${
-          editing
-            ? ` ondragover="insSegDragOver(event)" ondrop="insSegDrop(event)"`
-            : ""
-        }><thead><tr>${table.headers
+        }" id="insSegTable"><thead><tr>${table.headers
           .map((h) => `<th>${esc(h)}</th>`)
           .join("")}${editing ? "<th></th>" : ""}</tr></thead><tbody>`
         for (const r of table.rows) {
-          const drag = editing
-            ? ` data-at="${r.at}" ondragstart="insSegDragStart(event)"
-                 ondragend="insSegDragEnd(event)"`
-            : ""
+          // `data-at` is the only thing a line needs to be movable: the
+          // pointer loop reads it off whatever row is under the cursor.
+          const drag = editing ? ` data-at="${r.at}"` : ""
           if (r.kind === "gap") {
             html += `<tr class="ins-table-gap"${drag}><td colspan="${
               span - (editing ? 1 : 0)
@@ -25065,77 +25094,174 @@
         insRenderBody()
       }
 
-      // ── Dragging a line ──────────────────────────────────────────────
+      // ── Moving a line ────────────────────────────────────────────────
       //
-      // The handle turns its row draggable on mousedown and turns it off again
-      // on dragend. Marking the row `draggable` outright would make the name
-      // input inside it un-selectable — dragging a word out of a text field is
-      // the browser's own gesture, and it wins.
+      // A mousemove loop, not HTML5 drag-and-drop, and that is a fix rather
+      // than a preference. Two independent things break the native gesture in
+      // this app, and each one alone is enough:
+      //
+      // - **Tauri registers a window-level file-drop handler** (`dragDropEnabled`
+      //   defaults to true), which takes the drag at the OS level — `dragover`
+      //   and `drop` never reach the webview at all.
+      // - **WebKit decides whether an element is a drag source *at* mousedown**,
+      //   so setting `draggable` inside the mousedown handler is already too
+      //   late. Setting it permanently instead is not an option either: it makes
+      //   the name input inside the row un-selectable, because dragging a word
+      //   out of a text field is the browser's own gesture and it wins.
+      //
+      // Pointer events depend on neither, and need no change to the window's
+      // configuration — turning the file-drop handler off to buy a drag would
+      // be paying for this feature out of an unrelated one.
+      //
+      // The handle is also a real focusable button: the arrow keys move a line
+      // without a pointer at all, which is both the accessible path and the one
+      // that cannot be broken by a webview quirk.
 
-      let insSegDragFrom = null
+      /// `{ from, to }` while a line is being moved, or null.
+      let insSegDrag = null
 
-      function insSegGrip(el) {
-        const tr = el.closest("tr")
-        if (tr) tr.draggable = true
+      /// Move a line from one index to another. One mover, so the pointer path
+      /// and the keyboard path cannot disagree about what an index means:
+      /// **`to` is the final index**, not an insertion point.
+      function insSegMoveLine(from, to) {
+        const layout = insSegEnsureLayout()
+        if (!layout) return
+        const last = layout.entries.length - 1
+        const target = Math.max(0, Math.min(last, to))
+        if (from === target || from < 0 || from > last) return
+        const [moved] = layout.entries.splice(from, 1)
+        layout.entries.splice(target, 0, moved)
+        insSegEdited()
+        // The row has moved out from under the cursor, so the handle the user
+        // is holding has to be found again — otherwise a second arrow press
+        // moves whatever line happens to be sitting at the old index.
+        const grip = document.querySelector(
+          '#insSegTable tr[data-at="' + target + '"] .ins-seg-grip',
+        )
+        if (grip) grip.focus()
       }
 
-      function insSegDragStart(e) {
-        const tr = e.currentTarget
-        insSegDragFrom = Number(tr.dataset.at)
+      function insSegGripKey(e) {
+        if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return
+        const tr = e.currentTarget.closest("tr[data-at]")
+        if (!tr) return
+        e.preventDefault()
+        const from = Number(tr.dataset.at)
+        insSegMoveLine(from, from + (e.key === "ArrowUp" ? -1 : 1))
+      }
+
+      function insSegGripDown(e) {
+        if (e.button !== 0) return
+        const tr = e.currentTarget.closest("tr[data-at]")
+        if (!tr) return
+        // Stops the press selecting text across the table as the pointer moves.
+        e.preventDefault()
+        insSegDrag = { from: Number(tr.dataset.at), to: null }
         tr.classList.add("dragging")
-        // Firefox refuses to start a drag without data on the transfer.
-        try {
-          e.dataTransfer.setData("text/plain", String(insSegDragFrom))
-          e.dataTransfer.effectAllowed = "move"
-        } catch (err) {
-          /* the drag still works where this is not settable */
+        document.body.classList.add("ins-seg-dragging")
+        document.addEventListener("mousemove", insSegDragMove)
+        document.addEventListener("mouseup", insSegDragUp)
+        document.addEventListener("keydown", insSegDragKey, true)
+      }
+
+      /// Which line the pointer is over, and which half of it — the lower half
+      /// means "after this one", which is the only way to reach the very end of
+      /// the table.
+      function insSegDropTarget(e) {
+        const el = document.elementFromPoint(e.clientX, e.clientY)
+        const tr = el && el.closest ? el.closest("#insSegTable tr[data-at]") : null
+        if (!tr) return null
+        const box = tr.getBoundingClientRect()
+        return { at: Number(tr.dataset.at), after: e.clientY > box.top + box.height / 2, tr }
+      }
+
+      /// Where a line dropped on `at` (in its `after` half) actually lands.
+      ///
+      /// Pure, and split out because it is the one piece of arithmetic here
+      /// that is silently wrong rather than visibly broken: removing the line
+      /// first shifts every index below it, so a downward move overshoots by
+      /// one — and a table where every drag lands one row late still looks
+      /// like a working drag.
+      function insSegDropIndex(from, at, after) {
+        let to = at + (after ? 1 : 0)
+        if (from < to) to--
+        return to
+      }
+
+      function insSegMarkDrop(target) {
+        for (const el of document.querySelectorAll("#insSegTable tr.drop-before, #insSegTable tr.drop-after")) {
+          el.classList.remove("drop-before", "drop-after")
+        }
+        if (target) target.tr.classList.add(target.after ? "drop-after" : "drop-before")
+      }
+
+      /// Scroll the pane when the pointer nears its edge.
+      ///
+      /// Without it a table taller than the modal has no way to move a row
+      /// from one end to the other: the source and the destination are never on
+      /// screen together, and a drag cannot be paused to scroll.
+      const INS_SEG_EDGE = 48
+      const INS_SEG_EDGE_STEP = 14
+
+      function insSegAutoScroll(e) {
+        const pane = document.getElementById("insBody")
+        if (!pane) return
+        const box = pane.getBoundingClientRect()
+        if (e.clientY < box.top + INS_SEG_EDGE) pane.scrollTop -= INS_SEG_EDGE_STEP
+        else if (e.clientY > box.bottom - INS_SEG_EDGE) pane.scrollTop += INS_SEG_EDGE_STEP
+      }
+
+      function insSegDragMove(e) {
+        if (!insSegDrag) return
+        insSegAutoScroll(e)
+        const target = insSegDropTarget(e)
+        insSegMarkDrop(target)
+        // Remembered rather than recomputed on mouseup: releasing the button
+        // can land the pointer outside the table (over the scrollbar, past the
+        // last row), and a drag that silently does nothing there is worse than
+        // one that finishes where it was last seen.
+        if (target) {
+          insSegDrag.to = insSegDropIndex(insSegDrag.from, target.at, target.after)
         }
       }
 
-      function insSegDragEnd(e) {
-        e.currentTarget.draggable = false
-        e.currentTarget.classList.remove("dragging")
-        for (const el of document.querySelectorAll(".ins-table tr.drop-before"))
-          el.classList.remove("drop-before")
-        insSegDragFrom = null
+      function insSegDragStop() {
+        document.removeEventListener("mousemove", insSegDragMove)
+        document.removeEventListener("mouseup", insSegDragUp)
+        document.removeEventListener("keydown", insSegDragKey, true)
+        document.body.classList.remove("ins-seg-dragging")
+        for (const el of document.querySelectorAll("#insSegTable tr.dragging")) {
+          el.classList.remove("dragging")
+        }
+        insSegMarkDrop(null)
+        const drag = insSegDrag
+        insSegDrag = null
+        return drag
       }
 
-      /// Which line the pointer is over, and which half of it — dropping onto
-      /// the lower half means "after this one", which is the only way to reach
-      /// the very end of the table.
-      function insSegDropTarget(e) {
-        const tr = e.target && e.target.closest ? e.target.closest("tr[data-at]") : null
-        if (!tr) return null
-        const box = tr.getBoundingClientRect()
-        const after = e.clientY > box.top + box.height / 2
-        return { at: Number(tr.dataset.at), after, tr }
+      function insSegDragUp(e) {
+        const drag = insSegDragStop()
+        if (!drag) return
+        // The last line the pointer was seen over, or — when it was never seen
+        // over one — wherever the button came up. A quick flick can produce a
+        // mousedown and a mouseup with no `mousemove` at all between them, and
+        // a drag that lands on a row but does nothing reads as broken.
+        let to = drag.to
+        if (to === null && e) {
+          const target = insSegDropTarget(e)
+          if (target) to = insSegDropIndex(drag.from, target.at, target.after)
+        }
+        if (to === null) return
+        insSegMoveLine(drag.from, to)
       }
 
-      function insSegDragOver(e) {
-        if (insSegDragFrom === null) return
+      /// Escape abandons the move. Captured, so it is dealt with before the
+      /// modal's own Escape handler closes Insights out from under it.
+      function insSegDragKey(e) {
+        if (e.key !== "Escape") return
         e.preventDefault()
-        e.dataTransfer.dropEffect = "move"
-        const target = insSegDropTarget(e)
-        for (const el of document.querySelectorAll(".ins-table tr.drop-before"))
-          el.classList.remove("drop-before")
-        if (target) target.tr.classList.add("drop-before")
-      }
-
-      function insSegDrop(e) {
-        if (insSegDragFrom === null) return
-        e.preventDefault()
-        const target = insSegDropTarget(e)
-        const layout = insSegEnsureLayout()
-        if (!target || !layout) return
-        const from = insSegDragFrom
-        let to = target.at + (target.after ? 1 : 0)
-        if (from === to || from + 1 === to) return
-        const [moved] = layout.entries.splice(from, 1)
-        if (!moved) return
-        if (from < to) to--
-        layout.entries.splice(to, 0, moved)
-        insSegDragFrom = null
-        insSegEdited()
+        e.stopPropagation()
+        insSegDragStop()
       }
 
       // ── Presets ──────────────────────────────────────────────────────
@@ -25526,8 +25652,9 @@
                    title="Back to one block per breakdown, in the order the data comes back">Reset arrangement</button>`
               : ""
           }
-          <span class="ins-seg-note">Drag a line by its handle to move it;
-            type over a name to rename it.${
+          <span class="ins-seg-note">Drag a line by its handle to move it, or
+            click the handle and use the arrow keys; type over a name to rename
+            it.${
               notes.length ? " " + esc(notes.join(" · ")) + "." : ""
             }</span>
         </div>`

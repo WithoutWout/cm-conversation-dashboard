@@ -684,11 +684,40 @@ reachable without a second model of the table.
   already shows the new name; replacing it would take the caret with it.
   `insSegSyncBar` repaints the one thing that does have to change — the
   "changed since it was saved" dot above.
-- **The handle turns its row draggable on mousedown, not the row itself.** A
-  permanently `draggable` row makes the name field inside it un-selectable:
-  dragging a word out of a text input is the browser's own gesture and it wins.
+- **Lines move on a mousemove loop, not on HTML5 drag-and-drop**, and that is a
+  fix rather than a preference. Two independent things break the native gesture
+  here, each of them sufficient on its own:
+  - **Tauri registers a window-level file-drop handler.** `dragDropEnabled`
+    defaults to true, so the drag is taken at the OS level and `dragover` /
+    `drop` never reach the webview at all.
+  - **WebKit decides whether an element is a drag source *at* mousedown**, so
+    setting `draggable` inside the mousedown handler is already too late.
+    Setting it permanently is not an option either: it makes the name input in
+    the row un-selectable, because dragging a word out of a text field is the
+    browser's own gesture and it wins.
+
+  Pointer events depend on neither, and need no change to the window's
+  configuration — turning the file-drop handler off to buy a drag would be
+  paying for this feature out of an unrelated one.
+- **The handle is a focusable button, and the arrow keys move a line.** Both the
+  accessible path and the one that cannot be broken by a webview quirk.
 - **Dropping onto the lower half of a line means "after it"**, which is the only
-  way to reach the very end of the table.
+  way to reach the very end of the table. `insSegDropIndex` is split out and
+  pinned because it is the piece that fails *quietly*: removing the line first
+  shifts every index below it, so a downward move that does not compensate lands
+  one row late — which still looks like a working drag.
+- **A mouseup with no mousemove before it still commits.** A quick flick
+  produces exactly that, and a drag that lands on a row and does nothing reads
+  as broken.
+- **The pane auto-scrolls near its edges**, or a table taller than the modal has
+  no way to move a row from one end to the other: the source and the destination
+  are never on screen together, and a drag cannot be paused to scroll.
+
+**Verifying a drag needs real mouse events.** Synthetic `DragEvent`s exercise
+only the handlers, never the browser's decision to start a drag at all — which
+is exactly what was broken, so the first version passed its test and did nothing
+in the app. Mouse events have no such gate: dispatching `mousedown` /
+`mousemove` / `mouseup` runs the same path a real pointer does.
 
 ### A preset is the setup, never the dates
 

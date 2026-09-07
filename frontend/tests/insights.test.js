@@ -95,6 +95,7 @@ const EXPORTS = [
   "insSegNormalizeLayout",
   "insSegNormalizePresets",
   "insSegResolve",
+  "insSegDropIndex",
 ]
 const {
   INS_THEME_SCREEN,
@@ -151,6 +152,7 @@ const {
   insSegNormalizeLayout,
   insSegNormalizePresets,
   insSegResolve,
+  insSegDropIndex,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -925,6 +927,31 @@ test("the arrangement decides the export, line for line", () => {
     if (!line.startsWith("|")) continue
     assert.strictEqual(line.replace(/\\\|/g, "").split("|").length - 2, width, line)
   }
+})
+
+// Dropping a line removes it before re-inserting it, which shifts every index
+// below the one it came from. Get that wrong and every downward drag lands one
+// row late — which still looks like a working drag, and is only visible by
+// counting.
+test("a line lands where it was dropped, in both directions", () => {
+  const lines = ["a", "b", "c", "d"]
+  const move = (from, at, after) => {
+    const out = lines.slice()
+    const [x] = out.splice(from, 1)
+    out.splice(insSegDropIndex(from, at, after), 0, x)
+    return out.join("")
+  }
+  // Upward: onto the top half of `a` is before it; onto its bottom half is
+  // after it.
+  assert.strictEqual(move(3, 0, false), "dabc")
+  assert.strictEqual(move(3, 0, true), "adbc")
+  // Downward, where the shift bites.
+  assert.strictEqual(move(0, 3, true), "bcda", "the bottom half of the last line is the end")
+  assert.strictEqual(move(0, 3, false), "bcad")
+  assert.strictEqual(move(0, 1, true), "bacd", "one step down is one step, not two")
+  // Dropping a line onto itself is a no-op either way round.
+  assert.strictEqual(move(1, 1, false), "abcd")
+  assert.strictEqual(move(1, 1, true), "abcd")
 })
 
 test("a stored arrangement or preset cannot introduce something undrawable", () => {
