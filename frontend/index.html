@@ -11640,8 +11640,8 @@
             invoke("get_insight_tags", { args, unit, keys }),
           getInsightTagValues: (args, unit, kind, name) =>
             invoke("get_insight_tag_values", { args, unit, kind, name }),
-          getInsightSegments: (args, unit, breakdowns) =>
-            invoke("get_insight_segments", { args, unit, breakdowns }),
+          getInsightSegments: (args, unit, breakdowns, withKeys) =>
+            invoke("get_insight_segments", { args, unit, breakdowns, withKeys }),
           getConversationInsights: (args, unit, sections) =>
             invoke("get_conversation_insights", { args, unit, sections }),
           // Frees the resolved result set the Insights temp tables hold. Called
@@ -24539,8 +24539,19 @@
       // "matching turns" under one toggle and "all turns" under another would
       // be two different reports wearing one title.
 
-      /// More than this and it stops being a table you can read across.
-      const INS_SEGMENT_MAX_KEYS = 8
+      /// A ceiling on how many breakdowns one table compares.
+      ///
+      /// Not a readability rule — the arrangement editor exists precisely so a
+      /// long table can be cut down to the rows that are reported. It is a
+      /// ceiling on **work**: each breakdown is two more queries against the
+      /// rollup, and a real export carries around forty context keys and forty
+      /// metadata keys, so "select all" without a limit is a read nobody
+      /// intended to start.
+      ///
+      /// Set well above any reporting table anyone actually keeps, so it stops
+      /// a runaway rather than standing in the way — and the message says the
+      /// number, because a limit you discover by hitting it is a wall.
+      const INS_SEGMENT_MAX_KEYS = 40
 
       /// Two decimals, always — this is the column someone compares against
       /// last month's figure, where `insPct`'s rounding to a whole number above
@@ -25518,7 +25529,10 @@
           ${chips}
           <span class="ins-keybar-note">${
             available
-              ? insPlural(available, "keys") + " available in this result"
+              ? insPlural(available, "keys") +
+                " available in this result &middot; " +
+                insPlural(insSegKeys.length, "breakdowns") +
+                " chosen, each one a read of its own"
               : "Reading which keys this result has…"
           }</span>
         </div>`
@@ -25538,9 +25552,10 @@
           if (insSegKeys.length >= INS_SEGMENT_MAX_KEYS) {
             showImportToast(
               "error",
-              "Up to " +
+              "That is " +
                 INS_SEGMENT_MAX_KEYS +
-                " breakdowns at a time — remove one first.",
+                " breakdowns, which is as many as one table reads at once — " +
+                "remove one first.",
             )
             return
           }
@@ -25567,16 +25582,50 @@
         insLoadSegments(d, insLoadSeq)
       }
 
+      /// Stop a segments read that is taking longer than it is worth.
+      ///
+      /// The same interrupt every other read on this screen uses — one
+      /// connection behind one mutex, so there is only ever one statement in
+      /// flight to address. The table already on screen is left alone: it is
+      /// still a correct answer for the breakdowns it holds.
+      function insSegCancelRead() {
+        const d = insData
+        if (!d || !d.segmentsPending) return
+        insStopRead()
+        d.segmentsPending = false
+        insRenderBody()
+      }
+
       async function insLoadSegments(d, seq) {
         const sig = JSON.stringify(insSegKeys)
         const want = insSegKeys.map((b) => ({ kind: b.kind, name: b.name }))
+        // The picker's key lists are the fixed cost of the call — two scans of
+        // the whole join each, and ~470ms of a 533ms first read on a 120k
+        // database. They describe the *result set*, so ticking another
+        // breakdown cannot change them: they are read once per payload and
+        // carried forward, which is what keeps a tick a fast read rather than
+        // the same slow one again.
+        const withKeys = !(d.segments && d.segments.keysLoaded)
         d.segmentsPending = true
         try {
-          const seg = await window.backend.getInsightSegments(insArgs, insUnit, want)
+          const seg = await window.backend.getInsightSegments(
+            insArgs,
+            insUnit,
+            want,
+            withKeys,
+          )
           // A newer read, a cancellation (`null`), or a payload since replaced:
           // in all three the answer is no longer this screen's.
           if (seq !== insLoadSeq || insData !== d) return
           if (seg) {
+            if (!withKeys && d.segments) {
+              // Decided by what was *asked for*, never by what came back: an
+              // empty key list is also a legitimate answer, on a database with
+              // no context recorded at all.
+              seg.contextKeys = d.segments.contextKeys
+              seg.metadataKeys = d.segments.metadataKeys
+            }
+            seg.keysLoaded = true
             d.segments = seg
             d.segmentsSig = sig
             d.segmentsError = null
@@ -25617,6 +25666,15 @@
         const dropped = ((insSegLayout && insSegLayout.dropped) || []).length
         const missing = table.rows.filter((r) => r.missing).length
         const notes = []
+        // A re-read with a table already on screen used to say nothing at all:
+        // the pending line only draws when there is no table. That was fine
+        // when a read was one or two breakdowns; with forty available it is a
+        // wait, and a wait needs to say so and to carry a way out.
+        if (insData && insData.segmentsPending) {
+          return `<div class="ins-seg-bar"><span class="ins-seg-note">
+            <span class="mini-spinner"></span> Reading the segments…</span>
+            <button onclick="insSegCancelRead()">Cancel</button></div>`
+        }
         if (table.added) {
           notes.push(
             insPlural(table.added, "values") +

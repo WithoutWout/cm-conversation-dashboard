@@ -6502,10 +6502,18 @@ fn insight_segment_group(
 /// `fresh_stats` says whether `insight_segment_stats` already describes the
 /// session set now in `insight_sessions`; the caller owns that flag because it
 /// owns the scope cache.
+///
+/// `with_keys` says whether to re-read the two key lists the picker offers.
+/// They are the *fixed* cost of this call — two scans of the whole join each,
+/// measured at ~470 ms of a 533 ms single-breakdown read on a 120k-interaction
+/// database — and they answer a question about the result set, not about the
+/// breakdowns. Ticking another breakdown does not change them, so the renderer
+/// says so and the read drops to the breakdowns themselves.
 fn conversation_segments(
     conn: &Connection,
     breakdowns: &[InsightSegmentBreakdown],
     fresh_stats: bool,
+    with_keys: bool,
 ) -> Result<InsightSegments, String> {
     if !fresh_stats {
         build_insight_segment_stats(conn)?;
@@ -6525,8 +6533,19 @@ fn conversation_segments(
     Ok(InsightSegments {
         total,
         groups,
-        context_keys: insight_segment_keys(conn, "context_index")?,
-        metadata_keys: insight_segment_keys(conn, "metadata_index")?,
+        // Empty here means "not asked for", which the renderer distinguishes by
+        // what it sent rather than by what came back — an empty list is also a
+        // legitimate answer, on a database with no context recorded at all.
+        context_keys: if with_keys {
+            insight_segment_keys(conn, "context_index")?
+        } else {
+            Vec::new()
+        },
+        metadata_keys: if with_keys {
+            insight_segment_keys(conn, "metadata_index")?
+        } else {
+            Vec::new()
+        },
         culture_values,
     })
 }
@@ -6542,9 +6561,12 @@ async fn get_insight_segments(
     args: GetSessionsArgs,
     unit: Option<String>,
     breakdowns: Option<Vec<InsightSegmentBreakdown>>,
+    with_keys: Option<bool>,
 ) -> Result<Option<InsightSegments>, String> {
     let db = db_state.inner().clone();
     let breakdowns = breakdowns.unwrap_or_default();
+    // Absent means yes, which is what a caller that says nothing means.
+    let with_keys = with_keys.unwrap_or(true);
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = db.lock().map_err(|e| e.to_string())?;
         let DbState { conn, insight_scope, .. } = &mut *state;
@@ -6561,7 +6583,7 @@ async fn get_insight_segments(
         )
         .and_then(|_| {
             let fresh = insight_scope.segment_stats;
-            let out = conversation_segments(conn, &breakdowns, fresh);
+            let out = conversation_segments(conn, &breakdowns, fresh, with_keys);
             // Recorded only on success: a rollup that failed part-way through
             // describes nothing, and reusing it would chart rows that are not
             // the result of this search.
@@ -12576,6 +12598,105 @@ mod perf {
         (dir, db_path)
     }
 
+    /// What a Segments read costs as the number of breakdowns grows.
+    ///
+    ///   cargo test --release perf::segments_cost -- --nocapture --ignored
+    ///
+    /// The reason the breakdown limit is a number at all: the rollup is one
+    /// pass over the scope, but every breakdown after it is two more queries.
+    /// This says what that actually costs, so the ceiling is set from a
+    /// measurement rather than from a guess about readability.
+    #[test]
+    #[ignore]
+    fn segments_cost() {
+        let (dir, db_path) = match std::env::var("CAI_TEST_DB") {
+            Ok(path) => (None, PathBuf::from(path)),
+            Err(_) => {
+                let rows: i64 = std::env::var("CAI_BENCH_ROWS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(120_000);
+                println!("seeding {rows} interactions…");
+                let (dir, db) = seed_insights_db(rows);
+                (Some(dir), db)
+            }
+        };
+        let conn = open_db(db_path.to_str().unwrap()).expect("open");
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
+            .unwrap_or(0);
+        let sessions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+            .unwrap_or(0);
+        println!("database: {total} interactions, {sessions} sessions\n");
+
+        let args = GetSessionsArgs::default();
+        let mut cache = InsightScopeCache::default();
+        resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
+            .expect("scope");
+
+        // Every key the picker would offer, which is what "select all" means.
+        let keys: Vec<InsightSegmentBreakdown> =
+            std::iter::once(InsightSegmentBreakdown { kind: "culture".into(), name: String::new() })
+                .chain(
+                    insight_segment_keys(&conn, "context_index")
+                        .expect("context keys")
+                        .into_iter()
+                        .map(|k| InsightSegmentBreakdown { kind: "context".into(), name: k.name }),
+                )
+                .chain(
+                    insight_segment_keys(&conn, "metadata_index")
+                        .expect("metadata keys")
+                        .into_iter()
+                        .map(|k| InsightSegmentBreakdown { kind: "metadata".into(), name: k.name }),
+                )
+                .collect();
+        println!("{} breakdowns available\n", keys.len());
+
+        // The rollup, once, cold — every read after it reuses the same table.
+        let mut rollup = u128::MAX;
+        for _ in 0..3 {
+            let t = Instant::now();
+            build_insight_segment_stats(&conn).expect("rollup");
+            rollup = rollup.min(t.elapsed().as_micros());
+        }
+        println!("rollup (one pass over the scope): {:.0}ms", rollup as f64 / 1000.0);
+
+        for n in [1usize, 8, 20, 40] {
+            if n > keys.len() {
+                continue;
+            }
+            let want = &keys[..n];
+            // Both halves, because they invalidate on different things: the key
+            // lists describe the result set and the groups describe the
+            // breakdowns, so ticking one more key should pay only the second.
+            let mut with = u128::MAX;
+            let mut without = u128::MAX;
+            let mut rows = 0usize;
+            for _ in 0..3 {
+                let t = Instant::now();
+                let out = conversation_segments(&conn, want, true, true).expect("segments");
+                with = with.min(t.elapsed().as_micros());
+                rows = out.groups.iter().map(|g| g.rows.len()).sum();
+                let t = Instant::now();
+                conversation_segments(&conn, want, true, false).expect("segments");
+                without = without.min(t.elapsed().as_micros());
+            }
+            println!(
+                "{n:>3} breakdowns: {:>7.1}ms first read, {:>7.1}ms re-read                   ({rows} rows, {:.1}ms per breakdown)",
+                with as f64 / 1000.0,
+                without as f64 / 1000.0,
+                without as f64 / 1000.0 / n as f64,
+            );
+        }
+        drop(conn);
+        if let Some(dir) = dir {
+            if std::env::var("CAI_BENCH_KEEP").is_err() {
+                let _ = fs::remove_dir_all(&dir);
+            }
+        }
+    }
+
     /// Not an assertion — a measurement harness. Run with:
     ///   cargo test --release perf::insights_cost -- --nocapture --ignored
     ///
@@ -13782,7 +13903,7 @@ mod insights {
             &mut InsightScopeCache::default(),
         )
         .expect("scope");
-        conversation_segments(conn, &want, false).expect("segments")
+        conversation_segments(conn, &want, false, true).expect("segments")
     }
 
     fn seg_row<'a>(group: &'a InsightSegmentGroup, label: &str) -> &'a InsightSegmentRow {
@@ -13932,7 +14053,7 @@ mod insights {
         let args = GetSessionsArgs::default();
         resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
             .expect("scope");
-        let first = conversation_segments(&conn, &[], false).expect("segments");
+        let first = conversation_segments(&conn, &[], false, true).expect("segments");
         cache.segment_stats = true;
         // The rollup's own inserts move `total_changes()`, and the safety catch
         // reads exactly that counter — without the restamp the next resolve
@@ -13950,6 +14071,7 @@ mod insights {
             &conn,
             &[InsightSegmentBreakdown { kind: "context".into(), name: "channel".into() }],
             cache.segment_stats,
+            true,
         )
         .expect("segments");
         assert_eq!(again.total.interactions, 2);
@@ -13963,7 +14085,7 @@ mod insights {
         resolve_insight_scope(&conn, &narrowed, InsightUnit::Conversations, &mut cache)
             .expect("scope");
         assert!(!cache.segment_stats, "a different search drops the rollup");
-        let after = conversation_segments(&conn, &[], cache.segment_stats).expect("segments");
+        let after = conversation_segments(&conn, &[], cache.segment_stats, true).expect("segments");
         assert_eq!(after.total.interactions, 1, "only the zero-recognition conversation");
     }
 

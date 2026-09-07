@@ -569,6 +569,45 @@ this table is copied far more often than it is hovered.
   against last month's figure, and `insPct`'s rounding to a whole number above
   10% throws away the difference they are looking for.
 
+### How many breakdowns, and what they cost
+
+`INS_SEGMENT_MAX_KEYS` is **40**, and it is a ceiling on work rather than a rule
+about readability — the arrangement editor exists precisely so a long table can
+be cut down to the rows that are reported. A real export carries around forty
+context keys and forty metadata keys, so an unbounded "select all" is a read
+nobody intended to start.
+
+Measured with `perf::segments_cost` on the seeded 120k-interaction /
+13.3k-conversation database, best-of-three:
+
+| breakdowns | first read | re-read | rows |
+| --- | --- | --- | --- |
+| 1 | 556 ms | **8 ms** | 1 |
+| 8 | 691 ms | **148 ms** | 29 |
+| 20 | 858 ms | **313 ms** | 77 |
+| 40 | 1121 ms | **588 ms** | 157 |
+
+The rollup itself is 65 ms of that, once. A breakdown is ~15 ms at the margin,
+which is why the ceiling is set where a table stops being one anyone reports
+from rather than where it gets slow.
+
+**The gap between the two columns is the picker's key lists**, and finding it is
+the reason this was measured at all: two scans of the whole join each, ~470 ms of
+a 533 ms single-breakdown read — dominating a call whose actual subject cost 8 ms.
+They answer a question about the **result set**, not about the breakdowns, so
+ticking another key cannot change them.
+
+- **`with_keys` is a parameter, not an inference.** The renderer reads them once
+  per payload and carries them forward; a payload for a different search or the
+  other unit is a different object and asks again.
+- **Which list came back is decided by what was asked for, never by what
+  arrived.** An empty key list is also a legitimate answer — a database with no
+  context recorded at all — and treating "empty" as "not read" would carry stale
+  keys forward on exactly that database.
+- **A re-read with a table already on screen says so, and carries a Cancel.**
+  The pending line only draws when there is no table at all, which was fine when
+  a read was one breakdown and is not when it is forty.
+
 ### The rollup is what makes several breakdowns cheap
 
 `insight_segment_stats` is one row per conversation, built by one pass over the
