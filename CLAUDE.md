@@ -572,7 +572,7 @@ Always use these terms in the UI:
 | `cm-sort-dialogs`          | Dialogs sort choice |
 | `cm-flow-direction`        | Dialog graph layout direction |
 | `cm-view`                  | Last selected main view |
-| `conv-db-path`             | Last selected conversations database |
+| `cm-conv-db-path`          | Last selected conversations database (`CONV_DB_STORAGE_KEY`) |
 | `conv-low-recog-threshold` | Low recognition threshold |
 | `cm-display-timezone`      | IANA zone the chat, session list, date filter and Insights charts are read in. `""` or absent means follow the system. Import and Stored data stay UTC — see `docs/insights.md` → "Reading this in your own timezone" |
 | `conv-data-retention-days` | CSV import retention window |

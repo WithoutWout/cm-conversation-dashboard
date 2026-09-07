@@ -72,6 +72,47 @@ ok("no key is both exported and excluded", !KEYS.some((k) => EXCLUDED.includes(k
 // list is being appended to without being read.
 ok("the export list has no duplicates", new Set(KEYS).size === KEYS.length)
 
+// The Insights screen's preferences are settings like any other, and a preset
+// is the one thing here that is genuinely laborious to rebuild by hand.
+ok(
+  "the Insights preferences are exported",
+  ["cm-insights-unit", "cm-insights-sections", "cm-insights-export-caption"].every((k) =>
+    KEYS.includes(k),
+  ),
+)
+ok(
+  "the Segments setup and its presets are exported",
+  ["cm-insights-segments", "cm-insights-segment-layout", "cm-insights-segment-presets"].every(
+    (k) => KEYS.includes(k),
+  ),
+)
+
+// ── Nothing may be stored without a decision about backing it up ────────────
+//
+// An allowlist's failure mode is silence: a key added to the app is simply
+// absent from the backup, which looks exactly like a key that was never set.
+// Three Insights preferences sat outside both lists for two releases that way.
+// So every key the app actually stores has to appear in one list or the other,
+// read out of index.html rather than restated here — a copy would drift the
+// same way the original did.
+const literalKeys = new Set(
+  [...src.matchAll(/localStorage\.(?:get|set|remove)Item\(\s*"([^"]+)"/g)].map((m) => m[1]),
+)
+// Two are reached through a constant, which the regex above cannot see.
+for (const name of ["CONV_DB_STORAGE_KEY", "DATA_FOLDER_STORAGE_KEY"]) {
+  const m = new RegExp(`const ${name} = "([^"]+)"`).exec(src)
+  if (m) literalKeys.add(m[1])
+}
+ok("the scan found the keys it is supposed to check", literalKeys.size >= 20)
+const undecided = [...literalKeys].filter(
+  (k) => !KEYS.includes(k) && !EXCLUDED.includes(k),
+)
+ok(
+  "every stored key is either exported or deliberately excluded" +
+    (undecided.length ? " — missing: " + undecided.join(", ") : ""),
+  undecided.length === 0,
+)
+
 // ── Importing can only write keys this build knows ──────────────────────────
 ctx.reset()
 ctx._applyImportedSettings(

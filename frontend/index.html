@@ -19063,6 +19063,20 @@
         { key: "cm-display-timezone" },
         { key: "conv-data-retention-days" },
         { key: "cm-dismissed-version" },
+        // The Insights screen. `cm-insights-segment-presets` and
+        // `-segment-layout` are the ones worth carrying: a reporting table is
+        // built once and then wanted every month, and rebuilding it by hand on
+        // a new machine is exactly the work the preset exists to remove. They
+        // name context and metadata keys, which is a fact about the customer's
+        // taxonomy rather than a credential — the same footing as
+        // `cm-collections` and `cm-export-filters`, which are not marked
+        // sensitive either.
+        { key: "cm-insights-unit" },
+        { key: "cm-insights-sections" },
+        { key: "cm-insights-export-caption" },
+        { key: "cm-insights-segments" },
+        { key: "cm-insights-segment-layout" },
+        { key: "cm-insights-segment-presets" },
         // Web build only; absent keys are simply omitted from the file. On the
         // desktop the equivalent lives in analytics-api.json and is merged in
         // by Rust, secret included.
@@ -19084,6 +19098,14 @@
       //                                     name. Nothing is recoverable from
       //                                     carrying them, unlike a credential.
       //   cm-perf-debug                     a developer toggle.
+      //
+      // `every stored key is either exported or deliberately excluded` in
+      // frontend/tests/settings-backup.test.js is what keeps this list honest.
+      // An allowlist's failure mode is silence: three Insights preferences sat
+      // outside it for two releases and nobody could see it, because a key that
+      // is simply absent from a backup looks exactly like one that was never
+      // set. The test reads the keys out of this file, so the only way to add a
+      // stored key is to decide which of the two lists it belongs in.
       const SETTINGS_EXPORT_EXCLUDED = ["cm-conv-db-path", "cm-data-folder", "cm-perf-debug"]
 
       function _settingsIoStatus(msg, tone) {

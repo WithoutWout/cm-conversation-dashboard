@@ -30,6 +30,34 @@ changing that warning too.
 added later defaults to *not* exported and this list stays the only place that
 decision is made.
 
+**An allowlist's failure mode is silence, so a test enforces the decision rather
+than the outcome.** A key that was never added is simply absent from the backup,
+and an absent key looks exactly like one the user never set — which is how three
+Insights preferences (`cm-insights-unit`, `-sections`, `-export-caption`) sat
+outside both lists for two releases with nothing on screen to show it.
+`every stored key is either exported or deliberately excluded` scans
+`index.html` for the keys the app actually stores — the literals, plus the two
+reached through `CONV_DB_STORAGE_KEY` / `DATA_FOLDER_STORAGE_KEY` — and requires
+each to appear in `SETTINGS_EXPORT_KEYS` or `SETTINGS_EXPORT_EXCLUDED`. It names
+the missing key when it fails, so adding a stored key forces the choice instead
+of defaulting to one.
+
+**The Insights preferences are exported, and the Segments presets are the point
+of it.** A reporting table is built once and then wanted every month; rebuilding
+one by hand on a new machine is exactly the work the preset exists to remove.
+`cm-insights-segment-layout` and `cm-insights-segment-presets` name context and
+metadata keys, which is a fact about the customer's taxonomy rather than a
+credential — the same footing as `cm-collections` and `cm-export-filters`, so
+they are not marked `sensitive` either.
+
+**Adding keys does not bump `SETTINGS_EXPORT_SCHEMA`.** The schema names the
+*format*, and the format is unchanged: an older build reads a newer file and
+ignores the keys it does not know (`_applyImportedSettings` filters to its own
+allowlist), while a newer build reads an older file and simply finds fewer keys.
+Bumping it would make a v0.19 backup unreadable by v0.18 for no reason —
+the schema check refuses a *higher* schema outright, which is the right
+behaviour only when the file really cannot be understood.
+
 **`cm-display-timezone` stores `""` for "follow the system"**, and stores it
 rather than the resolved zone name on purpose. Resolving at write time would
 bake the zone of whichever machine wrote the backup into it, so restoring it on
