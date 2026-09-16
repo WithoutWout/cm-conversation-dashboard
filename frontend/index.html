@@ -1055,6 +1055,18 @@
         color: var(--muted);
         flex-wrap: wrap;
       }
+      /* Routes that carry context get a line each, or their pills run together. */
+      .dialog-link-row.has-ctx {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+      }
+      .route-ref {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
       .jump-link {
         color: var(--accent);
         font-weight: 600;
@@ -1167,6 +1179,7 @@
         display: flex;
         gap: 5px;
         align-items: center;
+        flex-wrap: wrap;
       }
       .node-route strong {
         color: var(--accent);
@@ -12793,12 +12806,13 @@
                 contentContextFilters.some(
                   (f) =>
                     f.name === name &&
-                    cv.Values.some((v) =>
+                    (f.value === "__any__" ||
+                      cv.Values.some((v) =>
                       v
                         .split(",")
                         .map((x) => x.trim())
                         .includes(f.value),
-                    ),
+                      )),
                 )
               pills.push(
                 '<span class="ctx-var-pill' +
@@ -12820,10 +12834,11 @@
               contentContextFilters.some(
                 (f) =>
                   f.name === name &&
-                  val
-                    .split(",")
-                    .map((x) => x.trim())
-                    .includes(f.value),
+                  (f.value === "__any__" ||
+                    val
+                      .split(",")
+                      .map((x) => x.trim())
+                      .includes(f.value)),
               )
             pills.push(
               '<span class="ctx-var-pill' +
@@ -13194,7 +13209,8 @@
         // superseded by the hover preview, which shows the same text plus its
         // triggers and how many responses the item actually contributes.
         const snippetHtml = cardSnippetHtml(
-          nonDefaultArticleMatchSnippet(art, q),
+          nonDefaultArticleMatchSnippet(art, q) ||
+            contextRouteMatchSnippet(art, q),
           q,
         )
         const _selKey = "article:" + art.Id
@@ -13955,6 +13971,12 @@
         const routeHtml = items
           .filter((i) => i.type !== "Answer")
           .map((item) => {
+            // The context a route fires under, as on a contextual response.
+            const pills = renderCtxVarPills(
+              item.contextVariables || [],
+              false,
+              null,
+            )
             if (item.type === "DialogStart") {
               const did = item.data && item.data.dialogId
               const d = dialogMap.get(did),
@@ -13964,7 +13986,9 @@
                 did +
                 ',false)">' +
                 name +
-                "</strong></span>"
+                "</strong>" +
+                pills +
+                "</span>"
               )
             }
             if (item.type === "TDialogStart") {
@@ -13976,7 +14000,9 @@
                 tid +
                 ',true)">' +
                 name +
-                "</strong></span>"
+                "</strong>" +
+                pills +
+                "</span>"
               )
             }
             return ""
@@ -14058,7 +14084,8 @@
         const desc = item.description || ""
         const hasDetail = !!desc
         const snippetHtml = cardSnippetHtml(
-          nonDefaultDialogMatchSnippet(item, q),
+          nonDefaultDialogMatchSnippet(item, q) ||
+            contextRouteMatchSnippet(item, q),
           q,
         )
         const relationHtml = relationRowHtml(
@@ -14273,6 +14300,76 @@
           }
         }
         return null
+      }
+
+      /// Where an output leads, for a route snippet: "Dialog: name".
+      function _routeTargetLabel(type, dialogId, tDialogId) {
+        if (type === "DialogStart") {
+          const d = dialogMap.get(dialogId)
+          return "Dialog: " + (d ? d.name : "#" + dialogId)
+        }
+        if (type === "TDialogStart") {
+          const d = tDialogMap.get(tDialogId)
+          return "Transactional Dialog: " + (d ? d.name : "#" + tDialogId)
+        }
+        return "Halo agent handover"
+      }
+
+      /// An item's outputs as `{isAnswer, set, label}`, Answers and routes in
+      /// order. A dialog's route label carries its node name.
+      function _itemRouteOutputs(item) {
+        if (item.Outputs)
+          return item.Outputs.map((o) => ({
+            isAnswer: o.Type === "Answer",
+            set: _outputCtxSet(o.ContextVariables, true),
+            label:
+              o.Type === "Answer"
+                ? ""
+                : _routeTargetLabel(o.Type, o.DialogId, o.TDialogId || o.DialogId),
+          }))
+        const outs = []
+        for (const node of item.nodes || [])
+          for (const oi of (node.output && node.output.items) || []) {
+            const data = oi.data || {}
+            outs.push({
+              isAnswer: oi.type === "Answer",
+              set: _outputCtxSet(oi.contextVariables, false),
+              label:
+                oi.type === "Answer"
+                  ? ""
+                  : (node.name && node.name.trim()
+                      ? node.name.trim() + ": "
+                      : "") +
+                    _routeTargetLabel(oi.type, data.dialogId, data.tDialogId),
+            })
+          }
+        return outs
+      }
+
+      /// Why an item matched a context filter when none of its Answers did: a
+      /// route into a Dialog carries the condition. Without this, Article 737
+      /// matches `available_livechat_theater` and its card shows no reason.
+      /// Only without a query — with one, the condition has to sit on the Answer
+      /// the text matched, so a route can never be the reason.
+      function contextRouteMatchSnippet(item, q) {
+        if ((q && q.trim()) || item._kind === "tdialog") return null
+        const varFilters = contentContextFilters.filter(
+          (f) => f.name !== "escalationGroup",
+        )
+        if (!varFilters.length) return null
+        const passes = (set) =>
+          varFilters.every((f) => _tagFilterMatches(set, f))
+        const outs = _itemRouteOutputs(item)
+        if (outs.some((o) => o.isAnswer && passes(o.set))) return null
+        const route = outs.find((o) => !o.isAnswer && passes(o.set))
+        if (!route) return null
+        const conds = varFilters
+          .filter((f) => route.set[f.name])
+          .map((f) => f.name + " = " + route.set[f.name].join(", "))
+        return {
+          label: "Context route",
+          text: route.label + (conds.length ? " · " + conds.join(" · ") : ""),
+        }
       }
 
       function nodeMatchesQuery(n, termRes) {
@@ -16150,45 +16247,55 @@
                 autoOpenCtxSection,
               ) +
               "</div>"
-        } else {
-          const refs = art.Outputs.map((o) => {
-            if (o.Type === "DialogStart") {
-              const d = dialogMap.get(o.DialogId),
-                name = d ? esc(d.name) : "#" + o.DialogId
-              return (
-                '&#8594; <span class="jump-link" onclick="openDialogInfoModal(' +
-                o.DialogId +
-                ',false)">' +
-                name +
-                "</span>" +
-                ' <span class="meta-dim">(Dialog #' +
-                o.DialogId +
-                ")</span>"
-              )
-            }
-            if (o.Type === "TDialogStart") {
-              const tid = o.TDialogId || o.DialogId,
-                d = tDialogMap.get(tid),
-                name = d ? esc(d.name) : "#" + tid
-              return (
-                '&#8594; <span class="jump-link tlink" onclick="openDialogInfoModal(' +
-                tid +
-                ',true)">' +
-                name +
-                "</span>" +
-                ' <span class="meta-dim">(Transactional Dialog #' +
-                tid +
-                ")</span>"
-              )
-            }
-            return null
-          }).filter(Boolean)
-          if (refs.length)
-            html +=
-              '<div class="detail-section"><h4>Linked Dialog</h4><div class="dialog-link-row">' +
-              refs.join(" ") +
-              "</div></div>"
         }
+
+        // Routes into Dialogs, each with the context it fires under. Shown for
+        // an Article with a default Response too: a route conditioned on context
+        // is how it reaches a Dialog, and it is what a context filter matched.
+        let routeHasCtx = false
+        const refs = art.Outputs.map((o) => {
+          let ref = null
+          if (o.Type === "DialogStart") {
+            const d = dialogMap.get(o.DialogId),
+              name = d ? esc(d.name) : "#" + o.DialogId
+            ref =
+              '&#8594; <span class="jump-link" onclick="openDialogInfoModal(' +
+              o.DialogId +
+              ',false)">' +
+              name +
+              "</span>" +
+              ' <span class="meta-dim">(Dialog #' +
+              o.DialogId +
+              ")</span>"
+          } else if (o.Type === "TDialogStart") {
+            const tid = o.TDialogId || o.DialogId,
+              d = tDialogMap.get(tid),
+              name = d ? esc(d.name) : "#" + tid
+            ref =
+              '&#8594; <span class="jump-link tlink" onclick="openDialogInfoModal(' +
+              tid +
+              ',true)">' +
+              name +
+              "</span>" +
+              ' <span class="meta-dim">(Transactional Dialog #' +
+              tid +
+              ")</span>"
+          }
+          if (!ref) return null
+          const pills = renderCtxVarPills(o.ContextVariables || [], true, null)
+          if (pills) routeHasCtx = true
+          return '<span class="route-ref">' + ref + pills + "</span>"
+        }).filter(Boolean)
+        if (
+          refs.length &&
+          (kind !== "answer" || (routeHasCtx && !filterActive))
+        )
+          html +=
+            '<div class="detail-section"><h4>Linked Dialog</h4><div class="dialog-link-row' +
+            (routeHasCtx ? " has-ctx" : "") +
+            '">' +
+            refs.join(" ") +
+            "</div></div>"
 
         if (filterActive && !html) {
           html =
@@ -29669,44 +29776,69 @@
       }
 
       // ── Content Context filter ──────────────────────────────────────
-      function buildContentContextOptions() {
-        const counts = new Map() // key: "name|||value" → count
-        for (const a of allArticles) {
-          for (const o of a.Outputs) {
-            if (o.Type !== "Answer") continue
-            for (const cv of o.ContextVariables || []) {
-              if (!cv.Values || cv.Values.includes("any")) continue
-              const name = ctxVarMap.get(cv.Id)
-              // escalationGroup is handled separately via OutputMetaData
-              if (!name || name === "escalationGroup") continue
-              for (const valStr of cv.Values) {
-                for (const v of valStr.split(",")) {
-                  const val = v.trim()
-                  if (!val || val === "any") continue
-                  const key = name + "|||" + val
-                  counts.set(key, (counts.get(key) || 0) + 1)
-                }
-              }
+      /// The context conditions one output fires under, as `{name: [values]}`.
+      /// Mirrors `outputCtxSet` in search-worker.js, which decides what a chip
+      /// returns — see the comment there. Every output type carries conditions,
+      /// so callers pass all of them, not only Answers.
+      function _outputCtxSet(cvs, isArticle) {
+        const set = {}
+        for (const cv of cvs || []) {
+          const name = ctxVarMap.get(isArticle ? cv.Id : cv.id)
+          if (!name || name === "escalationGroup") continue
+          const raw = isArticle ? cv.Values || [] : cv.value ? [cv.value] : []
+          const vals = []
+          for (const valStr of raw) {
+            for (const v of String(valStr).split(",")) {
+              const t = v.trim()
+              if (t && t !== "any") vals.push(t)
             }
           }
+          if (vals.length) set[name] = vals
         }
-        for (const d of allDialogsCombined) {
-          for (const node of d.nodes || []) {
-            for (const item of (node.output && node.output.items) || []) {
-              if (item.type !== "Answer") continue
-              for (const cv of item.contextVariables || []) {
-                const name = ctxVarMap.get(cv.id)
-                // escalationGroup is handled separately via metadata
-                if (!name || !cv.value || name === "escalationGroup") continue
-                for (const v of cv.value.split(",")) {
-                  const val = v.trim()
-                  if (!val) continue
-                  const key = name + "|||" + val
-                  counts.set(key, (counts.get(key) || 0) + 1)
-                }
-              }
+        return set
+      }
+
+      /// One context set per output of an item, in order — Answers and routes
+      /// alike. The renderer's view of the worker's `_ctxSets`, minus the
+      /// escalationGroup aggregate.
+      function _itemOutputCtxSets(item) {
+        if (item.Outputs)
+          return item.Outputs.map((o) => _outputCtxSet(o.ContextVariables, true))
+        const sets = []
+        for (const node of item.nodes || [])
+          for (const oi of (node.output && node.output.items) || [])
+            sets.push(_outputCtxSet(oi.contextVariables, false))
+        return sets
+      }
+
+      function buildContentContextOptions() {
+        // Every count is of items, and an item counts once per chip however
+        // many of its outputs carry the value — the filter asks whether *an*
+        // output matches, so that is the number it returns.
+        const counts = new Map() // key: "name|||value" → item count
+        const anyCounts = new Map() // name → items with an output setting it
+        const unsetCounts = new Map() // name → items with an output not setting it
+        const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1)
+        const perItem = []
+        for (const item of [...allArticles, ...allDialogsCombined]) {
+          const sets = _itemOutputCtxSets(item)
+          const pairs = new Set()
+          const names = new Set()
+          for (const set of sets)
+            for (const name of Object.keys(set)) {
+              names.add(name)
+              for (const v of set[name]) pairs.add(name + "|||" + v)
             }
-          }
+          for (const k of pairs) bump(counts, k)
+          for (const name of names) bump(anyCounts, name)
+          perItem.push(sets)
+        }
+        // "not set" is decided per name over every item, including items that
+        // never mention the name at all — one pass per name, after every name
+        // is known.
+        for (const name of anyCounts.keys()) {
+          for (const sets of perItem)
+            if (sets.some((set) => !set[name])) bump(unsetCounts, name)
         }
         contentContextOptions = Array.from(counts.entries()).map(
           ([key, count]) => {
@@ -29714,69 +29846,14 @@
             return { name, value, count }
           },
         )
-
-        // Add "not set" options: for each known variable name, count items that
-        // have at least one Answer output where that variable is not explicitly set.
-        // Skip "escalationGroup" — it uses its own aggregate ctxSet logic.
-        const allNames = new Set(contentContextOptions.map((o) => o.name))
-        for (const name of allNames) {
-          if (name === "escalationGroup") continue
-          // Whether one Answer sets this variable. The two kinds store it
-          // differently — an Article has `Values[]`, a dialog node one comma
-          // string — and the "any" value is discounted on the Article side
-          // only, which is a pre-existing asymmetry this pass must not change.
-          const articleSets = (o) => {
-            if (o.Type !== "Answer") return null
-            const cvs = o.ContextVariables || []
-            return cvs.some((cv) => {
-              const cvName = ctxVarMap.get(cv.Id)
-              return cvName === name && cv.Values && !cv.Values.includes("any")
-            })
-          }
-          const dialogSets = (item) => {
-            if (item.type !== "Answer") return null
-            const cvs = item.contextVariables || []
-            return cvs.some((cv) => {
-              const cvName = ctxVarMap.get(cv.id)
-              return cvName === name && cv.value
-            })
-          }
-          // Both halves in one pass. An item can count toward both: setting the
-          // variable on one answer and not on another is the common case, and
-          // the filter asks about an answer rather than about the item.
-          let notSetCount = 0
-          let anyCount = 0
-          const tally = (answers, sets) => {
-            let sawSet = false
-            let sawUnset = false
-            for (const answer of answers) {
-              const r = sets(answer)
-              if (r === null) continue
-              if (r) sawSet = true
-              else sawUnset = true
-            }
-            if (sawSet) anyCount++
-            if (sawUnset) notSetCount++
-          }
-          for (const a of allArticles) tally(a.Outputs, articleSets)
-          for (const d of allDialogsCombined) {
-            const items = []
-            for (const node of d.nodes || [])
-              for (const item of (node.output && node.output.items) || [])
-                items.push(item)
-            tally(items, dialogSets)
-          }
-          if (anyCount > 0)
-            contentContextOptions.push({
-              name,
-              value: "__any__",
-              count: anyCount,
-            })
-          if (notSetCount > 0)
+        for (const [name, count] of anyCounts) {
+          contentContextOptions.push({ name, value: "__any__", count })
+          const notSet = unsetCounts.get(name) || 0
+          if (notSet > 0)
             contentContextOptions.push({
               name,
               value: "__not_set__",
-              count: notSetCount,
+              count: notSet,
             })
         }
 
