@@ -114,6 +114,20 @@ jobs:
             - With search text as well, the condition still has to sit on the
               Response the text was found in, as before.
 
+            ### Escalation group filters find every group
+
+            The **escalationGroup** chips only looked at the escalation group a
+            Response is *tagged* with. A group can also be a *condition* — a
+            Response or a route into a Dialog that only fires for sessions in
+            that group — and those were invisible. **theater** is only ever used
+            that way, so filtering on it found nothing at all; it now finds the
+            15 Articles and Dialogs that use it.
+
+            - A chip now matches content tied to the group either way, on
+              Responses and on routes alike. Most groups find more than before.
+            - **default** appears as a chip of its own, for content conditioned
+              on the default escalation group.
+
             ---
 
             ## Download
