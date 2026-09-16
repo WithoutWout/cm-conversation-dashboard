@@ -91,59 +91,28 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Insights can compare slices of one search
+            ### The Context filter finds all the content it should
 
-            Insights could answer "how much feedback?", "how well did
-            recognition do?" and "how many interactions?" — but never the
-            comparisons between them. The report most people actually keep is a
-            table: a total, then a row per channel, per flag, per culture, each
-            carrying the same handful of figures. That table was being rebuilt
-            by hand in a spreadsheet every month.
+            Filtering Articles and Dialogs by a context value missed most of
+            what uses it. The filter only looked at **Responses**, but a context
+            condition just as often decides which **Dialog** or **Transactional
+            Dialog** an Article or a Dialog node starts, and those were
+            invisible to it. `available_livechat_theater` = *Set to any value*
+            found 1 item where 14 use it; 29 of the 44 context variables were
+            undercounted, and six never appeared in the filter at all.
 
-            It is now a section. Open **Insights → Choose data**, tick
-            **Segments**, and pick any mix of **Culture**, context keys and
-            metadata keys from one searchable list. Every row gives you:
-
-            - **Feedback interactions** and the **positive** share of them
-            - **Recognition rate** — of the turns the recognizer scored, how many
-              it matched. GenAI answers count in neither half
-            - **Recognition quality** — the average score of the ones it matched
-            - **Interactions** and **conversations**
-
-            It reads whatever your current search covers, date range included,
-            and goes out as TSV, CSV, Markdown, a file, or as a real table
-            inside the emailed dashboard report.
-
-            ### Shape the table, then save it as a preset
-
-            **Edit layout** turns the table into a list of lines you arrange
-            yourself. Drag any line by its handle — or click the handle and use
-            the arrow keys — to reorder rows, headings and blank lines. Type
-            over a name to rename it. **✕** removes a row for good, and *Restore
-            removed rows* brings them back.
-
-            Then **Save setup…** under the table keeps the breakdowns *and* the
-            arrangement under a name. A preset deliberately does **not** hold a
-            date range: change the dates, click the preset, and you get the same
-            table over the new period. Two things it handles so that keeps
-            working month to month:
-
-            - A row your table has that the new range has no data for stays put,
-              dashed and marked **no data** — your report never silently gets
-              shorter.
-            - A value that has appeared since you saved is added at the bottom
-              and marked **new**, one drag from wherever it belongs.
-
-            ### Smaller things
-
-            - Settings **Backup** now carries the whole Insights screen,
-              including your saved Segment presets — so a new machine is one
-              import away from the same reports. Six preferences were missing
-              from the backup entirely; three of them had been missing for
-              several releases.
-            - Up to **40 breakdowns** in one table, and adding one after the
-              first read is now roughly ten times faster.
-            - A long Segments read says it is working, and can be cancelled.
+            - The filter now counts a condition wherever it sits, so those items
+              show up, and every chip's number is exactly what clicking it
+              returns. The numbers used to count responses rather than items, so
+              a chip could promise more than it delivered.
+            - A result matched through a route says so: its card shows a
+              **Context route** line naming the Dialog it starts and the value
+              that matched.
+            - In the Article and Dialog windows, every route into a Dialog now
+              shows the context it fires under, highlighted when it matches your
+              filter.
+            - With search text as well, the condition still has to sit on the
+              Response the text was found in, as before.
 
             ---
 
