@@ -12943,11 +12943,15 @@
         const varFilters = contentContextFilters.filter(
           (f) => f.name !== "escalationGroup",
         )
-        // Escalation group: OR among selected values — answer passes if its
-        // single group is any of the selected group values.
+        // Escalation group: OR among selected values — the answer passes if
+        // its tag or its escalationGroup condition names any of them.
         if (escFilters.length) {
-          if (!escGroup || !escFilters.some((f) => f.value === escGroup))
-            return false
+          const groups = _outputEscGroups(
+            escGroup ? { escalationGroup: escGroup } : null,
+            contextVars,
+            isArticle,
+          )
+          if (!escFilters.some((f) => groups.includes(f.value))) return false
         }
         if (!varFilters.length) return true
         const ctxSet = {}
@@ -14318,10 +14322,18 @@
       /// An item's outputs as `{isAnswer, set, label}`, Answers and routes in
       /// order. A dialog's route label carries its node name.
       function _itemRouteOutputs(item) {
+        // The output's context set with its escalation groups (tag and
+        // condition) folded in, so an escalationGroup chip can explain a match
+        // the same way every other context chip does.
+        const withEsc = (set, groups) =>
+          groups.length ? { ...set, escalationGroup: groups } : set
         if (item.Outputs)
           return item.Outputs.map((o) => ({
             isAnswer: o.Type === "Answer",
-            set: _outputCtxSet(o.ContextVariables, true),
+            set: withEsc(
+              _outputCtxSet(o.ContextVariables, true),
+              _outputEscGroups(o.OutputMetaData, o.ContextVariables, true),
+            ),
             label:
               o.Type === "Answer"
                 ? ""
@@ -14333,7 +14345,10 @@
             const data = oi.data || {}
             outs.push({
               isAnswer: oi.type === "Answer",
-              set: _outputCtxSet(oi.contextVariables, false),
+              set: withEsc(
+                _outputCtxSet(oi.contextVariables, false),
+                _outputEscGroups(oi.metadata, oi.contextVariables, false),
+              ),
               label:
                 oi.type === "Answer"
                   ? ""
@@ -14353,18 +14368,15 @@
       /// the text matched, so a route can never be the reason.
       function contextRouteMatchSnippet(item, q) {
         if ((q && q.trim()) || item._kind === "tdialog") return null
-        const varFilters = contentContextFilters.filter(
-          (f) => f.name !== "escalationGroup",
-        )
-        if (!varFilters.length) return null
+        if (!contentContextFilters.length) return null
         const passes = (set) =>
-          varFilters.every((f) => _tagFilterMatches(set, f))
+          contentContextFilters.every((f) => _tagFilterMatches(set, f))
         const outs = _itemRouteOutputs(item)
         if (outs.some((o) => o.isAnswer && passes(o.set))) return null
         const route = outs.find((o) => !o.isAnswer && passes(o.set))
         if (!route) return null
-        const conds = varFilters
-          .filter((f) => route.set[f.name])
+        const conds = contentContextFilters
+          .filter((f) => route.set[f.name] && !f.value.startsWith("__"))
           .map((f) => f.name + " = " + route.set[f.name].join(", "))
         return {
           label: "Context route",
@@ -29811,6 +29823,26 @@
         return sets
       }
 
+      /// The escalation groups one output is tied to: its metadata tag and the
+      /// values of an escalationGroup condition. Mirrors `outputEscGroups` in
+      /// search-worker.js — see the comment there for why it reads both.
+      function _outputEscGroups(meta, cvs, isArticle) {
+        const out = []
+        const push = (g) => {
+          const t = String(g == null ? "" : g).trim()
+          if (t && t !== "any" && !out.includes(t)) out.push(t)
+        }
+        if (meta && meta.escalationGroup != null) push(meta.escalationGroup)
+        for (const cv of cvs || []) {
+          if (ctxVarMap.get(isArticle ? cv.Id : cv.id) !== "escalationGroup")
+            continue
+          const raw = isArticle ? cv.Values || [] : cv.value ? [cv.value] : []
+          for (const valStr of raw)
+            for (const v of String(valStr).split(",")) push(v)
+        }
+        return out
+      }
+
       function buildContentContextOptions() {
         // Every count is of items, and an item counts once per chip however
         // many of its outputs carry the value — the filter asks whether *an*
@@ -29857,28 +29889,21 @@
             })
         }
 
-        // Add escalation group filter options from OutputMetaData/metadata.
-        // Count distinct articles/dialogs that have at least one Answer output
-        // with that escalation group value.
+        // Escalation group chips: every group an item is tied to, by the
+        // metadata tag or by an escalationGroup condition, on any output — the
+        // same aggregate the worker filters on. Counted once per item.
         const escGroupCounts = new Map() // group value → count of articles+dialogs
-        for (const a of allArticles) {
+        for (const item of [...allArticles, ...allDialogsCombined]) {
           const groups = new Set()
-          for (const o of a.Outputs) {
-            if (o.Type !== "Answer") continue
-            const g = o.OutputMetaData && o.OutputMetaData.escalationGroup
-            if (g) groups.add(g)
-          }
-          for (const g of groups)
-            escGroupCounts.set(g, (escGroupCounts.get(g) || 0) + 1)
-        }
-        for (const d of allDialogsCombined) {
-          const groups = new Set()
-          for (const node of d.nodes || []) {
-            for (const item of (node.output && node.output.items) || []) {
-              if (item.type !== "Answer") continue
-              const g = item.metadata && item.metadata.escalationGroup
-              if (g) groups.add(g)
-            }
+          if (item.Outputs) {
+            for (const o of item.Outputs)
+              for (const g of _outputEscGroups(o.OutputMetaData, o.ContextVariables, true))
+                groups.add(g)
+          } else {
+            for (const node of item.nodes || [])
+              for (const oi of (node.output && node.output.items) || [])
+                for (const g of _outputEscGroups(oi.metadata, oi.contextVariables, false))
+                  groups.add(g)
           }
           for (const g of groups)
             escGroupCounts.set(g, (escGroupCounts.get(g) || 0) + 1)

@@ -48,8 +48,9 @@ let contentMetadataFilters = []
  * HaloAgentStart — so this takes the variables rather than the output, and
  * callers must not pre-filter on type. `any` is not a condition (it matches
  * everyone) and is dropped, so an output set to `any` throughout is `{}`.
- * escalationGroup is left out: its filter reads the Answer metadata tag through
- * the aggregate set instead. Mirrored by `_outputCtxSet` in index.html.
+ * escalationGroup is left out: its filter reads the tag and the condition
+ * together through the aggregate set (`outputEscGroups`). Mirrored by
+ * `_outputCtxSet` in index.html.
  */
 function outputCtxSet(cvs, isArticle) {
   const set = {}
@@ -67,6 +68,30 @@ function outputCtxSet(cvs, isArticle) {
     if (vals.length) set[name] = vals
   }
   return set
+}
+
+/**
+ * The escalation groups one output is tied to, by either route: the
+ * `escalationGroup` metadata tag it carries (which group it belongs to), and
+ * the values of an `escalationGroup` context-variable condition (the groups it
+ * fires for). The Context tab's escalationGroup chips match both, deliberately:
+ * `theater` exists in the export only as a condition, never as a tag, so a
+ * tag-only filter could not find it at all. `any` is not a group. Mirrored by
+ * `_outputEscGroups` in index.html.
+ */
+function outputEscGroups(meta, cvs, isArticle) {
+  const out = []
+  const push = (g) => {
+    const t = String(g == null ? "" : g).trim()
+    if (t && t !== "any" && !out.includes(t)) out.push(t)
+  }
+  if (meta && meta.escalationGroup != null) push(meta.escalationGroup)
+  for (const cv of cvs || []) {
+    if (ctxVarMap.get(isArticle ? cv.Id : cv.id) !== "escalationGroup") continue
+    const raw = isArticle ? cv.Values || [] : cv.value ? [cv.value] : []
+    for (const valStr of raw) for (const v of String(valStr).split(",")) push(v)
+  }
+  return out
 }
 
 // Parse a query into OR groups of AND terms.
@@ -424,13 +449,13 @@ function precomputeArticle(a) {
   }
 
   // Add aggregate escalation group ctxSet so the escalationGroup filter works.
-  // All groups found across Answer outputs are merged into a single ctxSet so
-  // multi-select (AND logic) can match articles that cover multiple groups.
+  // Every group any output is tied to — by tag or by condition, Answer or
+  // route — is merged into a single ctxSet so multi-select (AND logic) can
+  // match articles that cover multiple groups.
   const _escGroups = []
   for (const o of a.Outputs) {
-    if (o.Type !== "Answer") continue
-    const g = o.OutputMetaData && o.OutputMetaData.escalationGroup
-    if (g && !_escGroups.includes(g)) _escGroups.push(g)
+    for (const g of outputEscGroups(o.OutputMetaData, o.ContextVariables, true))
+      if (!_escGroups.includes(g)) _escGroups.push(g)
   }
   if (_escGroups.length) a._ctxSets.push({ escalationGroup: _escGroups })
 
@@ -465,8 +490,10 @@ function precomputeArticle(a) {
         if (vals.length) _aCtx[name] = vals
       }
     }
-    const _aEscGroup = _ao.OutputMetaData && _ao.OutputMetaData.escalationGroup
-    if (_aEscGroup) _aCtx.escalationGroup = [_aEscGroup]
+    // Tag and condition together, as the item-level aggregate reads them.
+    const _aEscGroups = outputEscGroups(_ao.OutputMetaData, _aCvs, true)
+    if (_aEscGroups.length) _aCtx.escalationGroup = _aEscGroups
+    else delete _aCtx.escalationGroup
     const _as = strip(_aExp)
     const _ar = _arT
     const _ae = expandVarNames(_aExp)
@@ -519,8 +546,9 @@ function precomputeDialog(item) {
           .filter(Boolean)
         if (vals.length) _nCtx[name] = vals
       }
-      const _nEscGroup = _nai.metadata && _nai.metadata.escalationGroup
-      if (_nEscGroup) _nCtx.escalationGroup = [_nEscGroup]
+      const _nEscGroups = outputEscGroups(_nai.metadata, _nCvs, false)
+      if (_nEscGroups.length) _nCtx.escalationGroup = _nEscGroups
+      else delete _nCtx.escalationGroup
       const _ns = strip(_nExp)
       const _nr = _nrT
       const _ne = expandVarNames(_nExp)
@@ -577,13 +605,13 @@ function precomputeDialog(item) {
     }
   }
 
-  // Add aggregate escalation group ctxSet so the escalationGroup filter works.
+  // Add aggregate escalation group ctxSet so the escalationGroup filter works —
+  // tag or condition, Answer or route, as for an Article.
   const _dEscGroups = []
   for (const n of nodes) {
     for (const oi of (n.output && n.output.items) || []) {
-      if (oi.type !== "Answer") continue
-      const g = oi.metadata && oi.metadata.escalationGroup
-      if (g && !_dEscGroups.includes(g)) _dEscGroups.push(g)
+      for (const g of outputEscGroups(oi.metadata, oi.contextVariables, false))
+        if (!_dEscGroups.includes(g)) _dEscGroups.push(g)
     }
   }
   if (_dEscGroups.length) item._ctxSets.push({ escalationGroup: _dEscGroups })

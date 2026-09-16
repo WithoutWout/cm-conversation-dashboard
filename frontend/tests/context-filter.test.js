@@ -105,6 +105,7 @@ vm.runInContext(
   let tDialogMap = new Map()
   ${[
     "_outputCtxSet",
+    "_outputEscGroups",
     "_itemOutputCtxSets",
     "buildContentContextOptions",
     "_tagFilterMatches",
@@ -310,6 +311,65 @@ eq(
 eq("no route snippet when an Answer matched", snippet(A_ANSWER, f("true")), null)
 eq("no route snippet with a query", snippet(A737, f("true"), "x"), null)
 eq("no route snippet without a filter", snippet(A737, []), null)
+
+// ── escalationGroup: the tag and the condition ───────────────────────────────
+// `escalationGroup` is two things in the export: a metadata tag saying which
+// group a Response belongs to, and a context variable an output can be
+// conditioned on. `theater` exists only as the second, so a chip reading the
+// tag alone could never find it. The Context tab's chip matches either.
+const esc = (value) => [{ name: "escalationGroup", value }]
+const E_COND_ANSWER = article(20, [
+  answer(true, acv("any")),
+  answer(false, acv("any", [{ Id: ESC, Values: ["theater"] }])),
+])
+const E_COND_ROUTE = article(21, [
+  route(900, true, "any"),
+  { ...route(901, false, "any"), ContextVariables: acv("any", [{ Id: ESC, Values: ["theater,attractiepark"] }]) },
+])
+const E_TAG_ANSWER = article(22, [
+  { ...answer(true, acv("any")), OutputMetaData: { escalationGroup: "attractiepark" } },
+])
+const E_ANY = article(23, [
+  answer(false, acv("any", [{ Id: ESC, Values: ["any"] }])),
+])
+const E_DIALOG = dialog(903, "Escalation routes", [
+  { ...item("DialogStart", [{ id: ESC, value: "theater" }], { dialogId: 901 }), metadata: { escalationGroup: "overnachten" } },
+])
+const E_ARTS = [E_COND_ANSWER, E_COND_ROUTE, E_TAG_ANSWER, E_ANY]
+const E_DLGS = [E_DIALOG, D_PLAIN]
+const escSearch = searcher(E_ARTS, [...E_DLGS, D_ROUTE_ONLY], CTX_VARS)
+eq(
+  "a group set only as a condition is found — on an Answer and on routes",
+  escSearch(esc("theater")),
+  ["a20", "a21", "d903"],
+)
+eq(
+  "the tag and the condition are both read for the same group",
+  escSearch(esc("attractiepark")),
+  ["a21", "a22"],
+)
+eq("a tag on a route is read too", escSearch(esc("overnachten")), ["d903"])
+eq("\"any\" is not a group", escSearch(esc("any")), [])
+eq(
+  "with a query, the group still has to sit on the Answer the text matched",
+  escSearch(esc("theater"), "t"),
+  ["a20"],
+)
+const escChips = checkCounts("escalationGroup fixture", E_ARTS, [...E_DLGS, D_ROUTE_ONLY], CTX_VARS)
+ok(
+  "a group that is only ever a condition gets a chip",
+  escChips.some((o) => o.name === "escalationGroup" && o.value === "theater"),
+)
+ctx.setData(E_ARTS, [...E_DLGS, D_ROUTE_ONLY], CTX_VARS)
+eq(
+  "a route matched by its escalationGroup condition explains itself",
+  snippet(E_COND_ROUTE, esc("theater")),
+  {
+    label: "Context route",
+    text: "Dialog: Theater only · escalationGroup = theater, attractiepark",
+  },
+)
+eq("an Answer tagged with the group needs no route snippet", snippet(E_TAG_ANSWER, esc("attractiepark")), null)
 
 // ── Renderer and worker read an output identically ──────────────────────────
 function checkMirror(label, articles, dialogs, ctxVars) {
