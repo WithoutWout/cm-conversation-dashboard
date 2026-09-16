@@ -41,6 +41,34 @@ let contentContextFilters = [] // [{name, value}] — active content context fil
 let contentMetadataFilters = []
 
 // ── Utilities ────────────────────────────────────────────────────────────────
+/**
+ * The context conditions one output fires under, as `{name: [values]}`.
+ *
+ * Every output type carries them — Answer, DialogStart, TDialogStart,
+ * HaloAgentStart — so this takes the variables rather than the output, and
+ * callers must not pre-filter on type. `any` is not a condition (it matches
+ * everyone) and is dropped, so an output set to `any` throughout is `{}`.
+ * escalationGroup is left out: its filter reads the Answer metadata tag through
+ * the aggregate set instead. Mirrored by `_outputCtxSet` in index.html.
+ */
+function outputCtxSet(cvs, isArticle) {
+  const set = {}
+  for (const cv of cvs || []) {
+    const name = ctxVarMap.get(isArticle ? cv.Id : cv.id)
+    if (!name || name === "escalationGroup") continue
+    const raw = isArticle ? cv.Values || [] : cv.value ? [cv.value] : []
+    const vals = []
+    for (const valStr of raw) {
+      for (const v of String(valStr).split(",")) {
+        const t = v.trim()
+        if (t && t !== "any") vals.push(t)
+      }
+    }
+    if (vals.length) set[name] = vals
+  }
+  return set
+}
+
 // Parse a query into OR groups of AND terms.
 // "hello world | goodbye" → [["hello","world"],["goodbye"]]
 // When in regex mode, return a single group with the raw query as one term.
@@ -379,32 +407,12 @@ function precomputeArticle(a) {
   a._searchId = String(a.Id)
   a._searchQuestionsUpper = a.Questions.map((qs) => qs.Text.toUpperCase())
 
-  // Build context sets for contextual Answer outputs
-  a._ctxSets = []
-  a._hasDefaultAnswer = false
-  for (const o of a.Outputs) {
-    if (o.Type !== "Answer") continue
-    const cvs = o.ContextVariables || []
-    if (!cvs.some((cv) => cv.Values && !cv.Values.includes("any"))) {
-      a._hasDefaultAnswer = true
-      continue
-    }
-    const ctxSet = {}
-    for (const cv of cvs) {
-      const name = ctxVarMap.get(cv.Id)
-      // escalationGroup is handled by the OutputMetaData aggregate pass below
-      if (!name || name === "escalationGroup") continue
-      const vals = []
-      for (const valStr of cv.Values) {
-        for (const v of valStr.split(",")) {
-          const t = v.trim()
-          if (t && t !== "any") vals.push(t)
-        }
-      }
-      if (vals.length) ctxSet[name] = vals
-    }
-    if (Object.keys(ctxSet).length) a._ctxSets.push(ctxSet)
-  }
+  // One context set per output of every type, in output order. A route into a
+  // Dialog is conditioned on context exactly like an Answer is, and on the real
+  // export most conditions sit on routes: available_livechat_theater is set on
+  // 11 DialogStart outputs and not one Answer. An unconditioned output is an
+  // empty set, which is what lets "not set" pass on it.
+  a._ctxSets = a.Outputs.map((o) => outputCtxSet(o.ContextVariables, true))
 
   // One metadata map per Answer output, in output order. Values are arrays so
   // the filter reads identically to the context one, even though a metadata
@@ -551,31 +559,12 @@ function precomputeDialog(item) {
     ((n.output && n.output.items) || []).some((i) => i.type === "Answer"),
   )
 
-  // Build context sets for contextual Answer items in nodes
+  // One context set per output item across every node, of every type — see
+  // precomputeArticle.
   item._ctxSets = []
-  item._hasDefaultAnswer = false
   for (const n of nodes) {
-    for (const oi of (n.output && n.output.items) || []) {
-      if (oi.type !== "Answer") continue
-      const cvs = oi.contextVariables || []
-      if (!cvs.length) {
-        item._hasDefaultAnswer = true
-        continue
-      }
-      const ctxSet = {}
-      for (const cv of cvs) {
-        const name = ctxVarMap.get(cv.id)
-        // escalationGroup is handled by the metadata aggregate pass below
-        if (!name || !cv.value || name === "escalationGroup") continue
-        const vals = cv.value
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean)
-        if (vals.length) ctxSet[name] = vals
-      }
-      if (Object.keys(ctxSet).length) item._ctxSets.push(ctxSet)
-      else item._hasDefaultAnswer = true
-    }
+    for (const oi of (n.output && n.output.items) || [])
+      item._ctxSets.push(outputCtxSet(oi.contextVariables, false))
   }
 
   // One metadata map per Answer item across every node, matching the Article
@@ -661,8 +650,8 @@ function tagFilterMatches(set, f) {
 const EMPTY_TAG_SET = {}
 
 // Returns true if item passes the active content context filter set.
-// An item passes if it has at least one ctxSet satisfying ALL active filters.
-// For "not set" filters the implicit default answer ({}) is also considered.
+// An item passes if one of its outputs — an Answer or a route — has a ctxSet
+// satisfying ALL active filters.
 // NOTE: escalationGroup is stored in a dedicated aggregate ctxSet separate from
 // per-answer contextVariable ctxSets, so it is checked independently and the
 // results are AND'd with the regular context variable check.
@@ -671,7 +660,7 @@ function matchesContentContext(item) {
   const ctxSets = item._ctxSets || []
 
   // Split filters: escalationGroup uses an item-level aggregate ctxSet;
-  // regular context vars use per-answer ctxSets. Must check independently
+  // regular context vars use per-output ctxSets. Must check independently
   // or combining the two always yields 0 results.
   const escFilters = contentContextFilters.filter(
     (f) => f.name === "escalationGroup",
@@ -693,21 +682,12 @@ function matchesContentContext(item) {
   // ── Regular context variable check ───────────────────────────────────────
   if (!varFilters.length) return true
   // Exclude the escalation aggregate ctxSet — it holds no regular vars and
-  // would falsely satisfy any "__not_set__" check.
-  const varCtxSets = ctxSets.filter((cs) => cs.escalationGroup === undefined)
-  const hasNotSetFilter = varFilters.some((f) => f.value === "__not_set__")
-  if (hasNotSetFilter && item._hasDefaultAnswer) {
-    return (
-      varCtxSets.some((ctxSet) =>
-        varFilters.every((f) => tagFilterMatches(ctxSet, f)),
-      ) ||
-      // The default answer sets nothing, so it is the empty set: "not set"
-      // passes on it, "any" and a literal value cannot.
-      varFilters.every((f) => tagFilterMatches(EMPTY_TAG_SET, f))
-    )
-  }
-  return varCtxSets.some((ctxSet) =>
-    varFilters.every((f) => tagFilterMatches(ctxSet, f)),
+  // would falsely satisfy any "__not_set__" check. Unconditioned outputs are
+  // already in the list as empty sets, so "not set" needs no special case.
+  return ctxSets.some(
+    (ctxSet) =>
+      ctxSet.escalationGroup === undefined &&
+      varFilters.every((f) => tagFilterMatches(ctxSet, f)),
   )
 }
 
@@ -716,9 +696,10 @@ function matchesContentContext(item) {
  *
  * Deliberately simpler than `matchesContentContext`: metadata has no
  * escalationGroup special case (that tag is reachable through the Context tab,
- * where it has always lived) and no implicit default-answer set, because an
- * answer with no metadata is a real entry in `_metaSets` — an empty map — and
- * so already satisfies `__not_set__` on its own.
+ * where it has always lived). Like context, an answer with no metadata is a
+ * real entry in `_metaSets` — an empty map — and so already satisfies
+ * `__not_set__` on its own. Unlike context it reads Answers only: metadata is a
+ * tag on a response, where context is a condition on any output.
  *
  * Filters on different keys must be satisfied by *one* answer, matching how
  * context works: an item whose answer A is `nochat=true` and whose answer B is

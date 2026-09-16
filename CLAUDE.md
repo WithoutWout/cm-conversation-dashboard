@@ -65,7 +65,7 @@ frontend/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
     conv-search.test.js, update-modal.test.js,
-    settings-backup.test.js, metadata-filter.test.js,
+    settings-backup.test.js, metadata-filter.test.js, context-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
     db-migration-progress.test.js, search-bubbles.test.js
