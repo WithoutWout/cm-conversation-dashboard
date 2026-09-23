@@ -1718,16 +1718,27 @@
           transform: rotate(360deg);
         }
       }
-      @keyframes chatReveal {
-        from {
-          opacity: 0;
+      /* A chat search dims what it did not match rather than hiding it; the
+         thread loses .is-focus once the matches are scrolled out of view. */
+      .chat-thread .chat-turn,
+      .chat-thread .system-pill {
+        transition: opacity 0.35s ease;
+      }
+      .chat-thread.is-focus .chat-turn:not(.is-match),
+      .chat-thread.is-focus .system-pill {
+        opacity: 0.3;
+      }
+      @keyframes chatMatchPulse {
+        0% {
+          box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
         }
-        to {
-          opacity: 1;
+        100% {
+          box-shadow: 0 0 0 10px transparent;
         }
       }
-      .chat-turn.chat-turn-new {
-        animation: chatReveal 0.5s ease forwards;
+      .chat-turn.is-match-current {
+        border-radius: 10px;
+        animation: chatMatchPulse 0.9s ease-out 1;
       }
       .spinner {
         width: 18px;
@@ -5443,6 +5454,46 @@
         color: var(--text);
         border: 1px solid var(--border);
         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+      }
+      .chat-match-nav {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 4px 4px 12px;
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        font-size: 0.78rem;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        white-space: nowrap;
+        z-index: 10;
+      }
+      .chat-match-nav-label {
+        margin-right: 4px;
+        font-variant-numeric: tabular-nums;
+      }
+      .chat-match-nav-btn {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: none;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .chat-match-nav-btn:hover:not(:disabled) {
+        background: var(--surface);
+        color: var(--accent);
+      }
+      .chat-match-nav-btn:disabled {
+        opacity: 0.35;
+        cursor: default;
       }
       .chat-thread {
         flex: 1;
@@ -9865,45 +9916,27 @@
               left.
             </div>
           </div>
-          <button
-            class="chat-float-btn"
-            id="chatShowAllBtn"
-            onclick="showFullConversation()"
-            style="display: none"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.2"
+          <div class="chat-match-nav" id="chatMatchNav" style="display: none">
+            <span class="chat-match-nav-label" id="chatMatchNavLabel"></span>
+            <button
+              type="button"
+              class="chat-match-nav-btn"
+              onclick="chatStepMatch(-1)"
+              title="Previous match (Shift+Enter)"
+              aria-label="Previous match"
             >
-              <path
-                d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"
-              />
-            </svg>
-            Show full conversation
-          </button>
-          <button
-            class="chat-float-btn chat-float-btn--secondary"
-            id="chatShowMatchedBtn"
-            onclick="showMatchedOnly()"
-            style="display: none"
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.2"
+              ↑
+            </button>
+            <button
+              type="button"
+              class="chat-match-nav-btn"
+              onclick="chatStepMatch(1)"
+              title="Next match (Enter)"
+              aria-label="Next match"
             >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            Show matched only
-          </button>
+              ↓
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -12039,7 +12072,12 @@
       let activeInteractions = []
       let chatFilter = "all"
       let chatQuery = ""
-      let chatShowAll = false // when true, show full conversation even while searching
+      // The turns the chat search matched, in thread order, and which one the
+      // match navigator is on. See docs/chat-rendering.md → "A match dims the
+      // rest, it never hides it".
+      let chatMatchIds = []
+      let chatMatchIdx = 0
+      let _chatDimObserver = null
       let chatSearchRegex = false // when true, treat chatQuery as a regex
       let chatMatchEntities = false // mirrors the E toggle for the opened chat
       let convImporting = false
@@ -32855,85 +32893,9 @@
       // Date filters handled by custom calendar picker (see initDatePicker / pickDay)
 
       // ── Chat thread ─────────────────────────────────────────────────
-      function showFullConversation() {
-        const thread = document.getElementById("chatThread")
-
-        // Snapshot which turn IDs are currently rendered (these stay visible — no animation)
-        const existingIds = new Set(
-          [...thread.querySelectorAll(".chat-turn")].map(
-            (el) => el.dataset.turnId,
-          ),
-        )
-
-        // Snapshot the first turn whose top edge is at or below the container's visible top
-        const containerRect = thread.getBoundingClientRect()
-        let anchorId = null
-        let anchorOffset = 0
-        for (const turn of thread.querySelectorAll(".chat-turn")) {
-          const rect = turn.getBoundingClientRect()
-          if (rect.top >= containerRect.top) {
-            anchorId = turn.dataset.turnId
-            anchorOffset = rect.top - containerRect.top
-            break
-          }
-        }
-
-        // Hide instantly before re-rendering so the scroll-position change is invisible
-        thread.style.opacity = "0"
-
-        chatShowAll = true
-        renderChatThread()
-
-        // Restore scroll position, then reveal
-        requestAnimationFrame(() => {
-          if (anchorId) {
-            const anchor = thread.querySelector(
-              `.chat-turn[data-turn-id="${anchorId}"]`,
-            )
-            if (anchor) {
-              const anchorCurrentTop =
-                anchor.getBoundingClientRect().top -
-                thread.getBoundingClientRect().top
-              const target = anchorCurrentTop - anchorOffset
-              if (target > 0) {
-                const maxScroll = thread.scrollHeight - thread.clientHeight
-                if (target > maxScroll) {
-                  const spacer = document.createElement("div")
-                  spacer.style.cssText = `height:${
-                    target - maxScroll
-                  }px;flex-shrink:0`
-                  thread.appendChild(spacer)
-                  void thread.scrollHeight
-                }
-                thread.scrollTop = target
-              }
-            }
-          }
-
-          // Show the thread, then animate only the newly added turns
-          thread.style.opacity = ""
-          for (const turn of thread.querySelectorAll(".chat-turn")) {
-            if (!existingIds.has(turn.dataset.turnId)) {
-              turn.classList.add("chat-turn-new")
-              turn.addEventListener(
-                "animationend",
-                () => turn.classList.remove("chat-turn-new"),
-                { once: true },
-              )
-            }
-          }
-        })
-      }
-
-      function showMatchedOnly() {
-        chatShowAll = false
-        renderChatThread()
-      }
-
       async function selectSession(uuid) {
         activeSessionUuid = uuid
         chatFilter = "all"
-        chatShowAll = false
         chatFlaggedTurnMap.clear()
         clearChatSelection()
         // Reset chat filter pills
@@ -34276,8 +34238,7 @@
 
         if (!allTurnsCached.length) {
           thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
-          document.getElementById("chatShowAllBtn").style.display = "none"
-          document.getElementById("chatShowMatchedBtn").style.display = "none"
+          _chatResetMatches(thread)
           perfEnd(perf, "empty")
           return
         }
@@ -34319,8 +34280,9 @@
             (turn.userRow || turn.botRows[0])?.logId ?? Math.random(),
           )
           const selectedCls = selectedTurnIds.has(turnId) ? " selected" : ""
+          const matchCls = matchedIds.has(turnId) ? " is-match" : ""
           const turnInner = renderTurnInner(turn)
-          return `<div class="chat-turn${selectedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onTurnClick(this,event)">${turnInner}</div>`
+          return `<div class="chat-turn${selectedCls}${matchCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onTurnClick(this,event)">${turnInner}</div>`
         }
 
         let feedbackOriginTurnScores = new Map()
@@ -34526,6 +34488,7 @@
 
         const allTurns = allTurnsCached
         feedbackOriginTurnScores = cachedTurnData.feedbackOriginTurnScores
+        const matchedIds = new Set()
 
         function scrollToFilterMatch() {
           const isFilterScroll =
@@ -34621,7 +34584,7 @@
 
         function renderTurnList(turns, done) {
           const shouldChunk =
-            turns.length > 90 && !(chatShowAll && chatQuery)
+            turns.length > 90 && !matchedIds.size
           if (!shouldChunk) {
             thread.innerHTML = turns.map(renderTurn).join("")
             done()
@@ -34651,26 +34614,109 @@
           requestAnimationFrame(appendChunk)
         }
 
-        if (chatQuery && !chatShowAll) {
-          const matched = searchPlan.valid ? allTurns.filter(turnMatches) : []
-          if (!matched.length) {
-            thread.innerHTML = `<div class="chat-empty">No messages match the current filter.</div>`
-            document.getElementById("chatShowAllBtn").style.display = "none"
-            document.getElementById("chatShowMatchedBtn").style.display = "none"
-            perfEnd(perf, "no matches")
-            return
+        // A search dims what it did not match; every turn is rendered, so the
+        // context around a match is one scroll away rather than one click.
+        _chatResetMatches(thread)
+        if (chatQuery && searchPlan.valid) {
+          for (const t of allTurns) {
+            if (t.system || !turnMatches(t)) continue
+            const id = String((t.userRow || t.botRows[0])?.logId ?? "")
+            if (id) matchedIds.add(id)
           }
-          document.getElementById("chatShowAllBtn").style.display = "flex"
-          document.getElementById("chatShowMatchedBtn").style.display = "none"
-          renderTurnList(matched, function () {})
+          chatMatchIds = [...matchedIds]
+        }
+        _chatSyncMatchNav()
+        renderTurnList(allTurns, function () {
+          if (renderSeq !== chatRenderSeq) return
+          if (chatMatchIds.length) {
+            requestAnimationFrame(() => {
+              if (renderSeq !== chatRenderSeq) return
+              chatFocusMatch(0)
+            })
+          } else scrollToFilterMatch()
+        })
+      }
+
+      // Clears the previous search's dimming and its observer. The thread
+      // element outlives every render, so both have to be taken off by hand.
+      function _chatResetMatches(thread) {
+        if (_chatDimObserver) _chatDimObserver.disconnect()
+        _chatDimObserver = null
+        chatMatchIds = []
+        chatMatchIdx = 0
+        thread.classList.remove("is-focus")
+        _chatSyncMatchNav()
+      }
+
+      function _chatSyncMatchNav() {
+        const nav = document.getElementById("chatMatchNav")
+        if (!nav) return
+        const n = chatMatchIds.length
+        if (!chatQuery) {
+          nav.style.display = "none"
           return
         }
+        nav.style.display = "flex"
+        document.getElementById("chatMatchNavLabel").textContent = n
+          ? `Match ${chatMatchIdx + 1} of ${n}`
+          : "No matches"
+        nav
+          .querySelectorAll(".chat-match-nav-btn")
+          .forEach((b) => (b.disabled = n < 2))
+      }
 
-        document.getElementById("chatShowAllBtn").style.display = "none"
-        document.getElementById("chatShowMatchedBtn").style.display = chatQuery
-          ? "flex"
-          : "none"
-        renderTurnList(allTurns, scrollToFilterMatch)
+      // Centres one match, dims everything else, and arms the observer that
+      // lifts the dimming once every match has been scrolled out of view.
+      function chatFocusMatch(idx) {
+        const thread = document.getElementById("chatThread")
+        const n = chatMatchIds.length
+        if (!n) return
+        chatMatchIdx = ((idx % n) + n) % n
+        const el = thread.querySelector(
+          `.chat-turn[data-turn-id="${chatMatchIds[chatMatchIdx]}"]`,
+        )
+        _chatSyncMatchNav()
+        if (!el) return
+        thread.classList.add("is-focus")
+        thread
+          .querySelectorAll(".chat-turn.is-match-current")
+          .forEach((t) => t.classList.remove("is-match-current"))
+        void el.offsetWidth
+        el.classList.add("is-match-current")
+        el.scrollIntoView({ behavior: "auto", block: "center" })
+        _chatArmUndim(thread)
+      }
+
+      function chatStepMatch(delta) {
+        if (chatMatchIds.length) chatFocusMatch(chatMatchIdx + delta)
+      }
+
+      // Armed only once a match has actually been seen on screen: the observer
+      // reports its first state asynchronously, and a match that starts out of
+      // view must not lift the dimming before the centring scroll lands.
+      function _chatArmUndim(thread) {
+        if (_chatDimObserver) _chatDimObserver.disconnect()
+        if (typeof IntersectionObserver === "undefined") return
+        const visible = new Set()
+        let seen = false
+        _chatDimObserver = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) visible.add(e.target)
+              else visible.delete(e.target)
+            }
+            if (visible.size) seen = true
+            else if (seen) {
+              thread.classList.remove("is-focus")
+              _chatDimObserver.disconnect()
+              _chatDimObserver = null
+            }
+          },
+          { root: thread, threshold: 0 },
+        )
+        thread
+          .querySelectorAll(".chat-turn.is-match")
+          .forEach((t) => _chatDimObserver.observe(t))
       }
 
       // Chat filter pills
@@ -34705,11 +34751,16 @@
         renderChatThread()
       })
       let _chatSearchTimer = null
+      // Enter walks the matches, Shift+Enter walks back.
+      document.getElementById("chatSearch").addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" || !chatMatchIds.length) return
+        e.preventDefault()
+        chatStepMatch(e.shiftKey ? -1 : 1)
+      })
       document.getElementById("chatSearch").addEventListener("input", (e) => {
         clearTimeout(_chatSearchTimer)
         _chatSearchTimer = setTimeout(() => {
           chatQuery = e.target.value.trim()
-          chatShowAll = false // reset to matched-turns mode on each new query
           document
             .getElementById("chatClearSearch")
             .classList.toggle("visible", chatQuery.length > 0)
@@ -34724,7 +34775,6 @@
           document.getElementById("chatSearch").value = ""
           document.getElementById("chatClearSearch").classList.remove("visible")
           chatQuery = ""
-          chatShowAll = false
           renderChatThread()
         })
 

@@ -8,6 +8,32 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 
 The chat view turns raw `interactions` rows into turns (`buildChatTurns`) and renders each row's `output_text` through `parseCmOutput`. Both have had bugs that read as "the chat is broken" rather than "the renderer is wrong", so the rules below are load-bearing.
 
+## A match dims the rest, it never hides it
+
+Opening a conversation from a search used to render only the matching turns,
+with a "Show full conversation" button to get the context back. The context is
+the point — what the user asked *before* the matched question is usually why it
+was asked — so now every turn is rendered and the match is found for you:
+
+- **`.is-match` on the turn, `.is-focus` on the thread.** Matching turns carry
+  `.is-match`; while `#chatThread` has `.is-focus`, every other turn and system
+  pill is at 30% opacity. Un-dimming is one class removal, not a re-render.
+- **The first match is centred** (`block: "center"`), pulsed once, and the
+  floating navigator reads `Match 1 of N` with ↑ ↓. Enter / Shift+Enter in the
+  chat search box walk the matches too.
+- **Scrolling away lifts the dimming.** `_chatArmUndim` watches the matched
+  turns with an `IntersectionObserver` rooted at the thread; when none is
+  visible, `.is-focus` goes. It is armed only after a match has been *seen* —
+  the observer reports its first state asynchronously, and a match that starts
+  below the fold would otherwise un-dim the thread before the centring scroll
+  lands. Navigating to a match re-dims and re-arms.
+- **No chunked rendering while a search is active.** The chunked path renders
+  60 turns and appends the rest over later frames; a match in turn 200 would not
+  exist yet when the centring runs.
+- A search with no match shows the whole conversation undimmed and the
+  navigator reads "No matches" — an empty pane said the same thing and hid the
+  conversation that was, after all, in the result list.
+
 ## CM.com output formatting (`parseCmOutput`)
 
 - **`_` is a line break, never emphasis.** A single `_` is `<br>`, a run of two or more (`__`, or `_  _`) is `<br><br>`. **`**text**` is the only bold marker.**
