@@ -8684,6 +8684,191 @@
       #insExportModal {
         z-index: 420;
       }
+      /* Above the export modal: its preview links here. */
+      #insSettingsModal {
+        z-index: 430;
+      }
+      .ins-gear-btn {
+        padding-left: 9px;
+        padding-right: 9px;
+      }
+      .ins-settings-box {
+        width: min(980px, 96vw);
+        max-height: 90vh;
+      }
+      .ins-set-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 540px);
+        gap: 22px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .ins-set-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .ins-set-controls section {
+        padding-bottom: 14px;
+        margin-bottom: 14px;
+        border-bottom: 1px solid var(--border);
+      }
+      .ins-set-controls section:last-child {
+        border-bottom: 0;
+      }
+      .ins-set-controls h4,
+      .ins-set-preview h4 {
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .ins-set-controls .hint {
+        margin-bottom: 8px;
+      }
+      .ins-set-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 6px;
+        font-size: 0.78rem;
+      }
+      .ins-set-row .hint {
+        margin: 0;
+      }
+      .ins-set-label {
+        min-width: 110px;
+        color: var(--text);
+        font-size: 0.78rem;
+      }
+      .ins-set-label.sub {
+        color: var(--muted);
+      }
+      .ins-set-types .ins-set-label {
+        width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ins-set-controls select {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        font-size: 0.76rem;
+        padding: 4px 6px;
+      }
+      .ins-set-mini {
+        font-size: 0.72rem;
+        padding: 3px 9px;
+      }
+      .ins-set-sub {
+        margin: 4px 0 0 24px;
+      }
+      .ins-set-sub.off {
+        opacity: 0.45;
+        pointer-events: none;
+      }
+      .ins-color {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .ins-color input[type="color"] {
+        width: 28px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: none;
+        cursor: pointer;
+      }
+      .ins-color input[type="text"] {
+        width: 110px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        padding: 4px 6px;
+      }
+      .ins-color input.invalid {
+        border-color: var(--red);
+      }
+      .ins-accs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        margin-top: 6px;
+      }
+      .ins-acc {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 6px 4px 2px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: var(--surface);
+      }
+      .ins-acc.dragging {
+        opacity: 0.5;
+      }
+      .ins-acc.drop-here {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+      .ins-acc .ins-color input[type="text"] {
+        width: 76px;
+      }
+      .ins-acc-grip {
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: grab;
+        font-size: 0.7rem;
+        letter-spacing: -2px;
+        padding: 2px 3px;
+      }
+      .ins-acc-n {
+        color: var(--muted);
+        font-size: 0.68rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .ins-acc-btns button {
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 1px 3px;
+      }
+      .ins-acc-btns button:hover:not(:disabled) {
+        color: var(--text);
+      }
+      .ins-acc-btns button:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .ins-set-preview {
+        position: sticky;
+        top: 0;
+      }
+      .ins-set-sample {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 6px;
+      }
+      .ins-set-sample svg {
+        display: block;
+        width: 100%;
+        height: auto;
+        margin-bottom: 8px;
+      }
       .ins-export-box {
         width: min(720px, 94vw);
         max-height: 88vh;
@@ -10978,6 +11163,10 @@
                 title="Choose what to count and which sections to build">
                 <svg class=ui-icon><use href=#i-sliders /></svg> Choose data
               </button>
+              <button class="btn-secondary ins-gear-btn" id="insSettingsBtn" onclick="insOpenSettings()"
+                title="Insights settings — export colours, language, labels and chart types">
+                <svg class=ui-icon><use href=#i-gear /></svg>
+              </button>
               <button class="btn-primary" id="insCopyAllBtn" disabled
                 title="Copy or save the whole dashboard — as rich text for an email, or as plain text">
                 <svg class=ui-icon><use href=#i-download /></svg> Export
@@ -11069,6 +11258,24 @@
         (500) — the toast has to stay visible, because it is what reports a
         copy having succeeded.
       -->
+      <!--
+        Insights settings: export palette, export language, labels, caption
+        parts and chart types, with a live sample. See docs/insights.md →
+        "Insights settings".
+      -->
+      <div class="modal-overlay" id="insSettingsModal">
+        <div class="modal-box ins-settings-box">
+          <div class="modal-header">
+            <h3>Insights settings</h3>
+            <button class="close-btn" onclick="insCloseSettings()">&#x2715;</button>
+          </div>
+          <div class="modal-body" id="insSettingsBody"></div>
+          <div class="modal-footer">
+            <button class="btn-secondary" onclick="insCloseSettings()">Done</button>
+          </div>
+        </div>
+      </div>
+
       <div class="modal-overlay" id="insExportModal">
         <div class="modal-box ins-export-box">
           <div class="modal-header">
@@ -19301,6 +19508,10 @@
         { key: "cm-insights-unit" },
         { key: "cm-insights-sections" },
         { key: "cm-insights-export-caption" },
+        { key: "cm-insights-export-palette" },
+        { key: "cm-insights-export-lang" },
+        { key: "cm-insights-export-options" },
+        { key: "cm-insights-chart-types" },
         { key: "cm-insights-segments" },
         { key: "cm-insights-segment-layout" },
         { key: "cm-insights-segment-presets" },
@@ -21830,6 +22041,9 @@
         // must never read as a value, so it is a step off the background rather
         // than a step on any scale.
         weekend: "#272c42",
+        // Categorical, for charts whose marks are different things rather than
+        // one series — a donut's slices, a stacked bar's segments.
+        cat: ["#3987e5", "#f0a04b", "#2bc4a0", "#a78bfa", "#f472b6", "#94a3b8"],
       }
       const INS_THEME_EXPORT = {
         name: "export",
@@ -21855,6 +22069,270 @@
         critical: "#d03b3b",
         neutral: "#6b7280",
         weekend: "#f3f4f6",
+        cat: ["#2a78d6", "#e8871e", "#1baa8c", "#8b5cf6", "#e0457b", "#64748b"],
+      }
+
+      // ── The export palette, chosen by the user ─────────────────────────
+      //
+      // A chart that goes into a company deck has to wear the company's
+      // colours. The user picks a background, a text colour, an ordered list
+      // of accents and the three status colours; everything else the export
+      // theme needs — gridlines, axis, secondary ink, the weekend wash, the
+      // heatmap ramp — is *derived* from those by mixing, so a dark brand
+      // background produces light gridlines without anyone choosing them.
+      //
+      // The default palette is `INS_THEME_EXPORT` exactly, not a derivation
+      // of it: the hand-tuned steps are validated, and a derivation that is
+      // only close would move every export the moment this shipped.
+      const INS_PALETTE_DEFAULT = {
+        surface: INS_THEME_EXPORT.surface,
+        ink: INS_THEME_EXPORT.ink,
+        accents: INS_THEME_EXPORT.cat.slice(),
+        good: INS_THEME_EXPORT.good,
+        warning: INS_THEME_EXPORT.warning,
+        critical: INS_THEME_EXPORT.critical,
+      }
+      const INS_PALETTE_KEYS = ["surface", "ink", "good", "warning", "critical"]
+
+      function insHexOk(v) {
+        return typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v)
+      }
+
+      /// Read entry by entry: a hand-edited or older file cannot put a
+      /// non-colour into an SVG attribute.
+      function insNormalizePalette(raw) {
+        const out = {
+          ...INS_PALETTE_DEFAULT,
+          accents: INS_PALETTE_DEFAULT.accents.slice(),
+        }
+        if (!raw || typeof raw !== "object") return out
+        for (const k of INS_PALETTE_KEYS) {
+          if (insHexOk(raw[k])) out[k] = raw[k].toLowerCase()
+        }
+        if (Array.isArray(raw.accents)) {
+          const acc = raw.accents.filter(insHexOk).map((c) => c.toLowerCase()).slice(0, 8)
+          if (acc.length) out.accents = acc
+        }
+        return out
+      }
+
+      let insPalette = (() => {
+        try {
+          return insNormalizePalette(
+            JSON.parse(localStorage.getItem("cm-insights-export-palette") || "null"),
+          )
+        } catch (e) {
+          return insNormalizePalette(null)
+        }
+      })()
+
+      function insSavePalette() {
+        try {
+          if (insPaletteIsDefault(insPalette)) {
+            localStorage.removeItem("cm-insights-export-palette")
+          } else {
+            localStorage.setItem("cm-insights-export-palette", JSON.stringify(insPalette))
+          }
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the choice */
+        }
+      }
+
+      function insPaletteIsDefault(p) {
+        return JSON.stringify(insNormalizePalette(p)) === JSON.stringify(insNormalizePalette(null))
+      }
+
+      /// `a` → `b` by `t` in sRGB. Plain, because the derived colours are
+      /// gridlines and washes: steps off a background, not hues to be judged.
+      function insMix(a, b, t) {
+        const pa = parseInt(a.slice(1), 16)
+        const pb = parseInt(b.slice(1), 16)
+        const ch = (v, sh) => (v >> sh) & 255
+        const out = [16, 8, 0].map((sh) =>
+          Math.round(ch(pa, sh) + (ch(pb, sh) - ch(pa, sh)) * t),
+        )
+        return "#" + out.map((v) => v.toString(16).padStart(2, "0")).join("")
+      }
+
+      /// Relative luminance, for picking a label colour that reads on a fill.
+      function insLuma(hex) {
+        const n = parseInt(hex.slice(1), 16)
+        const lin = (v) => {
+          const c = v / 255
+          return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+      }
+
+      /// The theme every export draws in.
+      function insExportTheme(palette) {
+        const p = insNormalizePalette(palette === undefined ? insPalette : palette)
+        if (insPaletteIsDefault(p)) return INS_THEME_EXPORT
+        const series = p.accents[0]
+        return {
+          name: "export",
+          surface: p.surface,
+          ink: p.ink,
+          ink2: insMix(p.ink, p.surface, 0.28),
+          muted: insMix(p.ink, p.surface, 0.45),
+          grid: insMix(p.surface, p.ink, 0.09),
+          axis: insMix(p.surface, p.ink, 0.22),
+          series,
+          // The same shape as the hand-tuned ramp: a bare tint off the surface
+          // for "nothing", then the accent from faint to full, then one step
+          // past it towards the ink.
+          ramp: [
+            insMix(p.surface, p.ink, 0.05),
+            insMix(p.surface, series, 0.14),
+            insMix(p.surface, series, 0.28),
+            insMix(p.surface, series, 0.5),
+            insMix(p.surface, series, 0.74),
+            series,
+            insMix(series, p.ink, 0.28),
+          ],
+          good: p.good,
+          warning: p.warning,
+          serious: insMix(p.warning, p.critical, 0.5),
+          critical: p.critical,
+          neutral: insMix(p.ink, p.surface, 0.45),
+          weekend: insMix(p.surface, p.ink, 0.05),
+          cat: p.accents.slice(),
+        }
+      }
+
+      // ── How a chart is drawn: type, labels, caption ────────────────────
+      //
+      // Which chart a card is drawn as, chosen per card. Only forms that are
+      // honest for the card's data are offered: a line needs an ordered axis,
+      // a donut needs parts of one whole. A heatmap and the Segments table are
+      // what they are.
+      const INS_CHART_KINDS = {
+        volume: ["auto", "columns", "line", "area"],
+        hour: ["columns", "line", "area"],
+        length: ["columns", "bars"],
+        recognition: ["columns", "bars", "donut", "stack"],
+        feedback: ["stack", "donut", "bars", "columns"],
+        recogType: ["bars", "columns", "donut", "stack"],
+        dialogStatus: ["bars", "columns", "donut", "stack"],
+        context: ["bars", "columns", "donut", "stack"],
+        metadata: ["bars", "columns", "donut", "stack"],
+        cultures: ["bars", "columns", "donut", "stack"],
+        entities: ["bars", "columns"],
+        questions: ["bars", "columns"],
+        articles: ["bars", "columns"],
+        dialogs: ["bars", "columns"],
+        dialogNodes: ["bars", "columns"],
+      }
+      const INS_CHART_KIND_NAMES = {
+        auto: "Automatic",
+        columns: "Columns",
+        bars: "Bars",
+        line: "Line",
+        area: "Area",
+        donut: "Donut",
+        stack: "100% bar",
+      }
+
+      function insNormalizeChartTypes(raw) {
+        const out = {}
+        if (!raw || typeof raw !== "object") return out
+        for (const [id, kind] of Object.entries(raw)) {
+          if (INS_CHART_KINDS[id] && INS_CHART_KINDS[id].includes(kind)) out[id] = kind
+        }
+        return out
+      }
+
+      let insChartTypes = (() => {
+        try {
+          return insNormalizeChartTypes(
+            JSON.parse(localStorage.getItem("cm-insights-chart-types") || "null"),
+          )
+        } catch (e) {
+          return {}
+        }
+      })()
+
+      function insSaveChartTypes() {
+        try {
+          localStorage.setItem("cm-insights-chart-types", JSON.stringify(insChartTypes))
+        } catch (e) {
+          /* not a reason to refuse the choice */
+        }
+      }
+
+      /// The kind a card is drawn as, or `null` to keep the one it was built
+      /// with. `auto` is the volume card's own rule (columns up to 62 days).
+      function insChartKindFor(id, types) {
+        const k = (types || insChartTypes)[id]
+        return k && k !== "auto" ? k : null
+      }
+
+      /// How labels read. Applied on screen as well as in exports — this is how
+      /// the data is presented, not a property of one file.
+      const INS_LABEL_DEFAULTS = {
+        weekdayTicks: false,
+        weekend: true,
+        dateFmt: "iso",
+        hourFmt: "hh",
+        valueLabels: "auto",
+        capTitle: true,
+        capNote: true,
+        capSearch: true,
+        capUnit: true,
+        capZone: true,
+      }
+      const INS_LABEL_CHOICES = {
+        dateFmt: ["iso", "dm", "dmon"],
+        hourFmt: ["hh", "hhmm", "ampm"],
+        valueLabels: ["auto", "always", "never"],
+      }
+
+      function insNormalizeLabelOpts(raw) {
+        const out = { ...INS_LABEL_DEFAULTS }
+        if (!raw || typeof raw !== "object") return out
+        for (const [k, v] of Object.entries(INS_LABEL_DEFAULTS)) {
+          if (typeof v === "boolean" && typeof raw[k] === "boolean") out[k] = raw[k]
+          else if (INS_LABEL_CHOICES[k] && INS_LABEL_CHOICES[k].includes(raw[k])) out[k] = raw[k]
+        }
+        return out
+      }
+
+      let insLabelOpts = (() => {
+        try {
+          return insNormalizeLabelOpts(
+            JSON.parse(localStorage.getItem("cm-insights-export-options") || "null"),
+          )
+        } catch (e) {
+          return insNormalizeLabelOpts(null)
+        }
+      })()
+
+      function insSaveLabelOpts() {
+        try {
+          localStorage.setItem("cm-insights-export-options", JSON.stringify(insLabelOpts))
+        } catch (e) {
+          /* not a reason to refuse the choice */
+        }
+      }
+
+      let insExportLang = (() => {
+        try {
+          // A literal list, not `INS_LANGS`: that is declared further down and
+          // is still in its temporal dead zone when this runs.
+          const l = localStorage.getItem("cm-insights-export-lang")
+          return ["en", "de", "nl"].includes(l) ? l : "en"
+        } catch (e) {
+          return "en"
+        }
+      })()
+
+      function insSaveExportLang() {
+        try {
+          if (insExportLang === "en") localStorage.removeItem("cm-insights-export-lang")
+          else localStorage.setItem("cm-insights-export-lang", insExportLang)
+        } catch (e) {
+          /* not a reason to refuse the choice */
+        }
       }
 
       // Never the app's own `-apple-system` stack. An exported SVG is
@@ -21888,23 +22366,425 @@
         return s.slice(0, max) + "…"
       }
 
+      // ── Export language ───────────────────────────────────────────────
+      //
+      // An exported chart, table or report can be written in English, German
+      // or Dutch. The screen stays English: this is a property of the thing
+      // that leaves, chosen in Insights settings, and the dashboard someone is
+      // working in should not change language under them.
+      //
+      // The mechanism is deliberately small. Every user-facing literal in the
+      // Insights builders goes through `insT(english)`, and the English string
+      // *is* the key — so an untranslated phrase degrades to English rather
+      // than to a key name, and reading the code still reads the text. The
+      // language is a module-level setting, `insCurLang`, which `insWithLang`
+      // flips around a synchronous build: the export asks for the cards again
+      // in its own language rather than translating the screen's cards after
+      // the fact, which is what keeps data labels (`Zero`, `Thumbs up`) that
+      // double as colour keys working — the colour is decided from the key
+      // before the label is translated.
+      const INS_LANGS = {
+        en: { name: "English", tag: "en-GB" },
+        de: { name: "Deutsch", tag: "de-DE" },
+        nl: { name: "Nederlands", tag: "nl-NL" },
+      }
+
+      let insCurLang = "en"
+
+      /// Run `fn` with every Insights string in `lang`. Synchronous only — an
+      /// `await` inside would leave the language switched for whatever the
+      /// event loop runs next, so async callers pass `lang` to `insT` instead.
+      function insWithLang(lang, fn) {
+        const prev = insCurLang
+        insCurLang = INS_LANGS[lang] ? lang : "en"
+        try {
+          return fn()
+        } finally {
+          insCurLang = prev
+        }
+      }
+
+      /// A phrase in the current (or given) language, with `{name}` slots
+      /// filled from `vars`.
+      function insT(key, vars, lang) {
+        const dict = INS_I18N[lang || insCurLang]
+        let s = dict && dict[key] != null ? dict[key] : key
+        if (vars) {
+          s = s.replace(/\{(\w+)\}/g, (m, k) => (vars[k] != null ? String(vars[k]) : m))
+        }
+        return s
+      }
+
+      /// Singular and plural of the nouns the dashboard counts in. English
+      /// keeps its `-s` rule in `insPlural`; the other two need real forms.
+      const INS_NOUNS = {
+        de: {
+          conversations: ["Gespräch", "Gespräche"],
+          interactions: ["Interaktion", "Interaktionen"],
+          "matching interactions": ["passende Interaktion", "passende Interaktionen"],
+          "more values": ["weiterer Wert", "weitere Werte"],
+          values: ["Wert", "Werte"],
+          rows: ["Zeile", "Zeilen"],
+          charts: ["Diagramm", "Diagramme"],
+        },
+        nl: {
+          conversations: ["gesprek", "gesprekken"],
+          interactions: ["interactie", "interacties"],
+          "matching interactions": ["overeenkomende interactie", "overeenkomende interacties"],
+          "more values": ["andere waarde", "andere waarden"],
+          values: ["waarde", "waarden"],
+          rows: ["rij", "rijen"],
+          charts: ["grafiek", "grafieken"],
+        },
+      }
+
+      /// A plural noun on its own, in the current language.
+      function insNoun(unit) {
+        const forms = INS_NOUNS[insCurLang] && INS_NOUNS[insCurLang][unit]
+        return forms ? forms[1] : unit
+      }
+
+      /// Weekday abbreviations, Sunday first — the index `getUTCDay` returns.
+      const INS_WEEKDAY_NAMES = {
+        en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+        de: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"],
+        nl: ["zo", "ma", "di", "wo", "do", "vr", "za"],
+      }
+      function insWeekdayNames() {
+        return INS_WEEKDAY_NAMES[insCurLang] || INS_WEEKDAY_NAMES.en
+      }
+      /// Monday first, the order the heatmap reads in.
+      function insWeekdayNamesMon() {
+        const n = insWeekdayNames()
+        return n.slice(1).concat(n[0])
+      }
+
+      /// The locale numbers are formatted in. English keeps the host's — what
+      /// the dashboard has always done — and the other two use their own, so a
+      /// German export reads `1.284` and `57,5 %` the way its reader expects.
+      function insLocale() {
+        return insCurLang === "en" ? undefined : INS_LANGS[insCurLang].tag
+      }
+      /// A decimal point in the current language.
+      function insDec(s) {
+        return insCurLang === "en" ? s : String(s).replace(".", ",")
+      }
+
+      // Keyed by the English phrase. `{x}` slots are filled by `insT`.
+      const INS_I18N = {
+        de: {
+          // Sections
+          Volume: "Volumen",
+          Quality: "Qualität",
+          Context: "Kontext",
+          Metadata: "Metadaten",
+          Content: "Inhalt",
+          Segments: "Segmente",
+          // Volume
+          "Interactions per day": "Interaktionen pro Tag",
+          "Conversations per day": "Gespräche pro Tag",
+          "Counted on the day the interaction happened. Days with nothing in them are shown as gaps.":
+            "Gezählt am Tag der Interaktion. Tage ohne Daten erscheinen als Lücken.",
+          "Counted on the day the conversation started. Days with nothing in them are shown as gaps.":
+            "Gezählt am Tag, an dem das Gespräch begann. Tage ohne Daten erscheinen als Lücken.",
+          "By hour of day": "Nach Tageszeit",
+          "The hour of day each interaction happened.": "Die Stunde, in der jede Interaktion stattfand.",
+          "The hour of day each matching interaction happened.":
+            "Die Stunde, in der jede passende Interaktion stattfand.",
+          "The hour of day each conversation started.": "Die Stunde, in der jedes Gespräch begann.",
+          "Hour ({zone})": "Stunde ({zone})",
+          "Day of week × hour": "Wochentag × Stunde",
+          "The same, laid out as a week. Darker is busier.":
+            "Dasselbe als Woche dargestellt. Dunkler heißt mehr Betrieb.",
+          "Matching interactions per conversation": "Passende Interaktionen pro Gespräch",
+          "Conversation length": "Gesprächslänge",
+          "How many of a conversation's interactions matched. This is the one chart that counts conversations in both readings.":
+            "Wie viele Interaktionen eines Gesprächs passten. Dieses Diagramm zählt in beiden Lesarten Gespräche.",
+          "Interactions per conversation, binned.": "Interaktionen pro Gespräch, gruppiert.",
+          "Matching interactions": "Passende Interaktionen",
+          Interactions: "Interaktionen",
+          Day: "Tag",
+          // Quality
+          "Recognition score per interaction": "Erkennungswert pro Interaktion",
+          "Lowest recognition score per conversation": "Niedrigster Erkennungswert pro Gespräch",
+          "The score on each matching interaction itself — there is no worst-of to take. GenAI answers are not scored.":
+            "Der Wert jeder passenden Interaktion selbst. GenAI-Antworten werden nicht bewertet.",
+          "The worst-scored turn in each conversation — the same measure the Low % and Zero % pills filter on. GenAI answers are not scored.":
+            "Die am schlechtesten bewertete Runde jedes Gesprächs. GenAI-Antworten werden nicht bewertet.",
+          Recognition: "Erkennung",
+          Zero: "Null",
+          "Under 40%": "Unter 40 %",
+          "Not scored": "Nicht bewertet",
+          Feedback: "Feedback",
+          "Whether anyone rated an answer in the conversation.":
+            "Ob im Gespräch eine Antwort bewertet wurde.",
+          "Thumbs up": "Daumen hoch",
+          "Thumbs down": "Daumen runter",
+          Both: "Beides",
+          "No feedback given": "Kein Feedback",
+          "How the answer was found": "Wie die Antwort gefunden wurde",
+          "Counted per matching interaction.": "Gezählt pro passender Interaktion.",
+          "Counted per interaction, not per conversation.": "Gezählt pro Interaktion, nicht pro Gespräch.",
+          "Recognition type": "Erkennungsart",
+          "Dialog outcome": "Dialog-Ergebnis",
+          "How the matching interactions left the Dialog they were in.":
+            "Wie die passenden Interaktionen ihren Dialog verlassen haben.",
+          "How conversations left the Dialog they were in.": "Wie Gespräche ihren Dialog verlassen haben.",
+          Outcome: "Ergebnis",
+          // Context / Metadata notes
+          "Share of the {n} {noun} that set this key": "Anteil der {n} {noun}, die diesen Schlüssel gesetzt haben",
+          "; {n} never set it": "; {n} haben ihn nie gesetzt",
+          " Context and metadata are recorded per conversation, so each interaction is counted under the value its conversation carried.":
+            " Kontext und Metadaten werden pro Gespräch erfasst; jede Interaktion zählt unter dem Wert ihres Gesprächs.",
+          " Showing the top {shown} of {total} values.": " Die häufigsten {shown} von {total} Werten.",
+          " Some {noun} carried more than one value, so these add up to more than {n}.":
+            " Einige {noun} hatten mehr als einen Wert, daher ergibt die Summe mehr als {n}.",
+          // Content
+          "Entities recognised": "Erkannte Entitäten",
+          "The entity the recognizer matched on the interaction itself, not the wording that triggered it.":
+            "Die erkannte Entität der Interaktion, nicht der auslösende Wortlaut.",
+          "The entity the recognizer matched, not the wording that triggered it.":
+            "Die erkannte Entität, nicht der auslösende Wortlaut.",
+          Entity: "Entität",
+          "Most common opening questions": "Häufigste Einstiegsfragen",
+          "The first real thing the user said, grouped case-insensitively.":
+            "Die erste echte Nachricht des Nutzers, ohne Beachtung der Groß-/Kleinschreibung gruppiert.",
+          "Opening question": "Einstiegsfrage",
+          "Articles that answered": "Antwortende Artikel",
+          "Matching interactions this Article produced.": "Passende Interaktionen, die dieser Artikel beantwortet hat.",
+          "Conversations in which this Article produced an answer.":
+            "Gespräche, in denen dieser Artikel eine Antwort gab.",
+          Article: "Artikel",
+          "Dialogs walked through": "Durchlaufene Dialoge",
+          "Matching interactions that passed through the Dialog, whether or not it answered.":
+            "Passende Interaktionen, die den Dialog durchlaufen haben, ob er geantwortet hat oder nicht.",
+          "Conversations that passed through the Dialog, whether or not it answered.":
+            "Gespräche, die den Dialog durchlaufen haben, ob er geantwortet hat oder nicht.",
+          Dialog: "Dialog",
+          "Dialog nodes that answered": "Antwortende Dialogknoten",
+          "The specific node an answer came from.": "Der Knoten, von dem eine Antwort kam.",
+          "Dialog node": "Dialogknoten",
+          Cultures: "Kulturen",
+          Culture: "Kultur",
+          // Segments
+          "Segment comparison": "Segmentvergleich",
+          "Every interaction of the conversations in each slice, in both readings. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score of the turns it matched.":
+            "Alle Interaktionen der Gespräche in jedem Segment, in beiden Lesarten. Positives Feedback ist ein Anteil der bewerteten Runden; die Erkennungsrate ist ein Anteil der vom Erkenner bewerteten Runden, GenAI-Antworten zählen also nicht mit; die Erkennungsqualität ist der Durchschnittswert der erkannten Runden.",
+          Segment: "Segment",
+          Total: "Gesamt",
+          "Feedback interactions": "Feedback-Interaktionen",
+          "Positive feedback": "Positives Feedback",
+          "Recognition rate": "Erkennungsrate",
+          "Recognition quality": "Erkennungsqualität",
+          Conversations: "Gespräche",
+          "{n} not shown": "{n} nicht angezeigt",
+          "some conversations set two values, so these rows overlap":
+            "manche Gespräche setzen zwei Werte, daher überschneiden sich diese Zeilen",
+          "nothing recorded for this key in this result": "für diesen Schlüssel ist hier nichts erfasst",
+          // Tiles and unit line
+          "they came from": "aus denen sie stammen",
+          "Of all interactions": "Aller Interaktionen",
+          "in those conversations": "in diesen Gesprächen",
+          "Median length": "Median-Länge",
+          GenAI: "GenAI",
+          "Zero recognition": "Keine Erkennung",
+          "Under {n}%": "Unter {n} %",
+          "in {n} conversations": "in {n} Gesprächen",
+          " · {pct} of their {n} interactions": " · {pct} ihrer {n} Interaktionen",
+          // Search summary
+          Search: "Suche",
+          Regex: "Regex",
+          user: "Nutzer",
+          bot: "Bot",
+          entities: "Entitäten",
+          Filter: "Filter",
+          "GenAI answers only": "Nur GenAI-Antworten",
+          "Thumbs down only": "Nur Daumen runter",
+          "Low recognition only": "Nur niedrige Erkennung",
+          "Zero recognition only": "Nur ohne Erkennung",
+          Dates: "Zeitraum",
+          start: "Beginn",
+          latest: "neueste",
+          Scope: "Umfang",
+          "Everything in the database": "Alles in der Datenbank",
+          "{name} not set": "{name} nicht gesetzt",
+          "{name} set": "{name} gesetzt",
+          "(empty)": "(leer)",
+          "times in {zone}": "Zeiten in {zone}",
+          // Tables and charts
+          Label: "Bezeichnung",
+          Weekday: "Wochentag",
+          Share: "Anteil",
+          "{n} per hour": "{n} pro Stunde",
+          Other: "Sonstige",
+          // Report
+          "Conversation insights": "Gesprächsanalyse",
+          "All times {zone}. Charts count {subject} unless the note says otherwise.":
+            "Alle Zeiten {zone}. Diagramme zählen {subject}, sofern nicht anders angegeben.",
+          "Generated by CAI Dashboard": "Erstellt mit CAI Dashboard",
+        },
+        nl: {
+          Volume: "Volume",
+          Quality: "Kwaliteit",
+          Context: "Context",
+          Metadata: "Metadata",
+          Content: "Content",
+          Segments: "Segmenten",
+          "Interactions per day": "Interacties per dag",
+          "Conversations per day": "Gesprekken per dag",
+          "Counted on the day the interaction happened. Days with nothing in them are shown as gaps.":
+            "Geteld op de dag van de interactie. Dagen zonder gegevens zijn zichtbaar als gaten.",
+          "Counted on the day the conversation started. Days with nothing in them are shown as gaps.":
+            "Geteld op de dag waarop het gesprek begon. Dagen zonder gegevens zijn zichtbaar als gaten.",
+          "By hour of day": "Per uur van de dag",
+          "The hour of day each interaction happened.": "Het uur waarop elke interactie plaatsvond.",
+          "The hour of day each matching interaction happened.":
+            "Het uur waarop elke overeenkomende interactie plaatsvond.",
+          "The hour of day each conversation started.": "Het uur waarop elk gesprek begon.",
+          "Hour ({zone})": "Uur ({zone})",
+          "Day of week × hour": "Dag van de week × uur",
+          "The same, laid out as a week. Darker is busier.":
+            "Hetzelfde, uitgezet als week. Donkerder is drukker.",
+          "Matching interactions per conversation": "Overeenkomende interacties per gesprek",
+          "Conversation length": "Gespreksduur",
+          "How many of a conversation's interactions matched. This is the one chart that counts conversations in both readings.":
+            "Hoeveel interacties van een gesprek overeenkwamen. Deze grafiek telt in beide lezingen gesprekken.",
+          "Interactions per conversation, binned.": "Interacties per gesprek, gegroepeerd.",
+          "Matching interactions": "Overeenkomende interacties",
+          Interactions: "Interacties",
+          Day: "Dag",
+          "Recognition score per interaction": "Herkenningsscore per interactie",
+          "Lowest recognition score per conversation": "Laagste herkenningsscore per gesprek",
+          "The score on each matching interaction itself — there is no worst-of to take. GenAI answers are not scored.":
+            "De score van elke overeenkomende interactie zelf. GenAI-antwoorden krijgen geen score.",
+          "The worst-scored turn in each conversation — the same measure the Low % and Zero % pills filter on. GenAI answers are not scored.":
+            "De laagst gescoorde beurt in elk gesprek. GenAI-antwoorden krijgen geen score.",
+          Recognition: "Herkenning",
+          Zero: "Nul",
+          "Under 40%": "Onder 40%",
+          "Not scored": "Geen score",
+          Feedback: "Feedback",
+          "Whether anyone rated an answer in the conversation.":
+            "Of er in het gesprek een antwoord is beoordeeld.",
+          "Thumbs up": "Duim omhoog",
+          "Thumbs down": "Duim omlaag",
+          Both: "Beide",
+          "No feedback given": "Geen feedback",
+          "How the answer was found": "Hoe het antwoord gevonden werd",
+          "Counted per matching interaction.": "Geteld per overeenkomende interactie.",
+          "Counted per interaction, not per conversation.": "Geteld per interactie, niet per gesprek.",
+          "Recognition type": "Herkenningstype",
+          "Dialog outcome": "Dialoog-uitkomst",
+          "How the matching interactions left the Dialog they were in.":
+            "Hoe de overeenkomende interacties hun Dialoog verlieten.",
+          "How conversations left the Dialog they were in.": "Hoe gesprekken hun Dialoog verlieten.",
+          Outcome: "Uitkomst",
+          "Share of the {n} {noun} that set this key": "Aandeel van de {n} {noun} die deze sleutel zetten",
+          "; {n} never set it": "; {n} zetten hem nooit",
+          " Context and metadata are recorded per conversation, so each interaction is counted under the value its conversation carried.":
+            " Context en metadata worden per gesprek vastgelegd; elke interactie telt onder de waarde van haar gesprek.",
+          " Showing the top {shown} of {total} values.": " De top {shown} van {total} waarden.",
+          " Some {noun} carried more than one value, so these add up to more than {n}.":
+            " Sommige {noun} hadden meer dan één waarde, dus het totaal is meer dan {n}.",
+          "Entities recognised": "Herkende entiteiten",
+          "The entity the recognizer matched on the interaction itself, not the wording that triggered it.":
+            "De herkende entiteit van de interactie, niet de formulering die hem activeerde.",
+          "The entity the recognizer matched, not the wording that triggered it.":
+            "De herkende entiteit, niet de formulering die hem activeerde.",
+          Entity: "Entiteit",
+          "Most common opening questions": "Meest gestelde openingsvragen",
+          "The first real thing the user said, grouped case-insensitively.":
+            "Het eerste echte bericht van de gebruiker, zonder onderscheid tussen hoofd- en kleine letters.",
+          "Opening question": "Openingsvraag",
+          "Articles that answered": "Artikelen die antwoordden",
+          "Matching interactions this Article produced.": "Overeenkomende interacties die dit Artikel beantwoordde.",
+          "Conversations in which this Article produced an answer.":
+            "Gesprekken waarin dit Artikel een antwoord gaf.",
+          Article: "Artikel",
+          "Dialogs walked through": "Doorlopen Dialogen",
+          "Matching interactions that passed through the Dialog, whether or not it answered.":
+            "Overeenkomende interacties die de Dialoog doorliepen, of hij nu antwoordde of niet.",
+          "Conversations that passed through the Dialog, whether or not it answered.":
+            "Gesprekken die de Dialoog doorliepen, of hij nu antwoordde of niet.",
+          Dialog: "Dialoog",
+          "Dialog nodes that answered": "Dialoognodes die antwoordden",
+          "The specific node an answer came from.": "De node waar een antwoord vandaan kwam.",
+          "Dialog node": "Dialoognode",
+          Cultures: "Culturen",
+          Culture: "Cultuur",
+          "Segment comparison": "Segmentvergelijking",
+          "Every interaction of the conversations in each slice, in both readings. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score of the turns it matched.":
+            "Alle interacties van de gesprekken in elk segment, in beide lezingen. Positieve feedback is een aandeel van de beoordeelde beurten; het herkenningspercentage is een aandeel van de beurten die de herkenner scoorde, dus GenAI-antwoorden tellen niet mee; de herkenningskwaliteit is de gemiddelde score van de herkende beurten.",
+          Segment: "Segment",
+          Total: "Totaal",
+          "Feedback interactions": "Feedback-interacties",
+          "Positive feedback": "Positieve feedback",
+          "Recognition rate": "Herkenningspercentage",
+          "Recognition quality": "Herkenningskwaliteit",
+          Conversations: "Gesprekken",
+          "{n} not shown": "{n} niet getoond",
+          "some conversations set two values, so these rows overlap":
+            "sommige gesprekken zetten twee waarden, dus deze rijen overlappen",
+          "nothing recorded for this key in this result": "niets vastgelegd voor deze sleutel in dit resultaat",
+          "they came from": "waar ze uit kwamen",
+          "Of all interactions": "Van alle interacties",
+          "in those conversations": "in die gesprekken",
+          "Median length": "Mediane lengte",
+          GenAI: "GenAI",
+          "Zero recognition": "Geen herkenning",
+          "Under {n}%": "Onder {n}%",
+          "in {n} conversations": "in {n} gesprekken",
+          " · {pct} of their {n} interactions": " · {pct} van hun {n} interacties",
+          Search: "Zoekopdracht",
+          Regex: "Regex",
+          user: "gebruiker",
+          bot: "bot",
+          entities: "entiteiten",
+          Filter: "Filter",
+          "GenAI answers only": "Alleen GenAI-antwoorden",
+          "Thumbs down only": "Alleen duim omlaag",
+          "Low recognition only": "Alleen lage herkenning",
+          "Zero recognition only": "Alleen geen herkenning",
+          Dates: "Periode",
+          start: "begin",
+          latest: "laatste",
+          Scope: "Bereik",
+          "Everything in the database": "Alles in de database",
+          "{name} not set": "{name} niet gezet",
+          "{name} set": "{name} gezet",
+          "(empty)": "(leeg)",
+          "times in {zone}": "tijden in {zone}",
+          Label: "Label",
+          Weekday: "Weekdag",
+          Share: "Aandeel",
+          "{n} per hour": "{n} per uur",
+          Other: "Overig",
+          "Conversation insights": "Gespreksinzichten",
+          "All times {zone}. Charts count {subject} unless the note says otherwise.":
+            "Alle tijden {zone}. Grafieken tellen {subject}, tenzij anders vermeld.",
+          "Generated by CAI Dashboard": "Gemaakt met CAI Dashboard",
+        },
+      }
+
       function insNum(n) {
-        return Number(n || 0).toLocaleString()
+        return Number(n || 0).toLocaleString(insLocale())
       }
 
       /// 1,284 · 12.9K · 1.2M — for stat tiles, where the exact digit matters
       /// less than the magnitude fitting on one line.
       function insCompact(n) {
         const v = Number(n || 0)
-        if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(1) + "M"
-        if (Math.abs(v) >= 10000) return (v / 1000).toFixed(1) + "K"
-        return v.toLocaleString()
+        if (Math.abs(v) >= 1000000) return insDec((v / 1000000).toFixed(1)) + "M"
+        if (Math.abs(v) >= 10000) return insDec((v / 1000).toFixed(1)) + "K"
+        return v.toLocaleString(insLocale())
       }
 
       /// "1 conversation", "4 conversations". Every tooltip on this dashboard
       /// ends in a counted noun, and `1 conversations` reads as a bug in the
       /// number rather than in the sentence.
       function insPlural(n, unit) {
+        const forms = INS_NOUNS[insCurLang] && INS_NOUNS[insCurLang][unit]
+        if (forms) return insNum(n) + " " + forms[Number(n) === 1 ? 0 : 1]
         const word = Number(n) === 1 && unit.endsWith("s") ? unit.slice(0, -1) : unit
         return insNum(n) + " " + word
       }
@@ -21912,8 +22792,9 @@
       function insPct(part, whole) {
         if (!whole) return "0%"
         const p = (Number(part || 0) / whole) * 100
-        if (p > 0 && p < 0.1) return "<0.1%"
-        return (p >= 10 ? Math.round(p) : Math.round(p * 10) / 10) + "%"
+        const sign = insCurLang === "de" ? " %" : "%"
+        if (p > 0 && p < 0.1) return "<" + insDec("0.1") + sign
+        return insDec(String(p >= 10 ? Math.round(p) : Math.round(p * 10) / 10)) + sign
       }
 
       /// Axis ticks on 1 / 2 / 5 × 10ⁿ, so the reader gets 0 · 20 · 40 rather
@@ -22011,10 +22892,25 @@
       function insColumnChart(spec, theme) {
         const data = spec.data || []
         const w = spec.width || INS_COL_W
-        const labelDirect = data.length <= 8
+        const labelDirect =
+          spec.valueLabels === "always"
+            ? data.length <= 40
+            : spec.valueLabels === "never"
+            ? false
+            : data.length <= 8
         const padT = labelDirect ? 22 : 12
         const padB = spec.rotateLabels ? 40 : 24
-        const padL = labelDirect ? 8 : 40
+        // A tilted label hangs down and to the *left* of its column, so the
+        // first one needs room before the plot starts or it is cut by the
+        // canvas edge — which longer labels (a weekday, a month name) reach.
+        const tilted = spec.rotateLabels
+          ? Math.min(
+              padB * 1.6,
+              Math.max(0, ...data.map((d) => insTextWidth(d.tick || d.label || "", 10))),
+            ) * 0.77
+          : 0
+        const firstBand = (w - 48) / Math.max(1, data.length)
+        const padL = Math.max(labelDirect ? 8 : 40, Math.ceil(tilted - firstBand / 2 + 6))
         const padR = 8
         const plotH = spec.plotHeight || 150
         const h = padT + plotH + padB + (spec.padBottom || 0)
@@ -22056,7 +22952,7 @@
           const x = cx - barW / 2
           const value = d.value || 0
           const bh = (value / scaleMax) * plotH
-          const fill = d.color || theme.series
+          const fill = insToneOf(d.color, theme) || theme.series
           if (bh > 0) {
             // Rounded at the data end, square at the baseline — the shape says
             // which end is the value and which is the axis.
@@ -22084,7 +22980,7 @@
           if (labelDirect && value > 0) {
             out += insText(cx, y0 - bh - 7, insNum(value), {
               fill: theme.ink,
-              size: 11,
+              size: data.length > 12 ? 8 : 11,
               anchor: "middle",
               weight: "600",
             })
@@ -22183,7 +23079,7 @@
                 by + barH
               ).toFixed(2)} L${gutter.toFixed(2)} ${(by + barH).toFixed(
                 2,
-              )} Z" fill="${insAttr(d.color || theme.series)}"/>`
+              )} Z" fill="${insAttr(insToneOf(d.color, theme) || theme.series)}"/>`
           }
           out += insText(gutter + bw + 7, cy + 3.5, tips[i], {
             fill: theme.ink,
@@ -22210,7 +23106,7 @@
       /// A 2px gap in the surface colour separates the segments; a stroke
       /// around them would add ink that is not data.
       function insStackChart(spec, theme) {
-        const data = (spec.data || []).filter((d) => (d.value || 0) > 0)
+        const data = insFoldSlices(spec.data, INS_MAX_SLICES)
         const w = spec.width || INS_ROW_W
         const barH = 26
         const legendRows = data.length
@@ -22223,13 +23119,13 @@
         data.forEach((d, i) => {
           const raw = ((d.value || 0) / total) * w
           const segW = Math.max(0, raw - (i < data.length - 1 ? gap : 0))
-          out += insRect(x, 6, segW, barH, d.color || theme.series)
+          out += insRect(x, 6, segW, barH, insSliceColor(d, i, theme))
           // Only inside the segment when it genuinely fits, with padding on
           // both sides. Otherwise the legend below carries it.
           const label = insPct(d.value, total)
           if (insTextWidth(label, 11) + 12 <= segW) {
             out += insText(x + segW / 2, 6 + barH / 2 + 4, label, {
-              fill: d.onFill || "#ffffff",
+              fill: insToneOf(d.onFill, theme) || insOnFill(insSliceColor(d, i, theme)),
               size: 11,
               anchor: "middle",
               weight: "600",
@@ -22249,14 +23145,141 @@
         })
         data.forEach((d, i) => {
           const y = 6 + barH + 22 + i * 18
-          out += insRect(0, y - 8, 10, 10, d.color || theme.series, ' rx="2"')
-          out += insText(16, y, d.label, { fill: theme.ink2, size: 11 })
+          out += insRect(0, y - 8, 10, 10, insSliceColor(d, i, theme), ' rx="2"')
+          out += insText(16, y, insFitText(d.label, w * 0.62, 11), { fill: theme.ink2, size: 11 })
           out += insText(
             w,
             y,
             insNum(d.value) + " · " + insPct(d.value, total),
             { fill: theme.ink, size: 11, anchor: "end", weight: "600" },
           )
+        })
+        return { svg: out + "</svg>", width: w, height: h }
+      }
+
+      /// How many parts a donut or a 100% bar shows before the rest is one
+      /// "Other" slice. Past eight, the colours stop being tellable apart and
+      /// the smallest slices are slivers nobody can read a value off.
+      const INS_MAX_SLICES = 8
+
+      /// The positive values, largest first *only* when there are too many:
+      /// an ordered scale (recognition bands, feedback) keeps its order when
+      /// it fits, and a long tail is folded into one counted "Other".
+      function insFoldSlices(data, max) {
+        const pos = (data || []).filter((d) => (d.value || 0) > 0)
+        if (pos.length <= max) return pos
+        const sorted = pos.slice().sort((a, b) => (b.value || 0) - (a.value || 0))
+        const kept = sorted.slice(0, max - 1)
+        const rest = sorted.slice(max - 1)
+        kept.push({
+          label: insT("Other") + " (" + insNum(rest.length) + ")",
+          value: rest.reduce((a, d) => a + (d.value || 0), 0),
+          color: "neutral",
+        })
+        return kept
+      }
+
+      /// A part's colour: its own tone when it has one (a status band, a
+      /// feedback kind), otherwise the next categorical accent.
+      function insSliceColor(d, i, theme) {
+        const own = insToneOf(d.color, theme)
+        if (own) return own
+        const cat = theme.cat && theme.cat.length ? theme.cat : [theme.series]
+        return cat[i % cat.length]
+      }
+
+      /// White or ink on a fill, whichever reads — a brand accent can be light.
+      function insOnFill(fill) {
+        return /^#[0-9a-f]{6}$/i.test(fill) && insLuma(fill) > 0.45 ? "#111827" : "#ffffff"
+      }
+
+      /// Part-to-whole as a ring, with a legend carrying every value.
+      ///
+      /// A donut rather than a pie: the hole holds the total, and an angle is
+      /// read no worse from a ring than from a wedge. Offered only for cards
+      /// whose bars are parts of one whole — see `INS_CHART_KINDS`.
+      function insDonutChart(spec, theme) {
+        const data = insFoldSlices(spec.data, INS_MAX_SLICES)
+        const w = spec.width || INS_ROW_W
+        const sum = data.reduce((a, d) => a + (d.value || 0), 0)
+        const total = spec.total || sum || 1
+        const r = 84
+        const inner = 52
+        const legendH = data.length * 20
+        const bodyH = Math.max(2 * r + 16, legendH + 16)
+        const h = bodyH + (spec.padBottom || 0)
+        const cx = r + 12
+        const cy = bodyH / 2
+        let out = insOpen(w, h, theme)
+        const pt = (rad, a) => [cx + rad * Math.sin(a), cy - rad * Math.cos(a)]
+        let a0 = 0
+        data.forEach((d, i) => {
+          const frac = (d.value || 0) / (sum || 1)
+          const a1 = a0 + frac * Math.PI * 2
+          const fill = insSliceColor(d, i, theme)
+          const tip = `${d.tip || d.label}: ${insPlural(d.value, spec.unit || "conversations")} (${insPct(
+            d.value,
+            total,
+          )})`
+          let path
+          if (frac >= 0.9999) {
+            // One slice is the whole ring; an arc from a point to itself draws
+            // nothing, so it is two half-rings.
+            const [ox, oy] = pt(r, 0)
+            const [bx, by] = pt(r, Math.PI)
+            const [ix, iy] = pt(inner, 0)
+            const [jx, jy] = pt(inner, Math.PI)
+            path =
+              `M${ox.toFixed(2)} ${oy.toFixed(2)} A${r} ${r} 0 1 1 ${bx.toFixed(2)} ${by.toFixed(2)} ` +
+              `A${r} ${r} 0 1 1 ${ox.toFixed(2)} ${oy.toFixed(2)} ` +
+              `M${ix.toFixed(2)} ${iy.toFixed(2)} A${inner} ${inner} 0 1 0 ${jx.toFixed(2)} ${jy.toFixed(2)} ` +
+              `A${inner} ${inner} 0 1 0 ${ix.toFixed(2)} ${iy.toFixed(2)} Z`
+          } else {
+            const large = a1 - a0 > Math.PI ? 1 : 0
+            const [x0, y0] = pt(r, a0)
+            const [x1, y1] = pt(r, a1)
+            const [x2, y2] = pt(inner, a1)
+            const [x3, y3] = pt(inner, a0)
+            path =
+              `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} ` +
+              `L${x2.toFixed(2)} ${y2.toFixed(2)} A${inner} ${inner} 0 ${large} 0 ${x3.toFixed(2)} ${y3.toFixed(2)} Z`
+          }
+          // The surface-coloured stroke is the gap between slices — the same
+          // 2px rule the stacked bar uses — and the tip rides on the slice.
+          out +=
+            `<path d="${path}" fill="${insAttr(fill)}" fill-rule="evenodd" stroke="${insAttr(
+              theme.surface,
+            )}" stroke-width="2" data-tip="${insAttr(tip)}"><title>${esc(tip)}</title></path>`
+          a0 = a1
+        })
+        out += insText(cx, cy + 2, insCompact(spec.total || sum), {
+          fill: theme.ink,
+          size: 17,
+          anchor: "middle",
+          weight: "700",
+        })
+        out += insText(cx, cy + 17, insFitText(insNoun(spec.unit || "conversations"), inner * 1.8, 10), {
+          fill: theme.muted,
+          size: 10,
+          anchor: "middle",
+        })
+        const lx = cx + r + 28
+        const ly0 = cy - legendH / 2 + 14
+        data.forEach((d, i) => {
+          const y = ly0 + i * 20
+          out += insRect(lx, y - 9, 10, 10, insSliceColor(d, i, theme), ' rx="2"')
+          const valueText = insNum(d.value) + " · " + insPct(d.value, total)
+          const valueW = insTextWidth(valueText, 11) + 4
+          out += insText(lx + 16, y, insFitText(d.label, w - lx - 16 - valueW - 12, 11), {
+            fill: theme.ink2,
+            size: 11,
+          })
+          out += insText(w - 4, y, valueText, {
+            fill: theme.ink,
+            size: 11,
+            anchor: "end",
+            weight: "600",
+          })
         })
         return { svg: out + "</svg>", width: w, height: h }
       }
@@ -22276,7 +23299,7 @@
         const cellW = (w - padL - 4 - 23 * gap) / 24
         const h = padT + 7 * (cellH + gap) + 34 + (spec.padBottom || 0)
         const max = Math.max(1, ...grid)
-        const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        const days = insWeekdayNamesMon()
         let out = insOpen(w, h, theme)
         for (let hr = 0; hr < 24; hr += 3) {
           out += insText(
@@ -22325,7 +23348,7 @@
               cellH,
               `${days[d]} ${String(hr).padStart(2, "0")}:00 — ${insPlural(
                 v,
-                "conversations",
+                spec.unit || "conversations",
               )}`,
             )
           }
@@ -22343,7 +23366,7 @@
         out += insText(
           padL + 4 + theme.ramp.length * 16 + 4,
           ly + 8,
-          insNum(max) + " per hour",
+          insT("{n} per hour", { n: insNum(max) }),
           { fill: theme.muted, size: 9 },
         )
         return { svg: out + "</svg>", width: w, height: h }
@@ -22415,16 +23438,30 @@
         out += insLine(padL, y0, padL + plotW, y0, theme.axis)
         if (data.length) {
           const pts = data.map((d, i) => `${xAt(i).toFixed(2)} ${yAt(d.value).toFixed(2)}`)
-          out +=
-            `<path d="M${xAt(0).toFixed(2)} ${y0.toFixed(2)} L${pts.join(
-              " L",
-            )} L${xAt(data.length - 1).toFixed(2)} ${y0.toFixed(
-              2,
-            )} Z" fill="${insAttr(theme.series)}" fill-opacity="0.1"/>`
+          // A line is the same chart without the wash.
+          if (spec.fill !== false) {
+            out +=
+              `<path d="M${xAt(0).toFixed(2)} ${y0.toFixed(2)} L${pts.join(
+                " L",
+              )} L${xAt(data.length - 1).toFixed(2)} ${y0.toFixed(
+                2,
+              )} Z" fill="${insAttr(theme.series)}" fill-opacity="0.1"/>`
+          }
           out +=
             `<path d="M${pts.join(" L")}" fill="none" stroke="${insAttr(
               theme.series,
             )}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+          // Every point labelled, when asked for and when it can be read.
+          if (spec.valueLabels === "always" && data.length <= 40) {
+            data.forEach((d, i) => {
+              if (!(d.value > 0)) return
+              out += insText(xAt(i), Math.max(10, yAt(d.value) - 7), insNum(d.value), {
+                fill: theme.ink,
+                size: data.length > 16 ? 8 : 10,
+                anchor: "middle",
+              })
+            })
+          }
           // One direct label, on the extreme — the point the reader is looking
           // for. A number on every day would be unreadable and go unread.
           let peak = 0
@@ -22433,22 +23470,26 @@
           })
           const px = xAt(peak)
           const py = yAt(data[peak].value)
-          out += `<circle cx="${px.toFixed(2)}" cy="${py.toFixed(
-            2,
-          )}" r="4" fill="${insAttr(theme.series)}" stroke="${insAttr(
-            theme.surface,
-          )}" stroke-width="2"/>`
-          out += insText(
-            Math.min(w - padR, Math.max(padL, px)),
-            Math.max(10, py - 9),
-            insNum(data[peak].value),
-            {
-              fill: theme.ink,
-              size: 11,
-              anchor: px > w - 60 ? "end" : "middle",
-              weight: "600",
-            },
-          )
+          // "never" means no number on the plot at all; "always" has already
+          // labelled every point, the peak included.
+          if (spec.valueLabels !== "never" && spec.valueLabels !== "always") {
+            out += `<circle cx="${px.toFixed(2)}" cy="${py.toFixed(
+              2,
+            )}" r="4" fill="${insAttr(theme.series)}" stroke="${insAttr(
+              theme.surface,
+            )}" stroke-width="2"/>`
+            out += insText(
+              Math.min(w - padR, Math.max(padL, px)),
+              Math.max(10, py - 9),
+              insNum(data[peak].value),
+              {
+                fill: theme.ink,
+                size: 11,
+                anchor: px > w - 60 ? "end" : "middle",
+                weight: "600",
+              },
+            )
+          }
           const every = Math.max(1, Math.ceil(data.length / 7))
           data.forEach((d, i) => {
             if (i % every === 0 || i === data.length - 1) {
@@ -22463,7 +23504,7 @@
               padT,
               slot,
               plotH,
-              `${d.tip || d.label}: ${insPlural(d.value, "conversations")}`,
+              `${d.tip || d.label}: ${insPlural(d.value, spec.unit || "conversations")}`,
             )
           })
         }
@@ -22551,18 +23592,25 @@
       ///
       /// Built *through* `insSearchSummary`, so a captioned chart and a pasted
       /// report cannot end up describing different slices.
-      function insCaptionLines(card, d, args, zone) {
-        const lines = [{ text: card.title, style: "title" }]
-        if (card.note) lines.push({ text: card.note, style: "note" })
-        for (const c of insSearchSummary(args)) {
+      function insCaptionLines(card, d, args, zone, opts) {
+        const o = opts || INS_LABEL_DEFAULTS
+        const lines = []
+        if (o.capTitle) lines.push({ text: card.title, style: "title" })
+        if (o.capNote && card.note) lines.push({ text: card.note, style: "note" })
+        for (const c of o.capSearch ? insSearchSummary(args) : []) {
           // `c.value`, not `c.title` — the trimmed form. The exact bound is a
           // fact about the query and belongs in the report; a caption is read
           // by a person looking at a picture, and wants the day.
           lines.push({ text: c.label + ": " + c.value, style: "meta" })
         }
-        if (d) {
+        if (d && (o.capUnit || o.capZone)) {
           lines.push({
-            text: insUnitLine(d) + " · times in " + insZoneLabel(zone || insZone()),
+            text: [
+              o.capUnit ? insUnitLine(d) : "",
+              o.capZone ? insT("times in {zone}", { zone: insZoneLabel(zone || insZone()) }) : "",
+            ]
+              .filter(Boolean)
+              .join(" · "),
             style: "meta",
           })
         }
@@ -22582,6 +23630,8 @@
           if (sp.kind === "stack") return insStackChart(sp, theme)
           if (sp.kind === "heatmap") return insHeatmap(sp, theme)
           if (sp.kind === "area") return insAreaChart(sp, theme)
+          if (sp.kind === "line") return insAreaChart({ ...sp, fill: false }, theme)
+          if (sp.kind === "donut") return insDonutChart(sp, theme)
           return insColumnChart(sp, theme)
         }
         if (!spec.caption || !spec.caption.length) return draw(spec)
@@ -22664,7 +23714,7 @@
       /// every chart here: no value on this dashboard is reachable only by
       /// looking at a colour.
       function insChartTsv(spec) {
-        const unit = spec.unit || "Conversations"
+        const unit = spec.unit || "conversations"
         const head = (h) => h.charAt(0).toUpperCase() + h.slice(1)
         // The weekend is a band and a tick colour on the picture; in a
         // spreadsheet neither survives, so the day series carries the weekday
@@ -22672,10 +23722,10 @@
         const wd = spec.weekdayColumn ? (l) => "\t" + insWeekdayShort(l) : null
         if (spec.kind === "heatmap") {
           const grid = spec.grid || []
-          const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+          const days = insWeekdayNamesMon()
           const hours = []
           for (let hr = 0; hr < 24; hr++) hours.push(String(hr).padStart(2, "0"))
-          const rows = ["Day\t" + hours.join("\t")]
+          const rows = [insT("Day") + "\t" + hours.join("\t")]
           days.forEach((d, i) => {
             const cells = []
             for (let hr = 0; hr < 24; hr++) cells.push(grid[i * 24 + hr] || 0)
@@ -22687,11 +23737,12 @@
         const total =
           spec.total || data.reduce((a, d) => a + (d.value || 0), 0) || 0
         const rows = [
-          (spec.axisLabel || "Label") +
-            (wd ? "\tWeekday" : "") +
+          (spec.axisLabel || insT("Label")) +
+            (wd ? "\t" + insT("Weekday") : "") +
             "\t" +
-            head(unit) +
-            "\tShare",
+            head(insNoun(unit)) +
+            "\t" +
+            insT("Share"),
         ]
         for (const d of data) {
           rows.push(
@@ -22897,12 +23948,20 @@
       /// The band colours are the reserved status scale, because the band
       /// *means* good-to-bad. They are never used for series identity anywhere
       /// else on this dashboard, and every one of them carries its label.
+      ///
+      /// Returned as a palette *token*, resolved by the builder against the
+      /// palette it draws in. A resolved colour here was fixed at build time in
+      /// the screen palette and carried into every export, which a custom
+      /// export palette would then silently fail to recolour.
+      function insRecogTone(label) {
+        if (label === "Zero") return "critical"
+        if (label === "Under 40%") return "serious"
+        if (label === "40–69%") return "warning"
+        if (label === "70–100%") return "good"
+        return "neutral"
+      }
       function insRecogColor(label, theme) {
-        if (label === "Zero") return theme.critical
-        if (label === "Under 40%") return theme.serious
-        if (label === "40–69%") return theme.warning
-        if (label === "70–100%") return theme.good
-        return theme.neutral
+        return theme[insRecogTone(label)]
       }
 
       // ── Reading this in the display timezone ───────────────────────────
@@ -23197,17 +24256,51 @@
       }
       function insWeekdayShort(label) {
         const wd = insWeekdayOf(label)
-        return wd < 0 ? "" : INS_WEEKDAYS[wd]
+        return wd < 0 ? "" : insWeekdayNames()[wd]
       }
       function insIsWeekend(label) {
         const wd = insWeekdayOf(label)
         return wd === 0 || wd === 6
       }
 
+      /// A `YYYY-MM-DD` label as the chosen date format reads it on an axis.
+      /// `oneYear` drops the year that every tick would otherwise repeat.
+      function insFmtDay(label, oneYear, fmt) {
+        const s = String(label || "")
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+        const y = s.slice(0, 4)
+        const m = s.slice(5, 7)
+        const d = s.slice(8, 10)
+        if (fmt === "dm") return oneYear ? d + "-" + m : d + "-" + m + "-" + y
+        if (fmt === "dmon") {
+          let mon = m
+          try {
+            mon = new Intl.DateTimeFormat(INS_LANGS[insCurLang].tag, {
+              month: "short",
+              timeZone: "UTC",
+            }).format(new Date(Date.UTC(+y, +m - 1, 1)))
+          } catch (e) {
+            /* an engine without Intl keeps the number */
+          }
+          return +d + " " + mon.replace(/\.$/, "") + (oneYear ? "" : " " + y)
+        }
+        return oneYear ? m + "-" + d : s
+      }
+
+      /// An hour bucket (`"09"`) as the chosen hour format reads it.
+      function insFmtHour(label, fmt) {
+        const h = parseInt(label, 10)
+        if (!Number.isFinite(h)) return String(label)
+        if (fmt === "hhmm") return String(h).padStart(2, "0") + ":00"
+        if (fmt === "ampm") return (h % 12 || 12) + (h < 12 ? " AM" : " PM")
+        return String(h).padStart(2, "0")
+      }
+
       /// A day series is a column chart while the columns are readable and a
       /// line once they are not. 62 is where a 640px chart stops giving each
       /// day enough width to be a mark rather than a hairline.
-      function insVolumeSpec(series) {
+      function insVolumeSpec(series, labelOpts) {
+        const o = labelOpts || insLabelOpts
         const filled = insFillDays(series.byDay || [])
         // The axis says `06-01` where the whole series is inside one year: the
         // repeated `2026-` is four characters of noise on every tick, and the
@@ -23219,22 +24312,23 @@
         // days a wash every five pixels is a texture over the whole plot, which
         // says less than no band at all. The weekday stays in the tooltip and
         // in the copied table either way.
-        const banded = filled.length <= 120
+        const banded = filled.length <= 120 && o.weekend
         const data = filled.map((b) => {
           const weekend = insIsWeekend(b.label)
+          const day = insFmtDay(b.label, oneYear, o.dateFmt)
           return {
             ...b,
-            tick: oneYear ? b.label.slice(5) : b.label,
-            tip: b.label + " · " + insWeekdayShort(b.label),
+            tick: o.weekdayTicks ? insWeekdayShort(b.label) + " " + day : day,
+            tip: insFmtDay(b.label, false, o.dateFmt) + " · " + insWeekdayShort(b.label),
             band: weekend && banded ? "weekend" : undefined,
-            tickColor: weekend ? "ink2" : undefined,
+            tickColor: weekend && o.weekend ? "ink2" : undefined,
           }
         })
         return {
           kind: filled.length > 62 ? "area" : "columns",
           data,
           unit: "conversations",
-          axisLabel: "Day",
+          axisLabel: insT("Day"),
           weekdayColumn: true,
           rotateLabels: filled.length > 12 && filled.length <= 62,
           tickEvery:
@@ -23277,7 +24371,7 @@
       /// The two flags are independent, so `none` is `total − up − down + both`;
       /// subtracting the two counts alone over-counts the conversations that
       /// carry one of each and under-states how many were never rated.
-      function insFeedbackSpec(d, theme) {
+      function insFeedbackSpec(d) {
         const both = d.mixedFeedbackSessions || 0
         const up = Math.max(0, (d.posFeedbackSessions || 0) - both)
         const down = Math.max(0, (d.negFeedbackSessions || 0) - both)
@@ -23286,16 +24380,17 @@
           kind: "stack",
           total: d.sessionCount || 0,
           unit: "conversations",
-          axisLabel: "Feedback",
+          axisLabel: insT("Feedback"),
+          // Tokens, not colours — see `insRecogTone`.
           data: [
-            { label: "Thumbs up", value: up, color: theme.good },
-            { label: "Thumbs down", value: down, color: theme.critical },
-            { label: "Both", value: both, color: theme.warning },
+            { label: insT("Thumbs up"), value: up, color: "good" },
+            { label: insT("Thumbs down"), value: down, color: "critical" },
+            { label: insT("Both"), value: both, color: "warning" },
             {
-              label: "No feedback given",
+              label: insT("No feedback given"),
               value: none,
-              color: theme.neutral,
-              onFill: theme.surface,
+              color: "neutral",
+              onFill: "surface",
             },
           ],
         }
@@ -23325,6 +24420,25 @@
         }
       }
 
+      /// A card's spec in the chart type the user chose for it, with the
+      /// value-label preference applied. Only a kind `INS_CHART_KINDS` allows
+      /// for the card ever reaches here.
+      function insApplyChartKind(id, spec, types) {
+        const out = { ...spec, valueLabels: insLabelOpts.valueLabels }
+        const kind = insChartKindFor(id, types)
+        if (!kind || kind === spec.kind) return out
+        out.kind = kind
+        // Names that read along a horizontal baseline need to be tilted once
+        // they stand under columns, or they are cut to a few letters.
+        if (kind === "columns" && spec.kind === "bars" && (spec.data || []).length > 6) {
+          out.rotateLabels = true
+        }
+        if (kind === "columns" && (spec.data || []).length > 31 && !spec.tickEvery) {
+          out.tickEvery = Math.ceil(spec.data.length / 16)
+        }
+        return out
+      }
+
       /// Every card on the dashboard, in reading order.
       ///
       /// One list, built once, so the on-screen render, the per-card copy and
@@ -23344,7 +24458,7 @@
               ? !(spec.grid || []).some((v) => v > 0)
               : !(spec.data || []).some((v) => (v.value || 0) > 0)
           if (empty) return
-          cards.push({ section, id, title, note, spec })
+          cards.push({ section, id, title, note, spec: insApplyChartKind(id, spec) })
         }
         // Every chart counts what the toggle says, so `unit` and `total` are
         // set once here rather than repeated — a card that kept the other
@@ -23358,53 +24472,54 @@
         push(
           "Volume",
           "volume",
-          w.byTurn ? "Interactions per day" : "Conversations per day",
+          w.byTurn ? insT("Interactions per day") : insT("Conversations per day"),
           w.byTurn
-            ? "Counted on the day the interaction happened. Days with nothing in them are shown as gaps."
-            : "Counted on the day the conversation started. Days with nothing in them are shown as gaps.",
+            ? insT("Counted on the day the interaction happened. Days with nothing in them are shown as gaps.")
+            : insT("Counted on the day the conversation started. Days with nothing in them are shown as gaps."),
           { ...insVolumeSpec(series), ...counted({ total: 0 }) },
         )
         push(
           "Volume",
           "hour",
-          "By hour of day",
+          insT("By hour of day"),
           w.byTurn
-            ? "The hour of day each " + insSingular(w.subject) + " happened."
-            : "The hour of day each conversation started.",
+            ? insT("The hour of day each " + insSingular(w.subject) + " happened.")
+            : insT("The hour of day each conversation started."),
           counted({
             kind: "columns",
             // The axis says `09`; the tooltip has room to say what that means.
             data: insToData(series.byHour).map((b) => ({
               ...b,
-              tip: b.label + ":00",
+              tick: insFmtHour(b.label, insLabelOpts.hourFmt),
+              tip: insFmtHour(b.label, "hhmm"),
             })),
             // A label rather than a disclaimer: an exported hour chart is an
             // SVG on its own in someone's email, and `09` with nothing beside
             // it is ambiguous in a way a date is not.
-            axisLabel: "Hour (" + tzName + ")",
+            axisLabel: insT("Hour ({zone})", { zone: tzName }),
             total: 0,
           }),
         )
         push(
           "Volume",
           "heat",
-          "Day of week × hour",
-          "The same, laid out as a week. Darker is busier.",
+          insT("Day of week × hour"),
+          insT("The same, laid out as a week. Darker is busier."),
           { kind: "heatmap", grid: series.hourWeekday, unit: w.noun },
         )
         push(
           "Volume",
           "length",
-          w.byTurn ? "Matching interactions per conversation" : "Conversation length",
+          w.byTurn ? insT("Matching interactions per conversation") : insT("Conversation length"),
           w.byTurn
-            ? "How many of a conversation's interactions matched. This is the one chart that counts conversations in both readings."
-            : "Interactions per conversation, binned.",
+            ? insT("How many of a conversation's interactions matched. This is the one chart that counts conversations in both readings.")
+            : insT("Interactions per conversation, binned."),
           {
             kind: "columns",
             data: insOrdered(d.lengthBuckets, INS_LENGTH_ORDER),
             total: d.sessionCount,
             unit: "conversations",
-            axisLabel: w.byTurn ? "Matching interactions" : "Interactions",
+            axisLabel: insT(w.byTurn ? "Matching interactions" : "Interactions"),
           },
         )
 
@@ -23412,18 +24527,21 @@
           "Quality",
           "recognition",
           w.byTurn
-            ? "Recognition score per interaction"
-            : "Lowest recognition score per conversation",
+            ? insT("Recognition score per interaction")
+            : insT("Lowest recognition score per conversation"),
           w.byTurn
-            ? "The score on each matching interaction itself — there is no worst-of to take. GenAI answers are not scored."
-            : "The worst-scored turn in each conversation — the same measure the Low % and Zero % pills filter on. GenAI answers are not scored.",
+            ? insT("The score on each matching interaction itself — there is no worst-of to take. GenAI answers are not scored.")
+            : insT("The worst-scored turn in each conversation — the same measure the Low % and Zero % pills filter on. GenAI answers are not scored."),
           counted({
             kind: "columns",
+            // The tone is decided from the band's key, before the label is
+            // translated — the key is what names the status colour.
             data: insOrdered(d.recognitionBands, INS_RECOG_ORDER).map((b) => ({
               ...b,
-              color: insRecogColor(b.label, theme),
+              label: insT(b.label),
+              color: insRecogTone(b.label),
             })),
-            axisLabel: "Recognition",
+            axisLabel: insT("Recognition"),
           }),
         )
         // Deliberately conversation-only: a thumb rates the conversation, not
@@ -23435,34 +24553,34 @@
           push(
             "Quality",
             "feedback",
-            "Feedback",
-            "Whether anyone rated an answer in the conversation.",
-            insFeedbackSpec(d, theme),
+            insT("Feedback"),
+            insT("Whether anyone rated an answer in the conversation."),
+            insFeedbackSpec(d),
           )
         }
         push(
           "Quality",
           "recogType",
-          "How the answer was found",
+          insT("How the answer was found"),
           w.byTurn
-            ? "Counted per matching interaction."
-            : "Counted per interaction, not per conversation.",
+            ? insT("Counted per matching interaction.")
+            : insT("Counted per interaction, not per conversation."),
           {
             kind: "bars",
             data: insToData(d.recognitionTypes),
             unit: "interactions",
             total: w.byTurn ? w.total : 0,
-            axisLabel: "Recognition type",
+            axisLabel: insT("Recognition type"),
           },
         )
         push(
           "Quality",
           "dialogStatus",
-          "Dialog outcome",
+          insT("Dialog outcome"),
           w.byTurn
-            ? "How the matching interactions left the Dialog they were in."
-            : "How conversations left the Dialog they were in.",
-          counted({ kind: "bars", data: insToData(d.dialogStatus), axisLabel: "Outcome" }),
+            ? insT("How the matching interactions left the Dialog they were in.")
+            : insT("How conversations left the Dialog they were in."),
+          counted({ kind: "bars", data: insToData(d.dialogStatus), axisLabel: insT("Outcome") }),
         )
 
         const ctxGroup = insPickGroup(d.contexts, insCtxKey)
@@ -23470,7 +24588,7 @@
           push(
             "Context",
             "context",
-            "Context · " + ctxGroup.name,
+            insT("Context") + " · " + ctxGroup.name,
             insTagNote(ctxGroup, w),
             insTagSpec(ctxGroup, w),
           )
@@ -23480,7 +24598,7 @@
           push(
             "Metadata",
             "metadata",
-            "Metadata · " + metaGroup.name,
+            insT("Metadata") + " · " + metaGroup.name,
             insTagNote(metaGroup, w),
             insTagSpec(metaGroup, w),
           )
@@ -23489,11 +24607,11 @@
         push(
           "Content",
           "entities",
-          "Entities recognised",
+          insT("Entities recognised"),
           w.byTurn
-            ? "The entity the recognizer matched on the interaction itself, not the wording that triggered it."
-            : "The entity the recognizer matched, not the wording that triggered it.",
-          counted({ kind: "bars", data: insLinkBuckets("entities", d.entities), axisLabel: "Entity" }),
+            ? insT("The entity the recognizer matched on the interaction itself, not the wording that triggered it.")
+            : insT("The entity the recognizer matched, not the wording that triggered it."),
+          counted({ kind: "bars", data: insLinkBuckets("entities", d.entities), axisLabel: insT("Entity") }),
         )
         // Conversation-only for the same reason as feedback: the opening
         // question is a fact about the conversation and has no per-turn reading.
@@ -23501,47 +24619,47 @@
           push(
             "Content",
             "questions",
-            "Most common opening questions",
-            "The first real thing the user said, grouped case-insensitively.",
+            insT("Most common opening questions"),
+            insT("The first real thing the user said, grouped case-insensitively."),
             counted({
               kind: "bars",
               data: insToData(d.firstMessages),
-              axisLabel: "Opening question",
+              axisLabel: insT("Opening question"),
             }),
           )
         }
         push(
           "Content",
           "articles",
-          "Articles that answered",
+          insT("Articles that answered"),
           w.byTurn
-            ? "Matching interactions this Article produced."
-            : "Conversations in which this Article produced an answer.",
-          counted({ kind: "bars", data: insLinkBuckets("articles", d.articles), axisLabel: "Article" }),
+            ? insT("Matching interactions this Article produced.")
+            : insT("Conversations in which this Article produced an answer."),
+          counted({ kind: "bars", data: insLinkBuckets("articles", d.articles), axisLabel: insT("Article") }),
         )
         push(
           "Content",
           "dialogs",
-          "Dialogs walked through",
+          insT("Dialogs walked through"),
           w.byTurn
-            ? "Matching interactions that passed through the Dialog, whether or not it answered."
-            : "Conversations that passed through the Dialog, whether or not it answered.",
-          counted({ kind: "bars", data: insLinkBuckets("dialogs", d.dialogs), axisLabel: "Dialog" }),
+            ? insT("Matching interactions that passed through the Dialog, whether or not it answered.")
+            : insT("Conversations that passed through the Dialog, whether or not it answered."),
+          counted({ kind: "bars", data: insLinkBuckets("dialogs", d.dialogs), axisLabel: insT("Dialog") }),
         )
         push(
           "Content",
           "dialogNodes",
-          "Dialog nodes that answered",
-          "The specific node an answer came from.",
-          counted({ kind: "bars", data: insLinkBuckets("dialogNodes", d.dialogNodes), axisLabel: "Dialog node" }),
+          insT("Dialog nodes that answered"),
+          insT("The specific node an answer came from."),
+          counted({ kind: "bars", data: insLinkBuckets("dialogNodes", d.dialogNodes), axisLabel: insT("Dialog node") }),
         )
         // Only when there is a comparison to make: one culture is a fact about
         // the database, not a distribution.
         if ((d.cultures || []).length > 1) {
-          push("Content", "cultures", "Cultures", "", counted({
+          push("Content", "cultures", insT("Cultures"), "", counted({
             kind: "bars",
             data: insToData(d.cultures),
-            axisLabel: "Culture",
+            axisLabel: insT("Culture"),
           }))
         }
 
@@ -23553,8 +24671,8 @@
           cards.push({
             section: "Segments",
             id: "segments",
-            title: "Segment comparison",
-            note: INS_SEGMENT_NOTE,
+            title: insT("Segment comparison"),
+            note: insT(INS_SEGMENT_NOTE),
             table: segTable,
           })
         }
@@ -23670,36 +24788,34 @@
         const values = group.values || []
         const folded = Math.max(0, (group.distinctValues || 0) - values.length)
         const shown = values.reduce((a, v) => a + v.count, 0)
-        let note =
-          "Share of the " + insNum(group.withKey) + " " + w.noun + " that set this key"
-        if (notSet) note += "; " + insNum(notSet) + " never set it"
+        let note = insT("Share of the {n} {noun} that set this key", {
+          n: insNum(group.withKey),
+          noun: insNoun(w.noun),
+        })
+        if (notSet) note += insT("; {n} never set it", { n: insNum(notSet) })
         note += "."
         // Context and metadata are recorded per conversation, not per turn, so
         // in interactions mode an interaction is counted under the key *its
         // conversation* carried. There is no per-turn context to count instead;
         // saying so is the difference between a caveat and a wrong number.
         if (w.byTurn)
-          note +=
-            " Context and metadata are recorded per conversation, so each" +
-            " interaction is counted under the value its conversation carried."
+          note += insT(
+            " Context and metadata are recorded per conversation, so each interaction is counted under the value its conversation carried.",
+          )
         if (folded)
-          note +=
-            " Showing the top " +
-            insNum(values.length) +
-            " of " +
-            insNum(group.distinctValues) +
-            " values."
+          note += insT(" Showing the top {shown} of {total} values.", {
+            shown: insNum(values.length),
+            total: insNum(group.distinctValues),
+          })
         // Said only where it is actually true of this key. A conversation whose
         // context changed mid-way carries both values, so the bars can add up to
         // more than the conversations that set the key — which reads as an
         // arithmetic error unless the chart says otherwise.
         if (shown > group.withKey)
-          note +=
-            " Some " +
-            w.noun +
-            " carried more than one value, so these add up to more than " +
-            insNum(group.withKey) +
-            "."
+          note += insT(
+            " Some {noun} carried more than one value, so these add up to more than {n}.",
+            { noun: insNoun(w.noun), n: insNum(group.withKey) },
+          )
         return note
       }
 
@@ -23712,54 +24828,54 @@
         const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1)
         // The hero is the number the unit names, and its label says which —
         // the same figure means very different things in the two readings.
-        const tiles = [{ label: cap(w.subject), value: insNum(w.total), hero: true }]
+        const tiles = [{ label: cap(insNoun(w.subject)), value: insNum(w.total), hero: true }]
         if (w.byTurn) {
           tiles.push({
-            label: "Conversations",
+            label: insT("Conversations"),
             value: insNum(d.sessionCount),
-            sub: "they came from",
+            sub: insT("they came from"),
           })
           // Only worth a tile when something actually narrowed it: otherwise
           // this is 100% by construction and says nothing.
           if (w.narrowed) {
             tiles.push({
-              label: "Of all interactions",
+              label: insT("Of all interactions"),
               value: insPct(w.total, d.interactionCount),
-              sub: "in those conversations",
+              sub: insT("in those conversations"),
             })
           }
         } else {
-          tiles.push({ label: "Interactions", value: insCompact(d.interactionCount) })
+          tiles.push({ label: insT("Interactions"), value: insCompact(d.interactionCount) })
           tiles.push({
-            label: "Median length",
+            label: insT("Median length"),
             value: insNum(d.medianInteractions),
-            sub: "interactions",
+            sub: insNoun("interactions"),
           })
         }
         if (!w.total) return tiles
         tiles.push({
-          label: "GenAI",
+          label: insT("GenAI"),
           value: insPct(d.genaiSessions, w.total),
-          sub: insNum(d.genaiSessions) + " " + w.noun,
+          sub: insPlural(d.genaiSessions, w.noun),
         })
         // Feedback is a property of a conversation, not of one turn — the same
         // reason its chart is not built in interactions mode.
         if (!w.byTurn) {
           tiles.push({
-            label: "Thumbs down",
+            label: insT("Thumbs down"),
             value: insPct(d.negFeedbackSessions, w.total),
-            sub: insNum(d.negFeedbackSessions) + " conversations",
+            sub: insPlural(d.negFeedbackSessions, "conversations"),
           })
         }
         tiles.push({
-          label: "Zero recognition",
+          label: insT("Zero recognition"),
           value: insPct(d.zeroRecogSessions, w.total),
-          sub: insNum(d.zeroRecogSessions) + " " + w.noun,
+          sub: insPlural(d.zeroRecogSessions, w.noun),
         })
         tiles.push({
-          label: "Under " + d.lowRecogThreshold + "%",
+          label: insT("Under {n}%", { n: d.lowRecogThreshold }),
           value: insPct(d.lowRecogSessions, w.total),
-          sub: insNum(d.lowRecogSessions) + " " + w.noun,
+          sub: insPlural(d.lowRecogSessions, w.noun),
         })
         return tiles
       }
@@ -23775,21 +24891,18 @@
       /// report cannot describe the reading differently.
       function insUnitLine(d, short) {
         const w = insWords(d)
-        const lead = short ? "" : insNum(w.total) + " " + w.subject
+        const lead = short ? "" : insPlural(w.total, w.subject)
         if (!w.byTurn) {
-          const rest = insNum(d.interactionCount) + " interactions"
+          const rest = insPlural(d.interactionCount, "interactions")
           return short ? rest : lead + " · " + rest
         }
         const rest =
-          "in " +
-          insNum(d.sessionCount) +
-          " conversations" +
+          insT("in {n} conversations", { n: insNum(d.sessionCount) }) +
           (w.narrowed
-            ? " · " +
-              insPct(w.total, d.interactionCount) +
-              " of their " +
-              insNum(d.interactionCount) +
-              " interactions"
+            ? insT(" · {pct} of their {n} interactions", {
+                pct: insPct(w.total, d.interactionCount),
+                n: insNum(d.interactionCount),
+              })
             : "")
         return short ? rest : lead + " " + rest
       }
@@ -23818,14 +24931,14 @@
           // names its own field, so it needs no note here.
           const where =
             [
-              a.queryScope === "user" || a.queryScope === "both" ? "user" : null,
-              a.queryScope === "bot" || a.queryScope === "both" ? "bot" : null,
-              a.queryEntities ? "entities" : null,
+              a.queryScope === "user" || a.queryScope === "both" ? insT("user") : null,
+              a.queryScope === "bot" || a.queryScope === "both" ? insT("bot") : null,
+              a.queryEntities ? insT("entities") : null,
             ]
               .filter(Boolean)
-              .join(" + ") || "entities"
+              .join(" + ") || insT("entities")
           out.push({
-            label: a.queryRegex ? "Regex" : "Search",
+            label: insT(a.queryRegex ? "Regex" : "Search"),
             value: a.query + " · " + where,
           })
         }
@@ -23835,7 +24948,8 @@
           low_recog: "Low recognition only",
           zero_recog: "Zero recognition only",
         }
-        if (FILTERS[a.filter]) out.push({ label: "Filter", value: FILTERS[a.filter] })
+        if (FILTERS[a.filter])
+          out.push({ label: insT("Filter"), value: insT(FILTERS[a.filter]) })
         if (a.dateFrom || a.dateTo) {
           // The bounds the picker sends are always `T00:00:00` and `T23:59:59`
           // — the exact boundaries of the days that were clicked, and so the
@@ -23844,13 +24958,13 @@
           // search terms that do carry information. The full bound stays one
           // hover away, because it is what the query actually compared against.
           const zone = insZone()
-          const from = a.dateFrom || "start"
-          const to = a.dateTo || "latest"
+          const from = a.dateFrom || insT("start")
+          const to = a.dateTo || insT("latest")
           // Back out of the zone, not merely trimmed: after the bounds are
           // shifted, `2026-07-01` local is stored as `2026-06-30T22:00:00`, and
           // a slice would name a day the user never picked.
           const chip = {
-            label: "Dates",
+            label: insT("Dates"),
             value:
               (a.dateFrom ? insZoneDayOf(from, zone) : from) +
               " → " +
@@ -23861,20 +24975,21 @@
           out.push(chip)
         }
         for (const f of a.contextFilters || []) {
-          out.push({ label: "Context", value: insTagFilterText(f) })
+          out.push({ label: insT("Context"), value: insTagFilterText(f) })
         }
         for (const f of a.metadataFilters || []) {
-          out.push({ label: "Metadata", value: insTagFilterText(f) })
+          out.push({ label: insT("Metadata"), value: insTagFilterText(f) })
         }
-        if (!out.length) out.push({ label: "Scope", value: "Everything in the database" })
+        if (!out.length)
+          out.push({ label: insT("Scope"), value: insT("Everything in the database") })
         return out
       }
 
       function insTagFilterText(f) {
         if (!f) return ""
-        if (f.value === "__not_set__") return f.name + " not set"
-        if (f.value === "__any__") return f.name + " set"
-        return f.name + " = " + (f.value === "" ? "(empty)" : f.value)
+        if (f.value === "__not_set__") return insT("{name} not set", { name: f.name })
+        if (f.value === "__any__") return insT("{name} set", { name: f.name })
+        return f.name + " = " + (f.value === "" ? insT("(empty)") : f.value)
       }
 
       // ── The Insights modal ───────────────────────────────────────────
@@ -24806,7 +25921,10 @@
       /// last month's figure, where `insPct`'s rounding to a whole number above
       /// 10% throws away the difference they are looking for.
       function insSegPct(p) {
-        return (Math.round(Number(p || 0) * 100) / 100).toFixed(2) + "%"
+        return (
+          insDec((Math.round(Number(p || 0) * 100) / 100).toFixed(2)) +
+          (insCurLang === "de" ? " %" : "%")
+        )
       }
 
       /// A share, or an em dash when there is nothing to take a share of.
@@ -24908,8 +26026,8 @@
       }
 
       function insSegKeyLabel(b) {
-        if (b.kind === "culture") return "Culture"
-        return (b.kind === "context" ? "Context · " : "Metadata · ") + b.name
+        if (b.kind === "culture") return insT("Culture")
+        return insT(b.kind === "context" ? "Context" : "Metadata") + " · " + b.name
       }
 
       // ── The layout ───────────────────────────────────────────────────
@@ -24956,7 +26074,7 @@
       function insSegKeyOf(id) {
         const parts = String(id).split(INS_SEG_SEP)
         if (parts.length < 3) return ""
-        return parts[0] === "culture" ? "Culture" : parts.slice(1, -1).join(INS_SEG_SEP)
+        return parts[0] === "culture" ? insT("Culture") : parts.slice(1, -1).join(INS_SEG_SEP)
       }
 
       /// What a data row is called until it is renamed: `Verblijf: true`.
@@ -25143,7 +26261,7 @@
             rows.push({
               kind: "total",
               at,
-              label: e.label == null ? "Total" : e.label,
+              label: e.label == null ? insT("Total") : e.label,
               ...cells(seg.total),
             })
             return
@@ -25154,16 +26272,16 @@
             // Stated, never silently dropped: a table that is missing rows and
             // does not say so is read as a complete one.
             if (g && g.foldedValues > 0) {
-              notes.push(insPlural(g.foldedValues, "more values") + " not shown")
+              notes.push(insT("{n} not shown", { n: insPlural(g.foldedValues, "more values") }))
             }
             // A conversation whose context changed mid-way carries two values
             // of one key, so its interactions are counted under both — which is
             // correct, and makes the rows sum to more than the Total above.
             if (g && g.overlapping) {
-              notes.push("some conversations set two values, so these rows overlap")
+              notes.push(insT("some conversations set two values, so these rows overlap"))
             }
             if (g && !(g.rows || []).length) {
-              notes.push("nothing recorded for this key in this result")
+              notes.push(insT("nothing recorded for this key in this result"))
             }
             rows.push({
               kind: "head",
@@ -25190,7 +26308,7 @@
           })
         })
         return {
-          headers: ["Segment", ...INS_SEGMENT_COLUMNS.map((c) => c.label)],
+          headers: [insT("Segment"), ...INS_SEGMENT_COLUMNS.map((c) => insT(c.label))],
           rows,
           added: resolved.added,
         }
@@ -26559,7 +27677,7 @@
       /// right on a high-DPI screen without the file being pointlessly large.
       const INS_EXPORT_SCALE = 2
 
-      function insRasterize(svgText, w, h, scale) {
+      function insRasterize(svgText, w, h, scale, background) {
         return new Promise((resolve, reject) => {
           const img = new Image()
           img.onload = () => {
@@ -26571,7 +27689,7 @@
               // The SVG paints its own surface, but an email client may show a
               // PNG over any background — an opaque white base means a
               // transparent edge can never turn into a dark halo.
-              ctx.fillStyle = INS_THEME_EXPORT.surface
+              ctx.fillStyle = background || INS_THEME_EXPORT.surface
               ctx.fillRect(0, 0, canvas.width, canvas.height)
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
               resolve(canvas)
@@ -26597,8 +27715,9 @@
       }
 
       function insChartCanvas(spec) {
-        const out = insRenderChart(spec, INS_THEME_EXPORT)
-        return insRasterize(out.svg, out.width, out.height, INS_EXPORT_SCALE)
+        const theme = insExportTheme()
+        const out = insRenderChart(spec, theme)
+        return insRasterize(out.svg, out.width, out.height, INS_EXPORT_SCALE, theme.surface)
       }
 
       /// Write to the clipboard, with one honest fallback and no silent failure.
@@ -26733,13 +27852,34 @@
       /// One place builds this, so the preview on screen and the bytes that
       /// leave cannot disagree about whether there is a caption.
       function insExportSpec(cardId) {
-        const card = insSpecs.get(cardId)
-        if (!card) return null
+        const card = insExportCardFor(cardId)
+        if (!card || !card.spec) return null
         if (!insExportCaption) return card.spec
         return {
           ...card.spec,
-          caption: insCaptionLines(card, insData, insArgs, insZone()),
+          caption: insWithLang(insExportLang, () =>
+            insCaptionLines(card, insData, insArgs, insZone(), insLabelOpts),
+          ),
         }
+      }
+
+      /// The dashboard's cards as an export reads them: built again, in the
+      /// export language. Built rather than translated, so a band's colour is
+      /// still decided from its English key — see `insRecogTone`.
+      function insLocalizedCards(lang) {
+        if (!insData) return []
+        return insWithLang(lang || insExportLang, () =>
+          insBuildCards(insData, INS_THEME_SCREEN),
+        )
+      }
+
+      /// One card, in the export language; the screen's card if it cannot be
+      /// rebuilt (it always can, but a missing export is worse than English).
+      function insExportCardFor(cardId) {
+        const screen = insSpecs.get(cardId)
+        if (!screen) return null
+        if (insExportLang === "en") return screen
+        return insLocalizedCards().find((c) => c.id === cardId) || screen
       }
 
       function insExportFileName(cardId, ext) {
@@ -26779,7 +27919,10 @@
 
       function insExportCards() {
         const chosen = insExportChosenSections()
-        return Array.from(insSpecs.values()).filter((c) => chosen.includes(c.section))
+        const screen = Array.from(insSpecs.values()).filter((c) => chosen.includes(c.section))
+        if (insExportLang === "en") return screen
+        const loc = new Map(insLocalizedCards().map((c) => [c.id, c]))
+        return screen.map((c) => loc.get(c.id) || c)
       }
 
       function insRenderExport() {
@@ -26840,8 +27983,13 @@
 
       function insExportChartBody(card) {
         const spec = insExportSpec(card.id)
-        const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
-        return `<div class="ins-export-preview">${svg}</div>
+        const theme = insExportTheme()
+        const { svg } = insRenderChart(spec, theme)
+        return `<div class="ins-export-preview" style="background:${esc(theme.surface)}">${svg}</div>
+          <p class="hint" style="margin:-6px 0 12px">
+            ${esc(INS_LANGS[insExportLang].name)} · colours, labels and chart type are set in
+            <a href="#" onclick="insOpenSettings();return false">Insights settings</a>.
+          </p>
           <label class="ins-export-check">
             <input type="checkbox" ${insExportCaption ? "checked" : ""}
               onchange="insToggleExportCaption()">
@@ -26969,7 +28117,7 @@
       function insExportChartSvg(toFile) {
         const spec = insExportSpec(insExportCardId)
         if (!spec) return
-        const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
+        const { svg } = insRenderChart(spec, insExportTheme())
         if (!toFile) {
           insCopyText(svg).then(
             () => showImportToast("success", "SVG source copied"),
@@ -26988,10 +28136,12 @@
       }
 
       function insExportChartData(format, toFile) {
-        const card = insSpecs.get(insExportCardId)
+        const card = insExportCardFor(insExportCardId)
         const spec = card && card.table ? null : insExportSpec(insExportCardId)
         if (!card || (!spec && !card.table)) return
-        const tsv = card.table ? insTableTsv(card.table) : insChartTsv(spec)
+        const tsv = insWithLang(insExportLang, () =>
+          card.table ? insTableTsv(card.table) : insChartTsv(spec),
+        )
         const text =
           format === "csv"
             ? insTsvToCsv(tsv)
@@ -27047,14 +28197,30 @@
         )
       }
 
-      async function insBuildReportHtml(only) {
+      async function insBuildReportHtml(only, lang) {
         const d = insData
+        const L = lang || insExportLang
         const cards = only || Array.from(insSpecs.values())
+        // Every string is resolved up front, synchronously: the loop below
+        // awaits a rasterisation per chart, and `insWithLang` must never span
+        // an await.
+        const t = insWithLang(L, () => ({
+          unitLine: insUnitLine(d),
+          summary: insSearchSummary(insArgs),
+          tiles: insTiles(d),
+          subject: insNoun(insWords(d).subject),
+        }))
+        // The report wears the export palette too: its text is the palette's
+        // ink, its rules the palette's grid.
+        const th = insExportTheme()
+        const C = { ink: th.ink, ink2: th.ink2, muted: th.muted, grid: th.grid, bg: th.surface }
         let html =
-          `<div style="${INS_MAIL_FONT}color:#111827;max-width:680px">` +
-          `<div style="font-size:19px;font-weight:700;margin-bottom:2px">Conversation insights</div>` +
-          `<div style="font-size:13px;color:#4b5563;margin-bottom:12px">` +
-          `${esc(insUnitLine(d))}` +
+          `<div style="${INS_MAIL_FONT}color:${C.ink};background:${C.bg};max-width:680px">` +
+          `<div style="font-size:19px;font-weight:700;margin-bottom:2px">${esc(
+            insT("Conversation insights", null, L),
+          )}</div>` +
+          `<div style="font-size:13px;color:${C.ink2};margin-bottom:12px">` +
+          `${esc(t.unitLine)}` +
           (d.firstTs && d.lastTs
             ? ` · ${esc(insZoneDayOf(d.firstTs, insZone()))} → ${esc(
                 insZoneDayOf(d.lastTs, insZone()),
@@ -27063,11 +28229,11 @@
           `</div>`
 
         html +=
-          `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}font-size:12px;color:#4b5563;margin-bottom:14px;border-collapse:collapse">` +
-          insSearchSummary(insArgs)
+          `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}font-size:12px;color:${C.ink2};margin-bottom:14px;border-collapse:collapse">` +
+          t.summary
             .map(
               (c) =>
-                `<tr><td style="padding:2px 10px 2px 0;color:#6b7280;white-space:nowrap">${esc(
+                `<tr><td style="padding:2px 10px 2px 0;color:${C.muted};white-space:nowrap">${esc(
                   c.label,
                 )}</td><td style="padding:2px 0">${esc(c.title || c.value)}</td></tr>`,
             )
@@ -27076,18 +28242,18 @@
 
         html +=
           `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}border-collapse:collapse;margin-bottom:18px"><tr>` +
-          insTiles(d)
+          t.tiles
             .map(
               (t) =>
                 `<td style="padding:8px 16px 8px 0;vertical-align:top">` +
-                `<div style="font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">${esc(
+                `<div style="font-size:11px;color:${C.muted};text-transform:uppercase;letter-spacing:.04em">${esc(
                   t.label,
                 )}</div>` +
-                `<div style="font-size:${t.hero ? 26 : 19}px;font-weight:700;color:#111827">${esc(
+                `<div style="font-size:${t.hero ? 26 : 19}px;font-weight:700;color:${C.ink}">${esc(
                   t.value,
                 )}</div>` +
                 (t.sub
-                  ? `<div style="font-size:11px;color:#6b7280">${esc(t.sub)}</div>`
+                  ? `<div style="font-size:11px;color:${C.muted}">${esc(t.sub)}</div>`
                   : "") +
                 `</td>`,
             )
@@ -27106,8 +28272,8 @@
         for (const card of cards) {
           if (card.section !== section) {
             section = card.section
-            html += `<div style="${INS_MAIL_FONT}font-size:15px;font-weight:700;color:#111827;margin:22px 0 8px">${esc(
-              section,
+            html += `<div style="${INS_MAIL_FONT}font-size:15px;font-weight:700;color:${C.ink};margin:22px 0 8px">${esc(
+              insT(section, null, L),
             )}</div>`
           }
           done++
@@ -27117,12 +28283,12 @@
           // of. Every element is styled inline for the same reason the rest of
           // this report is — `<style>` blocks and classes are stripped.
           const figure = card.table
-            ? insReportTableHtml(card.table)
+            ? insReportTableHtml(card.table, C)
             : `<img src="${(await insChartCanvas(card.spec)).toDataURL(
                 "image/png",
               )}" width="${INS_CHART_W}" style="display:block;width:100%;max-width:${
                 INS_CHART_W
-              }px;height:auto;border:1px solid #e8eaee;border-radius:6px" alt="${esc(
+              }px;height:auto;border:1px solid ${C.grid};border-radius:6px" alt="${esc(
                 card.title,
               )}">`
           if (Date.now() - started > LOADING_SHOW_DELAY_MS) {
@@ -27133,11 +28299,11 @@
           }
           html +=
             `<div style="margin-bottom:18px">` +
-            `<div style="${INS_MAIL_FONT}font-size:13px;font-weight:600;color:#111827">${esc(
+            `<div style="${INS_MAIL_FONT}font-size:13px;font-weight:600;color:${C.ink}">${esc(
               card.title,
             )}</div>` +
             (card.note
-              ? `<div style="${INS_MAIL_FONT}font-size:11px;color:#6b7280;margin-bottom:5px">${esc(
+              ? `<div style="${INS_MAIL_FONT}font-size:11px;color:${C.muted};margin-bottom:5px">${esc(
                   card.note,
                 )}</div>`
               : "") +
@@ -27146,11 +28312,18 @@
         }
 
         html +=
-          `<div style="${INS_MAIL_FONT}font-size:11px;color:#9ca3af;border-top:1px solid #e8eaee;padding-top:8px;margin-top:16px">` +
-          `All times ${esc(insZone())}. Charts count ${esc(
-            insWords(d).subject,
-          )} unless the note says otherwise. ` +
-          `Generated by CAI Dashboard${appVersion ? " v" + esc(appVersion) : ""}.` +
+          `<div style="${INS_MAIL_FONT}font-size:11px;color:${C.muted};border-top:1px solid ${C.grid};padding-top:8px;margin-top:16px">` +
+          esc(
+            insT(
+              "All times {zone}. Charts count {subject} unless the note says otherwise.",
+              { zone: insZone(), subject: t.subject },
+              L,
+            ),
+          ) +
+          " " +
+          `${esc(insT("Generated by CAI Dashboard", null, L))}${
+            appVersion ? " v" + esc(appVersion) : ""
+          }.` +
           `</div></div>`
         return html
       }
@@ -27160,13 +28333,14 @@
       /// A second renderer of one table object rather than a second walk of the
       /// payload — `insSegmentTable` has already decided what the rows are, so
       /// the two cannot disagree about a figure, only about a border.
-      function insReportTableHtml(table) {
+      function insReportTableHtml(table, colors) {
         if (!table) return ""
+        const C = colors || { ink: "#111827", muted: "#6b7280", grid: "#e8eaee" }
         const th =
-          "padding:5px 10px 5px 0;text-align:right;font-size:11px;color:#6b7280;" +
-          "font-weight:600;border-bottom:1px solid #e8eaee;white-space:nowrap"
+          `padding:5px 10px 5px 0;text-align:right;font-size:11px;color:${C.muted};` +
+          `font-weight:600;border-bottom:1px solid ${C.grid};white-space:nowrap`
         const td =
-          "padding:4px 10px 4px 0;text-align:right;font-size:12px;color:#111827;white-space:nowrap"
+          `padding:4px 10px 4px 0;text-align:right;font-size:12px;color:${C.ink};white-space:nowrap`
         let html =
           `<table cellpadding="0" cellspacing="0" style="${INS_MAIL_FONT}border-collapse:collapse">` +
           `<tr>` +
@@ -27187,7 +28361,7 @@
           if (r.kind === "head") {
             html +=
               `<tr><td colspan="${table.headers.length}" style="${td};text-align:left;` +
-              `color:#6b7280;font-size:11px;padding-top:12px;border-top:1px solid #e8eaee">${esc(
+              `color:${C.muted};font-size:11px;padding-top:12px;border-top:1px solid ${C.grid}">${esc(
                 r.label,
               )}${r.note ? " — " + esc(r.note) : ""}</td></tr>`
             continue
@@ -27208,10 +28382,14 @@
       /// Not a courtesy: it is what lands in Slack, in a plain-text mail, and
       /// in anything that refuses HTML — and it carries every number, so the
       /// report is never gated behind being able to see the pictures.
-      function insBuildReportText(only) {
+      function insBuildReportText(only, lang) {
+        return insWithLang(lang || insExportLang, () => insBuildReportTextIn(only))
+      }
+
+      function insBuildReportTextIn(only) {
         const d = insData
         const lines = [
-          "CONVERSATION INSIGHTS",
+          insT("Conversation insights").toUpperCase(),
           insUnitLine(d) +
             (d.firstTs && d.lastTs
               ? " · " +
@@ -27236,7 +28414,7 @@
         for (const card of only || insSpecs.values()) {
           if (card.section !== section) {
             section = card.section
-            lines.push("", "── " + section.toUpperCase() + " ──")
+            lines.push("", "── " + insT(section).toUpperCase() + " ──")
           }
           lines.push("", card.title)
           if (card.note) lines.push(card.note)
@@ -27264,6 +28442,456 @@
         htmlBlob.catch(() => {}).then(() => clearProgressToast())
       }
 
+      // ── Insights settings ─────────────────────────────────────────────
+      //
+      // Everything about how the charts *look* — the export palette, the
+      // export language, labels, caption parts and each card's chart type —
+      // in one modal opened from the Insights header. Deliberately not in the
+      // app's Settings: none of it applies anywhere else, and the live sample
+      // on the right only makes sense next to the dashboard it previews.
+      //
+      // Every control commits on change and redraws the dashboard behind the
+      // modal, so what is chosen is visible twice: in the sample, and in the
+      // real cards.
+
+      function insSettingsIsOpen() {
+        const el = document.getElementById("insSettingsModal")
+        return !!el && el.classList.contains("open")
+      }
+
+      function insOpenSettings() {
+        insCloseKeyPicker()
+        document.getElementById("insSettingsModal").classList.add("open")
+        insRenderSettings()
+      }
+
+      function insCloseSettings() {
+        document.getElementById("insSettingsModal").classList.remove("open")
+      }
+
+      /// Any CSS colour a person might paste — `#1a2b3c`, `#abc`, `rgb(…)`,
+      /// `hsl(…)`, `12, 34, 56`, a name — as `#rrggbb`, or `null`.
+      ///
+      /// Parsed by the browser's own colour parser: a canvas context's
+      /// `fillStyle` ignores anything it cannot read, so setting a sentinel
+      /// first and seeing whether it survived is a complete validity test.
+      function insParseColor(text) {
+        let t = String(text == null ? "" : text).trim()
+        if (!t) return null
+        if (/^#?[0-9a-f]{6}$/i.test(t)) return "#" + t.replace("#", "").toLowerCase()
+        if (/^#?[0-9a-f]{3}$/i.test(t)) {
+          const h = t.replace("#", "")
+          return ("#" + h[0] + h[0] + h[1] + h[1] + h[2] + h[2]).toLowerCase()
+        }
+        if (/^\d{1,3}\s*[, ]\s*\d{1,3}\s*[, ]\s*\d{1,3}$/.test(t)) {
+          t = "rgb(" + t.split(/[\s,]+/).join(",") + ")"
+        }
+        try {
+          const ctx = document.createElement("canvas").getContext("2d")
+          const sentinel = "#010203"
+          ctx.fillStyle = sentinel
+          ctx.fillStyle = t
+          const v = String(ctx.fillStyle)
+          if (v === sentinel && t.toLowerCase() !== sentinel) return null
+          if (/^#[0-9a-f]{6}$/i.test(v)) return v.toLowerCase()
+          const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(v)
+          if (m) {
+            return "#" + [m[1], m[2], m[3]].map((n) => (+n).toString(16).padStart(2, "0")).join("")
+          }
+        } catch (e) {
+          /* no canvas: only hex is accepted */
+        }
+        return null
+      }
+
+      /// Commit a settings change: persist, redraw the dashboard and anything
+      /// open over it.
+      function insSettingsChanged(what) {
+        if (what === "palette") insSavePalette()
+        if (what === "labels") insSaveLabelOpts()
+        if (what === "types") insSaveChartTypes()
+        if (what === "lang") insSaveExportLang()
+        if (insData && (what === "labels" || what === "types")) insRenderBody()
+        if (insExportIsOpen()) insRenderExport()
+        insRenderSettings()
+      }
+
+      function insSetPaletteColor(key, text, input) {
+        const c = insParseColor(text)
+        if (!c) {
+          if (input) input.classList.add("invalid")
+          return
+        }
+        insPalette[key] = c
+        insSettingsChanged("palette")
+      }
+
+      function insSetAccent(i, text, input) {
+        const c = insParseColor(text)
+        if (!c) {
+          if (input) input.classList.add("invalid")
+          return
+        }
+        insPalette.accents[i] = c
+        insSettingsChanged("palette")
+      }
+
+      /// While a colour picker is being dragged: update the swatch and the
+      /// sample, but do not re-render the modal — that would close the picker.
+      function insPreviewColor(key, i, value) {
+        if (key === "accent") insPalette.accents[i] = value
+        else insPalette[key] = value
+        const row = document.querySelector(`[data-ins-color="${key}${key === "accent" ? i : ""}"]`)
+        const hex = row && row.querySelector("input[type=text]")
+        if (hex) hex.value = value
+        insRenderSettingsSample()
+      }
+
+      function insMoveAccent(from, to) {
+        const acc = insPalette.accents
+        if (to < 0 || to >= acc.length || from === to) return
+        const [c] = acc.splice(from, 1)
+        acc.splice(to, 0, c)
+        insSettingsChanged("palette")
+      }
+
+      function insAddAccent() {
+        if (insPalette.accents.length >= 8) return
+        const last = insPalette.accents[insPalette.accents.length - 1] || "#2a78d6"
+        insPalette.accents.push(insMix(last, insPalette.ink, 0.35))
+        insSettingsChanged("palette")
+      }
+
+      function insRemoveAccent(i) {
+        if (insPalette.accents.length <= 1) return
+        insPalette.accents.splice(i, 1)
+        insSettingsChanged("palette")
+      }
+
+      function insSwapSurfaceInk() {
+        const s = insPalette.surface
+        insPalette.surface = insPalette.ink
+        insPalette.ink = s
+        insSettingsChanged("palette")
+      }
+
+      function insResetPalette() {
+        insPalette = insNormalizePalette(null)
+        insSettingsChanged("palette")
+      }
+
+      function insSetLabelOpt(key, value) {
+        insLabelOpts = insNormalizeLabelOpts({ ...insLabelOpts, [key]: value })
+        insSettingsChanged("labels")
+      }
+
+      function insSetChartType(id, kind) {
+        if (!INS_CHART_KINDS[id] || !INS_CHART_KINDS[id].includes(kind)) return
+        if (kind === INS_CHART_KINDS[id][0]) delete insChartTypes[id]
+        else insChartTypes[id] = kind
+        insSettingsChanged("types")
+      }
+
+      function insSetExportLang(lang) {
+        insExportLang = INS_LANGS[lang] ? lang : "en"
+        insSettingsChanged("lang")
+      }
+
+      function insSetCaptionOn(on) {
+        insExportCaption = !!on
+        try {
+          localStorage.setItem("cm-insights-export-caption", insExportCaption ? "1" : "0")
+        } catch (e) {
+          /* not a reason to refuse the choice */
+        }
+        if (insExportIsOpen()) insRenderExport()
+        insRenderSettings()
+      }
+
+      // Accent drag: a mousemove loop, never HTML5 drag — see "Moving a line"
+      // above for why the native gesture cannot work in this webview.
+      let insAccDrag = null
+      function insAccGripDown(e, i) {
+        if (e.button !== 0) return
+        e.preventDefault()
+        insAccDrag = { from: i, to: i }
+        document.addEventListener("mousemove", insAccDragMove)
+        document.addEventListener("mouseup", insAccDragUp, { once: true })
+        const chip = e.target.closest(".ins-acc")
+        if (chip) chip.classList.add("dragging")
+      }
+      function insAccDragMove(e) {
+        if (!insAccDrag) return
+        // The chips wrap, so "where" is 2-D: the target is the chip whose
+        // centre is nearest the pointer, whichever way the list runs.
+        const chips = [...document.querySelectorAll("#insSettingsBody .ins-acc")]
+        let to = insAccDrag.to
+        let best = Infinity
+        chips.forEach((c, k) => {
+          const r = c.getBoundingClientRect()
+          const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2))
+          if (dist < best) {
+            best = dist
+            to = k
+          }
+        })
+        insAccDrag.to = to
+        chips.forEach((c, k) => c.classList.toggle("drop-here", k === to && k !== insAccDrag.from))
+      }
+      function insAccDragUp() {
+        document.removeEventListener("mousemove", insAccDragMove)
+        const d = insAccDrag
+        insAccDrag = null
+        if (d && d.to !== d.from) insMoveAccent(d.from, d.to)
+        else insRenderSettings()
+      }
+
+      /// Two small charts in the current settings: one series over days (the
+      /// palette's first accent, the weekend wash, the date and value labels)
+      /// and one part-to-whole (the accents in order).
+      function insSettingsSampleSpecs() {
+        return insWithLang(insExportLang, () => {
+          const start = Date.UTC(2026, 5, 1)
+          const byDay = []
+          const shape = [42, 55, 61, 58, 49, 18, 14, 47, 60, 66, 52, 45, 16, 12]
+          shape.forEach((v, i) => byDay.push({ label: insUtcDayKey(start + i * 86400000), count: v }))
+          const vol = insVolumeSpec({ byDay })
+          const volKind = insChartKindFor("volume")
+          const volume = {
+            ...vol,
+            kind: volKind || vol.kind,
+            unit: "conversations",
+            valueLabels: insLabelOpts.valueLabels,
+            width: 520,
+            plotHeight: 110,
+          }
+          const parts = insPalette.accents.map((_, i) => ({
+            label: insT("Context") + " " + (i + 1),
+            value: 40 - i * 4,
+          }))
+          const partKind = insChartKindFor("context") || "donut"
+          const share = {
+            kind: partKind === "bars" || partKind === "columns" ? "donut" : partKind,
+            data: parts,
+            unit: "conversations",
+            width: 520,
+          }
+          if (insExportCaption) {
+            const card = { title: insT("Conversations per day"), note: "" }
+            volume.caption = insCaptionLines(card, null, {}, insZone(), insLabelOpts)
+          }
+          return { volume, share }
+        })
+      }
+
+      function insRenderSettingsSample() {
+        const el = document.getElementById("insSettingsSample")
+        if (!el) return
+        const theme = insExportTheme()
+        const { volume, share } = insSettingsSampleSpecs()
+        const a = insWithLang(insExportLang, () => insRenderChart(volume, theme).svg)
+        const b = insWithLang(insExportLang, () => insRenderChart(share, theme).svg)
+        el.style.background = theme.surface
+        el.innerHTML = a + b
+      }
+
+      function insRenderSettings() {
+        const body = document.getElementById("insSettingsBody")
+        if (!body) return
+        const p = insPalette
+        const o = insLabelOpts
+        const colorRow = (key, label, value, i) => {
+          const id = key + (key === "accent" ? i : "")
+          const set =
+            key === "accent"
+              ? `insSetAccent(${i}, this.value, this)`
+              : `insSetPaletteColor('${key}', this.value, this)`
+          return `<span class="ins-color" data-ins-color="${esc(id)}">
+              <input type="color" value="${esc(value)}" title="${esc(label)}"
+                oninput="insPreviewColor('${key}', ${i || 0}, this.value)"
+                onchange="${set}">
+              <input type="text" value="${esc(value)}" spellcheck="false"
+                aria-label="${esc(label)}" placeholder="#rrggbb, rgb(…)"
+                onchange="${set}" onkeydown="if(event.key==='Enter')this.blur()">
+            </span>`
+        }
+        const sel = (key, choices, names) =>
+          `<select onchange="insSetLabelOpt('${key}', this.value)">${choices
+            .map(
+              (c) =>
+                `<option value="${esc(c)}"${o[key] === c ? " selected" : ""}>${esc(names[c])}</option>`,
+            )
+            .join("")}</select>`
+        const check = (key, label) =>
+          `<label class="ins-export-check"><input type="checkbox" ${o[key] ? "checked" : ""}
+            onchange="insSetLabelOpt('${key}', this.checked)"> ${esc(label)}</label>`
+        const cardTitle = (id) => {
+          const c = insSpecs.get(id)
+          if (c) return c.title
+          const names = {
+            volume: "Per day",
+            hour: "By hour of day",
+            length: "Conversation length",
+            recognition: "Recognition score",
+            feedback: "Feedback",
+            recogType: "How the answer was found",
+            dialogStatus: "Dialog outcome",
+            context: "Context",
+            metadata: "Metadata",
+            cultures: "Cultures",
+            entities: "Entities recognised",
+            questions: "Opening questions",
+            articles: "Articles that answered",
+            dialogs: "Dialogs walked through",
+            dialogNodes: "Dialog nodes that answered",
+          }
+          return names[id] || id
+        }
+        body.innerHTML = `<div class="ins-set-grid">
+          <div class="ins-set-controls">
+            <section>
+              <h4>Export colours</h4>
+              <p class="hint">Used for every exported image, SVG and the emailed report.
+                Type any hex, <code>rgb()</code> or <code>hsl()</code> value, or pick one.</p>
+              <div class="ins-set-row"><span class="ins-set-label">Background</span>${colorRow(
+                "surface",
+                "Background",
+                p.surface,
+              )}</div>
+              <div class="ins-set-row"><span class="ins-set-label">Text</span>${colorRow(
+                "ink",
+                "Text",
+                p.ink,
+              )}
+                <button class="btn-secondary ins-set-mini" onclick="insSwapSurfaceInk()"
+                  title="Swap background and text — a dark export in one click">⇅ Swap</button></div>
+              <div class="ins-set-label" style="margin-top:10px">Accents
+                <span class="hint">— first is the main series colour; drag or use ← → to reorder</span></div>
+              <div class="ins-accs">${p.accents
+                .map(
+                  (c, i) => `<div class="ins-acc">
+                    <button class="ins-acc-grip" title="Drag to reorder"
+                      onmousedown="insAccGripDown(event, ${i})">&#8942;&#8942;</button>
+                    <span class="ins-acc-n">${i + 1}</span>
+                    ${colorRow("accent", "Accent " + (i + 1), c, i)}
+                    <span class="ins-acc-btns">
+                      <button onclick="insMoveAccent(${i}, ${i - 1})" ${i ? "" : "disabled"}
+                        title="Move left" aria-label="Move left">←</button>
+                      <button onclick="insMoveAccent(${i}, ${i + 1})" ${
+                        i < p.accents.length - 1 ? "" : "disabled"
+                      } title="Move right" aria-label="Move right">→</button>
+                      <button onclick="insRemoveAccent(${i})" ${
+                        p.accents.length > 1 ? "" : "disabled"
+                      } title="Remove" aria-label="Remove">✕</button>
+                    </span>
+                  </div>`,
+                )
+                .join("")}
+                ${
+                  p.accents.length < 8
+                    ? `<button class="btn-secondary ins-set-mini" onclick="insAddAccent()">+ Accent</button>`
+                    : ""
+                }
+              </div>
+              <div class="ins-set-label" style="margin-top:10px">Status colours
+                <span class="hint">— recognition bands and feedback</span></div>
+              <div class="ins-set-row"><span class="ins-set-label sub">Good</span>${colorRow(
+                "good",
+                "Good",
+                p.good,
+              )}</div>
+              <div class="ins-set-row"><span class="ins-set-label sub">Warning</span>${colorRow(
+                "warning",
+                "Warning",
+                p.warning,
+              )}</div>
+              <div class="ins-set-row"><span class="ins-set-label sub">Critical</span>${colorRow(
+                "critical",
+                "Critical",
+                p.critical,
+              )}</div>
+              ${
+                insPaletteIsDefault(p)
+                  ? ""
+                  : `<button class="btn-secondary ins-set-mini" onclick="insResetPalette()">Reset colours</button>`
+              }
+            </section>
+            <section>
+              <h4>Export language</h4>
+              <div class="ins-set-row">
+                <select onchange="insSetExportLang(this.value)">${Object.entries(INS_LANGS)
+                  .map(
+                    ([k, v]) =>
+                      `<option value="${k}"${insExportLang === k ? " selected" : ""}>${esc(
+                        v.name,
+                      )}</option>`,
+                  )
+                  .join("")}</select>
+                <span class="hint">Titles, notes, captions, labels and copied tables. The screen stays English.</span>
+              </div>
+            </section>
+            <section>
+              <h4>Labels</h4>
+              <div class="ins-set-row"><span class="ins-set-label">Dates</span>${sel(
+                "dateFmt",
+                INS_LABEL_CHOICES.dateFmt,
+                { iso: "2026-06-01 / 06-01", dm: "01-06", dmon: "1 Jun" },
+              )}</div>
+              <div class="ins-set-row"><span class="ins-set-label">Hours</span>${sel(
+                "hourFmt",
+                INS_LABEL_CHOICES.hourFmt,
+                { hh: "09", hhmm: "09:00", ampm: "9 AM" },
+              )}</div>
+              <div class="ins-set-row"><span class="ins-set-label">Values on marks</span>${sel(
+                "valueLabels",
+                INS_LABEL_CHOICES.valueLabels,
+                { auto: "When there is room", always: "Always", never: "Never" },
+              )}</div>
+              ${check("weekdayTicks", "Day of the week on day labels")}
+              ${check("weekend", "Shade weekends")}
+            </section>
+            <section>
+              <h4>Caption in exported images</h4>
+              <label class="ins-export-check"><input type="checkbox" ${
+                insExportCaption ? "checked" : ""
+              } onchange="insSetCaptionOn(this.checked)"> Include a caption</label>
+              <div class="ins-set-sub${insExportCaption ? "" : " off"}">
+                ${check("capTitle", "Title")}
+                ${check("capNote", "Note")}
+                ${check("capSearch", "What was searched for")}
+                ${check("capUnit", "What is counted")}
+                ${check("capZone", "Timezone")}
+              </div>
+            </section>
+            <section>
+              <h4>Chart types</h4>
+              <p class="hint">Only the forms that fit each card's data are offered.</p>
+              <div class="ins-set-types">${Object.keys(INS_CHART_KINDS)
+                .map(
+                  (id) => `<div class="ins-set-row"><span class="ins-set-label" title="${esc(
+                    cardTitle(id),
+                  )}">${esc(cardTitle(id))}</span>
+                    <select onchange="insSetChartType('${id}', this.value)">${INS_CHART_KINDS[id]
+                      .map(
+                        (k) =>
+                          `<option value="${k}"${
+                            (insChartTypes[id] || INS_CHART_KINDS[id][0]) === k ? " selected" : ""
+                          }>${esc(INS_CHART_KIND_NAMES[k])}</option>`,
+                      )
+                      .join("")}</select></div>`,
+                )
+                .join("")}</div>
+            </section>
+          </div>
+          <div class="ins-set-preview">
+            <h4>Sample</h4>
+            <div class="ins-set-sample" id="insSettingsSample"></div>
+            <p class="hint">A made-up fortnight and six parts, drawn exactly as an export would be.</p>
+          </div>
+        </div>`
+        insRenderSettingsSample()
+      }
+
       // ── Wiring ───────────────────────────────────────────────────────
       document
         .getElementById("convInsightsBtn")
@@ -27278,6 +28906,9 @@
       document.getElementById("insExportCancel").addEventListener("click", insCloseExport)
       document.getElementById("insExportModal").addEventListener("click", (e) => {
         if (e.target === e.currentTarget) insCloseExport()
+      })
+      document.getElementById("insSettingsModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) insCloseSettings()
       })
       insBindTooltips(document.getElementById("insBody"))
       insBindChartNav(document.getElementById("insBody"))
@@ -27302,6 +28933,10 @@
         // Extended rather than given its own listener: a second `keydown`
         // registered after this one fires *after* it, so Escape would close
         // Insights and only then reach a modal that had gone with it.
+        if (insSettingsIsOpen()) {
+          insCloseSettings()
+          return
+        }
         if (insExportIsOpen()) {
           insCloseExport()
           return

@@ -399,7 +399,7 @@ The orientation map for the whole window. It says what is on screen and where;
 
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
-                toggle | Choose data | Copy dashboard | ✕
+                toggle | Choose data | ⚙ Insights settings | Export | ✕
   header row 2: what the slice holds | chips describing the search this is
                 | one quiet UTC badge
   body, on open — the chooser, and nothing is read until it is answered:
@@ -435,6 +435,13 @@ The orientation map for the whole window. It says what is on screen and where;
   every card: title · what it counts · Export (a table card offers its
               numbers only — there is no picture of one)
   while reading: a Cancel button under the spinner; the unit toggle stays live
+
+<div#insSettingsModal>   (from the Insights header gear)
+  controls: export colours (background · text · Swap · accents, draggable ·
+            status colours · Reset) | export language | labels (dates · hours ·
+            values on marks · weekday · weekend) | caption parts | chart type
+            per card
+  sample:   two charts drawn exactly as an export would be
 
 <div.conv-sidebar-header>
   [( )] | expression field | search submit | [.*] | [U] [B] [E]
@@ -581,6 +588,10 @@ Always use these terms in the UI:
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
 | `cm-insights-export-caption` | `"0"` to leave the caption off an exported chart image; anything else, including absent, includes it |
+| `cm-insights-export-palette` | JSON `{surface, ink, accents[], good, warning, critical}` — the export palette. Absent means the built-in export theme. Read key by key; a non-hex value is dropped. See `docs/insights.md` → "Insights settings" |
+| `cm-insights-export-lang`  | `"de"` or `"nl"` to write exports in German or Dutch; absent means English. The screen stays English |
+| `cm-insights-export-options` | JSON — label options (`dateFmt`, `hourFmt`, `valueLabels`, `weekdayTicks`, `weekend`) and caption parts (`capTitle`, `capNote`, `capSearch`, `capUnit`, `capZone`). Label options apply on screen too |
+| `cm-insights-chart-types`  | JSON `{cardId: kind}` — the chart type chosen per Insights card, limited to what `INS_CHART_KINDS` allows for that card |
 | `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content, segments}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
 | `cm-insights-segment-layout` | JSON `{entries, dropped}` — the Segments table as an ordered list of lines (`{t:"total"\|"row"\|"head"\|"gap", id?, gid?, label?}`) plus the row ids removed by hand. Absent means "follow the breakdowns", which is a real state and not an empty object. Read entry by entry |
 | `cm-insights-segment-presets` | JSON array of `{id, name, breakdowns, layout}` — saved Segments setups. Holds the breakdowns and the arrangement, never a date range: a preset is applied to whatever the current search covers. See `docs/insights.md` → "A preset is the setup, never the dates" |

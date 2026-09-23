@@ -96,6 +96,19 @@ const EXPORTS = [
   "insSegNormalizePresets",
   "insSegResolve",
   "insSegDropIndex",
+  "insExportTheme",
+  "insNormalizePalette",
+  "insNormalizeChartTypes",
+  "insNormalizeLabelOpts",
+  "insApplyChartKind",
+  "insVolumeSpec",
+  "insFmtDay",
+  "insFmtHour",
+  "insWithLang",
+  "insT",
+  "INS_I18N",
+  "INS_CHART_KINDS",
+  "INS_LABEL_DEFAULTS",
 ]
 const {
   INS_THEME_SCREEN,
@@ -153,6 +166,19 @@ const {
   insSegNormalizePresets,
   insSegResolve,
   insSegDropIndex,
+  insExportTheme,
+  insNormalizePalette,
+  insNormalizeChartTypes,
+  insNormalizeLabelOpts,
+  insApplyChartKind,
+  insVolumeSpec,
+  insFmtDay,
+  insFmtHour,
+  insWithLang,
+  insT,
+  INS_I18N,
+  INS_CHART_KINDS,
+  INS_LABEL_DEFAULTS,
 } = new Function(
   sliceByIndent("function esc(s) {") +
     "\n" +
@@ -222,6 +248,8 @@ test("an exported chart depends on nothing outside itself", () => {
     { kind: "stack", data: bars(3), total: 27 },
     { kind: "heatmap", grid: Array.from({ length: 168 }, (_, i) => i % 9) },
     { kind: "area", data: bars(80, 90) },
+    { kind: "line", data: bars(30, 40) },
+    { kind: "donut", data: bars(5), total: 40 },
   ]
   for (const spec of specs) {
     const { svg } = insRenderChart(spec, INS_THEME_EXPORT)
@@ -286,7 +314,8 @@ function assertInsideCanvas(spec, label) {
     const x = Number(xm ? xm[1] : rot[1])
     const anchor = (/text-anchor="(\w+)"/.exec(attrs) || [])[1] || "start"
     const size = Number((/font-size="([\d.]+)"/.exec(attrs) || [])[1] || 11)
-    const tw = insTextWidth(m[2], size)
+    // Rotated by 40°, a label's horizontal extent is its length × cos 40°.
+    const tw = insTextWidth(m[2], size) * (rot ? Math.cos((40 * Math.PI) / 180) : 1)
     const left = anchor === "end" ? x - tw : anchor === "middle" ? x - tw / 2 : x
     assert.ok(left >= -0.5, label + ': "' + m[2] + '" starts left of the canvas')
     assert.ok(left + tw <= width + 0.5, label + ': "' + m[2] + '" runs past the right edge')
@@ -583,14 +612,14 @@ test("ordered scales keep their order however few land in each band", () => {
     byId.get("length").spec.data.map((d) => d.label),
     ["1", "3–5", "21+"],
   )
-  // The band colours are the reserved status scale, never a series hue.
+  // The band colours are the reserved status scale, never a series hue — and
+  // tokens, resolved per palette, so an export palette recolours them.
   const colors = byId.get("recognition").spec.data.map((d) => d.color)
-  assert.deepStrictEqual(colors, [
-    INS_THEME_SCREEN.critical,
-    INS_THEME_SCREEN.serious,
-    INS_THEME_SCREEN.good,
-  ])
-  assert.ok(!colors.includes(INS_THEME_SCREEN.series), "a status band wears a series colour")
+  assert.deepStrictEqual(colors, ["critical", "serious", "good"])
+  for (const theme of [INS_THEME_SCREEN, INS_THEME_EXPORT]) {
+    const svg = insRenderChart(byId.get("recognition").spec, theme).svg
+    assert.ok(svg.includes(theme.critical) && svg.includes(theme.good), theme.name)
+  }
 })
 
 // A card with nothing in it is not an empty chart, it is a chart that should
@@ -1526,6 +1555,8 @@ test("every chart builder closes its own tag exactly once", () => {
     { kind: "stack", data: bars(3), total: 27 },
     { kind: "heatmap", grid: Array.from({ length: 168 }, (_, i) => i % 9) },
     { kind: "area", data: bars(80, 90) },
+    { kind: "line", data: bars(20, 30) },
+    { kind: "donut", data: bars(12), total: 60 },
   ]
   for (const spec of specs) {
     for (const s of [spec, CAPTIONED(spec)]) {
@@ -1883,6 +1914,151 @@ test("a label full of markup cannot break the picture", () => {
   assertWellFormed(svg)
   assert.ok(!svg.includes("<script"), "raw markup reached the SVG")
   assert.ok(svg.includes("&amp;"), "an ampersand was not escaped")
+})
+
+
+// ── Export settings: palette, language, labels, chart types ─────────────
+
+test("a custom export palette recolours every mark, and leaks nothing from the screen", () => {
+  const palette = {
+    surface: "#101820",
+    ink: "#fafafa",
+    accents: ["#ff6600", "#00aa88", "#aa00ff"],
+    good: "#11aa11",
+    warning: "#eeaa00",
+    critical: "#cc0000",
+  }
+  const theme = insExportTheme(palette)
+  assert.strictEqual(theme.surface, "#101820")
+  assert.strictEqual(theme.series, "#ff6600")
+  for (const card of insBuildCards(CONVS, INS_THEME_SCREEN)) {
+    if (!card.spec) continue
+    const { svg } = insRenderChart(card.spec, theme)
+    assertWellFormed(svg)
+    // Nothing chosen at build time in the screen palette survives into a
+    // picture drawn in another one.
+    for (const k of ["surface", "series", "neutral", "ink", "grid"]) {
+      assert.ok(
+        !svg.toLowerCase().includes(INS_THEME_SCREEN[k].toLowerCase()),
+        card.id + ": the screen palette's " + k + " leaked into an export",
+      )
+    }
+  }
+  const fb = insBuildCards(CONVS, INS_THEME_SCREEN).find((c) => c.id === "feedback")
+  const svg = insRenderChart(fb.spec, theme).svg
+  assert.ok(svg.includes("#11aa11") && svg.includes("#cc0000"), "status colours were not applied")
+})
+
+test("the default palette is the validated export theme itself", () => {
+  assert.strictEqual(insExportTheme(null), INS_THEME_EXPORT)
+  assert.strictEqual(insExportTheme(insNormalizePalette({ surface: "nope" })), INS_THEME_EXPORT)
+  // A stored palette cannot put a non-colour into an attribute.
+  const p = insNormalizePalette({ surface: 'red" onload="x', accents: ["#123456", "blue", 7] })
+  assert.strictEqual(p.surface, INS_THEME_EXPORT.surface)
+  assert.deepStrictEqual(p.accents, ["#123456"])
+})
+
+test("every translated phrase exists in both languages", () => {
+  const de = Object.keys(INS_I18N.de).sort()
+  const nl = Object.keys(INS_I18N.nl).sort()
+  assert.deepStrictEqual(de, nl, "German and Dutch cover different phrases")
+  for (const lang of ["de", "nl"]) {
+    for (const [k, v] of Object.entries(INS_I18N[lang])) {
+      // A slot the English has must survive into the translation.
+      for (const slot of k.match(/\{\w+\}/g) || []) {
+        assert.ok(v.includes(slot), lang + ": " + JSON.stringify(k) + " lost " + slot)
+      }
+    }
+  }
+})
+
+test("an export in German is German, and the screen stays English", () => {
+  const de = insWithLang("de", () => insBuildCards(CONVS, INS_THEME_SCREEN))
+  const volume = de.find((c) => c.id === "volume")
+  assert.strictEqual(volume.title, "Gespräche pro Tag")
+  const rec = de.find((c) => c.id === "recognition")
+  assert.ok(rec.spec.data.some((d) => d.label === "Null"), "the band label was not translated")
+  // …and still wears the status colour its English key names.
+  assert.strictEqual(rec.spec.data.find((d) => d.label === "Null").color, "critical")
+  assert.ok(insWithLang("de", () => insChartTsv(volume.spec)).startsWith("Tag\tWochentag\tGespräche"))
+  assert.strictEqual(insBuildCards(CONVS, INS_THEME_SCREEN)[0].title, "Conversations per day")
+  // A tag note is built from slots, so the numbers survive translation.
+  const nl = insWithLang("nl", () => insBuildCards(CONVS, INS_THEME_SCREEN))
+  const ctx = nl.find((c) => c.id === "context")
+  if (ctx) assert.ok(/^Aandeel van de [\d.,]+ gesprekken/.test(ctx.note), ctx.note)
+  assert.strictEqual(insT("No such phrase", null, "de"), "No such phrase")
+})
+
+test("a chart type is only ever one the card's data can honestly take", () => {
+  assert.deepStrictEqual(
+    insNormalizeChartTypes({ volume: "donut", feedback: "donut", heat: "bars", nope: "bars" }),
+    { feedback: "donut" },
+  )
+  const cards = insBuildCards(CONVS, INS_THEME_SCREEN)
+  const fb = cards.find((c) => c.id === "feedback")
+  const asDonut = insApplyChartKind("feedback", fb.spec, { feedback: "donut" })
+  assert.strictEqual(asDonut.kind, "donut")
+  const out = insRenderChart(asDonut, INS_THEME_EXPORT)
+  assertWellFormed(out.svg)
+  assertInsideCanvas(asDonut, "feedback as donut")
+  // Bars turned into columns tilt their names rather than cutting them.
+  const ents = cards.find((c) => c.id === "entities")
+  if (ents && ents.spec.data.length > 6) {
+    assert.strictEqual(insApplyChartKind("entities", ents.spec, { entities: "columns" }).rotateLabels, true)
+  }
+  const hour = cards.find((c) => c.id === "hour")
+  const line = insApplyChartKind("hour", hour.spec, { hour: "line" })
+  assert.ok(!insRenderChart(line, INS_THEME_EXPORT).svg.includes('fill-opacity="0.1"'), "a line has no wash")
+})
+
+test("a donut folds a long tail into one counted slice", () => {
+  const out = insRenderChart({ kind: "donut", data: bars(14, 30), total: 300 }, INS_THEME_EXPORT)
+  assertWellFormed(out.svg)
+  assert.strictEqual((out.svg.match(/<path /g) || []).length, 8, "eight slices, not fourteen")
+  assert.ok(out.svg.includes("Other (7)"), "the folded slice does not say how many it holds")
+  // One slice is a whole ring, and still draws.
+  const one = insRenderChart({ kind: "donut", data: [{ label: "a", value: 5 }] }, INS_THEME_EXPORT)
+  assert.ok(/<path d="M[^"]+A[^"]+A/.test(one.svg), "a single slice drew nothing")
+})
+
+test("day labels follow the chosen format, weekday and weekend options", () => {
+  assert.strictEqual(insFmtDay("2026-06-01", true, "iso"), "06-01")
+  assert.strictEqual(insFmtDay("2026-06-01", false, "iso"), "2026-06-01")
+  assert.strictEqual(insFmtDay("2026-06-01", true, "dm"), "01-06")
+  assert.strictEqual(insFmtDay("2026-06-01", true, "dmon"), "1 Jun")
+  // The month name is the engine's own (`Mär` or `März` depending on its ICU).
+  assert.ok(/^5 Mär/.test(insWithLang("de", () => insFmtDay("2026-03-05", false, "dmon"))))
+  assert.strictEqual(insFmtHour("00", "ampm"), "12 AM")
+  assert.strictEqual(insFmtHour("13", "ampm"), "1 PM")
+  assert.strictEqual(insFmtHour("9", "hhmm"), "09:00")
+  const byDay = [
+    { label: "2026-06-05", count: 3 },
+    { label: "2026-06-06", count: 1 },
+  ]
+  const on = insVolumeSpec({ byDay }, { ...INS_LABEL_DEFAULTS, weekdayTicks: true })
+  assert.strictEqual(on.data[0].tick, "Fri 06-05")
+  assert.strictEqual(on.data[1].band, "weekend")
+  const off = insVolumeSpec({ byDay }, { ...INS_LABEL_DEFAULTS, weekend: false })
+  assert.strictEqual(off.data[1].band, undefined)
+  assert.strictEqual(off.data[1].tickColor, undefined)
+  assert.deepStrictEqual(insNormalizeLabelOpts({ dateFmt: "weird", weekend: "yes" }), INS_LABEL_DEFAULTS)
+})
+
+test("a tilted first label is never cut by the canvas edge", () => {
+  const data = []
+  for (let i = 0; i < 20; i++) data.push({ label: "x" + i, tick: "Wed 12 Sep 2026", value: i + 1 })
+  const spec = { kind: "columns", data, rotateLabels: true }
+  assertInsideCanvas(spec, "tilted")
+})
+
+test("caption parts can each be left out", () => {
+  const card = insBuildCards(CONVS, INS_THEME_SCREEN, "UTC").find((c) => c.id === "volume")
+  const none = { ...INS_LABEL_DEFAULTS, capTitle: false, capNote: false, capSearch: false, capUnit: false, capZone: false }
+  assert.deepStrictEqual(insCaptionLines(card, CONVS, { query: "x" }, "UTC", none), [])
+  const onlyZone = { ...none, capZone: true }
+  const lines = insCaptionLines(card, CONVS, {}, "Europe/Amsterdam", onlyZone)
+  assert.strictEqual(lines.length, 1)
+  assert.strictEqual(lines[0].text, "times in Amsterdam")
 })
 
 console.log(failures ? "\n" + failures + " failing" : "\nall insights tests passed")
