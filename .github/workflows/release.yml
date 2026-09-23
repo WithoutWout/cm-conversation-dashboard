@@ -91,50 +91,37 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### GAP analysis — a new tab
-            The questions the bot recognised badly, as a work list. Pick a date
-            range and every question scored under your low-recognition threshold
-            (or not recognised at all) is listed with the answer it got and its
-            score.
+            ### GAP: fix it right from the list
+            Selecting a question now shows **Fix this** — what to change in
+            CM.com so it is recognised next time, each with an **Edit ↗** button:
 
-            - Click a row to see the conversation it came from, with that turn
-              marked.
-            - Click a word of the question to copy it and look it up among your
-              entities; open any entity straight in CM.com.
-            - Tick rows off as **fixed** — one at a time, or every repeat of the
-              same question at once. Marks are kept in the database.
-            - **Export .xlsx** saves exactly what is listed, as
-              `GAP {date} {month}.xlsx`, with fixed rows in green.
+            - **Unknown words** the bot did not know, with **Add to entity…**:
+              it suggests the closest entities, copies the word and opens the
+              entity ready to paste.
+            - The **entities** it did recognise, the **Article or Dialog** that
+              answered, the **Articles** that use the same entities, and what
+              the person **asked next** — usually a rephrase that did get an
+              answer.
 
-            ### Search: and / or / not everywhere, and context as chips
-            - The **Content** search bar now works like the Conversations one:
-              chips joined by *and / or / not*, grouped with **( )**.
-            - Context and metadata values can be chips in both bars — for
-              example *parkeren* and not *Verblijf = true*. Click a chip to pick
-              other values, or several at once.
-            - Suggestions can be narrowed by type: Articles, Dialogs, Entities,
-              Context or Metadata.
+            Also in GAP: a **language badge** on the conversation, the list
+            keeps its place when you switch tabs and come back, the sort is
+            remembered, and the loading spinners are fixed.
 
-            ### Opening a search result shows the whole conversation
-            The rest of the chat is dimmed instead of hidden, the match is
-            centred, and scrolling away brings everything back. ↑ ↓ step
-            through the matches.
+            ### Insights numbers that match your reports
+            - **Interactions are answers** everywhere: the bot's own events,
+              rating rows and link clicks are no longer counted. Your database
+              is recounted once when the app opens.
+            - **Feedback** is shown as the **% of rated answers that were
+              positive**, next to the **% of answers that were rated**.
+            - **Segments**: recognition quality now includes zero scores, and
+              each answer is counted under its own language.
+            - **GenAI**: the tile and *How the answer was found* now show the
+              same share — GenAI follow-up questions are counted too.
 
-            ### Insights exports in your colours and language
-            - A new **settings** button in Insights: export colours (background,
-              text, accents, status colours), export language (**English,
-              German, Dutch**), date and hour formats, weekday labels, weekend
-              shading, values on bars, and which parts the caption includes.
-            - Choose the chart type per chart: columns, bars, line, area, and a
-              new donut and 100% bar.
-            - **Segments** now treats *True* and *true* as one value, names every
-              row *Key: value*, and lets you put back removed rows one by one.
-
-            ### Hide noisy metadata
-            Settings › Conversations › **Hidden metadata** keeps tokens and
-            per-conversation ids out of every metadata filter. The filter can
-            also hide a key in one click, and points out keys that look like an
-            id.
+            ### Smaller things
+            - **Pick a colour from anywhere on screen** in Insights settings.
+            - Insights settings and Export scroll when they do not fit.
+            - **Share Content** lists every view by Article/Dialog number.
 
             ---
 
