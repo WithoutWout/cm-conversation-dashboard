@@ -411,6 +411,33 @@ if (artPath && dlgPath) {
   out.push("  SKIP  real export not present beside the app")
 }
 
+// ── Settings › Hidden metadata ────────────────────────────────────────────────
+// Display only: a rule decides which chips are *offered*, never what a chip
+// counts or matches. The rule grammar is `key`, `key = value`, `*` wildcards.
+{
+  const hideCtx = vm.createContext({})
+  vm.runInContext(
+    `${extract("parseMetaHiddenRules")}
+     let metaHiddenRules = []
+     ${extract("metaHidden")}
+     function use(list) { metaHiddenRules = parseMetaHiddenRules(list) }`,
+    hideCtx,
+  )
+  hideCtx.use(["sessionToken", "*_id", "channel = test*", "  ", "= orphan"])
+  ok("a bare key hides the key", hideCtx.metaHidden("sessionToken") === true)
+  ok("…case-insensitively", hideCtx.metaHidden("SESSIONTOKEN", "abc") === true)
+  ok("a wildcard key rule matches", hideCtx.metaHidden("conversation_id", "x") === true)
+  ok("a key rule is anchored, not a substring", hideCtx.metaHidden("sessionTokenAge") === false)
+  ok("a value rule hides that value", hideCtx.metaHidden("channel", "testing") === true)
+  ok("…and only that value", hideCtx.metaHidden("channel", "web") === false)
+  ok("…and never the whole key", hideCtx.metaHidden("channel") === false)
+  ok("…nor its any / not-set chips", hideCtx.metaHidden("channel", "__any__") === false)
+  ok("regex characters in a rule are literal", (() => {
+    hideCtx.use(["a.b"])
+    return hideCtx.metaHidden("a.b") === true && hideCtx.metaHidden("axb") === false
+  })())
+}
+
 console.log(out.join("\n"))
 if (failed) {
   console.error(`\nMetadata filter: ${failed} check(s) failed`)

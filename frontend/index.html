@@ -5173,6 +5173,30 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .ctx-group-hide {
+        float: right;
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.6rem;
+        font-weight: 500;
+        letter-spacing: 0;
+        text-transform: none;
+        padding: 0 2px;
+        opacity: 0;
+      }
+      .ctx-group:hover .ctx-group-hide,
+      .ctx-group-hide.suggest {
+        opacity: 1;
+      }
+      .ctx-group-hide.suggest {
+        color: var(--orange);
+      }
+      .ctx-group-hide:hover {
+        color: var(--text);
+        text-decoration: underline;
+      }
       .ctx-chips {
         display: flex;
         flex-wrap: wrap;
@@ -10611,6 +10635,30 @@
                 border-top: 1px solid var(--border);
               "
             >
+              <label for="setting-meta-hidden">Hidden metadata</label>
+              <p class="hint" style="margin-bottom: 6px">
+                Keys or values left out of every metadata filter &mdash; tokens,
+                ids and other values that differ per conversation. One rule per
+                line: <code>key</code> hides a key, <code>key = value</code> one
+                value of it, <code>*</code> matches anything
+                (<code>*token*</code>, <code>*_id</code>). Nothing is deleted;
+                the data stays searchable.
+              </p>
+              <textarea
+                id="setting-meta-hidden"
+                rows="4"
+                spellcheck="false"
+                placeholder="sessionToken&#10;*_id&#10;channel = test"
+                style="width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem"
+              ></textarea>
+            </div>
+            <div
+              style="
+                margin-top: 14px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border);
+              "
+            >
               <label>Chat Copy Format</label>
               <p class="hint" style="margin-bottom: 6px">
                 How selected interactions are copied to the clipboard.
@@ -12379,6 +12427,109 @@
       let convMetadataFilters = [] // [{name, value}] — active metadata filters
       let metadataOptions = [] // [{name, value, count}] — from metadata_index
       let metadataOptionsLoaded = false
+
+      // ── Hidden metadata ───────────────────────────────────────────────
+      //
+      // Some metadata is noise to a filter: a session token, a per-conversation
+      // id, a timestamp — one value per conversation, hundreds of chips nobody
+      // will ever click. The user lists them in Settings as rules, one per
+      // line: `key` hides a whole key, `key = value` one value of it, and `*`
+      // matches anything (`*token*`, `*_id`).
+      //
+      // Display only. The index, the matching and every count are untouched —
+      // a hidden chip is simply not offered, in any picker. That is what keeps
+      // the setting safe to change: nothing has to be re-imported, and
+      // `metadata-filter.test.js`'s count assertions still hold.
+      function parseMetaHiddenRules(list) {
+        const glob = (p) =>
+          new RegExp(
+            "^" +
+              p
+                .split("*")
+                .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+                .join(".*") +
+              "$",
+            "i",
+          )
+        const out = []
+        for (const raw of list || []) {
+          const text = String(raw == null ? "" : raw).trim()
+          if (!text) continue
+          const at = text.indexOf("=")
+          const key = (at === -1 ? text : text.slice(0, at)).trim()
+          const value = at === -1 ? null : text.slice(at + 1).trim()
+          if (!key) continue
+          out.push({ text, key: glob(key), value: value == null ? null : glob(value) })
+        }
+        return out
+      }
+
+      let metaHiddenList = (() => {
+        try {
+          const raw = JSON.parse(localStorage.getItem("cm-metadata-hidden") || "[]")
+          return Array.isArray(raw) ? raw.map(String).filter((r) => r.trim()) : []
+        } catch (e) {
+          return []
+        }
+      })()
+      let metaHiddenRules = parseMetaHiddenRules(metaHiddenList)
+
+      /// Is this metadata key — or, with `value`, this one value of it —
+      /// hidden? A whole-key rule hides the key's "any" and "not set" chips too.
+      function metaHidden(name, value) {
+        for (const r of metaHiddenRules) {
+          if (!r.key.test(String(name))) continue
+          if (r.value === null) return true
+          if (value != null && !String(value).startsWith("__") && r.value.test(String(value)))
+            return true
+        }
+        return false
+      }
+
+      /// Replace the rule list, and put everything that showed metadata right:
+      /// active filters on a newly hidden chip are dropped — a filter nobody
+      /// can see is a filter nobody can take off.
+      function setMetaHiddenList(list) {
+        metaHiddenList = (list || []).map((r) => String(r).trim()).filter(Boolean)
+        metaHiddenList = [...new Set(metaHiddenList)]
+        metaHiddenRules = parseMetaHiddenRules(metaHiddenList)
+        try {
+          if (metaHiddenList.length)
+            localStorage.setItem("cm-metadata-hidden", JSON.stringify(metaHiddenList))
+          else localStorage.removeItem("cm-metadata-hidden")
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the change */
+        }
+        const keep = (f) => !metaHidden(f.name, f.value)
+        const convBefore = convMetadataFilters.length
+        const contentBefore = contentMetadataFilters.length
+        convMetadataFilters = convMetadataFilters.filter(keep)
+        contentMetadataFilters = contentMetadataFilters.filter(keep)
+        try {
+          _updateCtxFilterBadge()
+          _updateContentCtxBadge()
+          const co = document.getElementById("ctxModalOverlay")
+          if (co && co.classList.contains("open")) _renderCtxModal()
+          const cm = document.getElementById("contentCtxModalOverlay")
+          if (cm && cm.classList.contains("open")) _renderContentCtxModal()
+          if (contentMetadataFilters.length !== contentBefore) triggerSearch()
+          if (convMetadataFilters.length !== convBefore) convPage = 1
+          if (typeof insData !== "undefined" && insData) insRenderBody()
+        } catch (e) {
+          /* called before the rest of the renderer exists: nothing to redraw */
+        }
+      }
+
+      /// One click from a chip group: hide this key.
+      function hideMetadataKey(name) {
+        if (!name) return
+        setMetaHiddenList(metaHiddenList.concat([String(name).replace(/\*/g, "")]))
+        showImportToast(
+          "success",
+          "“" + name + "” is hidden from metadata filters. Undo under Settings › Conversations.",
+        )
+      }
+
       let contentContextFilters = [] // [{name, value}] — active content context filters
       let contentContextOptions = [] // [{name, value, count}] — built from export data
       let contentMetadataFilters = [] // [{name, value}] — active content metadata filters
@@ -19318,6 +19469,7 @@
         _fillTimezoneSelect()
         document.getElementById("setting-low-recog-threshold").value =
           lowRecogThreshold
+        document.getElementById("setting-meta-hidden").value = metaHiddenList.join("\n")
         // data-retention setting lives on the data modal's Database tab
         document.querySelector(
           `input[name="open-mode"][value="${openMode}"]`,
@@ -19494,6 +19646,7 @@
         { key: "cm-export-keep-unreachable" },
         { key: "chat-copy-format" },
         { key: "conv-low-recog-threshold" },
+        { key: "cm-metadata-hidden" },
         { key: "cm-display-timezone" },
         { key: "conv-data-retention-days" },
         { key: "cm-dismissed-version" },
@@ -19825,6 +19978,14 @@
           "conv-low-recog-threshold",
           String(lowRecogThreshold),
         )
+        const _hiddenNext = document
+          .getElementById("setting-meta-hidden")
+          .value.split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean)
+        if (_hiddenNext.join("\n") !== metaHiddenList.join("\n")) {
+          setMetaHiddenList(_hiddenNext)
+        }
         openMode = document.querySelector(
           'input[name="open-mode"]:checked',
         ).value
@@ -24593,7 +24754,10 @@
             insTagSpec(ctxGroup, w),
           )
         }
-        const metaGroup = insPickGroup(d.metadata, insMetaKey)
+        const metaGroup = insPickGroup(
+          (d.metadata || []).filter((g) => !insMetaHidden(g.name)),
+          insMetaKey,
+        )
         if (metaGroup) {
           push(
             "Metadata",
@@ -24713,6 +24877,17 @@
       /// `frontend/tests/insights.test.js`, where these globals do not exist —
       /// and "no content export is loaded" is the same answer, which is the
       /// normal case when the app is used for conversations alone.
+      /// The Settings › Hidden metadata rules, reached through a function for
+      /// the same reason `insContentMaps` is: under Node the rest of the
+      /// renderer does not exist, and "nothing is hidden" is the right answer.
+      function insMetaHidden(name) {
+        try {
+          return metaHidden(name)
+        } catch (e) {
+          return false
+        }
+      }
+
       function insContentMaps() {
         try {
           return {
@@ -27405,7 +27580,9 @@
           insRenderSegmentPicker()
           return
         }
-        const groups = (kind === "context" ? d.contexts : d.metadata) || []
+        const groups = (
+          (kind === "context" ? d.contexts : d.metadata) || []
+        ).filter((g) => kind === "context" || !insMetaHidden(g.name))
         const selected = insPickGroup(
           groups,
           kind === "context" ? insCtxKey : insMetaKey,
@@ -27482,7 +27659,9 @@
           ["context", "Context", seg.contextKeys],
           ["metadata", "Metadata", seg.metadataKeys],
         ]) {
-          const shown = (keys || []).filter((k) => matches(k.name))
+          const shown = (keys || []).filter(
+            (k) => matches(k.name) && !(kind === "metadata" && insMetaHidden(k.name)),
+          )
           if (!shown.length) continue
           html += `<div class="ins-keypop-group">${esc(label)}</div>`
           // Coverage *and* distinct values, the same two numbers the tag
@@ -32069,6 +32248,7 @@
               unit: "items",
               empty: kind.empty,
               noMatch: "No matching tags.",
+              hide: _contentCtxKind === "metadata" ? metaHidden : null,
             },
           )
         document.getElementById("contentCtxClearBtn").style.display =
@@ -32269,7 +32449,8 @@
       }
 
       function _buildTagChipsHtml(options, activeFilters, searchQ, opts) {
-        const { attrPrefix, unit, empty, noMatch } = opts
+        const { attrPrefix, unit, empty, noMatch, hide } = opts
+        if (hide) options = options.filter((o) => !hide(o.name, o.value))
         if (!options.length) {
           return `<div style="padding:16px;color:var(--muted);font-size:0.78rem;text-align:center">${empty}</div>`
         }
@@ -32328,9 +32509,26 @@
                 )}">${esc(label)}</button>`
               })
               .join("")
+            // A key with a value per conversation is noise to a filter: many
+            // values, almost every one counted once. Offered for hiding where
+            // it is seen, rather than only in Settings where nobody looks.
+            const values = opts2.filter((o) => !TAG_SENTINEL_LABELS[o.value])
+            const idLike =
+              values.length >= 15 &&
+              values.filter((o) => o.count <= 1).length >= values.length * 0.9
+            const hideBtn = hide
+              ? `<button class="ctx-group-hide${idLike ? " suggest" : ""}" data-hide-key="${esc(
+                  name,
+                )}" onclick="event.stopPropagation();hideMetadataKey(this.dataset.hideKey)"
+                  title="${
+                    idLike
+                      ? "Looks like an id — one value per conversation. Hide this key from metadata filters."
+                      : "Hide this key from metadata filters"
+                  }">${idLike ? "Looks like an id · hide" : "Hide"}</button>`
+              : ""
             return `<div class="ctx-group"><div class="ctx-group-name" title="${esc(
               name,
-            )}">${esc(name)}</div><div class="ctx-chips">${chips}</div></div>`
+            )}">${esc(name)}${hideBtn}</div><div class="ctx-chips">${chips}</div></div>`
           })
           .join("")
       }
@@ -32346,6 +32544,7 @@
             unit: "sessions",
             empty: kind.empty,
             noMatch: "No matching tags.",
+            hide: _ctxKind === "metadata" ? metaHidden : null,
           },
         )
         // Clear all clears both sets, so it shows whenever either is active.

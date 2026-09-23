@@ -463,7 +463,8 @@ The orientation map for the whole window. It says what is on screen and where;
   header: Settings | Backup… (opens #settingsBackupModal) | ✕
   Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)
   Conversations tab: connected database + "Manage database…",
-                     Halo Studio URL, low recognition threshold, chat copy format,
+                     Halo Studio URL, low recognition threshold, hidden metadata
+                     rules, chat copy format,
                      Analytics API (client ID / secret / customer key / project key /
                      culture / environment / activeSessionOnly / Test connection)
 
@@ -581,6 +582,7 @@ Always use these terms in the UI:
 | `cm-view`                  | Last selected main view |
 | `cm-conv-db-path`          | Last selected conversations database (`CONV_DB_STORAGE_KEY`) |
 | `conv-low-recog-threshold` | Low recognition threshold |
+| `cm-metadata-hidden`       | JSON array of rule strings — metadata keys (`key`) or values (`key = value`, `*` wildcard) left out of every metadata picker. Display only; see `docs/search.md` → "Hidden metadata" |
 | `cm-display-timezone`      | IANA zone the chat, session list, date filter and Insights charts are read in. `""` or absent means follow the system. Import and Stored data stay UTC — see `docs/insights.md` → "Reading this in your own timezone" |
 | `conv-data-retention-days` | CSV import retention window |
 | `chat-copy-format`         | Chat copy format preference |

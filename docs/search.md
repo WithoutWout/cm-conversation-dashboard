@@ -436,6 +436,28 @@ One button and one popover, not two funnels in an already-crowded toolbar: the t
 - **Metadata values keep their case**, unlike entity names — a value is a configured constant the user reads back off a chip, and `Polles Keuken` should not become `polles keuken`.
 - Tests: `the_metadata_backfill_matches_what_an_import_would_have_indexed`, `the_spellings_of_one_nested_value_collapse_to_the_same_pairs`, `restoring_line_breaks_never_edits_inside_a_string`, `only_objects_are_expanded`, `a_metadata_filter_narrows_to_its_own_table`, and `frontend/tests/metadata-filter.test.js` — which asserts **every chip's count against the set the matcher returns**, over the real export when it is checked out beside the app (203 chips across 41 keys). A chip saying "9 items" that filters down to 4 is worse than no chip at all.
 
+### Hidden metadata (Settings › Conversations)
+
+Some metadata is noise to a filter — a session token, a per-conversation id — a
+value per conversation and hundreds of chips nobody clicks. `cm-metadata-hidden`
+holds rules, one per line: `key` hides a key (its *any* and *not set* chips
+too), `key = value` one value of it, `*` matches anything; matching is
+case-insensitive and anchored, and every other regex character is literal.
+
+- **Display only.** `metaHidden(name, value)` is consulted where chips are
+  *offered* — both tag popovers (through `_buildTagChipsHtml`'s `hide`), the
+  Insights Metadata key picker and chart default, and the Segments picker. The
+  index, the matching and every count are untouched, so nothing is re-imported
+  and `metadata-filter.test.js`'s chip-count assertions still hold. The
+  backend's `META_EXCLUDED_KEYS` is a different thing: those keys are never
+  indexed at all.
+- **A filter on a newly hidden chip is dropped** (`setMetaHiddenList`). A filter
+  nobody can see is a filter nobody can take off.
+- **The popover offers it where the noise is.** Every metadata group has a
+  *Hide* on hover; a group with 15+ values of which 90% are counted once is
+  marked *Looks like an id · hide* permanently, because that shape is exactly a
+  per-conversation id and the user should not have to recognise it.
+
 ### Context is on routes too
 
 The Content Context tab used to read **Answers only**: the worker's `_ctxSets`, and the chips from `buildContentContextOptions`, both skipped every other output type. On the real export most conditions are not on Answers. They are on the routes an Article or a Dialog node takes into a Dialog, so `available_livechat_theater = any` returned **1 item out of 14**. The condition sits on 11 `DialogStart` outputs of four Articles and on the routes of ten Dialogs, and on exactly one Answer. **29 of 44 context keys** were undercounted, and six (`verjaardag`, `medewerkerGevraagd`, four `available_livechat_*`) were never offered at all.
