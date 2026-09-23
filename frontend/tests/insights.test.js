@@ -710,14 +710,14 @@ test("a segment row's shares are of the rows that could have them", () => {
 
   // A share of nothing is a dash, never 0% — "0% positive" is a claim about
   // ratings nobody left, and it is exactly the row people ask about.
-  assert.strictEqual(row("web").cells[col("Positive feedback")], "—")
-  assert.strictEqual(row("app | phone").cells[col("Recognition rate")], "—")
-  assert.strictEqual(row("app | phone").cells[col("Recognition quality")], "—")
+  assert.strictEqual(row("chan, nel: web").cells[col("Positive feedback")], "—")
+  assert.strictEqual(row("chan, nel: app | phone").cells[col("Recognition rate")], "—")
+  assert.strictEqual(row("chan, nel: app | phone").cells[col("Recognition quality")], "—")
   assert.strictEqual(insSegShare(0, 0), "—")
   assert.strictEqual(insSegPct(93.754), "93.75%")
 
   // Culture partitions the result set; the table has to still add up.
-  const cultureRows = ["nl", "en"].map(row)
+  const cultureRows = ["Culture: nl", "Culture: en"].map(row)
   assert.strictEqual(
     cultureRows.reduce((a, r) => a + Number(r.data[col("Interactions")]), 0),
     SEGMENTS.total.interactions,
@@ -841,7 +841,7 @@ test("the Segments card is a table, and every export path reaches it", () => {
 test("a row id survives a value that contains the obvious separators", () => {
   for (const value of ["web", "Stoppen, Faciliteitenkaart", "a|b", "x:y", ""]) {
     const id = insSegRowId("context", "chan|nel", value)
-    assert.strictEqual(insSegLabelOf(id), value, "round-trip failed for " + value)
+    assert.strictEqual(insSegLabelOf(id), value.toLowerCase(), "round-trip failed for " + value)
   }
 })
 
@@ -863,22 +863,71 @@ test("an arrangement keeps rows the data lost and appends ones it gained", () =>
 
   const table = insSegmentTable(next, saved)
   const labels = table.rows.map((r) => r.label)
-  assert.deepStrictEqual(labels, ["Total", "NL", "web", "app | phone", "kiosk"])
+  assert.deepStrictEqual(labels, ["Total", "NL", "chan, nel: web", "chan, nel: app | phone", "chan, nel: kiosk"])
 
   // The order the arrangement chose is untouched, and the rename with it.
   const row = (l) => table.rows.find((r) => r.label === l)
   assert.strictEqual(row("NL").missing, false, "nl still has numbers")
   // `web` no longer comes back: kept, dashed, and marked rather than dropped —
   // a report that silently gets shorter is the failure this prevents.
-  assert.strictEqual(row("web").missing, true)
-  assert.deepStrictEqual(row("web").cells, ["—", "—", "—", "—", "—", "—"])
-  assert.deepStrictEqual(row("web").data, ["", "", "", "", "", ""])
+  assert.strictEqual(row("chan, nel: web").missing, true)
+  assert.deepStrictEqual(row("chan, nel: web").cells, ["—", "—", "—", "—", "—", "—"])
+  assert.deepStrictEqual(row("chan, nel: web").data, ["", "", "", "", "", ""])
   // `kiosk` was not in the arrangement: appended at the end and marked, where
   // it is obvious, rather than slotted into a block nobody put it in.
-  assert.strictEqual(row("kiosk").isNew, true)
+  assert.strictEqual(row("chan, nel: kiosk").isNew, true)
   assert.strictEqual(table.added, 1)
   // …and the row this fixture dropped by hand is simply not there.
-  assert.strictEqual(row("en"), undefined)
+  assert.strictEqual(row("Culture: en"), undefined)
+})
+
+test("a value is one row whatever its case, and is named with its key", () => {
+  // The backend folds `True` and `true`; the label it sends is whichever
+  // spelling is commoner, and that can change month to month. The id cannot.
+  assert.strictEqual(
+    insSegRowId("context", "Verblijf", "True"),
+    insSegRowId("context", "Verblijf", "true"),
+  )
+  // An arrangement saved before the fold still finds its row, and two
+  // spellings saved as two rows become one.
+  const layout = insSegNormalizeLayout({
+    entries: [
+      { t: "row", id: "context\x1fVerblijf\x1fTrue", label: null },
+      { t: "row", id: "context\x1fVerblijf\x1ftrue", label: "Stays" },
+    ],
+    dropped: ["context\x1fVerblijf\x1fFALSE", "context\x1fVerblijf\x1ffalse"],
+  })
+  assert.deepStrictEqual(layout.entries.map((e) => e.id), [
+    insSegRowId("context", "Verblijf", "true"),
+  ])
+  assert.deepStrictEqual(layout.dropped, [insSegRowId("context", "Verblijf", "false")])
+
+  // Named `Key: value` in every rendering, so a row moved out from under its
+  // heading is still some key's `true` and not an anonymous one.
+  const seg = {
+    ...SEGMENTS,
+    groups: [
+      {
+        kind: "context",
+        name: "Verblijf",
+        foldedValues: 0,
+        overlapping: false,
+        rows: [{ ...SEGMENTS.groups[0].rows[0], label: "True" }],
+      },
+    ],
+  }
+  const table = insSegmentTable(seg)
+  const value = table.rows.find((r) => r.kind === "value")
+  assert.strictEqual(value.label, "Verblijf: True")
+  assert.ok(insTableTsv(table).includes("Verblijf: True\t"))
+  const html = insSegmentTableHtml(table, false)
+  assert.ok(html.includes('<span class="ins-seg-key">Verblijf:</span> True'), html)
+  // A renamed row keeps its own name, key and all.
+  const renamed = insSegmentTable(seg, {
+    entries: [{ t: "row", id: insSegRowId("context", "Verblijf", "true"), label: "Stays over" }],
+    dropped: [],
+  })
+  assert.strictEqual(renamed.rows[0].label, "Stays over")
 })
 
 test("a row removed by hand stays removed on the next read", () => {
@@ -888,7 +937,7 @@ test("a row removed by hand stays removed on the next read", () => {
   saved.dropped = [id]
   const table = insSegmentTable(SEGMENTS, saved)
   assert.ok(
-    !table.rows.some((r) => r.label === "en"),
+    !table.rows.some((r) => r.label === "Culture: en"),
     "a row taken out came back on the next read",
   )
   assert.strictEqual(table.added, 0, "and it was not counted as a new value either")

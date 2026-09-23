@@ -6445,9 +6445,52 @@ fn insight_segment_group(
             (rows, distinct, false)
         }
         Some(table) => {
-            let rows = insight_segment_rows(
-                conn,
-                &format!(
+            // Values are compared case-insensitively: `True` and `true` are one
+            // answer spelled two ways by two flows, and splitting them puts
+            // half of one segment on a row nobody reads as the same thing.
+            //
+            // Folding costs a sort the exact grouping does not have — the
+            // primary key hands `(name, value)` over already in order — and
+            // measured at twice the time per breakdown. So it is paid only by a
+            // key that actually has two spellings of one value; the probe reads
+            // the key's distinct values off the index and nothing else.
+            let collides: bool = conn
+                .query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM (\
+                           SELECT DISTINCT value FROM {table} WHERE name = ?1\
+                         ) GROUP BY LOWER(value) HAVING COUNT(*) > 1)"
+                    ),
+                    params![breakdown.name],
+                    |r| r.get(0),
+                )
+                .map_err(insight_err)?;
+            let sql = if collides {
+                // The pairs are de-duplicated *after* folding, so a conversation
+                // carrying both spellings is counted on its row once. The row is
+                // labelled with the spelling most conversations use.
+                format!(
+                    "WITH f AS (\
+                       SELECT DISTINCT t.session_uuid AS session_uuid, LOWER(t.value) AS v \
+                       FROM insight_segment_stats g JOIN {table} t \
+                         ON t.session_uuid = g.session_uuid \
+                       WHERE t.name = ?1\
+                     ), \
+                     spell AS (\
+                       SELECT LOWER(value) AS v, value, COUNT(*) AS n \
+                       FROM {table} WHERE name = ?1 GROUP BY value\
+                     ) \
+                     SELECT (SELECT sp.value FROM spell sp WHERE sp.v = f.v \
+                             ORDER BY sp.n DESC, sp.value ASC LIMIT 1) AS label, \
+                            {INSIGHT_SEGMENT_SUMS} \
+                     FROM insight_segment_stats g JOIN f \
+                       ON f.session_uuid = g.session_uuid \
+                     GROUP BY f.v \
+                     ORDER BY COALESCE(SUM(g.interactions), 0) DESC, f.v ASC \
+                     LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
+                )
+            } else {
+                format!(
                     "SELECT t.value AS label, {INSIGHT_SEGMENT_SUMS} \
                      FROM insight_segment_stats g JOIN {table} t \
                        ON t.session_uuid = g.session_uuid \
@@ -6455,20 +6498,17 @@ fn insight_segment_group(
                      GROUP BY t.value \
                      ORDER BY COALESCE(SUM(g.interactions), 0) DESC, t.value ASC \
                      LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
-                ),
-                &[&breakdown.name],
-                "(empty)",
-            )?;
+                )
+            };
+            let rows = insight_segment_rows(conn, &sql, &[&breakdown.name], "(empty)")?;
             let (distinct, tagged, sessions): (i64, i64, i64) = conn
                 .query_row(
                     &format!(
-                        "SELECT COUNT(*), COALESCE(SUM(n), 0), COUNT(DISTINCT session_uuid) FROM (\
-                           SELECT t.value AS value, t.session_uuid AS session_uuid, \
-                                  COUNT(*) AS n \
+                        "SELECT COUNT(DISTINCT v), COUNT(*), COUNT(DISTINCT session_uuid) FROM (\
+                           SELECT DISTINCT LOWER(t.value) AS v, t.session_uuid AS session_uuid \
                            FROM insight_segment_stats g JOIN {table} t \
                              ON t.session_uuid = g.session_uuid \
-                           WHERE t.name = ?1 \
-                           GROUP BY t.value, t.session_uuid\
+                           WHERE t.name = ?1\
                          )"
                     ),
                     params![breakdown.name],
@@ -14035,6 +14075,38 @@ mod insights {
         let park = &out.groups[1];
         assert!(!park.overlapping, "one value per conversation is not an overlap");
         assert_eq!(park.rows.iter().map(|r| r.interactions).sum::<i64>(), out.total.interactions);
+    }
+
+    /// `True` and `true` are one answer. Folded into one row, labelled with the
+    /// spelling most of the result set uses, and a conversation carrying both
+    /// spellings is counted on that row once — not once per spelling.
+    #[test]
+    fn a_value_spelled_in_two_cases_is_one_segment_row() {
+        let conn = seed_segments(
+            &[
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s3", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s4", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s5", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+            ],
+            &[
+                ("verblijf", "true", "s5"),
+                ("verblijf", "True", "s1"),
+                ("verblijf", "true", "s2"),
+                ("verblijf", "true", "s3"),
+                ("verblijf", "True", "s3"),
+                ("verblijf", "false", "s4"),
+            ],
+        );
+        let out = segments(&conn, &[("context", "verblijf")]);
+        let g = &out.groups[0];
+        assert_eq!(g.rows.len(), 2, "two answers, not three spellings: {:?}", g.rows.iter().map(|r| &r.label).collect::<Vec<_>>());
+        let yes = seg_row(g, "true");
+        assert_eq!(yes.sessions, 4, "s3 carries both spellings and counts once");
+        assert_eq!(yes.interactions, 4);
+        assert!(!g.overlapping, "two spellings of one value are not two values");
+        assert_eq!(g.folded_values, 0, "every distinct value is on screen");
     }
 
     /// The rollup is derived from `insight_sessions`, so ticking another

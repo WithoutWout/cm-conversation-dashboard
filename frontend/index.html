@@ -8288,15 +8288,101 @@
         padding-bottom: 7px;
       }
       tr.ins-table-head td {
-        color: var(--muted);
-        font-size: 0.66rem;
+        color: var(--text);
+        font-weight: 600;
+        font-size: 0.7rem;
         text-align: left;
-        padding-top: 12px;
-        padding-bottom: 3px;
+        padding-top: 14px;
+        padding-bottom: 4px;
         border-top: 1px solid var(--border);
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+      }
+      /* Zebra rows: a figure is read across six columns, and the eye slips a
+         line without a band to follow. */
+      table.ins-table tbody tr.ins-table-value:nth-child(even) th,
+      table.ins-table tbody tr.ins-table-value:nth-child(even) td {
+        background: color-mix(in srgb, var(--surface) 55%, transparent);
+      }
+      /* The key half of "Verblijf: true" — present, so a row is never an
+         anonymous "true", but quieter than the value it qualifies. */
+      .ins-seg-key {
+        color: var(--muted);
+        font-weight: 400;
+      }
+      .ins-seg-removed {
+        margin: 0 0 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface);
+        font-size: 0.7rem;
+      }
+      .ins-seg-removed summary {
+        cursor: pointer;
+        padding: 6px 10px;
+        color: var(--text);
+        user-select: none;
+      }
+      .ins-seg-removed-body {
+        padding: 0 10px 10px;
+      }
+      .ins-seg-removed-q {
+        width: 100%;
+        box-sizing: border-box;
+        margin-bottom: 6px;
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 0.7rem;
+      }
+      .ins-seg-removed ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .ins-seg-removed li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 4px 0;
+        border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+      }
+      .ins-seg-removed li:first-child {
+        border-top: 0;
+      }
+      .ins-seg-removed-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ins-seg-removed-n {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .ins-seg-removed button {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.67rem;
+        padding: 2px 8px;
+      }
+      .ins-seg-removed button:hover {
+        border-color: var(--accent);
+      }
+      .ins-seg-removed-all {
+        margin-top: 8px;
       }
       tr.ins-table-head em {
         font-style: normal;
+        font-weight: 400;
         color: var(--orange);
         margin-left: 8px;
       }
@@ -10934,22 +11020,6 @@
           </div>
         </div>
       </div>
-
-      <!--
-        The Context / Metadata key picker.
-        A real export carries around forty keys of each; as a row of chips that
-        was four wrapped lines of buttons above a single chart, and the chart —
-        the thing the section exists for — started below the fold. One button
-        naming the current key, and a searchable list behind it.
-      -->
-      <div class="ins-keypop" id="insKeyPop" hidden>
-        <div class="ins-keypop-head">
-          <input type="text" id="insKeyPopSearch" placeholder="Filter keys…"
-            autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="ins-keypop-list" id="insKeyPopList"></div>
-      </div>
-    </div>
 
       <!--
         The Context / Metadata key picker.
@@ -24864,8 +24934,41 @@
       /// The value string, never its position: a saved arrangement is applied
       /// to *next month's* numbers, where the rows come back in a different
       /// order and some of them do not come back at all.
+      ///
+      /// The value is lower-cased, because the backend folds `True` and `true`
+      /// into one row and labels it with whichever spelling is commoner — which
+      /// can change from one month to the next. An id built from the label
+      /// would then orphan a saved arrangement over a capital letter.
       function insSegRowId(kind, name, value) {
-        return kind + INS_SEG_SEP + name + INS_SEG_SEP + value
+        return kind + INS_SEG_SEP + name + INS_SEG_SEP + String(value).toLowerCase()
+      }
+
+      /// A stored id, folded the way `insSegRowId` folds a new one — so an
+      /// arrangement saved before the fold still finds its rows.
+      function insSegFoldId(id) {
+        const s = String(id)
+        const at = s.lastIndexOf(INS_SEG_SEP)
+        return at === -1 ? s : s.slice(0, at + 1) + s.slice(at + 1).toLowerCase()
+      }
+
+      /// The key half of a row's name: what it is a value *of*. Culture has no
+      /// key of its own, so it is named after the breakdown.
+      function insSegKeyOf(id) {
+        const parts = String(id).split(INS_SEG_SEP)
+        if (parts.length < 3) return ""
+        return parts[0] === "culture" ? "Culture" : parts.slice(1, -1).join(INS_SEG_SEP)
+      }
+
+      /// What a data row is called until it is renamed: `Verblijf: true`.
+      ///
+      /// The key is part of the name, not only of the heading above it. Once a
+      /// table is rearranged — or a heading removed, or a row restored at the
+      /// bottom — a bare `true` could be any key's `true`. `row` supplies the
+      /// spelling the data uses; without it the (folded) id's own value does.
+      function insSegRowName(id, row) {
+        const key = insSegKeyOf(id)
+        const value = row && row.label != null ? row.label : insSegLabelOf(id)
+        return key ? key + ": " + value : value
       }
 
       function insSegGroupId(g) {
@@ -24894,15 +24997,20 @@
               label: e.label == null ? null : String(e.label),
             })
           } else if (e.t === "row" && e.id) {
+            const id = insSegFoldId(e.id)
+            // Two spellings of one value saved as two rows are one row now.
+            if (entries.some((x) => x.t === "row" && x.id === id)) continue
             entries.push({
               t: "row",
-              id: String(e.id),
+              id,
               label: e.label == null ? null : String(e.label),
             })
           }
         }
         if (!entries.length) return null
-        const dropped = Array.isArray(raw.dropped) ? raw.dropped.map(String) : []
+        const dropped = Array.isArray(raw.dropped)
+          ? [...new Set(raw.dropped.map(insSegFoldId))]
+          : []
         return { entries, dropped }
       }
 
@@ -25067,11 +25175,15 @@
             })
             return
           }
+          const renamed = e.label != null
           rows.push({
             kind: "value",
             at,
             id: e.id,
-            label: e.label != null ? e.label : insSegLabelOf(e.id),
+            label: renamed ? e.label : insSegRowName(e.id, e.row),
+            // The two halves of an unrenamed name, so the screen can quiet the
+            // key without the exports losing it.
+            key: renamed ? "" : insSegKeyOf(e.id),
             missing: !e.row,
             isNew: !!e.isNew,
             ...cells(e.row),
@@ -25164,6 +25276,12 @@
             : r.isNew
             ? `<em class="ins-seg-flag new" title="This value was not in the saved arrangement">new</em>`
             : ""
+          const shown =
+            r.key && r.label.startsWith(r.key + ": ")
+              ? `<span class="ins-seg-key">${esc(r.key)}:</span> ${esc(
+                  r.label.slice(r.key.length + 2),
+                )}`
+              : esc(r.label)
           html += `<tr class="ins-table-${esc(r.kind)}${
             r.missing ? " missing" : ""
           }"${drag}><th scope="row" title="${esc(r.label)}">${
@@ -25171,7 +25289,7 @@
               ? grip(r.at) +
                 `<input class="ins-seg-name" value="${esc(r.label)}"
                    onchange="insSegRename(${r.at}, this.value)">`
-              : esc(r.label)
+              : shown
           }${flag}</th>${r.cells
             .map((c) => `<td>${esc(c)}</td>`)
             .join("")}${
@@ -25264,6 +25382,90 @@
           kind === "head" ? { t: "head", gid: null, label: "Heading" } : { t: "gap", label: null },
         )
         insSegEdited()
+      }
+
+      /// Put one removed row back: after the last line of its own breakdown
+      /// if that block is still on screen, at the end otherwise — where it is
+      /// obvious, and one drag from wherever it belongs.
+      function insSegRestoreRow(id) {
+        const layout = insSegEnsureLayout()
+        if (!layout) return
+        layout.dropped = (layout.dropped || []).filter((d) => d !== id)
+        const prefix = id.slice(0, id.lastIndexOf(INS_SEG_SEP) + 1)
+        const gid = prefix.slice(0, -1)
+        let at = -1
+        layout.entries.forEach((e, i) => {
+          if ((e.t === "row" && e.id.startsWith(prefix)) || (e.t === "head" && e.gid === gid))
+            at = i
+        })
+        const entry = { t: "row", id, label: null }
+        if (at === -1) layout.entries.push(entry)
+        else layout.entries.splice(at + 1, 0, entry)
+        insSegEdited()
+      }
+
+      /// Whether the removed-rows list is open — kept across the re-render a
+      /// restore causes, or putting three rows back is three trips to open it.
+      let insSegRemovedOpen = false
+
+      /// Narrow the removed-rows list as the user types. Rows are hidden in
+      /// place rather than re-rendered, so the input keeps its caret.
+      function insSegFilterRemoved(input) {
+        const q = input.value.trim().toLowerCase()
+        const list = input.closest(".ins-seg-removed")
+        if (!list) return
+        list.querySelectorAll("li[data-name]").forEach((li) => {
+          li.style.display = !q || li.dataset.name.includes(q) ? "" : "none"
+        })
+      }
+
+      /// The removed rows as a list, each with its own Restore.
+      function insSegRemovedHtml() {
+        const dropped = (insSegLayout && insSegLayout.dropped) || []
+        if (!dropped.length) return ""
+        const seg = insData && insData.segments
+        const byId = new Map()
+        for (const g of (seg && seg.groups) || []) {
+          for (const r of g.rows || []) byId.set(insSegRowId(g.kind, g.name || "", r.label), r)
+        }
+        const items = dropped
+          .map((id) => ({ id, row: byId.get(id) || null }))
+          .map(({ id, row }) => ({ id, row, name: insSegRowName(id, row) }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+        return `<details class="ins-seg-removed"${insSegRemovedOpen ? " open" : ""}
+            ontoggle="insSegRemovedOpen = this.open">
+          <summary>Removed rows (${dropped.length})</summary>
+          <div class="ins-seg-removed-body">
+            ${
+              items.length > 8
+                ? `<input type="search" class="ins-seg-removed-q" placeholder="Filter removed rows"
+                     oninput="insSegFilterRemoved(this)">`
+                : ""
+            }
+            <ul>${items
+              .map(
+                ({ id, row, name }) => `<li data-name="${esc(name.toLowerCase())}">
+                  <span class="ins-seg-removed-name" title="${esc(name)}">${
+                    insSegKeyOf(id)
+                      ? `<span class="ins-seg-key">${esc(insSegKeyOf(id))}:</span> ${esc(
+                          name.slice(insSegKeyOf(id).length + 2),
+                        )}`
+                      : esc(name)
+                  }</span>
+                  <span class="ins-seg-removed-n">${
+                    row ? esc(insPlural(row.interactions, "interactions")) : "no data in this range"
+                  }</span>
+                  <button onclick="insSegRestoreRow(${esc(JSON.stringify(id))})">Restore</button>
+                </li>`,
+              )
+              .join("")}</ul>
+            ${
+              dropped.length > 1
+                ? `<button class="ins-seg-removed-all" onclick="insSegRestoreDropped()">Restore all ${dropped.length}</button>`
+                : ""
+            }
+          </div>
+        </details>`
       }
 
       /// Put every removed row back, and forget it was ever removed.
@@ -25865,24 +26067,22 @@
             insPlural(missing, "rows") + " have no conversations in this date range",
           )
         }
+        // Removed rows are listed in both modes: putting one back is the
+        // thing people come looking for, and it should not first require
+        // knowing that "Edit layout" is where it lives.
+        const removed = dropped ? insSegRemovedHtml() : ""
         if (!insSegEditing) {
-          return notes.length
-            ? `<div class="ins-seg-bar"><span class="ins-seg-note">${esc(
-                notes.join(" · "),
-              )}</span></div>`
+          return notes.length || removed
+            ? `<div class="ins-seg-bar">${
+                notes.length
+                  ? `<span class="ins-seg-note">${esc(notes.join(" · "))}</span>`
+                  : ""
+              }</div>${removed}`
             : ""
         }
         return `<div class="ins-seg-bar editing">
           <button onclick="insSegAddLine('head')">+ Heading</button>
           <button onclick="insSegAddLine('gap')">+ Blank line</button>
-          ${
-            dropped
-              ? `<button onclick="insSegRestoreDropped()">Restore ${insPlural(
-                  dropped,
-                  "removed rows",
-                )}</button>`
-              : ""
-          }
           ${
             insSegLayout
               ? `<button onclick="insSegResetLayout()"
@@ -25894,7 +26094,7 @@
             it.${
               notes.length ? " " + esc(notes.join(" · ")) + "." : ""
             }</span>
-        </div>`
+        </div>${removed}`
       }
 
       /// A card's numbers, whichever kind of card it is.
