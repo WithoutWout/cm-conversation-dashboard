@@ -1,5 +1,6 @@
 mod analytics_api;
 mod self_update;
+mod xlsx;
 
 use analytics_api::{AnalyticsConfig, AnalyticsConfigView, AnalyticsState, FetchError, FetchOutcome};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -1406,6 +1407,15 @@ CREATE TABLE IF NOT EXISTS imported_windows (
     day   TEXT PRIMARY KEY,           -- UTC 'YYYY-MM-DD'
     hours INTEGER NOT NULL DEFAULT 0  -- bitmask of the UTC hours 0..23 fetched
 );
+-- GAP analysis: the low-recognition interactions someone has dealt with.
+-- Keyed by the interaction's LogId, which is stable across re-imports; a mark
+-- goes when its interaction does (retention purge, deleted days).
+CREATE TABLE IF NOT EXISTS gap_fixed (
+    log_id       INTEGER PRIMARY KEY,
+    session_uuid TEXT NOT NULL DEFAULT '',
+    fixed_at     TEXT NOT NULL,
+    note         TEXT NOT NULL DEFAULT ''
+);
 "#;
 
 /// Indexes that cost a b-tree write on every imported row and bought nothing.
@@ -2560,6 +2570,11 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
         params![cutoff_dt],
     );
     let _ = conn.execute(
+        "DELETE FROM gap_fixed WHERE log_id IN \
+         (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
+        params![cutoff_dt],
+    );
+    let _ = conn.execute(
         "DELETE FROM answer_index WHERE log_id IN \
          (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
         params![cutoff_dt],
@@ -2729,6 +2744,7 @@ fn export_format(format: &str) -> Option<(&'static str, &'static str)> {
         "html" => ("HTML", "html"),
         "md" => ("Markdown", "md"),
         "txt" => ("Text", "txt"),
+        "xlsx" => ("Excel workbook", "xlsx"),
         _ => return None,
     })
 }
@@ -2806,6 +2822,198 @@ async fn save_export_bytes(
     content: Vec<u8>,
 ) -> Result<FileSaveResult, String> {
     save_with_dialog(app, default_name, &format, content).await
+}
+
+/// A one-sheet `.xlsx` from rows the renderer already has — what is on screen,
+/// filtered and sorted the way it is on screen. See `xlsx.rs`.
+#[tauri::command]
+async fn save_export_xlsx(
+    app: AppHandle,
+    default_name: String,
+    sheet: xlsx::XlsxSheet,
+) -> Result<FileSaveResult, String> {
+    let bytes = xlsx::build(&sheet)?;
+    save_with_dialog(app, default_name, "xlsx", bytes).await
+}
+
+// ── GAP analysis ─────────────────────────────────────────────────────────────
+//
+// The low-recognition interactions of a date range, one row each, as a work
+// list: what the user asked, what they got, how sure the recognizer was, and
+// whether someone has dealt with it. See docs/gap.md.
+
+/// At most this many rows come back. A range that holds more is a range to
+/// narrow, and the renderer says so rather than silently showing a sample.
+const GAP_ROW_LIMIT: i64 = 20_000;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GapArgs {
+    from_utc: String,
+    to_utc: String,
+    threshold: i64,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapRow {
+    log_id: i64,
+    session_uuid: String,
+    timestamp: String,
+    question: String,
+    response: String,
+    recognition: f64,
+    recognition_type: String,
+    article_ids: String,
+    dialog_paths: String,
+    culture: String,
+    fixed_at: Option<String>,
+    note: String,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapResult {
+    rows: Vec<GapRow>,
+    truncated: bool,
+}
+
+/// `YYYY-MM-DDTHH:MM:SS`, the shape `timestamp_start` is stored in and the
+/// only shape the range compares correctly against as a string.
+fn is_naive_utc_stamp(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 19
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'T',
+            13 | 16 => *c == b':',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+/// The rows, split out of the command so it can run against a test connection.
+///
+/// "Low" is exactly the row-level predicate the Low % pill uses — a score above
+/// zero and strictly under the threshold, GenAI excluded — and "zero" is the
+/// Zero % pill's: scored 0 by a recognizer that ran. Both are gaps; the renderer
+/// lets the user tell them apart. A turn with no question text has nothing to
+/// improve and is left out.
+fn gap_rows(conn: &Connection, args: &GapArgs) -> Result<GapResult, String> {
+    if !is_naive_utc_stamp(&args.from_utc) || !is_naive_utc_stamp(&args.to_utc) {
+        return Err("The date range must be YYYY-MM-DDTHH:MM:SS.".into());
+    }
+    if !(1..=99).contains(&args.threshold) {
+        return Err("The threshold must be between 1 and 99.".into());
+    }
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT i.log_id, i.session_uuid, i.timestamp_start, \
+                    COALESCE(i.interaction_value, ''), COALESCE(i.output_text, ''), \
+                    COALESCE(i.recognition_quality, 0), COALESCE(i.recognition_type, ''), \
+                    COALESCE(i.article_ids, ''), COALESCE(i.dialog_paths, ''), \
+                    COALESCE(i.culture, ''), g.fixed_at, COALESCE(g.note, '') \
+             FROM interactions i LEFT JOIN gap_fixed g ON g.log_id = i.log_id \
+             WHERE i.timestamp_start >= ?1 AND i.timestamp_start <= ?2 \
+               AND ((i.recognition_quality > 0 AND i.recognition_quality < ?3) \
+                    OR (i.recognition_quality = 0 AND COALESCE(i.recognition_type, '') != '')) \
+               AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+               AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI' \
+               AND TRIM(COALESCE(i.interaction_value, '')) != '' \
+             ORDER BY i.timestamp_start DESC, i.log_id DESC \
+             LIMIT ?4",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+    let mut rows: Vec<GapRow> = stmt
+        .query_map(
+            params![args.from_utc, args.to_utc, args.threshold, GAP_ROW_LIMIT + 1],
+            |r| {
+                Ok(GapRow {
+                    log_id: r.get(0)?,
+                    session_uuid: r.get(1)?,
+                    timestamp: r.get(2)?,
+                    question: r.get(3)?,
+                    response: r.get(4)?,
+                    recognition: r.get(5)?,
+                    recognition_type: r.get(6)?,
+                    article_ids: r.get(7)?,
+                    dialog_paths: r.get(8)?,
+                    culture: r.get(9)?,
+                    fixed_at: r.get(10)?,
+                    note: r.get(11)?,
+                })
+            },
+        )
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+    let truncated = rows.len() as i64 > GAP_ROW_LIMIT;
+    rows.truncate(GAP_ROW_LIMIT as usize);
+    Ok(GapResult { rows, truncated })
+}
+
+#[tauri::command]
+async fn get_gap_interactions(
+    db_state: State<'_, SharedDbState>,
+    args: GapArgs,
+) -> Result<GapResult, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        gap_rows(conn, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Mark (or unmark) interactions as dealt with. Returns the timestamp written,
+/// so the renderer shows the same one the database holds.
+fn set_gap_fixed_rows(
+    conn: &Connection,
+    log_ids: &[i64],
+    fixed: bool,
+    note: Option<&str>,
+) -> Result<String, String> {
+    if log_ids.len() > GAP_ROW_LIMIT as usize {
+        return Err("Too many rows at once.".into());
+    }
+    let now: String = conn
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now')", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for id in log_ids {
+        if fixed {
+            tx.execute(
+                "INSERT INTO gap_fixed (log_id, session_uuid, fixed_at, note) \
+                 SELECT log_id, session_uuid, ?2, ?3 FROM interactions WHERE log_id = ?1 \
+                 ON CONFLICT(log_id) DO UPDATE SET note = CASE WHEN ?4 THEN excluded.note ELSE note END",
+                params![id, now, note.unwrap_or(""), note.is_some()],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            tx.execute("DELETE FROM gap_fixed WHERE log_id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(now)
+}
+
+#[tauri::command]
+async fn set_gap_fixed(
+    db_state: State<'_, SharedDbState>,
+    log_ids: Vec<i64>,
+    fixed: bool,
+    note: Option<String>,
+) -> Result<String, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        set_gap_fixed_rows(conn, &log_ids, fixed, note.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Unchanged in name, signature and behaviour — a collection export is a
@@ -9525,6 +9733,13 @@ async fn delete_interactions_by_dates(
         );
         let _ = tx.execute(
             &format!(
+                "DELETE FROM gap_fixed WHERE log_id IN \
+                 (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
+            ),
+            params_refs.as_slice(),
+        );
+        let _ = tx.execute(
+            &format!(
                 "DELETE FROM answer_index WHERE log_id IN \
                  (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
             ),
@@ -10401,6 +10616,9 @@ pub fn run() {
             save_collection_export,
             save_export_text,
             save_export_bytes,
+            save_export_xlsx,
+            get_gap_interactions,
+            set_gap_fixed,
             export_settings_backup,
             import_settings_backup,
             set_db_path,
@@ -10523,7 +10741,7 @@ mod tests {
     /// a shared extension means the dialog filter and the file disagree.
     #[test]
     fn every_export_format_forces_its_own_extension() {
-        let formats = ["json", "png", "svg", "csv", "tsv", "html", "md", "txt"];
+        let formats = ["json", "png", "svg", "csv", "tsv", "html", "md", "txt", "xlsx"];
         let mut seen = std::collections::HashSet::new();
         for f in formats {
             let (label, ext) = export_format(f).expect(f);
@@ -15012,6 +15230,61 @@ mod conv_search {
             Some(SearchExpr::Text(r#""ctx:x""#.to_string()))
         );
         assert_eq!(parse_search_expr("ctx:", false), Some(SearchExpr::Text("ctx:".to_string())));
+    }
+
+    /// The GAP list is the Low % and Zero % predicates at row level, bounded
+    /// by the date range, and a mark survives a re-query.
+    #[test]
+    fn the_gap_list_holds_low_and_zero_turns_and_remembers_what_was_fixed() {
+        let conn = search_conn();
+        let turn = |log_id: i64, q: &str, quality: f64, rtype: &str, ts: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+                 timestamp_end, culture, interaction_value, output_text, main_interaction_type, \
+                 all_interaction_types, recognition_type, recognition_quality, imported_at) \
+                 VALUES (?1,'u'||?1,'s'||?1,?5,?5,'nl',?2,'antwoord','Question','Question',?4,?3,0)",
+                params![log_id, q, quality, rtype, ts],
+            )
+            .expect("turn");
+        };
+        turn(1, "waar parkeren", 45.0, "Article", "2026-06-01T09:00:00");
+        turn(2, "hoe laat", 60.0, "Article", "2026-06-01T10:00:00"); // at the threshold: not low
+        turn(3, "blabla", 0.0, "Article", "2026-06-01T11:00:00"); // zero, recognizer ran
+        turn(4, "", 20.0, "Article", "2026-06-01T12:00:00"); // no question
+        turn(5, "genai", 10.0, "GenerativeAI", "2026-06-01T13:00:00");
+        turn(6, "later", 30.0, "Article", "2026-06-03T09:00:00"); // outside the range
+        turn(7, "event", 0.0, "", "2026-06-01T14:00:00"); // zero, nothing ran
+        let args = GapArgs {
+            from_utc: "2026-06-01T00:00:00".into(),
+            to_utc: "2026-06-02T23:59:59".into(),
+            threshold: 60,
+        };
+        let ids = |r: &GapResult| r.rows.iter().map(|g| g.log_id).collect::<Vec<_>>();
+        let got = gap_rows(&conn, &args).expect("gap");
+        assert_eq!(ids(&got), vec![3, 1], "newest first; strict <, GenAI and empty questions out");
+        assert!(got.rows.iter().all(|r| r.fixed_at.is_none()));
+
+        set_gap_fixed_rows(&conn, &[1], true, None).expect("fix");
+        let got = gap_rows(&conn, &args).expect("gap");
+        assert!(got.rows.iter().find(|r| r.log_id == 1).unwrap().fixed_at.is_some());
+        set_gap_fixed_rows(&conn, &[1], false, None).expect("unfix");
+        assert!(gap_rows(&conn, &args).unwrap().rows.iter().all(|r| r.fixed_at.is_none()));
+
+        // A mark on an interaction that does not exist is not invented.
+        set_gap_fixed_rows(&conn, &[999], true, None).expect("fix nothing");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM gap_fixed", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+
+        assert!(gap_rows(&conn, &GapArgs { threshold: 0, ..args }).is_err());
+        assert!(gap_rows(
+            &conn,
+            &GapArgs {
+                from_utc: "2026-06-01' OR 1=1 --".into(),
+                to_utc: "2026-06-02T23:59:59".into(),
+                threshold: 60
+            }
+        )
+        .is_err());
     }
 
     /// A column filter in FTS5 binds to the phrase that follows it and nothing

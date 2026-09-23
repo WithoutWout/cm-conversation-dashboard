@@ -37,6 +37,7 @@ implementation was tried first and was wrong.
 | `docs/loading-states.md` | spinners, `gateLoading`, `yieldToPaint`, modal resize, entrance motion |
 | `docs/settings-and-updates.md` | the settings backup file, and the portable-exe self-update |
 | `docs/ai-export.md` | `export_conversations_for_ai` and its `.jsonl` schema |
+| `docs/gap.md` | the GAP analysis view, fixed marks, `save_export_xlsx` and `xlsx.rs` |
 
 A rule that belongs to one feature belongs in that feature's doc. A rule that
 would change how you write *any* part of this app belongs here.
@@ -54,6 +55,7 @@ src-tauri/
                        one-request-at-a-time fetch, CSV validation, temp files
     self_update.rs  — Portable-exe self-update: install-kind detection, the
                       rename swap and its rollback, stale-backup cleanup
+    xlsx.rs         — Minimal one-sheet .xlsx writer over the `zip` crate
   tauri.conf.json   — App config, window setup, frontendDist: ../frontend, updater pubkey
   Cargo.toml        — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog, tauri-plugin-updater)
   capabilities/
@@ -106,6 +108,9 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }`. A wrapper over `save_with_dialog` |
 | `save_export_text`    | `saveExportText(defaultName, format, content)` | The same, for any format in `export_format` (`svg` `csv` `tsv` `html` `md` `txt` `json`). An unknown format is an `Err` *before* the dialog opens |
 | `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
+| `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
+| `get_gap_interactions` | `getGapInteractions({fromUtc, toUtc, threshold})` | The low- and zero-recognition interactions of a UTC range, newest first, each with its fixed mark — `{rows, truncated}`. See `docs/gap.md` |
+| `set_gap_fixed`       | `setGapFixed(logIds, fixed, note?)` | Marks or unmarks interactions as fixed in `gap_fixed`; returns the stored timestamp |
 | `export_settings_backup` | `exportSettingsBackup(defaultName, payload)` | Merges the Analytics API credentials into the renderer's payload and writes the backup (`0600`). See `docs/settings-and-updates.md` → "Settings backup" |
 | `import_settings_backup` | `importSettingsBackup()`          | Picks a backup, restores the Analytics API credentials from it, returns everything else — `{ ok, canceled, settings, appVersion, schemaVersion, analyticsRestored }` |
 
@@ -364,7 +369,8 @@ The orientation map for the whole window. It says what is on screen and where;
 
 ```
 <header>
-  brand | file tags | Export IDs button | Collections button | Settings button (gear)
+  brand | view switch: Content · Conversations · Flagged · GAP | file tags |
+  Export IDs button | Collections button | Settings button (gear)
 
 <div.global-search-bar>
   chip field (#contentTokens + input, #contentSuggest type-ahead) |
@@ -397,6 +403,17 @@ The orientation map for the whole window. It says what is on screen and where;
 
 <div.conv-toolbar>
   Data (opens #convDataModal) | Insights (opens #insightsModal) | Export for AI
+
+<div#view-gap>   (header GAP button — see docs/gap.md)
+  toolbar: from → to (display timezone) · 7 days / 30 days / This month / Last
+           month · threshold (from Settings) · All/Low/Zero · Any/Open/Fixed ·
+           text filter · count · Export .xlsx
+  left:    windowed list — Question · Response · Recognition · When · ✓ fixed
+           (sortable headers; ↑↓ move, F toggles fixed, C copies)
+  right:   header (when · culture · score · Mark fixed · Mark all N fixed ·
+           Copy question · Open in Conversations) · the question's words as
+           copy chips · the conversation, read-only, the row's turn marked ·
+           entity finder (name or word → words, Open in CM.com)
 
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
@@ -581,7 +598,7 @@ Always use these terms in the UI:
 | `cm-sort-articles`         | Articles sort choice |
 | `cm-sort-dialogs`          | Dialogs sort choice |
 | `cm-flow-direction`        | Dialog graph layout direction |
-| `cm-view`                  | Last selected main view |
+| `cm-view`                  | Last selected main view: `content` · `conversations` · `flagged` · `gap` |
 | `cm-conv-db-path`          | Last selected conversations database (`CONV_DB_STORAGE_KEY`) |
 | `conv-low-recog-threshold` | Low recognition threshold |
 | `cm-metadata-hidden`       | JSON array of rule strings — metadata keys (`key`) or values (`key = value`, `*` wildcard) left out of every metadata picker. Display only; see `docs/search.md` → "Hidden metadata" |

@@ -1772,6 +1772,392 @@
       }
 
       /* === FLAGGED VIEW === */
+      /* === GAP ANALYSIS VIEW === */
+      #view-gap {
+        display: none;
+        flex: 1;
+        overflow: hidden;
+        flex-direction: column;
+      }
+      #view-gap.active {
+        display: flex;
+      }
+      .gap-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .gap-range {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .gap-range input[type="date"] {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.78rem;
+        padding: 4px 6px;
+        color-scheme: dark;
+      }
+      .gap-range-sep {
+        color: var(--muted);
+      }
+      .gap-presets {
+        display: flex;
+        gap: 4px;
+        margin-left: 4px;
+      }
+      .gap-presets button {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.7rem;
+        padding: 3px 7px;
+      }
+      .gap-presets button:hover,
+      .gap-presets button.active {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .gap-threshold {
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+      .gap-threshold a {
+        color: var(--accent);
+        cursor: pointer;
+      }
+      .gap-pills {
+        display: flex;
+        gap: 4px;
+      }
+      .gap-filter {
+        flex: 1 1 180px;
+        min-width: 160px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.78rem;
+        padding: 5px 8px;
+      }
+      .gap-count {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .gap-export {
+        font-size: 0.74rem;
+      }
+      .gap-layout {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+      }
+      .gap-list-wrap {
+        flex: 1.35 1 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border);
+      }
+      .gap-head,
+      .gap-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) 84px 124px 30px;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+      }
+      .gap-head {
+        height: 30px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .gap-head button,
+      .gap-head span {
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.64rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        padding: 0;
+        text-align: left;
+        text-transform: uppercase;
+      }
+      .gap-head .gap-col-s,
+      .gap-row .gap-col-s {
+        text-align: right;
+      }
+      .gap-head button.sorted {
+        color: var(--text);
+      }
+      .gap-list {
+        position: relative;
+        flex: 1;
+        overflow-y: auto;
+        outline: none;
+      }
+      .gap-spacer {
+        width: 1px;
+      }
+      .gap-row {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 34px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+        cursor: pointer;
+        font-size: 0.78rem;
+      }
+      .gap-row:hover {
+        background: var(--surface);
+      }
+      .gap-row.active {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .gap-row > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .gap-col-q {
+        color: var(--text);
+      }
+      .gap-col-r {
+        color: var(--muted);
+      }
+      .gap-col-t {
+        color: var(--muted);
+        font-size: 0.7rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .gap-score {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      .gap-score.zero {
+        color: var(--red);
+      }
+      .gap-score.low {
+        color: var(--orange);
+      }
+      .gap-score.mid {
+        color: #fab219;
+      }
+      .gap-row.fixed .gap-col-q,
+      .gap-row.fixed .gap-col-r {
+        text-decoration: line-through;
+        text-decoration-color: color-mix(in srgb, var(--green) 70%, transparent);
+        opacity: 0.6;
+      }
+      .gap-fix {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: 1.5px solid var(--border);
+        background: none;
+        color: transparent;
+        cursor: pointer;
+        font-size: 0.7rem;
+        line-height: 1;
+        padding: 0;
+      }
+      .gap-fix:hover {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .gap-row.fixed .gap-fix {
+        background: var(--green);
+        border-color: var(--green);
+        color: #0b1220;
+      }
+      .gap-copy {
+        visibility: hidden;
+        margin-left: 6px;
+        background: none;
+        border: 0;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 0 2px;
+      }
+      .gap-row:hover .gap-copy {
+        visibility: visible;
+      }
+      .gap-copy:hover {
+        color: var(--text);
+      }
+      .gap-empty {
+        padding: 40px 20px;
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-align: center;
+      }
+      .gap-empty button {
+        margin-top: 10px;
+      }
+      .gap-side {
+        flex: 1 1 0;
+        min-width: 320px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .gap-chat-header {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.76rem;
+      }
+      .gap-chat-meta {
+        color: var(--muted);
+        flex: 1;
+        min-width: 160px;
+      }
+      .gap-chat-header button {
+        font-size: 0.72rem;
+        padding: 4px 9px;
+      }
+      .gap-chat-header .gap-fixed-btn.on {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .gap-words {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 8px 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+      .gap-words[hidden] {
+        display: none;
+      }
+      .gap-words-label {
+        color: var(--muted);
+        font-size: 0.66rem;
+        margin-right: 4px;
+        align-self: center;
+      }
+      .gap-word {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        cursor: copy;
+        font-size: 0.76rem;
+        padding: 2px 7px;
+      }
+      .gap-word:hover {
+        border-color: var(--accent);
+      }
+      .gap-word.picked {
+        background: color-mix(in srgb, var(--accent) 22%, transparent);
+        border-color: var(--accent);
+      }
+      .gap-thread {
+        flex: 1 1 0;
+        min-height: 120px;
+      }
+      .chat-turn.gap-mark {
+        border-radius: 10px;
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--orange) 70%, transparent);
+        background: color-mix(in srgb, var(--orange) 8%, transparent);
+      }
+      .gap-entities {
+        flex: 0 0 38%;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--border);
+        overflow: hidden;
+      }
+      .gap-entities-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .gap-entities-head input {
+        flex: 1;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.76rem;
+        font-weight: 400;
+        letter-spacing: 0;
+        padding: 4px 8px;
+        text-transform: none;
+      }
+      .gap-entity-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 14px 12px;
+      }
+      .gap-entity {
+        padding: 8px 0;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      }
+      .gap-entity-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78rem;
+      }
+      .gap-entity-name {
+        font-weight: 600;
+        color: var(--green);
+        cursor: copy;
+      }
+      .gap-entity-type {
+        color: var(--muted);
+        font-size: 0.68rem;
+      }
+      .gap-entity-top .btn-open-url {
+        margin-left: auto;
+      }
+      .gap-entity-words {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 3px;
+        margin-top: 5px;
+      }
+      .gap-entity-words .gap-word {
+        font-size: 0.7rem;
+        padding: 1px 6px;
+      }
+      .gap-entity-words mark {
+        background: color-mix(in srgb, var(--accent) 35%, transparent);
+        color: inherit;
+        border-radius: 2px;
+      }
+      .gap-hint {
+        color: var(--muted);
+        font-size: 0.74rem;
+        padding: 10px 0;
+      }
+
       #view-flagged {
         display: none;
         flex: 1;
@@ -7009,7 +7395,8 @@
       .panel.active,
       #view-content:not(.hidden),
       #view-conversations.active,
-      #view-flagged.active {
+      #view-flagged.active,
+      #view-gap.active {
         animation: fade-in 160ms ease;
       }
 
@@ -7121,6 +7508,7 @@
         #view-content:not(.hidden),
         #view-conversations.active,
         #view-flagged.active,
+        #view-gap.active,
         .card.open .card-detail,
         .chip-overflow.expanded > *,
         .ctx-modal-overlay.open .ctx-modal-box,
@@ -9418,6 +9806,25 @@
           </svg>
           Flagged
         </button>
+        <button
+          class="view-btn"
+          id="viewBtnGap"
+          onclick="switchView('gap')"
+          title="GAP analysis — the questions the bot recognised badly, as a work list"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          GAP
+        </button>
       </div>
       <div class="header-files" id="fileNames"></div>
       <button class="icon-btn" id="refreshBtn" title="Refresh data">
@@ -10398,6 +10805,88 @@
       </div>
     </div>
     <!-- end #view-flagged -->
+
+    <!--
+      GAP analysis: the low-recognition interactions of a date range as a work
+      list — question · response · recognition · fixed — with the chat each came
+      from, the words to copy and the entities to change. See docs/gap.md.
+    -->
+    <div id="view-gap">
+      <div class="gap-toolbar">
+        <div class="gap-range">
+          <input type="date" id="gapFrom" aria-label="From" />
+          <span class="gap-range-sep">→</span>
+          <input type="date" id="gapTo" aria-label="To" />
+          <div class="gap-presets">
+            <button data-gap-preset="7">7 days</button>
+            <button data-gap-preset="30">30 days</button>
+            <button data-gap-preset="month">This month</button>
+            <button data-gap-preset="last-month">Last month</button>
+          </div>
+        </div>
+        <span class="gap-threshold" id="gapThreshold"></span>
+        <div class="gap-pills" id="gapKindPills">
+          <button class="conv-pill active" data-gap-kind="all">All</button>
+          <button class="conv-pill" data-gap-kind="low">Low</button>
+          <button class="conv-pill" data-gap-kind="zero">Zero</button>
+        </div>
+        <div class="gap-pills" id="gapStatusPills">
+          <button class="conv-pill active" data-gap-status="all">Any</button>
+          <button class="conv-pill" data-gap-status="open">Open</button>
+          <button class="conv-pill" data-gap-status="fixed">Fixed</button>
+        </div>
+        <input
+          type="search"
+          id="gapFilter"
+          class="gap-filter"
+          placeholder="Filter questions and responses…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <span class="gap-count" id="gapCount"></span>
+        <button class="btn-secondary gap-export" id="gapExportBtn" title="Save what is listed, as it is sorted, as an Excel workbook">
+          <svg class=ui-icon><use href=#i-download /></svg> Export .xlsx
+        </button>
+      </div>
+      <div class="gap-layout">
+        <div class="gap-list-wrap">
+          <div class="gap-head" id="gapHead">
+            <button class="gap-col-q" data-gap-sort="question">Question</button>
+            <button class="gap-col-r" data-gap-sort="response">Response</button>
+            <button class="gap-col-s" data-gap-sort="recognition">Recognition</button>
+            <button class="gap-col-t" data-gap-sort="time">When</button>
+            <span class="gap-col-f" title="Fixed">✓</span>
+          </div>
+          <div class="gap-list" id="gapList" tabindex="0">
+            <div class="gap-spacer" id="gapSpacer"></div>
+          </div>
+        </div>
+        <div class="gap-side">
+          <div class="gap-chat-header" id="gapChatHeader">
+            <div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">
+              Select a row to see the conversation it came from.
+            </div>
+          </div>
+          <div class="gap-words" id="gapWords" hidden></div>
+          <div class="chat-thread gap-thread" id="gapChatThread"></div>
+          <div class="gap-entities" id="gapEntities">
+            <div class="gap-entities-head">
+              <span>Entities</span>
+              <input
+                type="search"
+                id="gapEntitySearch"
+                placeholder="Find an entity by name or word…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <div class="gap-entity-list" id="gapEntityList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- end #view-gap -->
+
 
     <!-- DB SETUP MODAL -->
     <div class="modal-overlay" id="dbSetupModal">
@@ -12035,6 +12524,11 @@
           // `content` is a plain number array; serde takes it as `Vec<u8>`.
           saveExportBytes: (defaultName, format, content) =>
             invoke("save_export_bytes", { defaultName, format, content }),
+          saveExportXlsx: (defaultName, sheet) =>
+            invoke("save_export_xlsx", { defaultName, sheet }),
+          getGapInteractions: (args) => invoke("get_gap_interactions", { args }),
+          setGapFixed: (logIds, fixed, note) =>
+            invoke("set_gap_fixed", { logIds, fixed, note: note == null ? null : note }),
           exportSettingsBackup: (defaultName, payload) =>
             invoke("export_settings_backup", { defaultName, payload }),
           importSettingsBackup: () => invoke("import_settings_backup"),
@@ -12168,6 +12662,9 @@
           Promise.resolve({ ok: false, canceled: true, path: null })
       if (!window.backend.saveExportBytes)
         window.backend.saveExportBytes = () =>
+          Promise.resolve({ ok: false, canceled: true, path: null })
+      if (!window.backend.saveExportXlsx)
+        window.backend.saveExportXlsx = () =>
           Promise.resolve({ ok: false, canceled: true, path: null })
       // Stub out conversation commands when running outside Tauri (dev preview)
       const _convStub = () => Promise.resolve(null)
@@ -21903,15 +22400,21 @@
         }
       }
 
-      function renderFlaggedThread(interactions) {
+      /// A conversation as a read-only thread. Shared by Flagged and GAP
+      /// analysis: `opts.markIds` names the turns to mark (by the log id of the
+      /// turn's first row) and `opts.markClass` how; with `opts.readOnly` the
+      /// turns carry no flag-selection handlers.
+      function renderFlaggedThread(interactions, opts) {
+        const o = opts || {}
         if (!interactions || interactions.length === 0) {
           return `<div class="chat-empty">No interactions stored.</div>`
         }
 
         // Build flagged log ID set for highlighting
-        const flaggedIds = new Set(
-          interactions.filter((r) => r.isFlagged).map((r) => String(r.logId)),
-        )
+        const flaggedIds =
+          o.markIds ||
+          new Set(interactions.filter((r) => r.isFlagged).map((r) => String(r.logId)))
+        const markClass = o.markClass || "flagged-mark"
 
         // Simple turn grouper (mirrors buildChatTurns logic but self-contained)
         const chatRowIsGenAi = (r) =>
@@ -21988,7 +22491,7 @@
               (turn.userRow || turn.botRows[0])?.logId ?? Math.random(),
             )
             const isFlagged = flaggedIds.has(turnId)
-            const flaggedCls = isFlagged ? " flagged-mark" : ""
+            const flaggedCls = isFlagged ? " " + markClass : ""
 
             let inner = ""
             if (turn.linkClicked) {
@@ -22052,6 +22555,9 @@
                 fmtChatTime(tsRow.timestampStart),
               )}</span></div>`
             }
+            if (o.readOnly) {
+              return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}">${inner}</div>`
+            }
             return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onFlaggedTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onFlaggedTurnClick(this,event)">${inner}</div>`
           })
           .join("")
@@ -22061,6 +22567,642 @@
           `<div class="chat-empty">No renderable interactions found.</div>`
         )
       }
+
+      // ═══════════════════════════════════════════════════════════════
+      // GAP ANALYSIS VIEW
+      // ═══════════════════════════════════════════════════════════════
+      //
+      // The low-recognition interactions of a date range as a work list: what
+      // was asked, what it got, how sure the recognizer was, and whether
+      // someone has dealt with it. Clicking a row opens its conversation; the
+      // question's words copy with one click and feed the entity finder, whose
+      // entities open in CM.com. See docs/gap.md.
+      //
+      // All filtering, sorting and the export read one list, `gapView()`, so
+      // what is on screen, what the count says and what lands in the workbook
+      // cannot disagree.
+
+      const GAP_ROW_H = 34
+      let gapRows = [] // what the backend returned for the range
+      let gapTruncated = false
+      let gapKind = "all" // all | low | zero
+      let gapStatus = "all" // all | open | fixed
+      let gapQuery = ""
+      let gapSort = { key: "time", dir: -1 }
+      let gapActiveId = null
+      let gapLoadSeq = 0
+      let gapRange = null // {from, to} as local YYYY-MM-DD
+      let _gapView = null // cached filtered + sorted list
+      const gapSessionCache = new Map()
+
+      /// Today in the display timezone, as `YYYY-MM-DD`.
+      function gapToday() {
+        try {
+          return new Date().toLocaleDateString("sv-SE", { timeZone: insZone() })
+        } catch (e) {
+          return new Date().toISOString().slice(0, 10)
+        }
+      }
+
+      function gapPresetRange(preset) {
+        const today = gapToday()
+        if (preset === "month") return { from: today.slice(0, 8) + "01", to: today }
+        if (preset === "last-month") {
+          const firstThis = today.slice(0, 8) + "01"
+          const lastPrev = insShiftDay(firstThis, -1)
+          return { from: lastPrev.slice(0, 8) + "01", to: lastPrev }
+        }
+        const days = Number(preset) || 7
+        return { from: insShiftDay(today, -(days - 1)), to: today }
+      }
+
+      /// A plain line of what the bot said: CM.com markup and tokens out.
+      function gapPlain(text) {
+        // `**` is CM.com's bold and `_` its line break (docs/chat-rendering.md);
+        // in one line of a table both are noise.
+        return strip(String(text || ""))
+          .replace(/\*\*/g, "")
+          .replace(/_+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+      }
+
+      function gapIsZero(r) {
+        return !(r.recognition > 0)
+      }
+
+      function gapView() {
+        if (_gapView) return _gapView
+        const q = gapQuery.trim().toLowerCase()
+        let list = gapRows.filter((r) => {
+          if (gapKind === "zero" && !gapIsZero(r)) return false
+          if (gapKind === "low" && gapIsZero(r)) return false
+          if (gapStatus === "open" && r.fixedAt) return false
+          if (gapStatus === "fixed" && !r.fixedAt) return false
+          if (q) {
+            if (r._hay == null)
+              r._hay = (r.question + " " + gapPlain(r.response)).toLowerCase()
+            if (!r._hay.includes(q)) return false
+          }
+          return true
+        })
+        const d = gapSort.dir
+        const by = {
+          time: (a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0),
+          recognition: (a, b) => a.recognition - b.recognition,
+          question: (a, b) => a.question.localeCompare(b.question),
+          response: (a, b) => gapPlain(a.response).localeCompare(gapPlain(b.response)),
+        }[gapSort.key]
+        list = list.slice().sort((a, b) => d * by(a, b) || b.logId - a.logId)
+        _gapView = list
+        return list
+      }
+
+      function gapInvalidate() {
+        _gapView = null
+      }
+
+      async function onEnterGapView() {
+        const from = document.getElementById("gapFrom")
+        const to = document.getElementById("gapTo")
+        if (!gapRange) {
+          gapRange = gapPresetRange("7")
+          from.value = gapRange.from
+          to.value = gapRange.to
+          document.querySelector('[data-gap-preset="7"]').classList.add("active")
+        }
+        gapRenderThreshold()
+        gapRenderEntities()
+        await loadGapRows()
+      }
+
+      function gapRenderThreshold() {
+        document.getElementById("gapThreshold").innerHTML =
+          "Low is under <strong>" +
+          esc(String(lowRecogThreshold)) +
+          "%</strong> · zero is not recognised · " +
+          '<a onclick="document.getElementById(\'settingsBtn\').click()">change</a>'
+      }
+
+      async function loadGapRows() {
+        const list = document.getElementById("gapList")
+        if (!convDbPath) {
+          gapRows = []
+          gapInvalidate()
+          list.innerHTML =
+            '<div class="gap-empty">Open a conversations database to see what the bot did not recognise.' +
+            '<br><button class="btn-primary" onclick="openDbSetupModal()">Open database…</button></div>'
+          document.getElementById("gapCount").textContent = ""
+          return
+        }
+        if (!gapRange || !gapRange.from || !gapRange.to) return
+        const seq = ++gapLoadSeq
+        const bounds = insZoneDayBounds(gapRange.from, gapRange.to, insZone())
+        // Behind the shared delay, so a fast read never flashes a spinner.
+        gateLoading("gap", true, (on) => {
+          if (on) list.innerHTML = '<div class="gap-empty"><span class="mini-spinner"></span> Reading…</div>'
+        })
+        try {
+          const res = await window.backend.getGapInteractions({
+            fromUtc: bounds.from,
+            toUtc: bounds.to,
+            threshold: lowRecogThreshold,
+          })
+          if (seq !== gapLoadSeq) return
+          gapRows = (res && res.rows) || []
+          gapTruncated = !!(res && res.truncated)
+        } catch (e) {
+          if (seq !== gapLoadSeq) return
+          gapRows = []
+          list.innerHTML = '<div class="gap-empty">Could not read the range. ' + esc(String(e)) + "</div>"
+          return
+        } finally {
+          gateLoading("gap", false, () => {})
+        }
+        gapInvalidate()
+        gapRenderList(true)
+      }
+
+      /// The list is windowed: only the rows in view (plus a margin) exist, so
+      /// a month of low-recognition turns scrolls like ten.
+      function gapRenderList(resetScroll) {
+        const list = document.getElementById("gapList")
+        const view = gapView()
+        const fixed = gapRows.filter((r) => r.fixedAt).length
+        document.getElementById("gapCount").textContent =
+          view.length.toLocaleString() +
+          (view.length !== gapRows.length ? " of " + gapRows.length.toLocaleString() : "") +
+          " · " +
+          fixed.toLocaleString() +
+          " fixed" +
+          (gapTruncated ? " · first 20,000 only — narrow the range" : "")
+        document.querySelectorAll("#gapHead [data-gap-sort]").forEach((b) => {
+          const on = b.dataset.gapSort === gapSort.key
+          b.classList.toggle("sorted", on)
+          b.textContent =
+            b.textContent.replace(/ [↑↓]$/, "") + (on ? (gapSort.dir > 0 ? " ↑" : " ↓") : "")
+        })
+        if (!view.length) {
+          list.innerHTML = gapRows.length
+            ? '<div class="gap-empty">Nothing matches these filters.</div>'
+            : '<div class="gap-empty">No low-recognition questions in this range.</div>'
+          return
+        }
+        if (!list.querySelector("#gapSpacer")) {
+          list.innerHTML = '<div class="gap-spacer" id="gapSpacer"></div>'
+        }
+        document.getElementById("gapSpacer").style.height = view.length * GAP_ROW_H + "px"
+        if (resetScroll) list.scrollTop = 0
+        gapPaintRows()
+      }
+
+      function gapPaintRows() {
+        const list = document.getElementById("gapList")
+        const view = gapView()
+        const spacer = document.getElementById("gapSpacer")
+        if (!spacer) return
+        const first = Math.max(0, Math.floor(list.scrollTop / GAP_ROW_H) - 10)
+        const last = Math.min(view.length, Math.ceil((list.scrollTop + list.clientHeight) / GAP_ROW_H) + 10)
+        let html = ""
+        for (let i = first; i < last; i++) {
+          const r = view[i]
+          const score = gapIsZero(r) ? "0%" : Math.round(r.recognition) + "%"
+          const tone = gapIsZero(r) ? "zero" : r.recognition < 40 ? "low" : "mid"
+          const response = gapPlain(r.response)
+          html +=
+            '<div class="gap-row' +
+            (r.fixedAt ? " fixed" : "") +
+            (r.logId === gapActiveId ? " active" : "") +
+            '" style="top:' +
+            i * GAP_ROW_H +
+            'px" data-log-id="' +
+            r.logId +
+            '" onclick="gapSelect(' +
+            r.logId +
+            ')"><span class="gap-col-q" title="' +
+            esc(r.question) +
+            '">' +
+            esc(r.question) +
+            '</span><span class="gap-col-r" title="' +
+            esc(response) +
+            '">' +
+            esc(response || "—") +
+            '</span><span class="gap-col-s"><span class="gap-score ' +
+            tone +
+            '">' +
+            score +
+            '</span><button class="gap-copy" title="Copy the question" onclick="event.stopPropagation();gapCopy(' +
+            r.logId +
+            ')">⧉</button></span><span class="gap-col-t">' +
+            esc(fmtTs(r.timestamp)) +
+            '</span><span class="gap-col-f"><button class="gap-fix" title="' +
+            (r.fixedAt ? "Fixed " + esc(fmtTs(r.fixedAt)) + " — click to reopen" : "Mark as fixed") +
+            '" onclick="event.stopPropagation();gapToggleFixed([' +
+            r.logId +
+            "], " +
+            !r.fixedAt +
+            ')">✓</button></span></div>'
+        }
+        // Keep the spacer; replace only the rows.
+        list.querySelectorAll(".gap-row").forEach((el) => el.remove())
+        spacer.insertAdjacentHTML("afterend", html)
+      }
+
+      function gapRowById(id) {
+        return gapRows.find((r) => r.logId === id) || null
+      }
+
+      async function gapSelect(logId) {
+        gapActiveId = logId
+        gapPaintRows()
+        const row = gapRowById(logId)
+        if (!row) return
+        gapRenderHeader(row)
+        gapRenderWords(row)
+        const thread = document.getElementById("gapChatThread")
+        let rows = gapSessionCache.get(row.sessionUuid)
+        if (!rows) {
+          thread.innerHTML = '<div class="chat-empty"><span class="mini-spinner"></span></div>'
+          try {
+            rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
+          } catch (e) {
+            rows = []
+          }
+          gapSessionCache.set(row.sessionUuid, rows)
+          if (gapActiveId !== logId) return
+        }
+        thread.innerHTML = renderFlaggedThread(rows, {
+          markIds: new Set([String(logId)]),
+          markClass: "gap-mark",
+          readOnly: true,
+        })
+        requestAnimationFrame(() => {
+          const el = thread.querySelector('.chat-turn[data-turn-id="' + logId + '"]')
+          if (el) el.scrollIntoView({ block: "center" })
+        })
+      }
+
+      function gapNorm(q) {
+        return String(q || "").trim().toLowerCase().replace(/\s+/g, " ")
+      }
+
+      function gapRenderHeader(row) {
+        const same = gapRows.filter((r) => gapNorm(r.question) === gapNorm(row.question))
+        const openSame = same.filter((r) => !r.fixedAt)
+        const score = gapIsZero(row) ? "not recognised" : Math.round(row.recognition) + "% recognition"
+        document.getElementById("gapChatHeader").innerHTML =
+          '<span class="gap-chat-meta">' +
+          esc(fmtTs(row.timestamp)) +
+          " · " +
+          esc(row.culture || "") +
+          " · " +
+          esc(score) +
+          (same.length > 1 ? " · asked " + same.length + "× in this range" : "") +
+          "</span>" +
+          '<button class="btn-secondary gap-fixed-btn' +
+          (row.fixedAt ? " on" : "") +
+          '" onclick="gapToggleFixed([' +
+          row.logId +
+          "], " +
+          !row.fixedAt +
+          ')">' +
+          (row.fixedAt ? "✓ Fixed" : "Mark fixed") +
+          "</button>" +
+          (openSame.length > 1
+            ? '<button class="btn-secondary" title="Every open row with this exact question" onclick="gapToggleFixed([' +
+              openSame.map((r) => r.logId).join(",") +
+              '], true)">Mark all ' +
+              openSame.length +
+              " fixed</button>"
+            : "") +
+          '<button class="btn-secondary" onclick="gapCopy(' +
+          row.logId +
+          ')">Copy question</button>' +
+          '<button class="btn-secondary" onclick="gapOpenInConversations(\'' +
+          esc(row.sessionUuid) +
+          "')\">Open in Conversations</button>"
+      }
+
+      /// The question's words as chips: a click copies the word and looks it
+      /// up in the entity finder, which is the two things someone improving
+      /// recognition does next. Shift-click collects several into one phrase.
+      let gapPicked = []
+      function gapRenderWords(row) {
+        const el = document.getElementById("gapWords")
+        gapPicked = []
+        const words = String(row.question || "")
+          .split(/\s+/)
+          .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+          .filter(Boolean)
+        if (!words.length) {
+          el.hidden = true
+          return
+        }
+        el.hidden = false
+        el.innerHTML =
+          '<span class="gap-words-label">Click to copy · shift-click for a phrase</span>' +
+          words
+            .map(
+              (w, i) =>
+                '<button class="gap-word" data-i="' +
+                i +
+                '" data-word="' +
+                esc(w) +
+                '" onclick="gapWordClick(this, event)">' +
+                esc(w) +
+                "</button>",
+            )
+            .join("")
+      }
+
+      function gapWordClick(btn, e) {
+        const word = btn.dataset.word
+        if (e.shiftKey) {
+          btn.classList.toggle("picked")
+          gapPicked = [...document.querySelectorAll("#gapWords .gap-word.picked")].map(
+            (b) => b.dataset.word,
+          )
+          const phrase = gapPicked.join(" ")
+          if (phrase) gapCopyText(phrase)
+          return
+        }
+        document.querySelectorAll("#gapWords .gap-word.picked").forEach((b) => b.classList.remove("picked"))
+        gapCopyText(word)
+        const search = document.getElementById("gapEntitySearch")
+        search.value = word
+        gapRenderEntities()
+      }
+
+      function gapCopyText(text) {
+        insCopyText(text).then(
+          () => showImportToast("success", "Copied “" + text + "”"),
+          () => showImportToast("error", "Could not copy"),
+        )
+      }
+
+      function gapCopy(logId) {
+        const row = gapRowById(logId)
+        if (row) gapCopyText(row.question)
+      }
+
+      function gapOpenInConversations(uuid) {
+        switchView("conversations")
+        setTimeout(() => selectSession(uuid), 0)
+      }
+
+      /// Mark rows fixed (or open again). Optimistic: the list changes at once
+      /// and puts itself back if the database refuses.
+      async function gapToggleFixed(ids, fixed) {
+        const rows = ids.map(gapRowById).filter(Boolean)
+        const before = rows.map((r) => r.fixedAt)
+        const stamp = new Date().toISOString().slice(0, 19)
+        rows.forEach((r) => (r.fixedAt = fixed ? r.fixedAt || stamp : null))
+        gapInvalidate()
+        gapRenderList(false)
+        const active = gapRowById(gapActiveId)
+        if (active) gapRenderHeader(active)
+        try {
+          const at = await window.backend.setGapFixed(ids, fixed, null)
+          if (fixed && at) rows.forEach((r) => (r.fixedAt = r.fixedAt === stamp ? at : r.fixedAt))
+        } catch (e) {
+          rows.forEach((r, i) => (r.fixedAt = before[i]))
+          gapInvalidate()
+          gapRenderList(false)
+          showImportToast("error", "Could not save: " + String(e))
+        }
+      }
+
+      /// Entities by name or trigger word, from the content export. Each opens
+      /// in CM.com (by id when the conversations have fired it, the list page
+      /// otherwise), and each word copies with a click.
+      function gapRenderEntities() {
+        const list = document.getElementById("gapEntityList")
+        if (!list) return
+        const q = (document.getElementById("gapEntitySearch").value || "").trim().toLowerCase()
+        if (!allEntities || !allEntities.length) {
+          list.innerHTML =
+            '<div class="gap-hint">Load a content export (with its EntitiesExport CSV) to search entities here.</div>'
+          return
+        }
+        if (!q) {
+          list.innerHTML =
+            '<div class="gap-hint">Click a word of the question above, or type, to find the entity it belongs to — or the one it should.</div>'
+          return
+        }
+        const scored = []
+        for (const e of allEntities) {
+          const name = String(e.name || "")
+          const words = (e.words || []).map((w) => String(w.text || "")).filter(Boolean)
+          const nameHit = name.toLowerCase().includes(q)
+          const wordHits = words.filter((w) => w.toLowerCase().includes(q))
+          if (!nameHit && !wordHits.length) continue
+          const exact = words.some((w) => w.toLowerCase() === q) || name.toLowerCase() === q
+          scored.push({ e, name, words, wordHits, rank: exact ? 0 : nameHit ? 1 : 2 })
+        }
+        scored.sort((a, b) => a.rank - b.rank || b.wordHits.length - a.wordHits.length || a.name.localeCompare(b.name))
+        if (!scored.length) {
+          list.innerHTML =
+            '<div class="gap-hint">No entity has “' +
+            esc(q) +
+            "” as its name or one of its words — a candidate to add.</div>"
+          return
+        }
+        const mark = (w) => {
+          const at = w.toLowerCase().indexOf(q)
+          return at < 0
+            ? esc(w)
+            : esc(w.slice(0, at)) + "<mark>" + esc(w.slice(at, at + q.length)) + "</mark>" + esc(w.slice(at + q.length))
+        }
+        list.innerHTML = scored
+          .slice(0, 30)
+          .map(({ e, name, words, wordHits }) => {
+            const shown = wordHits.concat(words.filter((w) => !wordHits.includes(w))).slice(0, 40)
+            return (
+              '<div class="gap-entity"><div class="gap-entity-top"><span class="gap-entity-name" title="Click to copy" onclick="gapCopyText(this.textContent)">' +
+              esc(name) +
+              '</span><span class="gap-entity-type">' +
+              esc(e.type || "") +
+              " · " +
+              words.length +
+              " words</span>" +
+              entityOpenButton(name) +
+              '</div><div class="gap-entity-words">' +
+              shown
+                .map(
+                  (w) =>
+                    '<button class="gap-word" data-word="' +
+                    esc(w) +
+                    '" onclick="gapCopyText(this.dataset.word)">' +
+                    mark(w) +
+                    "</button>",
+                )
+                .join("") +
+              (words.length > shown.length ? '<span class="gap-hint">+' + (words.length - shown.length) + "</span>" : "") +
+              "</div></div>"
+            )
+          })
+          .join("")
+      }
+
+      /// `GAP 2026-09-23 September.xlsx` — the day it was made, and the month
+      /// (or months) the range covers.
+      function gapExportName() {
+        const monthOf = (day) => {
+          try {
+            return new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, 1)).toLocaleString("en-GB", {
+              month: "long",
+              timeZone: "UTC",
+            })
+          } catch (e) {
+            return day.slice(0, 7)
+          }
+        }
+        const a = monthOf(gapRange.from)
+        const b = monthOf(gapRange.to)
+        return "GAP " + gapToday() + " " + (a === b ? a : a + "-" + b) + ".xlsx"
+      }
+
+      async function gapExport() {
+        const view = gapView()
+        if (!view.length) {
+          showImportToast("error", "Nothing to export in this view.")
+          return
+        }
+        const ids = (r) => {
+          let a = []
+          try {
+            a = JSON.parse(r.articleIds || "[]")
+          } catch (e) {
+            a = []
+          }
+          return Array.isArray(a) ? a.join(", ") : ""
+        }
+        const sheet = {
+          name: "GAP",
+          headers: [
+            "Date / time",
+            "Question",
+            "Response",
+            "Recognition %",
+            "Kind",
+            "Articles / Dialogs",
+            "Culture",
+            "Fixed",
+            "Fixed at",
+            "Conversation",
+          ],
+          widths: [18, 50, 60, 13, 8, 22, 8, 7, 18, 38],
+          rows: view.map((r) => ({
+            highlight: !!r.fixedAt,
+            cells: [
+              fmtTs(r.timestamp),
+              r.question,
+              gapPlain(r.response),
+              Math.round(r.recognition * 10) / 10,
+              gapIsZero(r) ? "Zero" : "Low",
+              ids(r),
+              r.culture || "",
+              r.fixedAt ? "Yes" : "",
+              r.fixedAt ? fmtTs(r.fixedAt) : "",
+              r.sessionUuid,
+            ],
+          })),
+        }
+        try {
+          const res = await window.backend.saveExportXlsx(gapExportName(), sheet)
+          if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
+          else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
+        } catch (e) {
+          showImportToast("error", "Could not save the workbook. " + String(e))
+        }
+      }
+
+      // ── Wiring ──
+      document.getElementById("gapList").addEventListener("scroll", () => {
+        requestAnimationFrame(gapPaintRows)
+      })
+      document.getElementById("gapList").addEventListener("keydown", (e) => {
+        const view = gapView()
+        if (!view.length) return
+        const at = view.findIndex((r) => r.logId === gapActiveId)
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault()
+          const next = view[Math.max(0, Math.min(view.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]
+          gapSelect(next.logId)
+          const list = document.getElementById("gapList")
+          const idx = view.indexOf(next)
+          const top = idx * GAP_ROW_H
+          if (top < list.scrollTop) list.scrollTop = top
+          else if (top + GAP_ROW_H > list.scrollTop + list.clientHeight)
+            list.scrollTop = top + GAP_ROW_H - list.clientHeight
+        } else if ((e.key === "f" || e.key === " ") && at >= 0) {
+          e.preventDefault()
+          gapToggleFixed([view[at].logId], !view[at].fixedAt)
+        } else if (e.key === "c" && at >= 0 && !e.metaKey && !e.ctrlKey) {
+          gapCopy(view[at].logId)
+        }
+      })
+      document.querySelectorAll("[data-gap-preset]").forEach((b) =>
+        b.addEventListener("click", () => {
+          gapRange = gapPresetRange(b.dataset.gapPreset)
+          document.getElementById("gapFrom").value = gapRange.from
+          document.getElementById("gapTo").value = gapRange.to
+          document.querySelectorAll("[data-gap-preset]").forEach((x) => x.classList.toggle("active", x === b))
+          loadGapRows()
+        }),
+      )
+      for (const id of ["gapFrom", "gapTo"]) {
+        document.getElementById(id).addEventListener("change", () => {
+          const from = document.getElementById("gapFrom").value
+          const to = document.getElementById("gapTo").value
+          if (!from || !to) return
+          gapRange = from <= to ? { from, to } : { from: to, to: from }
+          document.querySelectorAll("[data-gap-preset]").forEach((x) => x.classList.remove("active"))
+          loadGapRows()
+        })
+      }
+      document.querySelectorAll("[data-gap-kind]").forEach((b) =>
+        b.addEventListener("click", () => {
+          gapKind = b.dataset.gapKind
+          document.querySelectorAll("[data-gap-kind]").forEach((x) => x.classList.toggle("active", x === b))
+          gapInvalidate()
+          gapRenderList(true)
+        }),
+      )
+      document.querySelectorAll("[data-gap-status]").forEach((b) =>
+        b.addEventListener("click", () => {
+          gapStatus = b.dataset.gapStatus
+          document.querySelectorAll("[data-gap-status]").forEach((x) => x.classList.toggle("active", x === b))
+          gapInvalidate()
+          gapRenderList(true)
+        }),
+      )
+      let _gapFilterTimer = null
+      document.getElementById("gapFilter").addEventListener("input", (e) => {
+        clearTimeout(_gapFilterTimer)
+        _gapFilterTimer = setTimeout(() => {
+          gapQuery = e.target.value
+          gapInvalidate()
+          gapRenderList(true)
+        }, 150)
+      })
+      document.querySelectorAll("#gapHead [data-gap-sort]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const key = b.dataset.gapSort
+          gapSort =
+            gapSort.key === key
+              ? { key, dir: -gapSort.dir }
+              : { key, dir: key === "time" ? -1 : 1 }
+          gapInvalidate()
+          gapRenderList(true)
+        }),
+      )
+      let _gapEntityTimer = null
+      document.getElementById("gapEntitySearch").addEventListener("input", () => {
+        clearTimeout(_gapEntityTimer)
+        _gapEntityTimer = setTimeout(gapRenderEntities, 120)
+      })
+      document.getElementById("gapExportBtn").addEventListener("click", gapExport)
 
       // ═══════════════════════════════════════════════════════════════
       // CONVERSATIONS VIEW
@@ -22078,6 +23220,8 @@
         convEl.classList.toggle("active", name === "conversations")
         const flaggedEl = document.getElementById("view-flagged")
         flaggedEl.classList.toggle("active", name === "flagged")
+        document.getElementById("view-gap").classList.toggle("active", name === "gap")
+        document.getElementById("viewBtnGap").classList.toggle("active", name === "gap")
         document
           .getElementById("viewBtnContent")
           .classList.toggle("active", name === "content")
@@ -22093,10 +23237,13 @@
         if (name === "flagged") {
           loadFlaggedSessions()
         }
+        if (name === "gap") {
+          onEnterGapView()
+        }
       }
 
       // Apply initial view on load
-      if (currentView === "conversations" || currentView === "flagged") {
+      if (currentView === "conversations" || currentView === "flagged" || currentView === "gap") {
         // Defer until after all init runs
         setTimeout(() => switchView(currentView), 0)
       }
@@ -36138,7 +37285,7 @@
         if (qaIds.length) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           qaIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> Article ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> Article ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -36148,7 +37295,7 @@
         if (dialogIds.size) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Dialogs</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           dialogIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)"><svg class=ui-icon><use href=#i-dot /></svg> Dialog ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)"><svg class=ui-icon><use href=#i-dot /></svg> Dialog ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -36161,7 +37308,7 @@
           const ids = faqsFound.DataRetrievalResults.slice(0, 8)
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">GenAI source articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           ids.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView='conversations';switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> ${id}</button>`
+            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> ${id}</button>`
           })
           html += `</div></div>`
         }
@@ -36651,9 +37798,12 @@
       }
 
       function toggleBubbleDetail(logId) {
-        const detail = document.querySelector(
-          `.bubble-detail[data-logid="${logId}"]`,
-        )
+        // The same conversation can be drawn in two views at once (the chat
+        // and GAP analysis), so the one on screen is asked first.
+        const sel = `.bubble-detail[data-logid="${logId}"]`
+        const detail =
+          document.querySelector("#view-" + currentView + " " + sel) ||
+          document.querySelector(sel)
         if (!detail) return
         detail.classList.toggle("open")
       }
