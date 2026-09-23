@@ -285,6 +285,83 @@ never used for series identity.
   here". It is deliberately un-blue so it can never be read as the bottom of the
   value scale, and the scale legend keys it along with every other step.
 
+## Insights settings
+
+A gear button in the Insights header opens `#insSettingsModal`: the export
+palette, the export language, labels, caption parts and each card's chart type,
+with a live sample on the right drawn exactly as an export would be. It is not
+in the app's Settings because none of it applies anywhere else, and the sample
+only makes sense next to the dashboard it previews. Every control commits on
+change and redraws the dashboard behind the modal.
+
+### The palette is chosen, the rest of the theme is derived
+
+`cm-insights-export-palette` holds a background, a text colour, an ordered list
+of up to eight accents and the three status colours. `insExportTheme()` derives
+everything else — gridlines, axis, secondary ink, the weekend wash, the heatmap
+ramp — by mixing those, so a dark brand background produces light gridlines
+without anyone choosing them.
+
+- **The default palette returns `INS_THEME_EXPORT` itself**, not a derivation
+  that is only close to it. The hand-tuned steps are validated; a near miss
+  would have moved every existing export the day this shipped.
+- **Colours are parsed by the browser.** `insParseColor` sets a sentinel on a
+  canvas context's `fillStyle`, then the typed value, and reads back what
+  survived — so `#abc`, `rgb()`, `hsl()`, `12, 34, 56` and colour names all
+  work, and anything else is rejected with a red border instead of stored.
+- **Accents reorder by a mousemove loop, never HTML5 drag** (see "The
+  arrangement" for why the native gesture cannot work here), plus ← → buttons.
+  The target is the chip whose centre is nearest the pointer, because the chips
+  wrap and a one-axis rule picks the wrong one on the second line.
+- **Every colour a spec carries is a token** (`"good"`, `"critical"`,
+  `"surface"`), resolved by the builder against the palette it draws in. Before
+  this, `insFeedbackSpec` and the recognition card resolved colours at build
+  time — in the *screen* palette — and those hex values rode into every export.
+  Harmless while the two palettes shared status hues; a custom palette would
+  simply not have recoloured them. `a custom export palette recolours every
+  mark, and leaks nothing from the screen` pins it.
+- The emailed report's inline colours come from the same theme.
+
+### Export language
+
+English, German or Dutch, for exports only (`cm-insights-export-lang`). The
+screen stays English.
+
+- **The English phrase is the key** (`insT("Conversations per day")`), so an
+  untranslated phrase degrades to English rather than to a key name, and the
+  code still reads as its text. Dynamic phrases carry `{slots}`, and
+  `every translated phrase exists in both languages` checks that German and
+  Dutch cover the same phrases and keep every slot.
+- **An export builds its cards again in its language** (`insWithLang(lang, …)`
+  around `insBuildCards`) rather than translating the screen's cards. That is
+  what keeps a label that doubles as a key working: the recognition band's
+  status tone is decided from `Zero` before the label becomes `Null`.
+- **`insWithLang` must never span an `await`** — the language is module state,
+  and whatever the event loop ran next would render in German. The HTML report
+  resolves every string up front and passes `lang` to `insT` explicitly.
+- Numbers, percentages, weekdays and month names follow the language
+  (`1.284`, `8,2 %`, `Mo`).
+
+### Labels and chart types
+
+`cm-insights-export-options` holds how labels read — date format, hour format,
+day-of-week on day ticks, weekend shading, values on marks — plus the caption
+parts. **These apply on screen as well**: they are how the data is presented,
+not a property of one file.
+
+`cm-insights-chart-types` holds a kind per card id. `INS_CHART_KINDS` lists
+what each card may take, and only honest forms are offered: a line needs an
+ordered axis (days, hours), a donut or 100% bar needs parts of one whole. The
+heatmap and the Segments table are what they are.
+
+- **A donut or 100% bar folds past eight parts into one counted "Other (N)"**
+  (`insFoldSlices`). Past eight the colours stop being tellable apart. An ordered
+  scale that fits keeps its order.
+- **Bars turned into columns tilt their names**, or a name under a column is cut
+  to a few letters. A tilted first label hangs left of its column, so
+  `insColumnChart` widens its left padding for it; `assertInsideCanvas` measures
+  a rotated label by its horizontal extent (length × cos 40°).
+
 ## Numbers that had to be got right
 
 - **The feedback split is four disjoint groups**, which is why
@@ -421,8 +498,10 @@ file rather than a clipboard write.
 
 An exported chart travels alone. A bar reading 43% is alarming or unremarkable
 entirely depending on what was searched for, and the header saying so is on a
-screen the recipient never saw. One checkbox, not a form — letting the caption
-be half-dropped re-creates the ambiguity it exists to remove.
+screen the recipient never saw. One checkbox turns it on or off; which *parts* it
+carries (title, note, search, unit, timezone) are chosen in Insights settings,
+because a caption going into a slide under its own title wants to drop that
+title, and a report going to one team wants to drop the search it already knows.
 
 - **SVG text inside the picture, never HTML around it.** The property this whole
   feature rests on is that a chart depends on nothing outside itself; a caption
@@ -694,6 +773,28 @@ being a table you can read across.
   from the segments read *finishing* — long after the click that opened the
   popover. Restoring at the click site alone left the button unstyled every time.
 
+### Case is folded: `True` and `true` are one row
+
+Two flows setting one key spell its values differently, and a Segments table
+that splits them puts half of a segment on a row nobody reads as the same
+thing. `insight_segment_group` groups context and metadata values by
+`LOWER(value)` — ASCII only, which is SQLite's `LOWER` and every real case seen
+here — and de-duplicates `(session, value)` *after* folding, so a conversation
+carrying both spellings counts on its row once. The row is labelled with the
+spelling most conversations use.
+
+**Folding is paid only by a key that needs it.** Grouping by `LOWER(value)` costs
+a sort the exact grouping does not have — the primary key hands `(name, value)`
+over in order — and measured at twice the time per breakdown
+(`perf::segments_cost`: 14 → 30 ms at 40 breakdowns). A probe reads the key's
+distinct values off the index and checks for two spellings of one value; only
+then does the folded query run. With it the measured cost is back to 15.6 ms.
+
+The distinct-value count behind "N more values not shown" is folded the same
+way — and is now a count of distinct *values*: it was previously the number of
+`(value, conversation)` pairs, which overstated the note on any key with more
+conversations than values.
+
 ### The arrangement
 
 The natural table is grouped: Total, then a heading and its rows per breakdown.
@@ -715,7 +816,23 @@ reachable without a second model of the table.
   `kind ␟ name ␟ value`, joined with a unit separator because a context value
   can legitimately contain `|`, `:` or a comma — `Stoppen, Faciliteitenkaart` is
   a real one. `String.fromCharCode(31)` rather than the character itself, so no
-  invisible control byte lives in the source.
+  invisible control byte lives in the source. **The value half is lower-cased**,
+  because the backend folds case (below) and labels the row with whichever
+  spelling is commoner — which can change between two months. An id built from
+  the label would orphan a saved arrangement over a capital letter.
+  `insSegNormalizeLayout` folds ids stored before this, and merges two
+  spellings saved as two rows into one.
+- **A row is named `Key: value`** (`Verblijf: true`, `Culture: nl-NL`) in every
+  rendering — the screen quiets the key, the exports carry it whole. Under its
+  heading the key is redundant; but a rearranged table, a removed heading or a
+  row restored at the bottom leaves a bare `true` that could be any key's. A
+  renamed row keeps exactly the name it was given.
+- **Removed rows are a list, not a count.** "Restore 3 removed rows" was
+  all-or-nothing and did not say which three. The *Removed rows* disclosure —
+  shown in and out of Edit layout — lists each as `Key: value` with its
+  interaction count, a filter above eight, a Restore per row and Restore all.
+  `insSegRestoreRow` puts a row back after the last line of its own breakdown
+  when that block is still there, at the end otherwise.
 - **Every edit addresses a line by its index and re-renders**, so an index can
   never be stale: there is no moment between an edit and the redraw in which one
   is held.

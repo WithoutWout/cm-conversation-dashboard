@@ -9,6 +9,7 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 ## Content search semantics
 
 - `search-worker.js` is the source of truth for result inclusion. Renderer helpers may mirror parts of search only for snippets, highlights, and modal display.
+- **The Content bar is one expression too** — see "The Content bar takes the same chips" below. A query that is one run of text goes to the worker as `query` alone and takes exactly the old path; only a real expression is sent as `expr`.
 - Plain search supports space-separated AND terms, `|` OR groups, quoted exact phrases, case sensitivity (`Aa`), whole word (`\b`), and regex (`.*`).
 - Invalid regex mode returns an explicit `invalid_regex` result from the worker; the renderer must show that as an error state, not as a valid zero-result search.
 - When content context filters and a text query are both active, the same answer output must satisfy both the context filter and the text query.
@@ -91,6 +92,8 @@ op     := "AND" | "OR" | "AND NOT" | "NOT"  -- a bare NOT between terms is AND N
 term   := "(" expr ")" | "NOT" term | leaf
 leaf   := qa-<n> | dn-<n> | dn-<d>-<n>      -- an IdTarget, unquoted
         | entity:<word> | entity:"<phrase>"
+        | ctx:"<name>"="<value>"            -- a context tag; ="*" is any value
+        | meta:"<name>"="<value>"           -- a metadata tag, the same shape
         | <text>                            -- the term grammar above, verbatim
 ```
 
@@ -123,6 +126,74 @@ single n-ary node, so three Articles are one `UNION ALL` and not two nested ones
   expression says all four. The AI export header is `schema_version` 6 and its
   legend states the grammar; a file that does not describe its own filter
   language is misleading to the model reading it.
+
+### Context and metadata are leaves too
+
+The Context · Metadata panel filters are ANDed onto the whole search, so they
+could never be ORed with a word or excluded inside a group. A tag chip can:
+`parkeren AND NOT ctx:"Verblijf"="true"`. The type-ahead offers every context
+and metadata value (from the popover's own option lists, minus hidden metadata),
+and the panel stays as it was beside it.
+
+- **`leaf_tag` is conversation-level.** `match_log_id` is NULL: no turn is *why* a
+  conversation carries a context value. So a tag counts as no positive leaf
+  (`has_positive_leaf`), and a search of tags alone narrows conversations
+  without singling out turns — `match_rows` is `None`, exactly as for a
+  negation.
+- **The value compares `COLLATE NOCASE`**, the way Segments groups it (`True`
+  and `true` are one answer). The name is exact: the chips come from the index.
+- `="*"` (or no value) is "the key is set at all" — the panel's `any`. "Not set"
+  is `NOT` in front of it.
+- **A tag chip can hold several values, any of which matches:**
+  `ctx:"Channel"="web","app"`. One token rather than an OR group of tags,
+  because under `.*` a bracket belongs to the pattern and the chip must still
+  mean exactly what it says. The backend reads it as `t.value COLLATE NOCASE IN
+  (…)`; the worker as "any of".
+- **A tag chip opens its key's values where it sits** (`_exprOpenPicker`), the
+  way a Dialog chip opens its nodes: tick several, or *Any value*. It stays open
+  between ticks. The same popover is the Content bar's node picker.
+
+### Narrowing the suggestions by type
+
+The type-ahead offers Articles, Dialogs (with Transactional Dialogs and nodes),
+entities, context and metadata values in one ranked list, and a bar above it
+narrows to one type — clicked, or **Alt ←/→**. The counts beside each type are
+taken before the list is cut to its eight rows (`exprSuggestNarrow`), so
+"Metadata 23" is true while none of them is on screen, and a type with no hit
+is not offered. A value already inside a chip — including one of several in a
+multi-value tag chip — is not suggested again (`_exprTakenKeys`).
+- `TagLeaf::parse` and `_exprParseTagToken` are the two halves of one token;
+  `a_tag_token_reads_its_name_and_value` and `search-bubbles.test.js` quote the
+  same strings.
+
+### The Content bar takes the same chips
+
+The Content bar is the same field: text, Articles, Dialogs, nodes, entities and
+tags as chips, joined by and / or / not, grouped with `( )`. The chip model and
+its normalising, serialising and drawing are shared with the Conversations bar
+(`exprNormalize`, `exprToQuery`, `exprTokensHtml`); the worker reads the string
+with its own port of the grammar (`parseContentExpr`), under the same rules.
+
+- **It is still live.** What is typed but not yet a chip is part of the search,
+  ANDed after the chips, on the old 500 ms debounce. Enter turns it into a chip.
+- **A plain run of text is the old search, byte for byte.** `contentNeedsExpr`
+  sends `expr` only when there is more than one condition or a non-text one, and
+  the worker treats a lone text leaf as `query`. `content-expr.test.js` pins it.
+- **AND / OR / NOT combine at the item level** — an Article is in or out. Inside
+  one text leaf the old rule holds: all its words in the *same* answer. So
+  `campers nacht` (one chip) and `campers AND nacht` (two) are different
+  questions, and the difference is visible in the chips.
+- **Leaves:** text → the old matcher; `qa-N` / `dn-N` → the item itself;
+  `dn-D-N` → Dialog D, if it has node N; `entity:` → items whose questions
+  resolve to that entity (the same `phraseEntityUpper` map the card chip uses);
+  `ctx:` / `meta:` → any output's context set / any Answer's metadata set,
+  values compared case-insensitively.
+- **The panel still narrows**, ANDed at the item level. The same-answer pairing
+  of panel context with text is a one-leaf rule and only applies to a plain text
+  query.
+- **Highlighting reads the words, never the expression** (`contentTextTerms`),
+  and leaves out negated chips: nothing a `not` chip names is a reason a card is
+  on screen.
 
 ### AND is conversation-level
 
@@ -435,6 +506,28 @@ One button and one popover, not two funnels in an already-crowded toolbar: the t
 - **The two sides encode the same information differently**, and only the parsers need to know: the content export spells it as a plain object (`OutputMetaData: {escalationGroup: "…"}`), the interaction log as an array of `{key, value}` pairs. `metadata_index_rows` reads the array; `metaSetOf` in the worker reads the object.
 - **Metadata values keep their case**, unlike entity names — a value is a configured constant the user reads back off a chip, and `Polles Keuken` should not become `polles keuken`.
 - Tests: `the_metadata_backfill_matches_what_an_import_would_have_indexed`, `the_spellings_of_one_nested_value_collapse_to_the_same_pairs`, `restoring_line_breaks_never_edits_inside_a_string`, `only_objects_are_expanded`, `a_metadata_filter_narrows_to_its_own_table`, and `frontend/tests/metadata-filter.test.js` — which asserts **every chip's count against the set the matcher returns**, over the real export when it is checked out beside the app (203 chips across 41 keys). A chip saying "9 items" that filters down to 4 is worse than no chip at all.
+
+### Hidden metadata (Settings › Conversations)
+
+Some metadata is noise to a filter — a session token, a per-conversation id — a
+value per conversation and hundreds of chips nobody clicks. `cm-metadata-hidden`
+holds rules, one per line: `key` hides a key (its *any* and *not set* chips
+too), `key = value` one value of it, `*` matches anything; matching is
+case-insensitive and anchored, and every other regex character is literal.
+
+- **Display only.** `metaHidden(name, value)` is consulted where chips are
+  *offered* — both tag popovers (through `_buildTagChipsHtml`'s `hide`), the
+  Insights Metadata key picker and chart default, and the Segments picker. The
+  index, the matching and every count are untouched, so nothing is re-imported
+  and `metadata-filter.test.js`'s chip-count assertions still hold. The
+  backend's `META_EXCLUDED_KEYS` is a different thing: those keys are never
+  indexed at all.
+- **A filter on a newly hidden chip is dropped** (`setMetaHiddenList`). A filter
+  nobody can see is a filter nobody can take off.
+- **The popover offers it where the noise is.** Every metadata group has a
+  *Hide* on hover; a group with 15+ values of which 90% are counted once is
+  marked *Looks like an id · hide* permanently, because that shape is exactly a
+  per-conversation id and the user should not have to recognise it.
 
 ### Context is on routes too
 

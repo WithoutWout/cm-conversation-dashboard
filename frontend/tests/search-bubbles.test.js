@@ -40,6 +40,16 @@ const NAMES = [
   "convOpenGroupDepth",
   "convTextTerms",
   "_convChatQuery",
+  "exprNormalize",
+  "exprToQuery",
+  "_exprItemKey",
+  "_exprTagToken",
+  "_exprParseTagToken",
+  "_exprTagLabel",
+  "exprTagCandidates",
+  "_exprTagValues",
+  "_exprTakenKeys",
+  "exprSuggestNarrow",
 ]
 
 const ctx = vm.createContext({ console })
@@ -59,7 +69,23 @@ vm.runInContext(
   let entityOptions = []
   let entityMap = new Map()
   let dialogMap = new Map()
+  let contextOptions = []
+  let contextOptionsLoaded = false
+  let metadataOptions = []
+  let metadataOptionsLoaded = false
+  function metaHidden(name) { return name === "sessionToken" }
   const CONV_SUGGEST_MAX = 8
+  const EXPR_SUGGEST_TYPES = [
+    { key: "article", label: "Articles", kinds: ["article"] },
+    { key: "dialog", label: "Dialogs", kinds: ["dialog", "tdialog", "node"] },
+    { key: "entity", label: "Entities", kinds: ["entity"] },
+    { key: "context", label: "Context", kinds: ["ctxtag"] },
+    { key: "metadata", label: "Metadata", kinds: ["metatag"] },
+  ]
+  let _convSuggestType = "all"
+  let _convSuggestCounts = null
+  function setType(t) { _convSuggestType = t }
+  function counts() { return _convSuggestCounts }
   // The type-ahead asks for a label when it reads an id out of typed text.
   function _convLabelForId(idText) {
     const hit = convContentIndex().find((c) => c.idText === idText)
@@ -80,6 +106,10 @@ vm.runInContext(
       (o.exported || []).map((e) => [e.name.toUpperCase(), e]),
     )
     convExpr = o.expr || []
+    contextOptions = o.context || []
+    contextOptionsLoaded = !!o.context
+    metadataOptions = o.metadata || []
+    metadataOptionsLoaded = !!o.metadata
     convSearchEntities = o.entitiesOn !== false
     convSearchRegex = !!o.regex
     _convContentIndex = null
@@ -87,7 +117,7 @@ vm.runInContext(
     _convEntityIndexSrc = null
     normalizeConvExpr()
   }
-  function labelsFor(q) { return convSuggestFor(q).map((r) => r.idText || r.value) }
+  function labelsFor(q) { return convSuggestFor(q).map((r) => r.idText || r.label || r.value) }
   function query() { return convExprToQuery() }
   function items() { return convExpr }
   function ids() { return convExpr.filter((i) => i.t === "id").map((i) => i.idText) }
@@ -542,6 +572,74 @@ eq(
   "&lt;b&gt;<mark>park</mark>&lt;/b&gt;",
 )
 eq("nothing typed marks nothing", ctx._convMarkSuggest("parkeren", ""), "parkeren")
+
+// ── Context and metadata chips ───────────────────────────────────────────────
+// A tag is a condition like any other: it serialises to what `TagLeaf::parse`
+// reads, reads back from typed text, and is offered by the type-ahead.
+console.log("\nContext and metadata as chips:")
+const TAG = (kind, name, value) => ({ t: "tag", kind, name, values: value == null ? [] : [].concat(value) })
+ctx.setUp({})
+eq(
+  "a tag chip is written the way the backend reads it",
+  ctx.queryOf([TEXT("parkeren"), { t: "op", op: "not" }, TAG("context", "Verblijf", "true")]),
+  'parkeren AND NOT ctx:"Verblijf"="true"',
+)
+eq("…a key set to anything is a star", ctx.queryOf([TAG("metadata", "nochat", null)]), 'meta:"nochat"="*"')
+eq(
+  "typed tag syntax reads back as the chip",
+  ctx.convScanExprText('meta:"a b"="c d" OR ctx:channel=web', false),
+  [TAG("metadata", "a b", "c d"), { t: "op", op: "or" }, TAG("context", "channel", "web")],
+)
+eq("…round-trips", ctx.reparse('ctx:"Verblijf"="true" AND boos'), 'ctx:"Verblijf"="true" AND boos')
+eq(
+  "a chip picked to several values is one token",
+  ctx.queryOf([TAG("context", "Channel", ["web", "app"])]),
+  'ctx:"Channel"="web","app"',
+)
+eq("…and reads back as one chip", ctx.convScanExprText('ctx:"Channel"="web","app"', false), [TAG("context", "Channel", ["web", "app"])])
+eq("a star among the values is any value", ctx.convScanExprText('ctx:"Channel"="web","*"', false), [TAG("context", "Channel", null)])
+eq('a quoted tag is text', ctx.convScanExprText('"ctx:x"', false), [TEXT('"ctx:x"')])
+eq('a word that looks like a tag is quoted in a text chip', ctx.queryOf([TEXT("ctx:x")]), '"ctx:x"')
+ctx.setUp({
+  context: [
+    { name: "Verblijf", value: "true", count: 12 },
+    { name: "Verblijf", value: "__any__", count: 20 },
+    { name: "Verblijf", value: "__not_set__", count: 3 },
+  ],
+  metadata: [
+    { name: "sessionToken", value: "abc", count: 1 },
+    { name: "nochat", value: "true", count: 4 },
+  ],
+})
+// Ranked like everything else — the more conversations, the higher.
+eq("the type-ahead offers tag values", ctx.labelsFor("verblijf"), ["Verblijf · any", "Verblijf = true"])
+eq("…never a hidden metadata key", ctx.labelsFor("sessiontoken"), [])
+eq("…and counts every type before the list is cut", (ctx.labelsFor("verblijf"), ctx.counts().context), 2)
+eq(
+  "a value already in a multi-value chip is not offered again",
+  (ctx.setUp({
+    context: [
+      { name: "Verblijf", value: "true", count: 12 },
+      { name: "Verblijf", value: "false", count: 8 },
+    ],
+    expr: [TAG("context", "Verblijf", ["TRUE"])],
+  }),
+  ctx.labelsFor("verblijf")),
+  ["Verblijf = false"],
+)
+ctx.setUp({ context: [], metadata: [{ name: "nochat", value: "true", count: 4 }] })
+eq("narrowed to one type it shows only that type", (ctx.setType("metadata"), ctx.labelsFor("true")), ["nochat = true"])
+ctx.setType("all")
+eq("…and metadata as well as context", ctx.labelsFor("nochat"), ["nochat = true"])
+eq(
+  "a tag chip already placed is not offered again",
+  (ctx.setUp({
+    context: [{ name: "Verblijf", value: "true", count: 12 }],
+    expr: [TAG("context", "Verblijf", "true")],
+  }),
+  ctx.labelsFor("verblijf")),
+  [],
+)
 
 console.log(out.join("\n"))
 if (failed) {

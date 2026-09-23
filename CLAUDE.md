@@ -37,6 +37,7 @@ implementation was tried first and was wrong.
 | `docs/loading-states.md` | spinners, `gateLoading`, `yieldToPaint`, modal resize, entrance motion |
 | `docs/settings-and-updates.md` | the settings backup file, and the portable-exe self-update |
 | `docs/ai-export.md` | `export_conversations_for_ai` and its `.jsonl` schema |
+| `docs/gap.md` | the GAP analysis view, fixed marks, `save_export_xlsx` and `xlsx.rs` |
 
 A rule that belongs to one feature belongs in that feature's doc. A rule that
 would change how you write *any* part of this app belongs here.
@@ -54,6 +55,7 @@ src-tauri/
                        one-request-at-a-time fetch, CSV validation, temp files
     self_update.rs  — Portable-exe self-update: install-kind detection, the
                       rename swap and its rollback, stale-backup cleanup
+    xlsx.rs         — Minimal one-sheet .xlsx writer over the `zip` crate
   tauri.conf.json   — App config, window setup, frontendDist: ../frontend, updater pubkey
   Cargo.toml        — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog, tauri-plugin-updater)
   capabilities/
@@ -64,7 +66,7 @@ frontend/
   tests/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
-    conv-search.test.js, update-modal.test.js,
+    conv-search.test.js, update-modal.test.js, content-expr.test.js,
     settings-backup.test.js, metadata-filter.test.js, context-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
@@ -106,6 +108,9 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }`. A wrapper over `save_with_dialog` |
 | `save_export_text`    | `saveExportText(defaultName, format, content)` | The same, for any format in `export_format` (`svg` `csv` `tsv` `html` `md` `txt` `json`). An unknown format is an `Err` *before* the dialog opens |
 | `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
+| `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
+| `get_gap_interactions` | `getGapInteractions({fromUtc, toUtc, threshold})` | The low- and zero-recognition interactions of a UTC range, newest first, each with its fixed mark — `{rows, truncated}`. See `docs/gap.md` |
+| `set_gap_fixed`       | `setGapFixed(logIds, fixed, note?)` | Marks or unmarks interactions as fixed in `gap_fixed`; returns the stored timestamp |
 | `export_settings_backup` | `exportSettingsBackup(defaultName, payload)` | Merges the Analytics API credentials into the renderer's payload and writes the backup (`0600`). See `docs/settings-and-updates.md` → "Settings backup" |
 | `import_settings_backup` | `importSettingsBackup()`          | Picks a backup, restores the Analytics API credentials from it, returns everything else — `{ ok, canceled, settings, appVersion, schemaVersion, analyticsRestored }` |
 
@@ -348,7 +353,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 
 Three distinct search types:
 
-1. **Content search** — searches Dialogs and Articles and their content. Main search bar under the Content tab.
+1. **Content search** — searches Dialogs and Articles and their content. Main search bar under the Content tab. It takes the same chips as the Conversations bar (text, ids, entities, `ctx:` / `meta:` tags, and / or / not, brackets), evaluated per item by the worker; see `docs/search.md` → "The Content bar takes the same chips".
 2. **Conversations search** — searches conversations and their context (e.g. filter by context). Can be very resource-intensive; use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter. The search bar is **one boolean expression** over text, entities, Articles, Dialogs and their nodes, joined by AND / OR / AND NOT and grouped with brackets; it travels in the `query` string and `parse_search_expr` in `lib.rs` reads it. See `docs/search.md` → "The search bar is one expression".
 3. **Chat search** — searches within a single chat. A chat is first found and opened via Conversations search; Chat search then operates within that opened conversation.
 
@@ -364,10 +369,12 @@ The orientation map for the whole window. It says what is on screen and where;
 
 ```
 <header>
-  brand | file tags | Export IDs button | Collections button | Settings button (gear)
+  brand | view switch: Content · Conversations · Flagged · GAP | file tags |
+  Export IDs button | Collections button | Settings button (gear)
 
 <div.global-search-bar>
-  search input | [Aa] [\b] [.*] [¬T] [ND] | tag filter button (Context · Metadata)
+  chip field (#contentTokens + input, #contentSuggest type-ahead) |
+  [( )] [Aa] [\b] [.*] [¬T] [ND] | tag filter button (Context · Metadata)
 
 <div.tab-bar>
   All Results (sub-stats: art · dlg · t.dlg)
@@ -397,9 +404,21 @@ The orientation map for the whole window. It says what is on screen and where;
 <div.conv-toolbar>
   Data (opens #convDataModal) | Insights (opens #insightsModal) | Export for AI
 
+<div#view-gap>   (header GAP button — see docs/gap.md)
+  toolbar: range button → the shared two-month day calendar (display
+           timezone) with Last 7 / Last 30 / This month / Last month ·
+           threshold (from Settings) · All/Low/Zero · Any/Open/Fixed ·
+           text filter · count · Export .xlsx
+  left:    windowed list — Question · Response · Recognition · When · ✓ fixed
+           (sortable headers; ↑↓ move, F toggles fixed, C copies)
+  right:   header (when · culture · score · Mark fixed · Mark all N fixed ·
+           Copy question · Open in Conversations) · the question's words as
+           copy chips · the conversation, read-only, the row's turn marked ·
+           entity finder (name or word → words, Open in CM.com)
+
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
-                toggle | Choose data | Copy dashboard | ✕
+                toggle | Choose data | ⚙ Insights settings | Export | ✕
   header row 2: what the slice holds | chips describing the search this is
                 | one quiet UTC badge
   body, on open — the chooser, and nothing is read until it is answered:
@@ -436,10 +455,18 @@ The orientation map for the whole window. It says what is on screen and where;
               numbers only — there is no picture of one)
   while reading: a Cancel button under the spinner; the unit toggle stays live
 
+<div#insSettingsModal>   (from the Insights header gear)
+  controls: export colours (background · text · Swap · accents, draggable ·
+            status colours · Reset) | export language | labels (dates · hours ·
+            values on marks · weekday · weekend) | caption parts | chart type
+            per card
+  sample:   two charts drawn exactly as an export would be
+
 <div.conv-sidebar-header>
   [( )] | expression field | search submit | [.*] | [U] [B] [E]
     the field is one boolean expression, read strictly left to right:
-    chips for text, entities, Articles, Dialogs and nodes, an operator chip
+    chips for text, entities, Articles, Dialogs, nodes and context /
+    metadata values (ctx:"k"="v" · meta:"k"="v"), an operator chip
     between each pair (click cycles and / or / and not), and bracket pairs
     drawn as one nested band. A dashed, faint leading "not" toggle excludes
     the whole search. Committing puts what is typed into a chip.
@@ -456,7 +483,8 @@ The orientation map for the whole window. It says what is on screen and where;
   header: Settings | Backup… (opens #settingsBackupModal) | ✕
   Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)
   Conversations tab: connected database + "Manage database…",
-                     Halo Studio URL, low recognition threshold, chat copy format,
+                     Halo Studio URL, low recognition threshold, hidden metadata
+                     rules, chat copy format,
                      Analytics API (client ID / secret / customer key / project key /
                      culture / environment / activeSessionOnly / Test connection)
 
@@ -571,9 +599,10 @@ Always use these terms in the UI:
 | `cm-sort-articles`         | Articles sort choice |
 | `cm-sort-dialogs`          | Dialogs sort choice |
 | `cm-flow-direction`        | Dialog graph layout direction |
-| `cm-view`                  | Last selected main view |
+| `cm-view`                  | Last selected main view: `content` · `conversations` · `flagged` · `gap` |
 | `cm-conv-db-path`          | Last selected conversations database (`CONV_DB_STORAGE_KEY`) |
 | `conv-low-recog-threshold` | Low recognition threshold |
+| `cm-metadata-hidden`       | JSON array of rule strings — metadata keys (`key`) or values (`key = value`, `*` wildcard) left out of every metadata picker. Display only; see `docs/search.md` → "Hidden metadata" |
 | `cm-display-timezone`      | IANA zone the chat, session list, date filter and Insights charts are read in. `""` or absent means follow the system. Import and Stored data stay UTC — see `docs/insights.md` → "Reading this in your own timezone" |
 | `conv-data-retention-days` | CSV import retention window |
 | `chat-copy-format`         | Chat copy format preference |
@@ -581,6 +610,10 @@ Always use these terms in the UI:
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
 | `cm-insights-export-caption` | `"0"` to leave the caption off an exported chart image; anything else, including absent, includes it |
+| `cm-insights-export-palette` | JSON `{surface, ink, accents[], good, warning, critical}` — the export palette. Absent means the built-in export theme. Read key by key; a non-hex value is dropped. See `docs/insights.md` → "Insights settings" |
+| `cm-insights-export-lang`  | `"de"` or `"nl"` to write exports in German or Dutch; absent means English. The screen stays English |
+| `cm-insights-export-options` | JSON — label options (`dateFmt`, `hourFmt`, `valueLabels`, `weekdayTicks`, `weekend`) and caption parts (`capTitle`, `capNote`, `capSearch`, `capUnit`, `capZone`). Label options apply on screen too |
+| `cm-insights-chart-types`  | JSON `{cardId: kind}` — the chart type chosen per Insights card, limited to what `INS_CHART_KINDS` allows for that card |
 | `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content, segments}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
 | `cm-insights-segment-layout` | JSON `{entries, dropped}` — the Segments table as an ordered list of lines (`{t:"total"\|"row"\|"head"\|"gap", id?, gid?, label?}`) plus the row ids removed by hand. Absent means "follow the breakdowns", which is a real state and not an empty object. Read entry by entry |
 | `cm-insights-segment-presets` | JSON array of `{id, name, breakdowns, layout}` — saved Segments setups. Holds the breakdowns and the arrangement, never a date range: a preset is applied to whatever the current search covers. See `docs/insights.md` → "A preset is the setup, never the dates" |

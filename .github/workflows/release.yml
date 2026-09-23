@@ -91,42 +91,50 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### The Context filter finds all the content it should
+            ### GAP analysis — a new tab
+            The questions the bot recognised badly, as a work list. Pick a date
+            range and every question scored under your low-recognition threshold
+            (or not recognised at all) is listed with the answer it got and its
+            score.
 
-            Filtering Articles and Dialogs by a context value missed most of
-            what uses it. The filter only looked at **Responses**, but a context
-            condition just as often decides which **Dialog** or **Transactional
-            Dialog** an Article or a Dialog node starts, and those were
-            invisible to it. `available_livechat_theater` = *Set to any value*
-            found 1 item where 14 use it; 29 of the 44 context variables were
-            undercounted, and six never appeared in the filter at all.
+            - Click a row to see the conversation it came from, with that turn
+              marked.
+            - Click a word of the question to copy it and look it up among your
+              entities; open any entity straight in CM.com.
+            - Tick rows off as **fixed** — one at a time, or every repeat of the
+              same question at once. Marks are kept in the database.
+            - **Export .xlsx** saves exactly what is listed, as
+              `GAP {date} {month}.xlsx`, with fixed rows in green.
 
-            - The filter now counts a condition wherever it sits, so those items
-              show up, and every chip's number is exactly what clicking it
-              returns. The numbers used to count responses rather than items, so
-              a chip could promise more than it delivered.
-            - A result matched through a route says so: its card shows a
-              **Context route** line naming the Dialog it starts and the value
-              that matched.
-            - In the Article and Dialog windows, every route into a Dialog now
-              shows the context it fires under, highlighted when it matches your
-              filter.
-            - With search text as well, the condition still has to sit on the
-              Response the text was found in, as before.
+            ### Search: and / or / not everywhere, and context as chips
+            - The **Content** search bar now works like the Conversations one:
+              chips joined by *and / or / not*, grouped with **( )**.
+            - Context and metadata values can be chips in both bars — for
+              example *parkeren* and not *Verblijf = true*. Click a chip to pick
+              other values, or several at once.
+            - Suggestions can be narrowed by type: Articles, Dialogs, Entities,
+              Context or Metadata.
 
-            ### Escalation group filters find every group
+            ### Opening a search result shows the whole conversation
+            The rest of the chat is dimmed instead of hidden, the match is
+            centred, and scrolling away brings everything back. ↑ ↓ step
+            through the matches.
 
-            The **escalationGroup** chips only looked at the escalation group a
-            Response is *tagged* with. A group can also be a *condition* — a
-            Response or a route into a Dialog that only fires for sessions in
-            that group — and those were invisible. **theater** is only ever used
-            that way, so filtering on it found nothing at all; it now finds the
-            15 Articles and Dialogs that use it.
+            ### Insights exports in your colours and language
+            - A new **settings** button in Insights: export colours (background,
+              text, accents, status colours), export language (**English,
+              German, Dutch**), date and hour formats, weekday labels, weekend
+              shading, values on bars, and which parts the caption includes.
+            - Choose the chart type per chart: columns, bars, line, area, and a
+              new donut and 100% bar.
+            - **Segments** now treats *True* and *true* as one value, names every
+              row *Key: value*, and lets you put back removed rows one by one.
 
-            - A chip now matches content tied to the group either way, on
-              Responses and on routes alike. Most groups find more than before.
-            - **default** appears as a chip of its own, for content conditioned
-              on the default escalation group.
+            ### Hide noisy metadata
+            Settings › Conversations › **Hidden metadata** keeps tokens and
+            per-conversation ids out of every metadata filter. The filter can
+            also hide a key in one click, and points out keys that look like an
+            id.
 
             ---
 

@@ -1,5 +1,6 @@
 mod analytics_api;
 mod self_update;
+mod xlsx;
 
 use analytics_api::{AnalyticsConfig, AnalyticsConfigView, AnalyticsState, FetchError, FetchOutcome};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -1406,6 +1407,15 @@ CREATE TABLE IF NOT EXISTS imported_windows (
     day   TEXT PRIMARY KEY,           -- UTC 'YYYY-MM-DD'
     hours INTEGER NOT NULL DEFAULT 0  -- bitmask of the UTC hours 0..23 fetched
 );
+-- GAP analysis: the low-recognition interactions someone has dealt with.
+-- Keyed by the interaction's LogId, which is stable across re-imports; a mark
+-- goes when its interaction does (retention purge, deleted days).
+CREATE TABLE IF NOT EXISTS gap_fixed (
+    log_id       INTEGER PRIMARY KEY,
+    session_uuid TEXT NOT NULL DEFAULT '',
+    fixed_at     TEXT NOT NULL,
+    note         TEXT NOT NULL DEFAULT ''
+);
 "#;
 
 /// Indexes that cost a b-tree write on every imported row and bought nothing.
@@ -2560,6 +2570,11 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
         params![cutoff_dt],
     );
     let _ = conn.execute(
+        "DELETE FROM gap_fixed WHERE log_id IN \
+         (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
+        params![cutoff_dt],
+    );
+    let _ = conn.execute(
         "DELETE FROM answer_index WHERE log_id IN \
          (SELECT log_id FROM interactions WHERE timestamp_start < ?1)",
         params![cutoff_dt],
@@ -2729,6 +2744,7 @@ fn export_format(format: &str) -> Option<(&'static str, &'static str)> {
         "html" => ("HTML", "html"),
         "md" => ("Markdown", "md"),
         "txt" => ("Text", "txt"),
+        "xlsx" => ("Excel workbook", "xlsx"),
         _ => return None,
     })
 }
@@ -2806,6 +2822,198 @@ async fn save_export_bytes(
     content: Vec<u8>,
 ) -> Result<FileSaveResult, String> {
     save_with_dialog(app, default_name, &format, content).await
+}
+
+/// A one-sheet `.xlsx` from rows the renderer already has — what is on screen,
+/// filtered and sorted the way it is on screen. See `xlsx.rs`.
+#[tauri::command]
+async fn save_export_xlsx(
+    app: AppHandle,
+    default_name: String,
+    sheet: xlsx::XlsxSheet,
+) -> Result<FileSaveResult, String> {
+    let bytes = xlsx::build(&sheet)?;
+    save_with_dialog(app, default_name, "xlsx", bytes).await
+}
+
+// ── GAP analysis ─────────────────────────────────────────────────────────────
+//
+// The low-recognition interactions of a date range, one row each, as a work
+// list: what the user asked, what they got, how sure the recognizer was, and
+// whether someone has dealt with it. See docs/gap.md.
+
+/// At most this many rows come back. A range that holds more is a range to
+/// narrow, and the renderer says so rather than silently showing a sample.
+const GAP_ROW_LIMIT: i64 = 20_000;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GapArgs {
+    from_utc: String,
+    to_utc: String,
+    threshold: i64,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapRow {
+    log_id: i64,
+    session_uuid: String,
+    timestamp: String,
+    question: String,
+    response: String,
+    recognition: f64,
+    recognition_type: String,
+    article_ids: String,
+    dialog_paths: String,
+    culture: String,
+    fixed_at: Option<String>,
+    note: String,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapResult {
+    rows: Vec<GapRow>,
+    truncated: bool,
+}
+
+/// `YYYY-MM-DDTHH:MM:SS`, the shape `timestamp_start` is stored in and the
+/// only shape the range compares correctly against as a string.
+fn is_naive_utc_stamp(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 19
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'T',
+            13 | 16 => *c == b':',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+/// The rows, split out of the command so it can run against a test connection.
+///
+/// "Low" is exactly the row-level predicate the Low % pill uses — a score above
+/// zero and strictly under the threshold, GenAI excluded — and "zero" is the
+/// Zero % pill's: scored 0 by a recognizer that ran. Both are gaps; the renderer
+/// lets the user tell them apart. A turn with no question text has nothing to
+/// improve and is left out.
+fn gap_rows(conn: &Connection, args: &GapArgs) -> Result<GapResult, String> {
+    if !is_naive_utc_stamp(&args.from_utc) || !is_naive_utc_stamp(&args.to_utc) {
+        return Err("The date range must be YYYY-MM-DDTHH:MM:SS.".into());
+    }
+    if !(1..=99).contains(&args.threshold) {
+        return Err("The threshold must be between 1 and 99.".into());
+    }
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT i.log_id, i.session_uuid, i.timestamp_start, \
+                    COALESCE(i.interaction_value, ''), COALESCE(i.output_text, ''), \
+                    COALESCE(i.recognition_quality, 0), COALESCE(i.recognition_type, ''), \
+                    COALESCE(i.article_ids, ''), COALESCE(i.dialog_paths, ''), \
+                    COALESCE(i.culture, ''), g.fixed_at, COALESCE(g.note, '') \
+             FROM interactions i LEFT JOIN gap_fixed g ON g.log_id = i.log_id \
+             WHERE i.timestamp_start >= ?1 AND i.timestamp_start <= ?2 \
+               AND ((i.recognition_quality > 0 AND i.recognition_quality < ?3) \
+                    OR (i.recognition_quality = 0 AND COALESCE(i.recognition_type, '') != '')) \
+               AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
+               AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI' \
+               AND TRIM(COALESCE(i.interaction_value, '')) != '' \
+             ORDER BY i.timestamp_start DESC, i.log_id DESC \
+             LIMIT ?4",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+    let mut rows: Vec<GapRow> = stmt
+        .query_map(
+            params![args.from_utc, args.to_utc, args.threshold, GAP_ROW_LIMIT + 1],
+            |r| {
+                Ok(GapRow {
+                    log_id: r.get(0)?,
+                    session_uuid: r.get(1)?,
+                    timestamp: r.get(2)?,
+                    question: r.get(3)?,
+                    response: r.get(4)?,
+                    recognition: r.get(5)?,
+                    recognition_type: r.get(6)?,
+                    article_ids: r.get(7)?,
+                    dialog_paths: r.get(8)?,
+                    culture: r.get(9)?,
+                    fixed_at: r.get(10)?,
+                    note: r.get(11)?,
+                })
+            },
+        )
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+    let truncated = rows.len() as i64 > GAP_ROW_LIMIT;
+    rows.truncate(GAP_ROW_LIMIT as usize);
+    Ok(GapResult { rows, truncated })
+}
+
+#[tauri::command]
+async fn get_gap_interactions(
+    db_state: State<'_, SharedDbState>,
+    args: GapArgs,
+) -> Result<GapResult, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        gap_rows(conn, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Mark (or unmark) interactions as dealt with. Returns the timestamp written,
+/// so the renderer shows the same one the database holds.
+fn set_gap_fixed_rows(
+    conn: &Connection,
+    log_ids: &[i64],
+    fixed: bool,
+    note: Option<&str>,
+) -> Result<String, String> {
+    if log_ids.len() > GAP_ROW_LIMIT as usize {
+        return Err("Too many rows at once.".into());
+    }
+    let now: String = conn
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%S', 'now')", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for id in log_ids {
+        if fixed {
+            tx.execute(
+                "INSERT INTO gap_fixed (log_id, session_uuid, fixed_at, note) \
+                 SELECT log_id, session_uuid, ?2, ?3 FROM interactions WHERE log_id = ?1 \
+                 ON CONFLICT(log_id) DO UPDATE SET note = CASE WHEN ?4 THEN excluded.note ELSE note END",
+                params![id, now, note.unwrap_or(""), note.is_some()],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            tx.execute("DELETE FROM gap_fixed WHERE log_id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(now)
+}
+
+#[tauri::command]
+async fn set_gap_fixed(
+    db_state: State<'_, SharedDbState>,
+    log_ids: Vec<i64>,
+    fixed: bool,
+    note: Option<String>,
+) -> Result<String, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        set_gap_fixed_rows(conn, &log_ids, fixed, note.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Unchanged in name, signature and behaviour — a collection export is a
@@ -4113,6 +4321,85 @@ enum SearchExpr {
     /// A run of free text, in the term grammar the bar has always used:
     /// space-separated AND terms, `|` OR groups, `"quoted phrases"`.
     Text(String),
+    /// A context or metadata tag the conversation carried: `ctx:"name"="value"`
+    /// or `meta:"name"="value"`, with `="*"` (or no value) for "set at all".
+    Tag(TagLeaf),
+}
+
+/// A tag leaf. The table is chosen from `kind`, never taken from the wire.
+#[derive(Clone, Debug, PartialEq)]
+struct TagLeaf {
+    metadata: bool,
+    name: String,
+    /// Any of these values; empty is "the key is set, to anything".
+    values: Vec<String>,
+}
+
+impl TagLeaf {
+    /// `"name"="value"`, `"name"="a","b"` (any of them), `name=value`,
+    /// `"name"` or `"name"="*"` — the part after `ctx:` / `meta:`. `None` when
+    /// there is no name.
+    ///
+    /// Several values are a comma-separated list inside the one token, not an
+    /// OR group of tags: under `.*` a bracket belongs to the pattern, and a
+    /// tag picked to three values must still mean exactly that.
+    fn parse(rest: &str, metadata: bool) -> Option<Self> {
+        let chars: Vec<char> = rest.chars().collect();
+        let i: usize;
+        let name: String;
+        if chars.first() == Some(&'"') {
+            let close = chars[1..].iter().position(|&c| c == '"')? + 1;
+            name = chars[1..close].iter().collect();
+            i = close + 1;
+        } else {
+            let end = chars.iter().position(|&c| c == '=').unwrap_or(chars.len());
+            name = chars[..end].iter().collect();
+            i = end;
+        }
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let mut values: Vec<String> = Vec::new();
+        if chars.get(i) == Some(&'=') {
+            let mut j = i + 1;
+            while j < chars.len() {
+                let v: String;
+                if chars[j] == '"' {
+                    let close = chars[j + 1..]
+                        .iter()
+                        .position(|&c| c == '"')
+                        .map(|p| j + 1 + p)
+                        .unwrap_or(chars.len());
+                    v = chars[j + 1..close.min(chars.len())].iter().collect();
+                    j = (close + 1).min(chars.len());
+                } else {
+                    let end = chars[j..]
+                        .iter()
+                        .position(|&c| c == ',')
+                        .map(|p| j + p)
+                        .unwrap_or(chars.len());
+                    v = chars[j..end].iter().collect();
+                    j = end;
+                }
+                let v = v.trim().to_string();
+                if !v.is_empty() && v != "*" && !values.iter().any(|x| x.eq_ignore_ascii_case(&v)) {
+                    values.push(v);
+                }
+                // Past the separator, if there is one.
+                while j < chars.len() && chars[j] != ',' {
+                    j += 1;
+                }
+                j += 1;
+            }
+            // `"*"` among the values means any value: the list is moot.
+            let raw: String = chars[i + 1..].iter().collect();
+            if raw.split(',').any(|p| matches!(p.trim(), "*" | "\"*\"")) {
+                values.clear();
+            }
+        }
+        Some(TagLeaf { metadata, name, values })
+    }
 }
 
 impl SearchExpr {
@@ -4122,9 +4409,11 @@ impl SearchExpr {
     /// An expression with no positive leaf therefore narrows conversations
     /// without narrowing turns, and `match_rows` has to be `None` — Insights
     /// would otherwise read "zero matching interactions" where the truth is
-    /// "nothing singled any of them out".
+    /// "nothing singled any of them out". A tag leaf is the same: a context
+    /// value belongs to the conversation, not to any one of its turns.
     fn has_positive_leaf(&self) -> bool {
         match self {
+            SearchExpr::Tag(_) => false,
             SearchExpr::Id(_) | SearchExpr::Entity(_) | SearchExpr::Text(_) => true,
             SearchExpr::And(cs) | SearchExpr::Or(cs) => cs.iter().any(Self::has_positive_leaf),
             SearchExpr::Not(_) => false,
@@ -4142,6 +4431,7 @@ enum SearchTok {
     Not,
     Id(IdTarget),
     Entity(String),
+    Tag(TagLeaf),
     /// The raw source slice, quotes and all — `tokenize_segment` needs to see
     /// them to tell a phrase from two words.
     Text(String),
@@ -4209,6 +4499,15 @@ fn scan_search_tokens(input: &str, regex_mode: bool) -> Vec<SearchTok> {
             let name = unquote_token(rest);
             if !name.trim().is_empty() {
                 out.push(SearchTok::Entity(name));
+                continue;
+            }
+        }
+        let tag = strip_prefix_ci(&raw, "ctx:")
+            .map(|r| (r, false))
+            .or_else(|| strip_prefix_ci(&raw, "meta:").map(|r| (r, true)));
+        if let Some((rest, metadata)) = tag {
+            if let Some(t) = TagLeaf::parse(rest, metadata) {
+                out.push(SearchTok::Tag(t));
                 continue;
             }
         }
@@ -4306,7 +4605,7 @@ fn parse_expr(toks: &[SearchTok], pos: &mut usize, depth: usize) -> Option<Searc
             // renderer has split them) join with AND, the same default the
             // operator chip takes.
             Some(SearchTok::Open) | Some(SearchTok::Id(_)) | Some(SearchTok::Entity(_))
-            | Some(SearchTok::Text(_)) => ors.push(false),
+            | Some(SearchTok::Tag(_)) | Some(SearchTok::Text(_)) => ors.push(false),
             _ => break,
         }
     }
@@ -4382,6 +4681,11 @@ fn parse_term(toks: &[SearchTok], pos: &mut usize, depth: usize) -> Option<Searc
             let name = name.trim().to_lowercase();
             *pos += 1;
             Some(SearchExpr::Entity(name))
+        }
+        SearchTok::Tag(t) => {
+            let t = t.clone();
+            *pos += 1;
+            Some(SearchExpr::Tag(t))
         }
         SearchTok::Text(_) => {
             let mut parts: Vec<String> = Vec::new();
@@ -4525,6 +4829,8 @@ const MATCH_NOTHING: &str = "SELECT '' AS session_uuid, NULL AS match_log_id WHE
 struct SearchCtx<'a> {
     fts_available: bool,
     entity_available: bool,
+    context_available: bool,
+    metadata_available: bool,
     /// Which message columns a text leaf reads, or `None` for entities only.
     text_scope: Option<&'a str>,
     /// The **E** toggle: a text leaf also matches entity name / matched text / id.
@@ -4657,6 +4963,7 @@ impl<'a> ExprSql<'a> {
         match e {
             SearchExpr::Id(t) => Ok((self.leaf_id(t), false)),
             SearchExpr::Entity(name) => Ok((self.leaf_entity(name), false)),
+            SearchExpr::Tag(t) => Ok((self.leaf_tag(t), false)),
             SearchExpr::Text(text) => Ok((self.leaf_text(text)?, false)),
             SearchExpr::Not(inner) => {
                 let (i, neg) = self.compile(inner)?;
@@ -4807,6 +5114,42 @@ impl<'a> ExprSql<'a> {
         self.add_node(format!(
             "SELECT e.session_uuid, e.log_id AS match_log_id FROM {from} \
              WHERE (e.name = {p}){entity_row_filter}"
+        ))
+    }
+
+    /// A context or metadata tag, as a condition like any other.
+    ///
+    /// The same relation as the tag filter panel's `EXISTS`, but a leaf, so it
+    /// can be ORed with a word or negated inside a group — which the panel,
+    /// ANDed onto the whole search, never could. Conversation-level by nature:
+    /// `match_log_id` is NULL, because no turn is *why* a conversation carries
+    /// a context value. The value compares case-insensitively, as the Segments
+    /// table groups it: `True` and `true` are one answer.
+    fn leaf_tag(&mut self, t: &TagLeaf) -> usize {
+        self.modes.push("tag".to_string());
+        let (table, available) = if t.metadata {
+            ("metadata_index", self.ctx.metadata_available)
+        } else {
+            ("context_index", self.ctx.context_available)
+        };
+        if !available {
+            return self.add_node(MATCH_NOTHING.to_string());
+        }
+        let pn = self.param(Box::new(t.name.clone()));
+        let value_cond = if t.values.is_empty() {
+            String::new()
+        } else {
+            let ps: Vec<String> = t
+                .values
+                .clone()
+                .into_iter()
+                .map(|v| self.param(Box::new(v)))
+                .collect();
+            format!(" AND t.value COLLATE NOCASE IN ({})", ps.join(", "))
+        };
+        self.add_node(format!(
+            "SELECT DISTINCT t.session_uuid, NULL AS match_log_id FROM {table} t \
+             WHERE t.name = {pn}{value_cond}"
         ))
     }
 
@@ -5322,6 +5665,8 @@ fn build_session_filter_query(
     let ctx = SearchCtx {
         fts_available: table_exists(conn, "interactions_fts"),
         entity_available: table_exists(conn, "entity_index"),
+        context_available: table_exists(conn, "context_index"),
+        metadata_available: table_exists(conn, "metadata_index"),
         // "none" is both message toggles off, which is only meaningful
         // alongside the entity toggle. With nothing selected at all, search the
         // text — an empty result set would read as "no matches" rather than
@@ -6445,9 +6790,52 @@ fn insight_segment_group(
             (rows, distinct, false)
         }
         Some(table) => {
-            let rows = insight_segment_rows(
-                conn,
-                &format!(
+            // Values are compared case-insensitively: `True` and `true` are one
+            // answer spelled two ways by two flows, and splitting them puts
+            // half of one segment on a row nobody reads as the same thing.
+            //
+            // Folding costs a sort the exact grouping does not have — the
+            // primary key hands `(name, value)` over already in order — and
+            // measured at twice the time per breakdown. So it is paid only by a
+            // key that actually has two spellings of one value; the probe reads
+            // the key's distinct values off the index and nothing else.
+            let collides: bool = conn
+                .query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM (\
+                           SELECT DISTINCT value FROM {table} WHERE name = ?1\
+                         ) GROUP BY LOWER(value) HAVING COUNT(*) > 1)"
+                    ),
+                    params![breakdown.name],
+                    |r| r.get(0),
+                )
+                .map_err(insight_err)?;
+            let sql = if collides {
+                // The pairs are de-duplicated *after* folding, so a conversation
+                // carrying both spellings is counted on its row once. The row is
+                // labelled with the spelling most conversations use.
+                format!(
+                    "WITH f AS (\
+                       SELECT DISTINCT t.session_uuid AS session_uuid, LOWER(t.value) AS v \
+                       FROM insight_segment_stats g JOIN {table} t \
+                         ON t.session_uuid = g.session_uuid \
+                       WHERE t.name = ?1\
+                     ), \
+                     spell AS (\
+                       SELECT LOWER(value) AS v, value, COUNT(*) AS n \
+                       FROM {table} WHERE name = ?1 GROUP BY value\
+                     ) \
+                     SELECT (SELECT sp.value FROM spell sp WHERE sp.v = f.v \
+                             ORDER BY sp.n DESC, sp.value ASC LIMIT 1) AS label, \
+                            {INSIGHT_SEGMENT_SUMS} \
+                     FROM insight_segment_stats g JOIN f \
+                       ON f.session_uuid = g.session_uuid \
+                     GROUP BY f.v \
+                     ORDER BY COALESCE(SUM(g.interactions), 0) DESC, f.v ASC \
+                     LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
+                )
+            } else {
+                format!(
                     "SELECT t.value AS label, {INSIGHT_SEGMENT_SUMS} \
                      FROM insight_segment_stats g JOIN {table} t \
                        ON t.session_uuid = g.session_uuid \
@@ -6455,20 +6843,17 @@ fn insight_segment_group(
                      GROUP BY t.value \
                      ORDER BY COALESCE(SUM(g.interactions), 0) DESC, t.value ASC \
                      LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
-                ),
-                &[&breakdown.name],
-                "(empty)",
-            )?;
+                )
+            };
+            let rows = insight_segment_rows(conn, &sql, &[&breakdown.name], "(empty)")?;
             let (distinct, tagged, sessions): (i64, i64, i64) = conn
                 .query_row(
                     &format!(
-                        "SELECT COUNT(*), COALESCE(SUM(n), 0), COUNT(DISTINCT session_uuid) FROM (\
-                           SELECT t.value AS value, t.session_uuid AS session_uuid, \
-                                  COUNT(*) AS n \
+                        "SELECT COUNT(DISTINCT v), COUNT(*), COUNT(DISTINCT session_uuid) FROM (\
+                           SELECT DISTINCT LOWER(t.value) AS v, t.session_uuid AS session_uuid \
                            FROM insight_segment_stats g JOIN {table} t \
                              ON t.session_uuid = g.session_uuid \
-                           WHERE t.name = ?1 \
-                           GROUP BY t.value, t.session_uuid\
+                           WHERE t.name = ?1\
                          )"
                     ),
                     params![breakdown.name],
@@ -8279,7 +8664,7 @@ fn ai_export_header(
             "feedback_targets": "Each thumbs up/down already joined to the answer it rated, so this join does not need redoing. target_resolution says how certain that join is: 'originatingInteractionId' = the log stated it; 'previousBotOutputFallback' = inferred from the preceding answer, so treat it as probable rather than certain.",
             "is_feedback_target": "Present as true only on turns that received feedback; absent on all others.",
             "interaction_scope": "whole_conversations = every turn of each matching conversation. matched_turns = only the turns that satisfied the search, so a conversation's chat_trace is a subset of it and the turns around a match are not present.",
-            "query": "search_context.query is a boolean expression, evaluated strictly left to right with parentheses overriding: upper-case AND / OR / NOT join the terms, qa-<n> is an Article, dn-<n> a Dialog, dn-<d>-<n> one of its nodes, entity:<name> an entity the recognizer fired, and anything else is free text (space = all of these words in one message, | = either group, \"...\" = that exact phrase). AND means both somewhere in the conversation, not both in the same turn.",
+            "query": "search_context.query is a boolean expression, evaluated strictly left to right with parentheses overriding: upper-case AND / OR / NOT join the terms, qa-<n> is an Article, dn-<n> a Dialog, dn-<d>-<n> one of its nodes, entity:<name> an entity the recognizer fired, ctx:\"<key>\"=\"<value>\" / meta:\"<key>\"=\"<value>\" a context or metadata value the conversation carried (\"*\" = any value), and anything else is free text (space = all of these words in one message, | = either group, \"...\" = that exact phrase). AND means both somewhere in the conversation, not both in the same turn.",
             "conventions": "Empty fields are omitted rather than sent as null, so a missing key means no value. Answer HTML has been stripped to plain text."
         },
     })
@@ -9384,6 +9769,13 @@ async fn delete_interactions_by_dates(
         );
         let _ = tx.execute(
             &format!(
+                "DELETE FROM gap_fixed WHERE log_id IN \
+                 (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
+            ),
+            params_refs.as_slice(),
+        );
+        let _ = tx.execute(
+            &format!(
                 "DELETE FROM answer_index WHERE log_id IN \
                  (SELECT log_id FROM interactions WHERE DATE(timestamp_start) IN ({placeholders}))"
             ),
@@ -10260,6 +10652,9 @@ pub fn run() {
             save_collection_export,
             save_export_text,
             save_export_bytes,
+            save_export_xlsx,
+            get_gap_interactions,
+            set_gap_fixed,
             export_settings_backup,
             import_settings_backup,
             set_db_path,
@@ -10382,7 +10777,7 @@ mod tests {
     /// a shared extension means the dialog filter and the file disagree.
     #[test]
     fn every_export_format_forces_its_own_extension() {
-        let formats = ["json", "png", "svg", "csv", "tsv", "html", "md", "txt"];
+        let formats = ["json", "png", "svg", "csv", "tsv", "html", "md", "txt", "xlsx"];
         let mut seen = std::collections::HashSet::new();
         for f in formats {
             let (label, ext) = export_format(f).expect(f);
@@ -14037,6 +14432,38 @@ mod insights {
         assert_eq!(park.rows.iter().map(|r| r.interactions).sum::<i64>(), out.total.interactions);
     }
 
+    /// `True` and `true` are one answer. Folded into one row, labelled with the
+    /// spelling most of the result set uses, and a conversation carrying both
+    /// spellings is counted on that row once — not once per spelling.
+    #[test]
+    fn a_value_spelled_in_two_cases_is_one_segment_row() {
+        let conn = seed_segments(
+            &[
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s3", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s4", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s5", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+            ],
+            &[
+                ("verblijf", "true", "s5"),
+                ("verblijf", "True", "s1"),
+                ("verblijf", "true", "s2"),
+                ("verblijf", "true", "s3"),
+                ("verblijf", "True", "s3"),
+                ("verblijf", "false", "s4"),
+            ],
+        );
+        let out = segments(&conn, &[("context", "verblijf")]);
+        let g = &out.groups[0];
+        assert_eq!(g.rows.len(), 2, "two answers, not three spellings: {:?}", g.rows.iter().map(|r| &r.label).collect::<Vec<_>>());
+        let yes = seg_row(g, "true");
+        assert_eq!(yes.sessions, 4, "s3 carries both spellings and counts once");
+        assert_eq!(yes.interactions, 4);
+        assert!(!g.overlapping, "two spellings of one value are not two values");
+        assert_eq!(g.folded_values, 0, "every distinct value is on screen");
+    }
+
     /// The rollup is derived from `insight_sessions`, so ticking another
     /// breakdown key must not cost another pass over `interactions` — and a
     /// *different* search must not be answered out of the previous one's rows.
@@ -14788,6 +15215,128 @@ mod conv_search {
             query_scope: Some(scope.to_string()),
             ..Default::default()
         }
+    }
+
+    /// A context or metadata tag is a leaf like any other: it can be ORed with
+    /// a word and negated inside a group, which the tag panel — ANDed onto the
+    /// whole search — never could.
+    #[test]
+    fn a_tag_chip_combines_with_words_and_negation() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "stay", user: "waar kan ik parkeren", bot: "hier", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "day", user: "waar kan ik parkeren", bot: "daar", ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "other", user: "openingstijden", bot: "tien uur", ..Default::default() });
+        conn.execute_batch(
+            "INSERT INTO context_index(name, value, session_uuid) VALUES ('Verblijf','True','stay'); \
+             INSERT INTO context_index(name, value, session_uuid) VALUES ('Verblijf','false','day'); \
+             INSERT INTO metadata_index(name, value, session_uuid) VALUES ('nochat','true','other');",
+        )
+        .expect("tags");
+        rebuild_session_summary(&conn).expect("summary");
+        let q = |s: &str| found(&conn, &text_args(s, "both"));
+
+        // Case-insensitive on the value, as Segments groups it.
+        assert_eq!(q(r#"ctx:"Verblijf"="true""#), vec!["stay"]);
+        assert_eq!(q(r#"ctx:"Verblijf"="*""#), vec!["day", "stay"]);
+        assert_eq!(q(r#"parkeren AND NOT ctx:"Verblijf"="true""#), vec!["day"]);
+        assert_eq!(q(r#"ctx:"Verblijf"="true" OR meta:"nochat"="true""#), vec!["other", "stay"]);
+        // A chip picked to two values matches either.
+        assert_eq!(q(r#"ctx:"Verblijf"="TRUE","false""#), vec!["day", "stay"]);
+        // A tag alone narrows conversations, never turns.
+        let fq = build_session_filter_query(&conn, &text_args(r#"meta:nochat=true"#, "both"))
+            .expect("build");
+        assert!(fq.match_rows.is_none(), "a tag leaf singled out a turn");
+    }
+
+    #[test]
+    fn a_tag_token_reads_its_name_and_value() {
+        let tag = |metadata: bool, name: &str, value: Option<&str>| {
+            Some(SearchExpr::Tag(TagLeaf {
+                metadata,
+                name: name.to_string(),
+                values: value.map(|v| vec![v.to_string()]).unwrap_or_default(),
+            }))
+        };
+        let tags = |metadata: bool, name: &str, values: &[&str]| {
+            Some(SearchExpr::Tag(TagLeaf {
+                metadata,
+                name: name.to_string(),
+                values: values.iter().map(|v| v.to_string()).collect(),
+            }))
+        };
+        // Several values are one token, any of them.
+        assert_eq!(
+            parse_search_expr(r#"ctx:"Channel"="web","app, mobile","web""#, false),
+            tags(false, "Channel", &["web", "app, mobile"])
+        );
+        assert_eq!(parse_search_expr("ctx:Channel=web,app", false), tags(false, "Channel", &["web", "app"]));
+        assert_eq!(parse_search_expr(r#"ctx:"Channel"="web","*""#, false), tags(false, "Channel", &[]));
+        assert_eq!(parse_search_expr(r#"ctx:"Verblijf"="true""#, false), tag(false, "Verblijf", Some("true")));
+        assert_eq!(parse_search_expr(r#"meta:"a b"="c d""#, false), tag(true, "a b", Some("c d")));
+        assert_eq!(parse_search_expr("meta:nochat=true", false), tag(true, "nochat", Some("true")));
+        assert_eq!(parse_search_expr(r#"Meta:"x"="*""#, false), tag(true, "x", None));
+        assert_eq!(parse_search_expr("ctx:channel", false), tag(false, "channel", None));
+        // Quoted whole, or with no name, it is text.
+        assert_eq!(
+            parse_search_expr(r#""ctx:x""#, false),
+            Some(SearchExpr::Text(r#""ctx:x""#.to_string()))
+        );
+        assert_eq!(parse_search_expr("ctx:", false), Some(SearchExpr::Text("ctx:".to_string())));
+    }
+
+    /// The GAP list is the Low % and Zero % predicates at row level, bounded
+    /// by the date range, and a mark survives a re-query.
+    #[test]
+    fn the_gap_list_holds_low_and_zero_turns_and_remembers_what_was_fixed() {
+        let conn = search_conn();
+        let turn = |log_id: i64, q: &str, quality: f64, rtype: &str, ts: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, \
+                 timestamp_end, culture, interaction_value, output_text, main_interaction_type, \
+                 all_interaction_types, recognition_type, recognition_quality, imported_at) \
+                 VALUES (?1,'u'||?1,'s'||?1,?5,?5,'nl',?2,'antwoord','Question','Question',?4,?3,0)",
+                params![log_id, q, quality, rtype, ts],
+            )
+            .expect("turn");
+        };
+        turn(1, "waar parkeren", 45.0, "Article", "2026-06-01T09:00:00");
+        turn(2, "hoe laat", 60.0, "Article", "2026-06-01T10:00:00"); // at the threshold: not low
+        turn(3, "blabla", 0.0, "Article", "2026-06-01T11:00:00"); // zero, recognizer ran
+        turn(4, "", 20.0, "Article", "2026-06-01T12:00:00"); // no question
+        turn(5, "genai", 10.0, "GenerativeAI", "2026-06-01T13:00:00");
+        turn(6, "later", 30.0, "Article", "2026-06-03T09:00:00"); // outside the range
+        turn(7, "event", 0.0, "", "2026-06-01T14:00:00"); // zero, nothing ran
+        let args = GapArgs {
+            from_utc: "2026-06-01T00:00:00".into(),
+            to_utc: "2026-06-02T23:59:59".into(),
+            threshold: 60,
+        };
+        let ids = |r: &GapResult| r.rows.iter().map(|g| g.log_id).collect::<Vec<_>>();
+        let got = gap_rows(&conn, &args).expect("gap");
+        assert_eq!(ids(&got), vec![3, 1], "newest first; strict <, GenAI and empty questions out");
+        assert!(got.rows.iter().all(|r| r.fixed_at.is_none()));
+
+        set_gap_fixed_rows(&conn, &[1], true, None).expect("fix");
+        let got = gap_rows(&conn, &args).expect("gap");
+        assert!(got.rows.iter().find(|r| r.log_id == 1).unwrap().fixed_at.is_some());
+        set_gap_fixed_rows(&conn, &[1], false, None).expect("unfix");
+        assert!(gap_rows(&conn, &args).unwrap().rows.iter().all(|r| r.fixed_at.is_none()));
+
+        // A mark on an interaction that does not exist is not invented.
+        set_gap_fixed_rows(&conn, &[999], true, None).expect("fix nothing");
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM gap_fixed", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+
+        assert!(gap_rows(&conn, &GapArgs { threshold: 0, ..args }).is_err());
+        assert!(gap_rows(
+            &conn,
+            &GapArgs {
+                from_utc: "2026-06-01' OR 1=1 --".into(),
+                to_utc: "2026-06-02T23:59:59".into(),
+                threshold: 60
+            }
+        )
+        .is_err());
     }
 
     /// A column filter in FTS5 binds to the phrase that follows it and nothing
