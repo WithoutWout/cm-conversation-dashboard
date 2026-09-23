@@ -33,8 +33,13 @@ the answer), and so is a turn with no question text — there is nothing to
 improve about it. Newest first, at most 20,000 rows; a range with more says so
 in the count and asks to be narrowed, rather than silently showing a sample.
 
-The range is two calendar days in the **display timezone**, turned into UTC
-bounds by `insZoneDayBounds` — the same conversion the conversation date filter
+The range is picked on the **shared day calendar** — the same two-month
+`calMonthHtml` grid, `_calRangeCls` range classes and class-only hover preview
+as Import and Stored data (`docs/import.md` → "The shared day calendar"), in a
+popover under the range button, with the presets underneath as quick buttons.
+Unlike those two calendars its days are in the **display timezone** (the legend
+says which): they name moments, as the conversation date filter's do, not rows.
+`insZoneDayBounds` turns them into UTC bounds — the same conversion that filter
 uses. `gap_rows` validates both bounds as `YYYY-MM-DDTHH:MM:SS` and the
 threshold as 1–99 before anything runs.
 

@@ -405,8 +405,9 @@ The orientation map for the whole window. It says what is on screen and where;
   Data (opens #convDataModal) | Insights (opens #insightsModal) | Export for AI
 
 <div#view-gap>   (header GAP button — see docs/gap.md)
-  toolbar: from → to (display timezone) · 7 days / 30 days / This month / Last
-           month · threshold (from Settings) · All/Low/Zero · Any/Open/Fixed ·
+  toolbar: range button → the shared two-month day calendar (display
+           timezone) with Last 7 / Last 30 / This month / Last month ·
+           threshold (from Settings) · All/Low/Zero · Any/Open/Fixed ·
            text filter · count · Export .xlsx
   left:    windowed list — Question · Response · Recognition · When · ✓ fixed
            (sortable headers; ↑↓ move, F toggles fixed, C copies)

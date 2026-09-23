@@ -1796,36 +1796,42 @@
         align-items: center;
         gap: 6px;
       }
-      .gap-range input[type="date"] {
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text);
-        font-size: 0.78rem;
-        padding: 4px 6px;
-        color-scheme: dark;
+      .gap-range {
+        position: relative;
       }
-      .gap-range-sep {
+      .gap-range-btn {
+        width: auto;
+        min-width: 230px;
+      }
+      .gap-range-caret {
         color: var(--muted);
-      }
-      .gap-presets {
-        display: flex;
-        gap: 4px;
-        margin-left: 4px;
-      }
-      .gap-presets button {
-        background: none;
-        border: 1px solid var(--border);
-        border-radius: 5px;
-        color: var(--muted);
-        cursor: pointer;
+        margin-left: auto;
         font-size: 0.7rem;
-        padding: 3px 7px;
       }
-      .gap-presets button:hover,
-      .gap-presets button.active {
-        color: var(--text);
+      /* The shared day calendar (docs/import.md → "The shared day calendar"),
+         in a popover under the range button. */
+      .gap-cal-pop {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 90;
+        width: 560px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+        padding: 10px 12px 12px;
+        animation: pop-in 0.12s ease-out;
+      }
+      .gap-cal-pop[hidden] {
+        display: none;
+      }
+      .gap-cal-pop .day-cal {
+        margin: 6px 0 10px;
+      }
+      .manage-db-quick button.active {
         border-color: var(--accent);
+        color: var(--text);
       }
       .gap-threshold {
         color: var(--muted);
@@ -10943,16 +10949,13 @@
     -->
     <div id="view-gap">
       <div class="gap-toolbar">
-        <div class="gap-range">
-          <input type="date" id="gapFrom" aria-label="From" />
-          <span class="gap-range-sep">→</span>
-          <input type="date" id="gapTo" aria-label="To" />
-          <div class="gap-presets">
-            <button data-gap-preset="7">7 days</button>
-            <button data-gap-preset="30">30 days</button>
-            <button data-gap-preset="month">This month</button>
-            <button data-gap-preset="last-month">Last month</button>
-          </div>
+        <div class="gap-range" id="gapRangeWrap">
+          <button class="conv-date-range-btn gap-range-btn" id="gapRangeBtn" onclick="gapToggleCal()">
+            <span style="font-size: 0.85rem"><svg class=ui-icon><use href=#i-calendar /></svg></span>
+            <span class="conv-date-range-label" id="gapRangeLabel"></span>
+            <span class="gap-range-caret">&#x25BE;</span>
+          </button>
+          <div class="gap-cal-pop" id="gapCalPop" hidden></div>
         </div>
         <span class="gap-threshold" id="gapThreshold"></span>
         <div class="gap-pills" id="gapKindPills">
@@ -22817,14 +22820,11 @@
       }
 
       async function onEnterGapView() {
-        const from = document.getElementById("gapFrom")
-        const to = document.getElementById("gapTo")
         if (!gapRange) {
           gapRange = gapPresetRange("7")
-          from.value = gapRange.from
-          to.value = gapRange.to
-          document.querySelector('[data-gap-preset="7"]').classList.add("active")
+          gapPreset = "7"
         }
+        gapRenderRangeLabel()
         gapRenderThreshold()
         gapRenderEntities()
         await loadGapRows()
@@ -23271,6 +23271,182 @@
         }
       }
 
+      // ── The range: the shared day calendar ──
+      //
+      // The same two-month calendar as Import and Stored data (`calMonthHtml`,
+      // `_calRangeCls`, `.day-cal`): two clicks make a range, hovering previews
+      // the second end, presets sit underneath. Its days are read in the
+      // display timezone — they name moments here, like the conversation date
+      // filter, not rows the way the data modal's UTC days do.
+      let gapPreset = "7"
+      let gapCalMonth = null
+      let gapPickPhase = 0
+      let gapPickFrom = ""
+      let gapHover = ""
+
+      function gapFmtDay(key, withYear) {
+        return new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7) - 1, +key.slice(8, 10))).toLocaleDateString(
+          "en-GB",
+          { day: "numeric", month: "short", year: withYear ? "numeric" : undefined, timeZone: "UTC" },
+        )
+      }
+
+      function gapRenderRangeLabel() {
+        const el = document.getElementById("gapRangeLabel")
+        if (!el || !gapRange) return
+        const sameYear = gapRange.from.slice(0, 4) === gapRange.to.slice(0, 4)
+        el.textContent =
+          gapRange.from === gapRange.to
+            ? gapFmtDay(gapRange.from, true)
+            : gapFmtDay(gapRange.from, !sameYear) + " → " + gapFmtDay(gapRange.to, true)
+      }
+
+      function _gapCalRange() {
+        if (gapPickPhase === 1) {
+          const hi = gapHover || gapPickFrom
+          return hi < gapPickFrom ? { lo: hi, hi: gapPickFrom } : { lo: gapPickFrom, hi }
+        }
+        return { lo: gapRange.from, hi: gapRange.to }
+      }
+
+      function _gapMonthHtml(monthDate, isFirst) {
+        const today = gapToday()
+        const { lo, hi } = _gapCalRange()
+        return calMonthHtml(monthDate, isFirst, {
+          prevFn: "gapCalPrev",
+          nextFn: "gapCalNext",
+          clickFn: "gapPickDay",
+          dataAttr: "data-gap-date",
+          keyFor: _calDayKey,
+          classify: (key) => {
+            let cls = "cal-day"
+            if (key > today) cls += " disabled"
+            else {
+              if (key === today) cls += " today"
+              cls += _calRangeCls(key, lo, hi)
+            }
+            return { cls, title: "" }
+          },
+        })
+      }
+
+      function gapRenderCal() {
+        const pop = document.getElementById("gapCalPop")
+        if (!pop || pop.hidden) return
+        if (!gapCalMonth) {
+          const end = gapRange.to
+          gapCalMonth = new Date(+end.slice(0, 4), +end.slice(5, 7) - 2, 1)
+        }
+        const second = new Date(gapCalMonth.getFullYear(), gapCalMonth.getMonth() + 1, 1)
+        const presets = [
+          ["7", "Last 7 days"],
+          ["30", "Last 30 days"],
+          ["month", "This month"],
+          ["last-month", "Last month"],
+        ]
+        pop.innerHTML =
+          `<div class="day-cal-legend"><span>${
+            gapPickPhase === 1 ? "Now pick the other end" : "Click a start day, then an end day"
+          }</span><span>Days in ${esc(insZoneLabel(insZone()))}</span></div>` +
+          `<div class="day-cal" id="gapCal"><div class="day-cal-month">${_gapMonthHtml(
+            gapCalMonth,
+            true,
+          )}</div><div class="day-cal-month">${_gapMonthHtml(second, false)}</div></div>` +
+          `<div class="manage-db-quick">${presets
+            .map(
+              ([k, label]) =>
+                `<button class="${gapPreset === k && gapPickPhase === 0 ? "active" : ""}" onclick="gapApplyPreset('${k}')">${label}</button>`,
+            )
+            .join("")}</div>`
+        const cal = document.getElementById("gapCal")
+        cal.addEventListener("mouseover", (e) => {
+          if (gapPickPhase !== 1) return
+          const el = e.target.closest("[data-gap-date]")
+          const next = el ? el.dataset.gapDate : ""
+          if (next !== gapHover) {
+            gapHover = next
+            _gapUpdateCalClasses()
+          }
+        })
+      }
+
+      /// Hover preview only touches classes, as the data modal's calendars do —
+      /// a re-render on every mousemove fights the pointer.
+      function _gapUpdateCalClasses() {
+        const { lo, hi } = _gapCalRange()
+        document.querySelectorAll("#gapCal [data-gap-date]").forEach((el) => {
+          el.classList.remove("range-start", "range-end", "in-range")
+          const cls = _calRangeCls(el.dataset.gapDate, lo, hi).trim()
+          if (cls) el.classList.add(cls)
+        })
+      }
+
+      function gapToggleCal() {
+        const pop = document.getElementById("gapCalPop")
+        if (!pop.hidden) {
+          gapCloseCal()
+          return
+        }
+        pop.hidden = false
+        document.getElementById("gapRangeBtn").classList.add("active")
+        gapPickPhase = 0
+        gapHover = ""
+        gapCalMonth = null
+        gapRenderCal()
+      }
+
+      function gapCloseCal() {
+        const pop = document.getElementById("gapCalPop")
+        if (pop) pop.hidden = true
+        const btn = document.getElementById("gapRangeBtn")
+        if (btn) btn.classList.remove("active")
+        gapPickPhase = 0
+        gapHover = ""
+      }
+
+      function gapCalPrev() {
+        gapCalMonth = new Date(gapCalMonth.getFullYear(), gapCalMonth.getMonth() - 1, 1)
+        gapRenderCal()
+      }
+      function gapCalNext() {
+        gapCalMonth = new Date(gapCalMonth.getFullYear(), gapCalMonth.getMonth() + 1, 1)
+        gapRenderCal()
+      }
+
+      function gapPickDay(key) {
+        if (gapPickPhase === 0) {
+          gapPickFrom = key
+          gapPickPhase = 1
+          gapHover = ""
+          gapRenderCal()
+          return
+        }
+        gapRange = key < gapPickFrom ? { from: key, to: gapPickFrom } : { from: gapPickFrom, to: key }
+        gapPreset = ""
+        gapCloseCal()
+        gapRenderRangeLabel()
+        loadGapRows()
+      }
+
+      function gapApplyPreset(k) {
+        gapRange = gapPresetRange(k)
+        gapPreset = k
+        gapCloseCal()
+        gapRenderRangeLabel()
+        loadGapRows()
+      }
+
+      document.addEventListener("mousedown", (e) => {
+        const pop = document.getElementById("gapCalPop")
+        if (!pop || pop.hidden) return
+        if (e.target.closest("#gapRangeWrap")) return
+        gapCloseCal()
+      })
+      document.addEventListener("keydown", (e) => {
+        const pop = document.getElementById("gapCalPop")
+        if (e.key === "Escape" && pop && !pop.hidden) gapCloseCal()
+      })
+
       // ── Wiring ──
       document.getElementById("gapList").addEventListener("scroll", () => {
         requestAnimationFrame(gapPaintRows)
@@ -23296,25 +23472,6 @@
           gapCopy(view[at].logId)
         }
       })
-      document.querySelectorAll("[data-gap-preset]").forEach((b) =>
-        b.addEventListener("click", () => {
-          gapRange = gapPresetRange(b.dataset.gapPreset)
-          document.getElementById("gapFrom").value = gapRange.from
-          document.getElementById("gapTo").value = gapRange.to
-          document.querySelectorAll("[data-gap-preset]").forEach((x) => x.classList.toggle("active", x === b))
-          loadGapRows()
-        }),
-      )
-      for (const id of ["gapFrom", "gapTo"]) {
-        document.getElementById(id).addEventListener("change", () => {
-          const from = document.getElementById("gapFrom").value
-          const to = document.getElementById("gapTo").value
-          if (!from || !to) return
-          gapRange = from <= to ? { from, to } : { from: to, to: from }
-          document.querySelectorAll("[data-gap-preset]").forEach((x) => x.classList.remove("active"))
-          loadGapRows()
-        })
-      }
       document.querySelectorAll("[data-gap-kind]").forEach((b) =>
         b.addEventListener("click", () => {
           gapKind = b.dataset.gapKind
