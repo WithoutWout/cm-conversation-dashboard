@@ -2121,6 +2121,85 @@
         overflow-y: auto;
         padding: 0 14px 12px;
       }
+      /* The "Fix this" panel: one section per thing to change, each line
+         ending in the button that opens it in CM.com. */
+      /* Not `.gap-fix`: that is the round ✓ on each list row. */
+      .gap-fixpanel {
+        flex-basis: 44%;
+      }
+      .gap-fix-sec {
+        padding: 8px 0;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+      }
+      .gap-fix-sec:last-child {
+        border-bottom: 0;
+      }
+      .gap-fix-label {
+        font-size: 0.64rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+      .gap-fix-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 26px;
+        font-size: 0.76rem;
+      }
+      .gap-fix-row + .gap-fix-row {
+        margin-top: 3px;
+      }
+      .gap-fix-what {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .gap-fix-what .gap-fix-id {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.7rem;
+        margin-right: 6px;
+      }
+      .gap-fix-what .gap-fix-arrow {
+        color: var(--muted);
+        margin: 0 4px;
+      }
+      .gap-fixpanel .btn-open-url {
+        height: 22px;
+        padding: 0 8px;
+        font-size: 0.68rem;
+        flex-shrink: 0;
+      }
+      .gap-fix-copy {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--muted);
+        cursor: pointer;
+        height: 22px;
+        padding: 0 6px;
+        font-size: 0.72rem;
+        flex-shrink: 0;
+      }
+      .gap-fix-copy:hover {
+        color: var(--text);
+      }
+      .gap-fix-word {
+        font-weight: 600;
+      }
+      .gap-fix-quiet {
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+      .gap-fix-quote {
+        color: var(--text);
+        font-style: italic;
+      }
       .gap-entity {
         padding: 8px 0;
         border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
@@ -5506,7 +5585,13 @@
       /* Deliberately unscoped: the Export for AI button and the progress toast
          both use it, and while it was scoped to the search box those two
          rendered an empty span where the spinner should be. */
+      /* inline-block: several call sites put it on a <span> inside running
+         text, where an inline box ignores width and height and the ring drew
+         as a squashed, wobbling sliver. In a flex container it is a block
+         either way. */
       .mini-spinner {
+        display: inline-block;
+        vertical-align: -3px;
         width: 16px;
         height: 16px;
         border: 2px solid var(--border);
@@ -9276,6 +9361,22 @@
         padding-left: 9px;
         padding-right: 9px;
       }
+      /* The body scrolls, not the box: the header and the Done button stay put
+         while the controls run longer than the window. Without the flex column
+         the 90vh cap did nothing but let the body spill past the screen, where
+         the fixed overlay could not scroll to it. */
+      .ins-settings-box,
+      .ins-export-box {
+        display: flex;
+        flex-direction: column;
+      }
+      .ins-settings-box .modal-body,
+      .ins-export-box .modal-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+      }
       .ins-settings-box {
         width: min(980px, 96vw);
         max-height: 90vh;
@@ -9378,6 +9479,28 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.72rem;
         padding: 4px 6px;
+      }
+      .ins-pick {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
+      .ins-pick:hover {
+        color: var(--text);
+        border-color: var(--muted);
+      }
+      .ins-pick.busy {
+        color: var(--accent);
+        border-color: var(--accent);
       }
       .ins-color input.invalid {
         border-color: var(--red);
@@ -9839,6 +9962,11 @@
         </symbol>
         <symbol id="i-pencil" viewBox="0 0 16 16">
           <path d="M11.2 2.9a1.55 1.55 0 0 1 2.2 2.2L5.5 13l-2.9.8.8-2.9 7.8-8Z" />
+        </symbol>
+        <symbol id="i-pipette" viewBox="0 0 16 16">
+          <path d="M9.7 3.5l1.1-1.1a1.65 1.65 0 0 1 2.3 2.3l-1.1 1.1" />
+          <path d="M8.3 4.3l3.4 3.4" />
+          <path d="M9.9 6 4.5 11.4 2.6 13.4l-.1-.1.2-1.9L8.1 5.9" />
         </symbol>
         <symbol id="i-dot" viewBox="0 0 16 16">
           <circle cx="8" cy="8" r="3.3" fill="currentColor" stroke="none" />
@@ -11002,9 +11130,9 @@
           </div>
           <div class="gap-words" id="gapWords" hidden></div>
           <div class="chat-thread gap-thread" id="gapChatThread"></div>
-          <div class="gap-entities" id="gapEntities">
+          <div class="gap-entities gap-fixpanel" id="gapEntities">
             <div class="gap-entities-head">
-              <span>Entities</span>
+              <span id="gapFixTitle">Fix this</span>
               <input
                 type="search"
                 id="gapEntitySearch"
@@ -12660,6 +12788,7 @@
           saveExportXlsx: (defaultName, sheet) =>
             invoke("save_export_xlsx", { defaultName, sheet }),
           getGapInteractions: (args) => invoke("get_gap_interactions", { args }),
+          pickScreenColor: () => invoke("pick_screen_color"),
           setGapFixed: (logIds, fixed, note) =>
             invoke("set_gap_fixed", { logIds, fixed, note: note == null ? null : note }),
           exportSettingsBackup: (defaultName, payload) =>
@@ -18563,11 +18692,11 @@
       // Article relations replacing the response column — which no user is
       // going to infer from the word.
       const EXPORT_VIEW_HINTS = {
-        list: "Every item in one flat list, in the order the search returned them.",
+        list: "Every item in one flat list — Articles, then Dialogs, then Transactional Dialogs, each by number.",
         grouped:
-          "Split into Articles, Dialogs and Transactional Dialogs and sorted by ID. Dialog rows show the Articles that route into them instead of their response text.",
+          "Split into Articles, Dialogs and Transactional Dialogs, each by number. Dialog rows show the Articles that route into them instead of their response text.",
         table:
-          "ID, title and matched responses as a table — pastes into a spreadsheet or a ticket with its columns intact.",
+          "ID, title and matched responses as a table, by number — pastes into a spreadsheet or a ticket with its columns intact.",
       }
 
       function _exportKey(item) {
@@ -18701,6 +18830,10 @@
         return kind === "article" ? 0 : kind === "dialog" ? 1 : 2
       }
 
+      /// Articles, then Dialogs, then Transactional Dialogs, each by number —
+      /// in every view, not only Grouped. A shared list is looked up by its
+      /// numbers; the order the search happened to rank them in means nothing
+      /// to the person it is sent to.
       function groupedExportItems(items) {
         return items
           .slice()
@@ -18719,7 +18852,7 @@
             !_exportDropped.has(_exportKey(item)) &&
             _exportItemMatches(item, q),
         )
-        return _exportView === "grouped" ? groupedExportItems(items) : items
+        return groupedExportItems(items)
       }
 
       function buildItemUrl(kind, id) {
@@ -20733,6 +20866,7 @@
         { key: "cm-open-mode" },
         { key: "cm-other-open-mode" },
         { key: "cm-view" },
+        { key: "cm-gap-sort" },
         { key: "cm-sort-all" },
         { key: "cm-sort-articles" },
         { key: "cm-sort-dialogs" },
@@ -22745,9 +22879,32 @@
       let gapKind = "all" // all | low | zero
       let gapStatus = "all" // all | open | fixed
       let gapQuery = ""
-      let gapSort = { key: "time", dir: -1 }
+      // Remembered across restarts in `cm-gap-sort`. Read field by field, so
+      // an older or hand-edited value cannot name a column that does not exist
+      // — it falls back to newest first.
+      const GAP_SORT_STORAGE = "cm-gap-sort"
+      const GAP_SORT_KEYS = ["time", "recognition", "question", "response"]
+      function gapLoadSort() {
+        try {
+          const v = JSON.parse(localStorage.getItem(GAP_SORT_STORAGE) || "null")
+          if (v && GAP_SORT_KEYS.includes(v.key) && (v.dir === 1 || v.dir === -1)) {
+            return { key: v.key, dir: v.dir }
+          }
+        } catch (e) {
+          /* unreadable or unavailable: the default */
+        }
+        return { key: "time", dir: -1 }
+      }
+      let gapSort = gapLoadSort()
       let gapActiveId = null
       let gapLoadSeq = 0
+      // What the list on screen was read for — database, range, threshold. A
+      // return to the view re-reads only when this changed; anything else is
+      // the same answer, and re-reading it threw away the scroll position,
+      // the open conversation and the place in the entity finder.
+      let gapLoadedKey = ""
+      let gapEntitiesFor = null // the entity list the finder was last drawn from
+      let gapSavedScroll = null // {list, chat, entities} while the view is away
       let gapRange = null // {from, to} as local YYYY-MM-DD
       let _gapView = null // cached filtered + sorted list
       const gapSessionCache = new Map()
@@ -22819,6 +22976,17 @@
         _gapView = null
       }
 
+      function gapStateKey() {
+        return JSON.stringify([convDbPath || "", gapRange && gapRange.from, gapRange && gapRange.to, lowRecogThreshold])
+      }
+
+      /// Called as the view is left: `display: none` does not keep a scroll
+      /// position in WebKit, so it is kept here.
+      function gapRememberScroll() {
+        const at = (id) => document.getElementById(id)?.scrollTop || 0
+        gapSavedScroll = { list: at("gapList"), chat: at("gapChatThread"), entities: at("gapEntityList") }
+      }
+
       async function onEnterGapView() {
         if (!gapRange) {
           gapRange = gapPresetRange("7")
@@ -22826,7 +22994,31 @@
         }
         gapRenderRangeLabel()
         gapRenderThreshold()
-        gapRenderEntities()
+        if (gapEntitiesFor !== allEntities) {
+          gapEntitiesFor = allEntities
+          gapRenderEntities()
+        }
+        if (gapLoadedKey && gapLoadedKey === gapStateKey()) {
+          // The same list: put it back exactly where it was.
+          const saved = gapSavedScroll
+          gapSavedScroll = null
+          // Synchronously, not in a frame: the view is already shown (switchView
+          // toggles it before calling here), so the scroll can be set now —
+          // and a frame does not arrive in a window that is not composited,
+          // which left the rows painted for the top of the list.
+          if (saved) {
+            const set = (id, v) => {
+              const el = document.getElementById(id)
+              if (el) el.scrollTop = v
+            }
+            set("gapList", saved.list)
+            set("gapChatThread", saved.chat)
+            set("gapEntityList", saved.entities)
+          }
+          gapPaintRows()
+          return
+        }
+        gapSavedScroll = null
         await loadGapRows()
       }
 
@@ -22842,6 +23034,7 @@
         const list = document.getElementById("gapList")
         if (!convDbPath) {
           gapRows = []
+          gapLoadedKey = ""
           gapInvalidate()
           list.innerHTML =
             '<div class="gap-empty">Open a conversations database to see what the bot did not recognise.' +
@@ -22851,11 +23044,12 @@
         }
         if (!gapRange || !gapRange.from || !gapRange.to) return
         const seq = ++gapLoadSeq
+        const key = gapStateKey()
         const bounds = insZoneDayBounds(gapRange.from, gapRange.to, insZone())
-        // Behind the shared delay, so a fast read never flashes a spinner.
-        gateLoading("gap", true, (on) => {
-          if (on) list.innerHTML = '<div class="gap-empty"><span class="mini-spinner"></span> Reading…</div>'
-        })
+        // The shared pane spinner, behind the shared delay, so a fast read
+        // never flashes one. It was a `.mini-spinner` on an inline <span>,
+        // which ignores width and height and drew as a squashed sliver.
+        setPaneLoading("gapList", "Reading…")
         try {
           const res = await window.backend.getGapInteractions({
             fromUtc: bounds.from,
@@ -22865,13 +23059,15 @@
           if (seq !== gapLoadSeq) return
           gapRows = (res && res.rows) || []
           gapTruncated = !!(res && res.truncated)
+          gapLoadedKey = key
         } catch (e) {
           if (seq !== gapLoadSeq) return
           gapRows = []
+          gapLoadedKey = "" // a failed read is retried on the next visit
           list.innerHTML = '<div class="gap-empty">Could not read the range. ' + esc(String(e)) + "</div>"
           return
         } finally {
-          gateLoading("gap", false, () => {})
+          clearPaneLoading("gapList")
         }
         gapInvalidate()
         gapRenderList(true)
@@ -22976,11 +23172,13 @@
         const thread = document.getElementById("gapChatThread")
         let rows = gapSessionCache.get(row.sessionUuid)
         if (!rows) {
-          thread.innerHTML = '<div class="chat-empty"><span class="mini-spinner"></span></div>'
+          setPaneLoading("gapChatThread", "Loading conversation…")
           try {
             rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
           } catch (e) {
             rows = []
+          } finally {
+            clearPaneLoading("gapChatThread")
           }
           gapSessionCache.set(row.sessionUuid, rows)
           if (gapActiveId !== logId) return
@@ -22990,6 +23188,14 @@
           markClass: "gap-mark",
           readOnly: true,
         })
+        // The "Fix this" panel reads this turn's recognition details and the
+        // turns after it, which is why it waits for the conversation.
+        gapFixFor = { row, chatRows: rows }
+        gapAddWord = ""
+        const finder = document.getElementById("gapEntitySearch")
+        finder.value = ""
+        finder.placeholder = "Find an entity by name or word…"
+        gapRenderEntities()
         requestAnimationFrame(() => {
           const el = thread.querySelector('.chat-turn[data-turn-id="' + logId + '"]')
           if (el) el.scrollIntoView({ block: "center" })
@@ -23000,15 +23206,27 @@
         return String(q || "").trim().toLowerCase().replace(/\s+/g, " ")
       }
 
+      /// The language badge a conversation wears: its `translation_language`
+      /// context when it set one — the language the bot actually answered in —
+      /// and its culture otherwise. One helper, so the conversation list and
+      /// the GAP chat cannot label the same conversation two ways.
+      function langBadgeHtml(culture, translation) {
+        const label = translation || culture
+        if (!label) return ""
+        const title = translation
+          ? "Translation: " + translation + (culture && culture !== translation ? " · culture " + culture : "")
+          : "Culture: " + label
+        return `<span class="session-badge lang" title="${esc(title)}">${esc(label)}</span>`
+      }
+
       function gapRenderHeader(row) {
         const same = gapRows.filter((r) => gapNorm(r.question) === gapNorm(row.question))
         const openSame = same.filter((r) => !r.fixedAt)
         const score = gapIsZero(row) ? "not recognised" : Math.round(row.recognition) + "% recognition"
         document.getElementById("gapChatHeader").innerHTML =
+          langBadgeHtml(row.culture, row.translationLanguage) +
           '<span class="gap-chat-meta">' +
           esc(fmtTs(row.timestamp)) +
-          " · " +
-          esc(row.culture || "") +
           " · " +
           esc(score) +
           (same.length > 1 ? " · asked " + same.length + "× in this range" : "") +
@@ -23133,14 +23351,36 @@
         const list = document.getElementById("gapEntityList")
         if (!list) return
         const q = (document.getElementById("gapEntitySearch").value || "").trim().toLowerCase()
-        if (!allEntities || !allEntities.length) {
+        if (q && (!allEntities || !allEntities.length)) {
           list.innerHTML =
             '<div class="gap-hint">Load a content export (with its EntitiesExport CSV) to search entities here.</div>'
           return
         }
-        if (!q) {
+        const title = document.getElementById("gapFixTitle")
+        if (title) title.textContent = gapAddWord ? "Add to entity" : q ? "Entities" : "Fix this"
+        if (!q && gapAddWord) {
+          const close = gapClosestEntities(gapAddWord)
           list.innerHTML =
-            '<div class="gap-hint">Click a word of the question above, or type, to find the entity it belongs to — or the one it should.</div>'
+            '<div class="gap-fix-sec"><div class="gap-fix-row"><span class="gap-fix-what">Adding <strong>' + esc(gapAddWord) +
+            "</strong> — copied, ready to paste into the entity you open.</span>" +
+            '<button class="gap-fix-copy" onclick="gapEndAdd()">Done</button></div></div>' +
+            (close.length
+              ? '<div class="gap-fix-label" style="margin-top:8px">Closest entities</div>' +
+                close
+                  .map(
+                    (c) =>
+                      '<div class="gap-fix-row"><span class="gap-fix-what"><strong>' + esc(c.name) +
+                      '</strong> <span class="gap-fix-quiet">via “' + esc(c.via) + "”</span></span>" +
+                      gapEntityActionHtml(c.name) + "</div>",
+                  )
+                  .join("")
+              : '<div class="gap-hint">No entity has a word close to it — type above to find the one it belongs in, or create a new entity in CM.com.</div>')
+          return
+        }
+        if (!q) {
+          list.innerHTML = gapFixFor
+            ? gapFixHtml(gapFixModel(gapFixFor.row, gapFixFor.chatRows))
+            : '<div class="gap-hint">Select a row to see what to change in CM.com so it is recognised next time.</div>'
           return
         }
         const scored = []
@@ -23179,7 +23419,7 @@
               " · " +
               words.length +
               " words</span>" +
-              entityOpenButton(name) +
+              gapEntityActionHtml(name) +
               '</div><div class="gap-entity-words">' +
               shown
                 .map(
@@ -23196,6 +23436,275 @@
             )
           })
           .join("")
+      }
+
+      // ── Fix this ───────────────────────────────────────────────────────
+      //
+      // What to change in CM.com so this question is recognised next time,
+      // read from the turn's own `recognitionDetails` — see docs/gap.md →
+      // "Fix this". `gapFixFor` is the selected row and its conversation;
+      // `gapAddWord` is set while the finder is picking an entity for a word.
+      let gapFixFor = null
+      let gapAddWord = ""
+
+      /// One `article_ids` entry as something that can be opened in CM.com.
+      function gapContentRef(raw) {
+        const id = String(raw || "")
+        let m = /^qa-(\d+)$/.exec(id)
+        if (m) {
+          const n = Number(m[1])
+          const a = articleMap.get(n)
+          return {
+            kind: "article",
+            label: id,
+            title: a
+              ? aFaqQ(a) || ((a.Questions || []).find((q) => q.IsFaq) || (a.Questions || [])[0] || {}).Text || ""
+              : "",
+            url: cmBaseUrl ? cmBaseUrl + "/articles/" + n : "",
+          }
+        }
+        m = /^dn-(\d+)(?:-(\d+))?$/.exec(id)
+        if (m) {
+          const d = Number(m[1])
+          const dialog = dialogMap.get(d) || tDialogMap.get(d)
+          const node = m[2] && dialog && (dialog.nodes || []).find((n) => String(n.id) === m[2])
+          const title = [dialog && dialog.name, node && node.name].filter(Boolean).join(" · ")
+          const base = cmBaseUrl ? cmBaseUrl + "/dialogs/" + d : ""
+          return {
+            kind: m[2] ? "node" : "dialog",
+            label: id,
+            title,
+            url: base && m[2] ? base + "?currentNode=" + m[2] : base,
+          }
+        }
+        return null // e-1 and friends: nothing to open
+      }
+
+      /// Everything the panel shows for one GAP row, as data.
+      ///
+      /// `chatRows` is the conversation the row came from, in order — the turn
+      /// itself carries the recognizer's account of what it knew, and the turns
+      /// after it carry what the person asked next.
+      function gapFixModel(row, chatRows) {
+        const rows = chatRows || []
+        const at = rows.findIndex((r) => String(r.logId) === String(row.logId))
+        const turn = at >= 0 ? rows[at] : {}
+        const det = parseJsonSafe(turn.recognitionDetails || "") || {}
+        const unknown = [
+          ...new Set(
+            String(det.missingWords || "")
+              .split(",")
+              .map((w) => w.trim())
+              .filter(Boolean),
+          ),
+        ]
+        const recognised = []
+        for (const m of Array.isArray(det.entityMatches) ? det.entityMatches : []) {
+          const name = String(m.displayName || m.name || "")
+          if (!name || recognised.some((r) => r.name === name && r.match === m.match)) continue
+          recognised.push({
+            name,
+            match: String(m.match || ""),
+            id: m.entityId != null ? m.entityId : entityIdFor(name),
+          })
+        }
+        const refsOf = (json) =>
+          (parseJsonSafe(json || "") || []).map(gapContentRef).filter(Boolean)
+        const zero = gapIsZero(row)
+        const answered = refsOf(turn.articleIds || row.articleIds)
+        const missingArticle = String(det.missingArticle) === "true"
+
+        // The Articles whose questions use the entities this turn was
+        // recognised as — the ones a question with this pattern belongs on.
+        let candidates = []
+        if (recognised.length && allArticles.length) {
+          const idx = entityRefIndex()
+          const shared = new Map()
+          for (const r of recognised) {
+            const b = idx.get(r.name.toUpperCase())
+            if (!b) continue
+            for (const a of b.articles) shared.set(a, (shared.get(a) || 0) + 1)
+          }
+          const answeredIds = new Set(answered.map((x) => x.label))
+          candidates = [...shared]
+            .filter(([a]) => !answeredIds.has("qa-" + a.Id))
+            .sort((x, y) => y[1] - x[1] || x[0].Id - y[0].Id)
+            .slice(0, 5)
+            .map(([a, n]) => ({ ...gapContentRef("qa-" + a.Id), shared: n }))
+        }
+
+        // What the person asked next and got a real answer to — usually a
+        // rephrase, and the best hint for which Article they were after.
+        let next = null
+        for (let k = at + 1; at >= 0 && k < rows.length && k <= at + 8; k++) {
+          const r = rows[k]
+          const type = r.recognitionType || ""
+          if (!type || type === "GenerativeAI") continue
+          if (!(Number(r.recognitionQuality) >= lowRecogThreshold)) continue
+          const refs = refsOf(r.articleIds)
+          if (!refs.length) continue
+          next = { question: String(r.interactionValue || ""), quality: Number(r.recognitionQuality), refs }
+          break
+        }
+        return { hasDetails: !!turn.recognitionDetails, zero, unknown, recognised, answered, missingArticle, candidates, next }
+      }
+
+      /// An "Edit ↗" link plus a copy-link button, or one disabled button that
+      /// says why when no CM.com Context URL is set.
+      function gapEditHtml(url, label) {
+        if (!url) {
+          return '<button class="btn-open-url" disabled style="opacity:0.35;cursor:not-allowed" title="Set a CM.com Context URL in Settings to open this in CM.com">' +
+            extLinkSvg() + " " + esc(label) + "</button>"
+        }
+        return (
+          '<a class="btn-open-url" href="' + esc(url) + '" title="Open in CM.com" target="_blank">' +
+          extLinkSvg() + " " + esc(label) + "</a>" +
+          '<button class="gap-fix-copy" title="Copy the link" data-url="' + esc(url) +
+          '" onclick="gapCopyText(this.dataset.url)"><svg class=ui-icon><use href=#i-link /></svg></button>'
+        )
+      }
+
+      function gapRefRowHtml(ref, label) {
+        return (
+          '<div class="gap-fix-row"><span class="gap-fix-what" title="' + esc(ref.title || ref.label) + '">' +
+          '<span class="gap-fix-id">' + esc(ref.label) + "</span>" + esc(ref.title || "") +
+          "</span>" + gapEditHtml(ref.url, label || (ref.kind === "article" ? "Edit Article" : "Edit Dialog")) + "</div>"
+        )
+      }
+
+      function gapEntityUrl(id) {
+        return cmBaseUrl ? cmBaseUrl + "/entities/" + (id == null ? "" : id) : ""
+      }
+
+      function gapFixHtml(m) {
+        if (!m.hasDetails) {
+          return '<div class="gap-hint">This turn carries no recognition details, so there is nothing to diagnose — use the words above and the finder.</div>'
+        }
+        const sec = (label, body) =>
+          '<div class="gap-fix-sec"><div class="gap-fix-label">' + esc(label) + "</div>" + body + "</div>"
+        let html = ""
+
+        html += sec(
+          "Unknown words",
+          m.unknown.length
+            ? m.unknown
+                .map(
+                  (w) =>
+                    '<div class="gap-fix-row"><span class="gap-fix-what gap-fix-word">' + esc(w) + "</span>" +
+                    '<button class="gap-fix-copy" data-word="' + esc(w) + '" onclick="gapCopyText(this.dataset.word)">Copy</button>' +
+                    '<button class="btn-secondary gap-fix-add" data-word="' + esc(w) +
+                    '" onclick="gapAddToEntity(this.dataset.word)" title="Pick the entity that should know this word">Add to entity…</button></div>',
+                )
+                .join("")
+            : '<div class="gap-fix-quiet">Every word was known to an entity' +
+              (m.zero ? " — it is the combination that nothing answers." : ".") + "</div>",
+        )
+
+        if (m.recognised.length) {
+          html += sec(
+            "Recognised as",
+            m.recognised
+              .map(
+                (r) =>
+                  '<div class="gap-fix-row"><span class="gap-fix-what" title="' + esc(r.match + " → " + r.name) + '">' +
+                  esc(r.match) + '<span class="gap-fix-arrow">→</span><strong>' + esc(r.name) + "</strong></span>" +
+                  gapEditHtml(gapEntityUrl(r.id), "Edit entity") + "</div>",
+              )
+              .join(""),
+          )
+        }
+
+        html += sec(
+          "Answered by",
+          m.zero
+            ? '<div class="gap-fix-quiet">Nothing — the fallback answered, because no Article or Dialog was recognised.</div>'
+            : m.answered.length
+            ? m.answered.map((r) => gapRefRowHtml(r)).join("")
+            : '<div class="gap-fix-quiet">Nothing that can be opened.</div>',
+        )
+
+        if (m.candidates.length && (m.missingArticle || m.zero)) {
+          html += sec(
+            m.missingArticle ? "No Article for this — Articles using these entities" : "Articles using these entities",
+            m.candidates.map((r) => gapRefRowHtml(r)).join(""),
+          )
+        }
+
+        if (m.next) {
+          html += sec(
+            "They asked next",
+            '<div class="gap-fix-row"><span class="gap-fix-what gap-fix-quote" title="' + esc(m.next.question) + '">“' +
+              esc(m.next.question) + "” · " + Math.round(m.next.quality) + "%</span></div>" +
+              m.next.refs.map((r) => gapRefRowHtml(r)).join(""),
+          )
+        }
+        return html
+      }
+
+      /// Start picking the entity that should know `word`: the word is copied,
+      /// and the finder offers the closest entities until something is typed.
+      function gapAddToEntity(word) {
+        gapAddWord = word
+        gapCopyText(word)
+        const input = document.getElementById("gapEntitySearch")
+        input.value = ""
+        input.placeholder = "Which entity should know “" + word + "”? Type to search…"
+        input.focus()
+        gapRenderEntities()
+      }
+
+      function gapEndAdd() {
+        gapAddWord = ""
+        const input = document.getElementById("gapEntitySearch")
+        input.value = ""
+        input.placeholder = "Find an entity by name or word…"
+        gapRenderEntities()
+      }
+
+      /// Entities with a word close to `word` — the same stem, or one word
+      /// containing the other — best first. Spelling variants are the usual
+      /// reason a word is unknown ("schatkaarten" beside "schatkaart").
+      function gapClosestEntities(word, limit) {
+        const w = String(word || "").toLowerCase()
+        if (w.length < 3) return []
+        const stem = w.slice(0, Math.max(4, w.length - 3))
+        const prefix = (a, b) => {
+          let i = 0
+          while (i < a.length && i < b.length && a[i] === b[i]) i++
+          return i
+        }
+        const out = []
+        for (const e of allEntities || []) {
+          let best = 0
+          let via = ""
+          for (const t of e.words || []) {
+            const x = String(t.text || "").toLowerCase()
+            if (x.length < 3) continue
+            let score = 0
+            if (x.startsWith(stem) || w.startsWith(x.length >= 4 ? x : "\u0000")) score = prefix(x, w)
+            else if (x.length >= 5 && (w.includes(x) || x.includes(w))) score = Math.min(x.length, w.length) - 1
+            if (score > best) {
+              best = score
+              via = t.text
+            }
+          }
+          if (best >= 4) out.push({ e, name: String(e.name || ""), via, score: best })
+        }
+        out.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+        return out.slice(0, limit || 6)
+      }
+
+      /// The finder's button for one entity: opens it, and while picking for a
+      /// word, copies the word first so it can be pasted straight in.
+      function gapEntityActionHtml(name) {
+        if (!gapAddWord) return entityOpenButton(name)
+        const url = gapEntityUrl(entityIdFor(name))
+        if (!url) return gapEditHtml("", "Add “" + gapAddWord + "”")
+        return (
+          '<a class="btn-open-url" data-entity-open="' + esc(name) + '" href="' + esc(url) +
+          '" title="Copy “' + esc(gapAddWord) + '” and open ' + esc(name) + ' in CM.com" target="_blank" data-word="' +
+          esc(gapAddWord) + '" onclick="gapCopyText(this.dataset.word)">' + extLinkSvg() + " Add “" + esc(gapAddWord) + "”</a>"
+        )
       }
 
       /// `GAP 2026-09-23 September.xlsx` — the day it was made, and the month
@@ -23504,6 +24013,11 @@
             gapSort.key === key
               ? { key, dir: -gapSort.dir }
               : { key, dir: key === "time" ? -1 : 1 }
+          try {
+            localStorage.setItem(GAP_SORT_STORAGE, JSON.stringify(gapSort))
+          } catch (e) {
+            /* not remembered, but still applied */
+          }
           gapInvalidate()
           gapRenderList(true)
         }),
@@ -23522,6 +24036,7 @@
       // ── View switcher ───────────────────────────────────────────────
 
       function switchView(name) {
+        if (currentView === "gap" && name !== "gap") gapRememberScroll()
         currentView = name
         localStorage.setItem("cm-view", name)
         document
@@ -23596,6 +24111,7 @@
         answerIndex: "Indexing what answered each question…",
         contexts: "Reorganising stored conversations…",
         compacting: "Reclaiming disk space…",
+        summary: "Recounting interactions per conversation…",
       }
 
       /**
@@ -24482,6 +24998,7 @@
         de: {
           conversations: ["Gespräch", "Gespräche"],
           interactions: ["Interaktion", "Interaktionen"],
+          answers: ["Antwort", "Antworten"],
           "matching interactions": ["passende Interaktion", "passende Interaktionen"],
           "more values": ["weiterer Wert", "weitere Werte"],
           values: ["Wert", "Werte"],
@@ -24491,6 +25008,7 @@
         nl: {
           conversations: ["gesprek", "gesprekken"],
           interactions: ["interactie", "interacties"],
+          answers: ["antwoord", "antwoorden"],
           "matching interactions": ["overeenkomende interactie", "overeenkomende interacties"],
           "more values": ["andere waarde", "andere waarden"],
           values: ["waarde", "waarden"],
@@ -24577,15 +25095,21 @@
           "Under 40%": "Unter 40 %",
           "Not scored": "Nicht bewertet",
           Feedback: "Feedback",
-          "Whether anyone rated an answer in the conversation.":
-            "Ob im Gespräch eine Antwort bewertet wurde.",
+          "Positive feedback": "Positives Feedback",
+          "Answers rated": "Bewertete Antworten",
+          "of {n} rated": "von {n} bewerteten",
+          "{n} of {m} answers": "{n} von {m} Antworten",
+          "{pos} of the {n} rated answers were positive. {rated} of all {m} answers were rated.":
+            "{pos} der {n} bewerteten Antworten waren positiv. {rated} aller {m} Antworten wurden bewertet.",
+          "{pos} of the {n} rated matching answers were positive. {rated} of all {m} matching answers were rated.":
+            "{pos} der {n} bewerteten passenden Antworten waren positiv. {rated} aller {m} passenden Antworten wurden bewertet.",
           "Thumbs up": "Daumen hoch",
           "Thumbs down": "Daumen runter",
-          Both: "Beides",
-          "No feedback given": "Kein Feedback",
           "How the answer was found": "Wie die Antwort gefunden wurde",
-          "Counted per matching interaction.": "Gezählt pro passender Interaktion.",
-          "Counted per interaction, not per conversation.": "Gezählt pro Interaktion, nicht pro Gespräch.",
+          "Per matching typed question, follow-ups in a GenAI conversation included.":
+            "Pro passender getippter Frage, Folgefragen in einem GenAI-Gespräch eingeschlossen.",
+          "Per typed question: every question that went through the recognizer, and every follow-up in a GenAI conversation.":
+            "Pro getippter Frage: jede Frage, die durch die Erkennung ging, und jede Folgefrage in einem GenAI-Gespräch.",
           "Recognition type": "Erkennungsart",
           "Dialog outcome": "Dialog-Ergebnis",
           "How the matching interactions left the Dialog they were in.":
@@ -24629,8 +25153,10 @@
           Culture: "Kultur",
           // Segments
           "Segment comparison": "Segmentvergleich",
-          "Every interaction of the conversations in each slice, in both readings. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score of the turns it matched.":
-            "Alle Interaktionen der Gespräche in jedem Segment, in beiden Lesarten. Positives Feedback ist ein Anteil der bewerteten Runden; die Erkennungsrate ist ein Anteil der vom Erkenner bewerteten Runden, GenAI-Antworten zählen also nicht mit; die Erkennungsqualität ist der Durchschnittswert der erkannten Runden.",
+          "Every answer of the conversations in each slice, in both readings; bot events, rating rows and link clicks are not counted as interactions. Culture is each turn's own. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score over those same turns, zeros included.":
+            "Jede Antwort der Gespräche in jedem Segment, in beiden Lesarten; Bot-Ereignisse, Bewertungszeilen und Link-Klicks zählen nicht als Interaktionen. Die Sprache ist die jeder einzelnen Interaktion. Positives Feedback ist ein Anteil der bewerteten Interaktionen; die Erkennungsrate ist ein Anteil der Interaktionen, die der Erkenner bewertet hat, GenAI-Antworten gehören also zu keiner der beiden Hälften; die Erkennungsqualität ist der mittlere Score über dieselben Interaktionen, Nullen eingeschlossen.",
+          "some conversations switched language, so their conversation counts overlap":
+            "einige Gespräche wechselten die Sprache, daher überschneiden sich ihre Gesprächszahlen",
           Segment: "Segment",
           Total: "Gesamt",
           "Feedback interactions": "Feedback-Interaktionen",
@@ -24647,7 +25173,9 @@
           "Of all interactions": "Aller Interaktionen",
           "in those conversations": "in diesen Gesprächen",
           "Median length": "Median-Länge",
-          GenAI: "GenAI",
+          "GenAI answers": "GenAI-Antworten",
+          "{n} answers · in {m} conversations": "{n} Antworten · in {m} Gesprächen",
+          "{n} of {m} typed questions": "{n} von {m} getippten Fragen",
           "Zero recognition": "Keine Erkennung",
           "Under {n}%": "Unter {n} %",
           "in {n} conversations": "in {n} Gesprächen",
@@ -24725,15 +25253,21 @@
           "Under 40%": "Onder 40%",
           "Not scored": "Geen score",
           Feedback: "Feedback",
-          "Whether anyone rated an answer in the conversation.":
-            "Of er in het gesprek een antwoord is beoordeeld.",
+          "Positive feedback": "Positieve feedback",
+          "Answers rated": "Beoordeelde antwoorden",
+          "of {n} rated": "van {n} beoordeeld",
+          "{n} of {m} answers": "{n} van {m} antwoorden",
+          "{pos} of the {n} rated answers were positive. {rated} of all {m} answers were rated.":
+            "{pos} van de {n} beoordeelde antwoorden was positief. {rated} van alle {m} antwoorden is beoordeeld.",
+          "{pos} of the {n} rated matching answers were positive. {rated} of all {m} matching answers were rated.":
+            "{pos} van de {n} beoordeelde overeenkomende antwoorden was positief. {rated} van alle {m} overeenkomende antwoorden is beoordeeld.",
           "Thumbs up": "Duim omhoog",
           "Thumbs down": "Duim omlaag",
-          Both: "Beide",
-          "No feedback given": "Geen feedback",
           "How the answer was found": "Hoe het antwoord gevonden werd",
-          "Counted per matching interaction.": "Geteld per overeenkomende interactie.",
-          "Counted per interaction, not per conversation.": "Geteld per interactie, niet per gesprek.",
+          "Per matching typed question, follow-ups in a GenAI conversation included.":
+            "Per overeenkomende getypte vraag, vervolgvragen in een GenAI-gesprek inbegrepen.",
+          "Per typed question: every question that went through the recognizer, and every follow-up in a GenAI conversation.":
+            "Per getypte vraag: elke vraag die door de herkenner ging, en elke vervolgvraag in een GenAI-gesprek.",
           "Recognition type": "Herkenningstype",
           "Dialog outcome": "Dialoog-uitkomst",
           "How the matching interactions left the Dialog they were in.":
@@ -24774,8 +25308,10 @@
           Cultures: "Culturen",
           Culture: "Cultuur",
           "Segment comparison": "Segmentvergelijking",
-          "Every interaction of the conversations in each slice, in both readings. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score of the turns it matched.":
-            "Alle interacties van de gesprekken in elk segment, in beide lezingen. Positieve feedback is een aandeel van de beoordeelde beurten; het herkenningspercentage is een aandeel van de beurten die de herkenner scoorde, dus GenAI-antwoorden tellen niet mee; de herkenningskwaliteit is de gemiddelde score van de herkende beurten.",
+          "Every answer of the conversations in each slice, in both readings; bot events, rating rows and link clicks are not counted as interactions. Culture is each turn's own. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score over those same turns, zeros included.":
+            "Elk antwoord van de gesprekken in elk segment, in beide lezingen; bot-events, beoordelingsregels en linkklikken tellen niet als interacties. De taal is die van elke afzonderlijke interactie. Positieve feedback is een aandeel van de beoordeelde interacties; het herkenningspercentage is een aandeel van de interacties die de herkenner scoorde, dus GenAI-antwoorden vallen in geen van beide helften; de herkenningskwaliteit is de gemiddelde score over diezelfde interacties, nullen meegerekend.",
+          "some conversations switched language, so their conversation counts overlap":
+            "sommige gesprekken wisselden van taal, dus hun gespreksaantallen overlappen",
           Segment: "Segment",
           Total: "Totaal",
           "Feedback interactions": "Feedback-interacties",
@@ -24791,7 +25327,9 @@
           "Of all interactions": "Van alle interacties",
           "in those conversations": "in die gesprekken",
           "Median length": "Mediane lengte",
-          GenAI: "GenAI",
+          "GenAI answers": "GenAI-antwoorden",
+          "{n} answers · in {m} conversations": "{n} antwoorden · in {m} gesprekken",
+          "{n} of {m} typed questions": "{n} van {m} getypte vragen",
           "Zero recognition": "Geen herkenning",
           "Under {n}%": "Onder {n}%",
           "in {n} conversations": "in {n} gesprekken",
@@ -25872,9 +26410,17 @@
           key: "quality",
           name: "Quality",
           blurb:
-            "Recognition scores, thumbs up and down, how the answer was found, and how Dialogs ended.",
+            "Recognition scores, positive feedback and how many answers were rated, how the answer was found, and how Dialogs ended.",
           cost: "fast",
-          fields: ["recognitionBands", "recognitionTypes", "dialogStatus"],
+          fields: [
+            "recognitionBands",
+            "recognitionTypes",
+            "dialogStatus",
+            "ratedAnswers",
+            "positiveAnswers",
+            "typedQuestions",
+            "genaiAnswers",
+          ],
         },
         {
           key: "context",
@@ -25993,7 +26539,9 @@
       /// so the axis has to read left to right in that order however few
       /// conversations land in each.
       const INS_RECOG_ORDER = ["Zero", "Under 40%", "40–69%", "70–100%", "Not scored"]
-      const INS_LENGTH_ORDER = ["1", "2", "3–5", "6–10", "11–20", "21+"]
+      // "0" is a conversation with no answer at all — the greeting, and nobody
+      // asked anything. Counted in answers, like every interaction figure.
+      const INS_LENGTH_ORDER = ["0", "1", "2", "3–5", "6–10", "11–20", "21+"]
 
       function insOrdered(buckets, order) {
         const by = new Map((buckets || []).map((b) => [b.label, b.count]))
@@ -26427,34 +26975,45 @@
         return out
       }
 
-      /// Thumbs up, thumbs down, both, and none — four disjoint groups.
+      /// The rated answers, split by their rating.
       ///
-      /// The two flags are independent, so `none` is `total − up − down + both`;
-      /// subtracting the two counts alone over-counts the conversations that
-      /// carry one of each and under-states how many were never rated.
+      /// Counted per answer, as the Interaction Log records it: a rating is an
+      /// interaction of its own naming the answer it is about. The whole bar is
+      /// the rated answers, so its green share *is* the positive-feedback
+      /// percentage people report; how many answers were rated at all is in the
+      /// note and the tile, where it is a number rather than a sliver.
+      /// See docs/insights.md → "Feedback, per answer".
       function insFeedbackSpec(d) {
-        const both = d.mixedFeedbackSessions || 0
-        const up = Math.max(0, (d.posFeedbackSessions || 0) - both)
-        const down = Math.max(0, (d.negFeedbackSessions || 0) - both)
-        const none = Math.max(0, (d.sessionCount || 0) - up - down - both)
+        const rated = d.ratedAnswers || 0
+        const up = Math.min(rated, d.positiveAnswers || 0)
         return {
           kind: "stack",
-          total: d.sessionCount || 0,
-          unit: "conversations",
+          total: rated,
+          unit: "answers",
           axisLabel: insT("Feedback"),
           // Tokens, not colours — see `insRecogTone`.
           data: [
             { label: insT("Thumbs up"), value: up, color: "good" },
-            { label: insT("Thumbs down"), value: down, color: "critical" },
-            { label: insT("Both"), value: both, color: "warning" },
-            {
-              label: insT("No feedback given"),
-              value: none,
-              color: "neutral",
-              onFill: "surface",
-            },
+            { label: insT("Thumbs down"), value: rated - up, color: "critical" },
           ],
         }
+      }
+
+      /// The sentence under the feedback card: both shares, with what each is of.
+      function insFeedbackNote(d, byTurn) {
+        const rated = d.ratedAnswers || 0
+        const vars = {
+          pos: insPct(d.positiveAnswers, rated),
+          n: insNum(rated),
+          rated: insPct(rated, d.answerCount),
+          m: insNum(d.answerCount || 0),
+        }
+        return byTurn
+          ? insT(
+              "{pos} of the {n} rated matching answers were positive. {rated} of all {m} matching answers were rated.",
+              vars,
+            )
+          : insT("{pos} of the {n} rated answers were positive. {rated} of all {m} answers were rated.", vars)
       }
 
       /// One tag key's values.
@@ -26605,32 +27164,24 @@
             axisLabel: insT("Recognition"),
           }),
         )
-        // Deliberately conversation-only: a thumb rates the conversation, not
-        // the turn that happened to match. Showing it here would invite exactly
-        // the misreading the interactions unit exists to prevent — "43% of my
-        // matching turns got a thumbs down" when it is 43% of their
-        // conversations. The body states the omission rather than hiding it.
-        if (!w.byTurn) {
-          push(
-            "Quality",
-            "feedback",
-            insT("Feedback"),
-            insT("Whether anyone rated an answer in the conversation."),
-            insFeedbackSpec(d),
-          )
-        }
+        // Per answer, so it reads the same in both units: in the interactions
+        // reading it is the matching answers that were rated.
+        push("Quality", "feedback", insT("Positive feedback"), insFeedbackNote(d, w.byTurn), insFeedbackSpec(d))
         push(
           "Quality",
           "recogType",
           insT("How the answer was found"),
           w.byTurn
-            ? insT("Counted per matching interaction.")
-            : insT("Counted per interaction, not per conversation."),
+            ? insT("Per matching typed question, follow-ups in a GenAI conversation included.")
+            : insT("Per typed question: every question that went through the recognizer, and every follow-up in a GenAI conversation."),
           {
             kind: "bars",
             data: insToData(d.recognitionTypes),
             unit: "interactions",
-            total: w.byTurn ? w.total : 0,
+            // Out of the typed questions in both readings — the GenAI tile's
+            // denominator. Out of every matching answer, the Interactions
+            // reading put the GenAI bar at 1.7% beside the tile's 6.3%.
+            total: typeof d.typedQuestions === "number" ? d.typedQuestions : 0,
             axisLabel: insT("Recognition type"),
           },
         )
@@ -26920,7 +27471,10 @@
             })
           }
         } else {
-          tiles.push({ label: insT("Interactions"), value: insCompact(d.interactionCount) })
+          // Answers, as the portal counts them: the bot's own events, rating
+          // rows and link clicks are a quarter of the log and nobody reports
+          // them. See docs/insights.md → "Interactions are answers".
+          tiles.push({ label: insT("Interactions"), value: insCompact(insAnswers(d)) })
           tiles.push({
             label: insT("Median length"),
             value: insNum(d.medianInteractions),
@@ -26928,18 +27482,38 @@
           })
         }
         if (!w.total) return tiles
-        tiles.push({
-          label: insT("GenAI"),
-          value: insPct(d.genaiSessions, w.total),
-          sub: insPlural(d.genaiSessions, w.noun),
-        })
-        // Feedback is a property of a conversation, not of one turn — the same
-        // reason its chart is not built in interactions mode.
-        if (!w.byTurn) {
+        // Feedback leads the rates, as the positive share of what was rated —
+        // the number people report — with how many answers were rated beside
+        // it. Read with Quality, so absent (not 0%) when that was not chosen.
+        if (typeof d.ratedAnswers === "number" && d.answerCount > 0) {
           tiles.push({
-            label: insT("Thumbs down"),
-            value: insPct(d.negFeedbackSessions, w.total),
-            sub: insPlural(d.negFeedbackSessions, "conversations"),
+            label: insT("Positive feedback"),
+            value: d.ratedAnswers ? insPct(d.positiveAnswers, d.ratedAnswers) : "—",
+            sub: insT("of {n} rated", { n: insNum(d.ratedAnswers || 0) }),
+          })
+          tiles.push({
+            label: insT("Answers rated"),
+            value: insPct(d.ratedAnswers, d.answerCount),
+            sub: insT("{n} of {m} answers", { n: insNum(d.ratedAnswers || 0), m: insNum(d.answerCount) }),
+          })
+        }
+        // The share of typed questions GenAI answered — exactly the GenAI
+        // bar of *How the answer was found*, from the same read, so the tile
+        // and the chart cannot show two GenAI percentages. Read with Quality;
+        // absent, not 0%, when that was not chosen.
+        if (typeof d.typedQuestions === "number" && d.typedQuestions > 0) {
+          tiles.push({
+            label: insT("GenAI answers"),
+            value: insPct(d.genaiAnswers, d.typedQuestions),
+            sub: w.byTurn
+              ? insT("{n} of {m} typed questions", {
+                  n: insNum(d.genaiAnswers || 0),
+                  m: insNum(d.typedQuestions),
+                })
+              : insT("{n} answers · in {m} conversations", {
+                  n: insNum(d.genaiAnswers || 0),
+                  m: insNum(d.genaiSessions || 0),
+                }),
           })
         }
         tiles.push({
@@ -26955,6 +27529,12 @@
         return tiles
       }
 
+      /// The interactions figure: answers, from a payload that carries them, or
+      /// every row from one cached before it did.
+      function insAnswers(d) {
+        return typeof d.answerCount === "number" ? d.answerCount : d.interactionCount
+      }
+
       /// One sentence naming the reading, for the header and both exports.
       ///
       /// A pasted report that does not say whether "1,284" is conversations or
@@ -26968,7 +27548,7 @@
         const w = insWords(d)
         const lead = short ? "" : insPlural(w.total, w.subject)
         if (!w.byTurn) {
-          const rest = insPlural(d.interactionCount, "interactions")
+          const rest = insPlural(insAnswers(d), "interactions")
           return short ? rest : lead + " · " + rest
         }
         const rest =
@@ -28036,8 +28616,10 @@
         },
         {
           label: "Recognition quality",
-          text: (r) => (r.recognized ? insSegPct(r.qualitySum / r.recognized) : "—"),
-          data: (r) => (r.recognized ? insSegPct(r.qualitySum / r.recognized) : "—"),
+          // Over every turn the recognizer attempted, zeros included — the
+          // portal's definition, and the one the report is compared against.
+          text: (r) => insSegShare(r.qualitySum / 100, r.recognized + r.unrecognized),
+          data: (r) => insSegShare(r.qualitySum / 100, r.recognized + r.unrecognized),
         },
         {
           label: "Interactions",
@@ -28058,11 +28640,12 @@
       /// answer that. Stated in the card note rather than in a tooltip, because
       /// this table is copied far more often than it is hovered.
       const INS_SEGMENT_NOTE =
-        "Every interaction of the conversations in each slice, in both readings. " +
-        "Positive feedback is a share of the rated turns; recognition rate is a " +
-        "share of the turns the recognizer scored, so GenAI answers are in " +
-        "neither half of it; recognition quality is the mean score of the turns " +
-        "it matched."
+        "Every answer of the conversations in each slice, in both readings; bot " +
+        "events, rating rows and link clicks are not counted as interactions. " +
+        "Culture is each turn's own. Positive feedback is a share of the rated " +
+        "turns; recognition rate is a share of the turns the recognizer scored, " +
+        "so GenAI answers are in neither half of it; recognition quality is the " +
+        "mean score over those same turns, zeros included."
 
       /// Which slices the table is comparing, remembered between sessions.
       ///
@@ -28352,8 +28935,14 @@
             // A conversation whose context changed mid-way carries two values
             // of one key, so its interactions are counted under both — which is
             // correct, and makes the rows sum to more than the Total above.
+            // For Culture it is a conversation that switched language: each turn
+            // is under its own culture, so only the conversation counts overlap.
             if (g && g.overlapping) {
-              notes.push(insT("some conversations set two values, so these rows overlap"))
+              notes.push(
+                g.kind === "culture"
+                  ? insT("some conversations switched language, so their conversation counts overlap")
+                  : insT("some conversations set two values, so these rows overlap"),
+              )
             }
             if (g && !(g.rows || []).length) {
               notes.push(insT("nothing recorded for this key in this result"))
@@ -30626,6 +31215,46 @@
         insRenderSettingsSample()
       }
 
+      /// The pipette. Windows (WebView2, Chromium) has the `EyeDropper` API;
+      /// WKWebView on macOS does not, so there the backend opens AppKit's
+      /// colour sampler — and cleans up after it if it outstays the pick (see
+      /// `screen_color.rs`). Either one samples the whole screen, not just
+      /// this window. Anywhere else the button is not drawn at all.
+      function insCanPickScreen() {
+        if (typeof window.EyeDropper === "function") return true
+        return !!window.backend?.pickScreenColor && /Mac/i.test(navigator.platform || navigator.userAgent || "")
+      }
+
+      let insPicking = false
+      async function insPickScreenColor(btn, key, i) {
+        // One pick at a time: the modal re-renders under an open pick, so the
+        // flag cannot live on the button.
+        if (insPicking) return
+        insPicking = true
+        let picked = null
+        btn.classList.add("busy")
+        try {
+          if (typeof window.EyeDropper === "function") {
+            // Opened inside the click: EyeDropper needs the user's gesture.
+            const r = await new window.EyeDropper().open()
+            picked = r && r.sRGBHex
+          } else {
+            picked = await window.backend.pickScreenColor()
+          }
+        } catch (e) {
+          // Esc in EyeDropper rejects with AbortError; that is a cancel, not a failure.
+          if (!(e && e.name === "AbortError")) {
+            showImportToast("error", "Could not pick a colour from the screen: " + (e?.message || e))
+          }
+        } finally {
+          insPicking = false
+          btn.classList.remove("busy")
+        }
+        if (!picked) return
+        if (key === "accent") insSetAccent(i, picked)
+        else insSetPaletteColor(key, picked)
+      }
+
       function insMoveAccent(from, to) {
         const acc = insPalette.accents
         if (to < 0 || to >= acc.length || from === to) return
@@ -30791,7 +31420,13 @@
                 onchange="${set}">
               <input type="text" value="${esc(value)}" spellcheck="false"
                 aria-label="${esc(label)}" placeholder="#rrggbb, rgb(…)"
-                onchange="${set}" onkeydown="if(event.key==='Enter')this.blur()">
+                onchange="${set}" onkeydown="if(event.key==='Enter')this.blur()">${
+                insCanPickScreen()
+                  ? `<button type="button" class="ins-pick" title="Pick from anywhere on the screen"
+                      aria-label="${esc(label)}: pick from the screen"
+                      onclick="insPickScreenColor(this, '${key}', ${i || 0})"><svg class=ui-icon><use href=#i-pipette /></svg></button>`
+                  : ""
+              }
             </span>`
         }
         const sel = (key, choices, names) =>
@@ -33546,7 +34181,7 @@
                   "progress",
                   `Writing ${n.toLocaleString()} conversation${
                     n !== 1 ? "s" : ""
-                  } · ${turns.toLocaleString()} interactions…`,
+                  } · ${turns.toLocaleString()} log rows…`,
                 )
               }
             },
@@ -33687,7 +34322,6 @@
                     : ""
                 }
                 ${(() => {
-                  // Prefer translation_language context over culture when present
                   let langCtxs = []
                   try {
                     langCtxs = s.contexts ? JSON.parse(s.contexts) : []
@@ -33695,12 +34329,7 @@
                   const tlCtx = langCtxs.find(
                     (c) => c.name === "translation_language",
                   )
-                  const label = tlCtx ? tlCtx.value : s.culture
-                  return label
-                    ? `<span class="session-badge lang" title="${
-                        tlCtx ? "Translation: " + esc(label) : esc(label)
-                      }">${esc(label)}</span>`
-                    : ""
+                  return langBadgeHtml(s.culture, tlCtx ? tlCtx.value : "")
                 })()}
                 ${
                   s.contexts

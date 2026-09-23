@@ -43,6 +43,29 @@ says which): they name moments, as the conversation date filter's do, not rows.
 uses. `gap_rows` validates both bounds as `YYYY-MM-DDTHH:MM:SS` and the
 threshold as 1–99 before anything runs.
 
+## Leaving and coming back
+
+Switching to another view and back changes nothing: the list, the open
+conversation, the entity finder and all three scroll positions are as they were.
+
+- **The list is read again only when what it is *for* changed** —
+  `gapLoadedKey` is the database, the range and the threshold it was read with.
+  Re-reading on every visit was the old behaviour, and it threw away the scroll
+  position, the selection and the finder's place for an identical answer. A
+  failed read clears the key, so the next visit retries.
+- **The scroll positions are saved on leaving** (`gapRememberScroll`, from
+  `switchView`) because the view is `display: none` while away and the browser
+  resets a hidden element's scroll to 0 — measured, not assumed.
+- **They are restored synchronously**, then the windowed rows repainted: the
+  view is already shown when `onEnterGapView` runs, and a restore in a frame
+  left rows painted for the top of the list, because a frame does not arrive in
+  a window that is not composited.
+- The entity finder is redrawn only when the content export behind it changed.
+- **The sort survives a restart** (`cm-gap-sort`, in the settings backup too).
+  It is read field by field: an unknown column or a direction other than ±1
+  falls back to newest first. The pills, the text filter and the range are not
+  remembered across a restart — the range starts at the last seven days.
+
 ## Fixed marks
 
 `gap_fixed(log_id PRIMARY KEY, session_uuid, fixed_at, note)` in the
@@ -72,6 +95,12 @@ the row shows the database's time, not the renderer's.
 
 ## The side panel
 
+- **The header starts with the language badge** the conversation list uses
+  (`langBadgeHtml`, shared by both): the conversation's `translation_language`
+  context when it set one — the language the bot actually answered in — and the
+  culture otherwise, with both in the tooltip. `gap_rows` reads the translation
+  language per row through `idx_ctx_name_session`.
+
 - **The conversation** is `renderFlaggedThread` with `readOnly` and the row's
   turn marked (`gap-mark`) and centred. It is cached per session, so moving
   through several rows of one conversation does not refetch it. The bubble
@@ -80,11 +109,34 @@ the row shows the database's time, not the renderer's.
 - **The question's words** are chips. A click copies the word *and* looks it up
   in the entity finder below — the two things someone improving recognition does
   next. Shift-click collects a phrase.
-- **The entity finder** searches the content export's entities by name and by
-  trigger word; an exact word match ranks first. Each entity opens in CM.com
-  through `entityOpenButton` (by id when imported conversations have fired it,
-  the list page otherwise — the export CSV has no ids), and each word copies. No
-  match says so: a word no entity knows is a candidate to add.
+- **"Fix this"** replaces the plain entity finder with what to change in
+  CM.com, each line ending in *Edit ↗* (through the usual link handler, so the
+  pop-up/browser setting holds) and a copy-link button. It is read from the
+  turn's own `recognitionDetails` and the turns after it — the chat rows the
+  panel already loaded, so the backend sends nothing extra. `gapFixModel` is the
+  data, `gapFixHtml` the drawing; `gap-fix.test.js` pins the model.
+  - **Unknown words** — `missingWords`: words no entity knows. *Add to entity…*
+    copies the word and turns the search box into a picker: the closest
+    entities first (`gapClosestEntities` — a shared stem, or one word inside
+    the other, which is the usual reason: "schatkaarten" beside "schatkaart"),
+    then anything typed. Each result's button copies the word again and opens
+    that entity, ready to paste.
+  - **Recognised as** — `entityMatches`, by the entity's own `entityId`, so the
+    link is direct even for an entity the imported conversations never
+    otherwise fired.
+  - **Answered by** — the turn's `article_ids` as Article / Dialog-node links;
+    for a zero it says the fallback answered, rather than linking the fallback.
+  - **No Article for this** — when CM.com set `missingArticle` (or the turn is a
+    zero): the Articles whose questions use the recognised entities, most shared
+    first, the one that answered left out. Needs the content export.
+  - **They asked next** — the next turn within eight that the recognizer scored
+    at or above the threshold (GenAI skipped): usually a rephrase, and the best
+    hint for which Article the person was after.
+  - A turn with no recognition details says so rather than guessing.
+- **The class is `.gap-fixpanel`, not `.gap-fix`** — that name is the round ✓
+  on each list row, and reusing it squeezed the panel to 20 px.
+- Typing in the panel's search box still searches entities by name and word,
+  as the finder did; clearing it brings the panel back.
 
 ## The export
 

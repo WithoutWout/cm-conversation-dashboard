@@ -52,6 +52,8 @@ const EXPORTS = [
   "insRampColor",
   "insFillDays",
   "insFeedbackSpec",
+  "insFeedbackNote",
+  "insAnswers",
   "insTagSpec",
   "insTagNote",
   "insUnitLine",
@@ -122,6 +124,8 @@ const {
   insRampColor,
   insFillDays,
   insFeedbackSpec,
+  insFeedbackNote,
+  insAnswers,
   insTagSpec,
   insTagNote,
   insUnitLine,
@@ -442,6 +446,13 @@ const PAYLOAD = {
   posFeedbackSessions: 8,
   negFeedbackSessions: 6,
   mixedFeedbackSessions: 1,
+  // Per answer, read with Quality: 300 answers, 40 of them rated, 30 positively.
+  answerCount: 300,
+  ratedAnswers: 40,
+  positiveAnswers: 30,
+  // The chart's GenerativeAI bar and its total, read with Quality.
+  typedQuestions: 200,
+  genaiAnswers: 13,
   zeroRecogSessions: 9,
   lowRecogSessions: 21,
   lowRecogThreshold: 60,
@@ -487,30 +498,61 @@ const TURNS = {
 }
 
 
-// The two feedback flags are independent — one conversation can carry a thumbs
-// up and a thumbs down — so `none` is not `total − up − down`. Getting this
-// wrong over-counts the overlap and silently under-states how many
-// conversations nobody rated at all.
-test("the feedback split is disjoint and accounts for every conversation", () => {
-  const spec = insFeedbackSpec(
-    {
-      sessionCount: 100,
-      posFeedbackSessions: 30,
-      negFeedbackSessions: 20,
-      mixedFeedbackSessions: 5,
-    },
-    INS_THEME_SCREEN,
-  )
+// Feedback is reported as the positive share of the *rated* answers, and the
+// share of answers rated at all. The bar is the rated answers, so its green part
+// is the headline percentage; unrated answers are not a slice of it, or the
+// positive share would shrink every time fewer people bothered to rate.
+test("feedback is the positive share of the rated answers", () => {
+  const spec = insFeedbackSpec({ answerCount: 300, ratedAnswers: 40, positiveAnswers: 30 })
   const at = (l) => spec.data.find((d) => d.label === l).value
-  assert.strictEqual(at("Thumbs up"), 25)
-  assert.strictEqual(at("Thumbs down"), 15)
-  assert.strictEqual(at("Both"), 5)
-  assert.strictEqual(at("No feedback given"), 55)
-  assert.strictEqual(
-    spec.data.reduce((a, d) => a + d.value, 0),
-    100,
-    "the segments do not add up to the result set",
-  )
+  assert.strictEqual(spec.total, 40)
+  assert.strictEqual(spec.unit, "answers")
+  assert.strictEqual(at("Thumbs up"), 30)
+  assert.strictEqual(at("Thumbs down"), 10)
+  assert.strictEqual(spec.data.length, 2, "unrated answers are not part of the bar")
+  const note = insFeedbackNote({ answerCount: 300, ratedAnswers: 40, positiveAnswers: 30 })
+  assert.ok(note.startsWith("75% of the 40 rated answers were positive."), note)
+  assert.ok(note.includes("13% of all 300 answers were rated."), note)
+  const tiles = insTiles(PAYLOAD)
+  const tile = (l) => tiles.find((t) => t.label === l)
+  assert.strictEqual(tile("Positive feedback").value, "75%")
+  assert.strictEqual(tile("Positive feedback").sub, "of 40 rated")
+  assert.strictEqual(tile("Answers rated").value, "13%")
+  assert.strictEqual(tile("Answers rated").sub, "40 of 300 answers")
+  // Leads the rates: before GenAI and recognition.
+  assert.ok(tiles.indexOf(tile("Positive feedback")) < tiles.findIndex((t) => t.label === "GenAI answers"))
+
+  // Nothing rated is a dash, never "0% positive" — a claim about ratings nobody left.
+  const none = insTiles({ ...PAYLOAD, ratedAnswers: 0, positiveAnswers: 0 })
+  assert.strictEqual(none.find((t) => t.label === "Positive feedback").value, "—")
+  // Quality not read: no feedback tiles at all, rather than a false 0%.
+  const noQuality = insTiles({ ...PAYLOAD, answerCount: 0, ratedAnswers: 0, positiveAnswers: 0 })
+  assert.ok(!noQuality.some((t) => t.label === "Positive feedback" || t.label === "Answers rated"))
+  // In German too, with the slots filled.
+  const de = insWithLang("de", () => insFeedbackNote({ answerCount: 300, ratedAnswers: 40, positiveAnswers: 30 }))
+  assert.ok(de.startsWith("75 % der 40 bewerteten Antworten waren positiv."), de)
+})
+
+// The GenAI tile is the GenerativeAI share of *How the answer was found* —
+// the same rows and the same denominator — so the headline and the chart can
+// never show two different GenAI percentages again.
+test("the GenAI tile is the chart's own GenAI share", () => {
+  const d = { ...PAYLOAD, recognitionTypes: [{ label: "Entity Recognition", count: 187 }, { label: "GenerativeAI", count: 13 }] }
+  const tile = insTiles(d).find((t) => t.label === "GenAI answers")
+  assert.strictEqual(tile.value, "6.5%")
+  assert.strictEqual(tile.value, insPct(13, 187 + 13), "the tile and the chart disagree")
+  assert.strictEqual(tile.sub, "13 answers · in 12 conversations")
+  assert.strictEqual(insTiles(TURNS).find((t) => t.label === "GenAI answers").sub, "13 of 200 typed questions")
+  // …and the chart's GenAI bar says the same, in both readings: its share is
+  // of the typed questions, never of every matching answer.
+  for (const base of [d, { ...TURNS, recognitionTypes: d.recognitionTypes }]) {
+    const card = insBuildCards(base, INS_THEME_SCREEN).find((c) => c.id === "recogType")
+    assert.strictEqual(card.spec.total, 200)
+    const svg = insRenderChart(card.spec, INS_THEME_SCREEN).svg
+    assert.ok(svg.includes(insPct(13, 200)), "the GenAI bar is not the tile's share")
+  }
+  // Quality not read: no GenAI tile rather than a 0%.
+  assert.ok(!insTiles({ ...PAYLOAD, typedQuestions: undefined, genaiAnswers: undefined }).some((t) => t.label === "GenAI answers"))
 })
 
 // A quiet week has to look quiet. The query only returns days that have
@@ -732,8 +774,9 @@ test("a segment row's shares are of the rows that could have them", () => {
   assert.strictEqual(row("Total").cells[col("Positive feedback")], "57.50%")
   // 300 of the 320 turns the recognizer scored — *not* of 412 interactions.
   assert.strictEqual(row("Total").cells[col("Recognition rate")], "93.75%")
-  // The mean over the matched turns only: 24000 / 300.
-  assert.strictEqual(row("Total").cells[col("Recognition quality")], "80.00%")
+  // The mean over every turn the recognizer attempted, zeros included — the
+  // portal's definition: 24000 / 320, not 24000 / 300 (which read 80.00%).
+  assert.strictEqual(row("Total").cells[col("Recognition quality")], "75.00%")
   assert.strictEqual(row("Total").cells[col("Interactions")], insNumOf(412))
   assert.strictEqual(row("Total").cells[col("Conversations")], insNumOf(100))
 
@@ -990,7 +1033,7 @@ test("the arrangement decides the export, line for line", () => {
   const tsv = insTableTsv(table)
   const lines = tsv.split("\n")
   assert.strictEqual(lines[1], [
-    "Total (nochat false)", "40", "57.50%", "93.75%", "80.00%", "412", "100",
+    "Total (nochat false)", "40", "57.50%", "93.75%", "75.00%", "412", "100",
   ].join("\t"))
   // A blank line asked for is a blank row in the sheet, and a heading with no
   // group behind it keeps the name it was given.
@@ -1110,10 +1153,12 @@ test("a section that was not chosen contributes no card, not even a derived one"
     for (const f of sec.fields || []) partial[f] = []
   }
   const all = insBuildCards(partial, INS_THEME_SCREEN)
-  assert.ok(
-    all.some((c) => c.section === "Quality"),
-    "the fixture must still produce a derived Quality card, or this proves nothing",
-  )
+  // Feedback used to be the derived card this guarded against — drawn from the
+  // always-read headline flags under a section nobody chose. It is counted per
+  // answer now, from Quality's own fields, so an unchosen Quality has nothing
+  // to draw it from: no card, and no feedback tile claiming 0%.
+  assert.ok(!all.some((c) => c.section === "Quality"), "a Quality card with Quality not read")
+  assert.ok(!insTiles(partial).some((t) => t.label === "Positive feedback"))
   const kept = all.filter((c) => chosen[c.section.toLowerCase()])
   assert.deepStrictEqual([...new Set(kept.map((c) => c.section))], ["Volume"])
   assert.ok(kept.length, "Volume was chosen and drew nothing")
@@ -1777,8 +1822,8 @@ test("every card, tile and tooltip in one reading names that reading", () => {
       }
       // "How the answer was found" counts interactions in both readings — in
       // one it is every interaction of the matched conversations, in the other
-      // only the matching ones.
-      const expected = card.id === "recogType" ? "interactions" : noun
+      // only the matching ones. Feedback counts answers in both, the same way.
+      const expected = card.id === "recogType" ? "interactions" : card.id === "feedback" ? "answers" : noun
       assert.strictEqual(card.spec.unit, expected, card.id + " counts the wrong thing")
       const tips = [
         ...insRenderChart(card.spec, INS_THEME_SCREEN).svg.matchAll(/<title>([^<]*)</g),
@@ -1820,7 +1865,9 @@ test("the hero is the number the unit names, and says which", () => {
 
 // A pasted number with two possible meanings is worse than no number.
 test("both readings state the unit in words, in the header and the report", () => {
-  assert.strictEqual(insUnitLine(CONVS), "100 conversations · 412 interactions")
+  // Answers, not every row: 300 of the 412 rows in the fixture are answers.
+  assert.strictEqual(insUnitLine(CONVS), "100 conversations · 300 interactions")
+  assert.strictEqual(insUnitLine({ ...CONVS, answerCount: undefined }), "100 conversations · 412 interactions")
   const turns = insUnitLine(TURNS)
   assert.ok(turns.startsWith("260 matching interactions in 100 conversations"), turns)
   assert.ok(turns.includes("412"), "the report does not say what 260 is out of: " + turns)
@@ -1844,20 +1891,21 @@ function insNumLike(d) {
   return (d.unit === "interactions" ? d.matchedInteractions : d.sessionCount).toLocaleString()
 }
 
-// Both are properties of a conversation, not of a turn that happened to match.
-// Rendering them in the interactions reading would invite the exact misreading
-// the reading exists to prevent.
-test("feedback and opening questions are left out of the interactions reading", () => {
+// The opening question is a property of a conversation, not of a turn that
+// happened to match, and has no per-turn reading. Feedback is counted per
+// answer, so unlike the old per-conversation flags it reads in both.
+test("opening questions are left out of the interactions reading; feedback is not", () => {
   const convIds = insBuildCards(CONVS, INS_THEME_SCREEN).map((c) => c.id)
   const turnIds = insBuildCards(TURNS, INS_THEME_SCREEN).map((c) => c.id)
   assert.ok(convIds.includes("feedback") && convIds.includes("questions"))
-  assert.ok(!turnIds.includes("feedback"), "a conversation-level rating in a per-turn reading")
+  assert.ok(turnIds.includes("feedback"), "per-answer feedback is a per-turn fact")
   assert.ok(!turnIds.includes("questions"))
-  assert.ok(!insTiles(TURNS).some((t) => t.label === "Thumbs down"))
-  assert.ok(insTiles(CONVS).some((t) => t.label === "Thumbs down"))
+  assert.ok(insBuildCards(TURNS, INS_THEME_SCREEN).find((c) => c.id === "feedback").note.includes("matching answers"))
+  assert.ok(insTiles(TURNS).some((t) => t.label === "Positive feedback"))
+  assert.ok(!insTiles(CONVS).some((t) => t.label === "Thumbs down"), "the old conversation tile is gone")
   // Everything else survives the switch — the reading is not a smaller feature.
   for (const id of convIds) {
-    if (id === "feedback" || id === "questions") continue
+    if (id === "questions") continue
     assert.ok(turnIds.includes(id), id + " disappeared in the interactions reading")
   }
 })

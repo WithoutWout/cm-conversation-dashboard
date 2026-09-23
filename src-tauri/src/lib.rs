@@ -1,4 +1,5 @@
 mod analytics_api;
+mod screen_color;
 mod self_update;
 mod xlsx;
 
@@ -74,6 +75,8 @@ enum MigrationPhase {
     Contexts(i64),
     /// The VACUUM that turns the freed pages back into disk space.
     Compacting,
+    /// Rebuilding `session_summary` because the rules it is derived by changed.
+    Summary,
 }
 
 impl MigrationPhase {
@@ -82,6 +85,7 @@ impl MigrationPhase {
             Self::AnswerIndex => serde_json::json!({ "phase": "answerIndex" }),
             Self::Contexts(done) => serde_json::json!({ "phase": "contexts", "done": done }),
             Self::Compacting => serde_json::json!({ "phase": "compacting" }),
+            Self::Summary => serde_json::json!({ "phase": "summary" }),
         }
     }
 }
@@ -1539,6 +1543,16 @@ fn contexts_worth_interning(json: &str) -> bool {
 
 const META_ANSWER_INDEX_BUILT: &str = "answer_index_built";
 
+const META_SESSION_SUMMARY_RULES: &str = "session_summary_rules";
+
+/// Which *rules* the stored `session_summary` rows were derived with. The
+/// summary is a cache, so a change to [`session_summary_insert_sql`] that
+/// makes it say something different about the same interactions has to reach
+/// databases summarised before it — bump this, and the next open rebuilds.
+///
+/// 1. `interaction_count` counts answers (`IS_ANSWER_ROW`), not rows
+const SESSION_SUMMARY_RULES_VERSION: i64 = 1;
+
 /// Which *rules* the stored `answer_index` rows were built with.
 ///
 /// Versioned from the start rather than a bare "have we built it?" flag, for
@@ -1831,6 +1845,23 @@ fn meta_flag_set(conn: &Connection, key: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// [`IS_ANSWER_ROW`] for any table alias — a macro so `session_summary`'s
+/// count and every Insights query spell the rule identically.
+macro_rules! answer_row {
+    ($alias:literal) => {
+        concat!(
+            "(COALESCE(",
+            $alias,
+            ".main_interaction_type, '') NOT IN ('Feedback', 'Event', 'LinkClick'))"
+        )
+    };
+}
+
+/// [`IS_ANSWER_ROW`] for a row already read into Rust.
+fn is_answer_type(main_interaction_type: &str) -> bool {
+    !matches!(main_interaction_type, "Feedback" | "Event" | "LinkClick")
+}
+
 /// The `SELECT` that derives one `session_summary` row per session.
 ///
 /// Shared by the full rebuild and the scoped per-import rebuild so the two can
@@ -1860,7 +1891,7 @@ SELECT
     s.session_uuid,
     MIN(s.timestamp_start) AS first_ts,
     MAX(COALESCE(NULLIF(s.timestamp_end, ''), s.timestamp_start)) AS last_ts,
-    COUNT(*) AS interaction_count,
+    SUM(CASE WHEN {answer} THEN 1 ELSE 0 END) AS interaction_count,
     COALESCE(MIN(NULLIF(s.culture, '')), '') AS culture,
     COALESCE((
         SELECT i2.interaction_value
@@ -1923,7 +1954,11 @@ SELECT
 FROM interactions s
 WHERE s.session_uuid IS NOT NULL AND s.session_uuid != '' {scope}
 GROUP BY s.session_uuid;
-"#
+"#,
+        // Answers, not rows: see `IS_ANSWER_ROW`. `interaction_count` is what
+        // the conversation list, the median length, the length chart and the
+        // Insights total all read, so they all count the same thing.
+        answer = answer_row!("s"),
     )
 }
 
@@ -2359,6 +2394,17 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
         );
         rebuild_session_summary(&conn)?;
         clear_meta_flag(&conn, META_PENDING_FINALIZE);
+    }
+    if meta_flag_version(&conn, META_SESSION_SUMMARY_RULES) < SESSION_SUMMARY_RULES_VERSION {
+        let started = Instant::now();
+        report(MigrationPhase::Summary);
+        rebuild_session_summary(&conn)?;
+        set_meta_version(&conn, META_SESSION_SUMMARY_RULES, SESSION_SUMMARY_RULES_VERSION);
+        log::info!(
+            target: "import",
+            "re-derived session_summary with rules v{SESSION_SUMMARY_RULES_VERSION} in {}ms",
+            started.elapsed().as_millis()
+        );
     }
     ensure_session_summary(&conn)?;
     // One-time ANALYZE so the query planner has statistics for the
@@ -2867,6 +2913,10 @@ struct GapRow {
     article_ids: String,
     dialog_paths: String,
     culture: String,
+    /// The conversation's `translation_language` context, when it set one —
+    /// the language the bot actually answered in. The chat header badge
+    /// prefers it over the culture, as the conversation list's badge does.
+    translation_language: String,
     fixed_at: Option<String>,
     note: String,
 }
@@ -2911,7 +2961,11 @@ fn gap_rows(conn: &Connection, args: &GapArgs) -> Result<GapResult, String> {
                     COALESCE(i.interaction_value, ''), COALESCE(i.output_text, ''), \
                     COALESCE(i.recognition_quality, 0), COALESCE(i.recognition_type, ''), \
                     COALESCE(i.article_ids, ''), COALESCE(i.dialog_paths, ''), \
-                    COALESCE(i.culture, ''), g.fixed_at, COALESCE(g.note, '') \
+                    COALESCE(i.culture, ''), g.fixed_at, COALESCE(g.note, ''), \
+                    COALESCE((SELECT c.value FROM context_index c \
+                              WHERE c.name = 'translation_language' \
+                                AND c.session_uuid = i.session_uuid \
+                              ORDER BY c.value LIMIT 1), '') \
              FROM interactions i LEFT JOIN gap_fixed g ON g.log_id = i.log_id \
              WHERE i.timestamp_start >= ?1 AND i.timestamp_start <= ?2 \
                AND ((i.recognition_quality > 0 AND i.recognition_quality < ?3) \
@@ -2940,6 +2994,7 @@ fn gap_rows(conn: &Connection, args: &GapArgs) -> Result<GapResult, String> {
                     culture: r.get(9)?,
                     fixed_at: r.get(10)?,
                     note: r.get(11)?,
+                    translation_language: r.get(12)?,
                 })
             },
         )
@@ -2997,6 +3052,14 @@ fn set_gap_fixed_rows(
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(now)
+}
+
+/// The pipette beside each Insights colour: macOS's system colour sampler.
+/// `Ok(None)` when the user cancels; `Err("unsupported")` off macOS, where the
+/// renderer uses the webview's own `EyeDropper` instead. See `screen_color.rs`.
+#[tauri::command]
+async fn pick_screen_color(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    screen_color::pick(app).await
 }
 
 #[tauri::command]
@@ -6065,6 +6128,22 @@ struct ConversationInsights {
     /// them, and a stacked bar built that way over-counts the overlap and
     /// under-counts the remainder.
     mixed_feedback_sessions: i64,
+    /// Answers in this reading — every answered turn of the matched
+    /// conversations, or the matching answered turns. See `IS_ANSWER_ROW`.
+    /// The dashboard's "interactions" figure: the bot's own events, the rating
+    /// rows and link clicks are not interactions anyone reports. Always read.
+    answer_count: i64,
+    /// Of those, the answers some rating points at. `None` when the Quality
+    /// section was not read — which is not the same answer as "nobody rated".
+    rated_answers: Option<i64>,
+    /// Of those, the ones whose every rating is a thumbs up. Read with Quality.
+    positive_answers: Option<i64>,
+    /// Typed questions — every row *How the answer was found* counts. Read
+    /// with Quality, like the two below.
+    typed_questions: Option<i64>,
+    /// Of those, the ones GenAI answered: the chart's GenerativeAI bar, and the
+    /// GenAI tile's numerator.
+    genai_answers: Option<i64>,
     zero_recog_sessions: i64,
     low_recog_sessions: i64,
     low_recog_threshold: i64,
@@ -6153,6 +6232,19 @@ const IS_ZERO_RECOG_ROW: &str = "(i.recognition_quality = 0 \
 const IS_SCORED_ROW: &str = "(i.recognition_quality > 0 \
      AND COALESCE(i.recognition_type, '') != 'GenerativeAI' \
      AND COALESCE(i.main_interaction_type, '') != 'GenerativeAI')";
+
+/// A turn the bot answered, which is what a rating can be about — and what
+/// this app counts as an interaction everywhere it shows one.
+///
+/// Written as what is *not* an answer rather than a list of what is, so a type
+/// this app has not met yet counts rather than silently vanishing. In the
+/// Interaction Log a rating is never stored on the answer: it is an
+/// interaction of its own (`Feedback`) pointing back at the answer through
+/// `originatingInteractionId`. `Event` rows are the bot's own prompts — the
+/// greeting, and `show_feedback` asking for the rating — and `LinkClick` is a
+/// click, not a question. Counting any of them would put the ratings, and the
+/// prompts asking for them, in the denominator of "how many answers were rated".
+const IS_ANSWER_ROW: &str = answer_row!("i");
 
 /// The matching interactions, one row each.
 ///
@@ -6486,17 +6578,26 @@ const INSIGHT_SEGMENT_VALUES_PER_KEY: i64 = 50;
 /// `quality_sum` rather than an average: an average cannot be re-averaged over
 /// a group without its weight, and every row of this table is summed into
 /// several different groups.
+///
+/// **One row per conversation per culture its turns were in**, not per
+/// conversation: the Culture block counts each turn under the turn's own
+/// culture, as the portal's report does, so a conversation that switched
+/// language splits across two rows. Context and metadata still join on
+/// `session_uuid` and sum every row of it, so their numbers are unchanged, and
+/// `INSIGHT_SEGMENT_SUMS` counts conversations with `COUNT(DISTINCT …)` so the
+/// split never counts one twice.
 const INSIGHT_SEGMENT_TABLE: &str = "\
 DROP TABLE IF EXISTS temp.insight_segment_stats;\
 CREATE TEMP TABLE insight_segment_stats (\
-    session_uuid TEXT PRIMARY KEY,\
+    session_uuid TEXT NOT NULL,\
     culture      TEXT NOT NULL DEFAULT '',\
     interactions INTEGER NOT NULL DEFAULT 0,\
     feedback     INTEGER NOT NULL DEFAULT 0,\
     feedback_pos INTEGER NOT NULL DEFAULT 0,\
     recognized   INTEGER NOT NULL DEFAULT 0,\
     unrecognized INTEGER NOT NULL DEFAULT 0,\
-    quality_sum  REAL NOT NULL DEFAULT 0\
+    quality_sum  REAL NOT NULL DEFAULT 0,\
+    PRIMARY KEY (session_uuid, culture)\
 );";
 
 /// The seven sums every segment row is made of, over `insight_segment_stats g`.
@@ -6504,7 +6605,7 @@ CREATE TEMP TABLE insight_segment_stats (\
 /// Written once because the Total row and every breakdown row must be the same
 /// arithmetic — a total that is not the sum of its parts is the one failure
 /// this table cannot survive.
-const INSIGHT_SEGMENT_SUMS: &str = "COUNT(*), \
+const INSIGHT_SEGMENT_SUMS: &str = "COUNT(DISTINCT g.session_uuid), \
      COALESCE(SUM(g.interactions), 0), \
      COALESCE(SUM(g.feedback), 0), \
      COALESCE(SUM(g.feedback_pos), 0), \
@@ -6525,6 +6626,9 @@ const INSIGHT_SEGMENT_SUMS: &str = "COUNT(*), \
 struct InsightSegmentRow {
     label: String,
     sessions: i64,
+    /// Answers only — `IS_ANSWER_ROW`: the bot's own events, the rating rows
+    /// and link clicks are not interactions anyone reports. On the reference
+    /// database they are 27% of all rows.
     interactions: i64,
     /// Turns carrying a thumbs rating.
     feedback: i64,
@@ -6536,7 +6640,10 @@ struct InsightSegmentRow {
     /// denominator of the recognition rate — GenAI answers and turns the
     /// recognizer never saw are in neither.
     unrecognized: i64,
-    /// `SUM(recognition_quality)` over the recognized turns, 0–100 each.
+    /// `SUM(recognition_quality)` over the recognized turns, 0–100 each. The
+    /// renderer divides it by `recognized + unrecognized`, so recognition
+    /// quality is the mean over every turn the recognizer attempted, zeros
+    /// included — the portal's definition.
     quality_sum: f64,
 }
 
@@ -6602,7 +6709,9 @@ fn build_insight_segment_stats(conn: &Connection) -> Result<(), String> {
             "INSERT INTO insight_segment_stats \
                (session_uuid, culture, interactions, feedback, feedback_pos, \
                 recognized, unrecognized, quality_sum) \
-             SELECT s.session_uuid, s.culture, COUNT(*), \
+             SELECT s.session_uuid, \
+                    COALESCE(NULLIF(i.culture, ''), s.culture) AS turn_culture, \
+                    COALESCE(SUM(CASE WHEN {IS_ANSWER_ROW} THEN 1 ELSE 0 END), 0), \
                     COALESCE(SUM(CASE WHEN {FEEDBACK_ROW} THEN 1 ELSE 0 END), 0), \
                     COALESCE(SUM(CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END), 0), \
                     COALESCE(SUM(CASE WHEN {IS_SCORED_ROW} THEN 1 ELSE 0 END), 0), \
@@ -6611,7 +6720,7 @@ fn build_insight_segment_stats(conn: &Connection) -> Result<(), String> {
                                       THEN i.recognition_quality ELSE 0 END), 0) \
              FROM insight_sessions s \
              JOIN interactions i ON i.session_uuid = s.session_uuid \
-             GROUP BY s.session_uuid"
+             GROUP BY s.session_uuid, turn_culture"
         ),
         [],
     )
@@ -6762,10 +6871,10 @@ fn insight_segment_group(
         other => return Err(format!("Unknown breakdown kind: {other}")),
     };
     let (rows, distinct, overlapping) = match table {
-        // Grouped by the *conversation's* culture, not the turn's, so a segment
-        // is a set of conversations in every breakdown here. Mixing a
-        // session-keyed block with a turn-keyed one in one table is exactly how
-        // two rows of it come to mean different things.
+        // Grouped by the *turn's* culture, as the portal's report is, so a
+        // conversation that switched language contributes to both rows and is
+        // counted once in each. The rows can therefore add up to more
+        // conversations than the total — never more interactions.
         None => {
             let rows = insight_segment_rows(
                 conn,
@@ -6779,15 +6888,15 @@ fn insight_segment_group(
                 &[],
                 "(none)",
             )?;
-            let distinct: i64 = conn
+            let (distinct, overlapping): (i64, bool) = conn
                 .query_row(
-                    "SELECT COUNT(*) FROM (SELECT culture FROM insight_segment_stats \
-                     GROUP BY culture)",
+                    "SELECT COUNT(DISTINCT culture), COUNT(*) > COUNT(DISTINCT session_uuid) \
+                     FROM insight_segment_stats",
                     [],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(insight_err)?;
-            (rows, distinct, false)
+            (rows, distinct, overlapping)
         }
         Some(table) => {
             // Values are compared case-insensitively: `True` and `true` are one
@@ -7530,17 +7639,21 @@ INSERT OR IGNORE INTO insight_matches (log_id, session_uuid)
 SELECT m.match_log_id, m.session_uuid
 FROM ({match_rows}) m
 JOIN insight_sessions s ON s.session_uuid = m.session_uuid
-WHERE m.match_log_id IS NOT NULL"#,
+JOIN interactions i ON i.log_id = m.match_log_id
+WHERE m.match_log_id IS NOT NULL AND {IS_ANSWER_ROW}"#,
                     base_where = filter_query.base_where.as_str(),
                     search_cte = filter_query.search_cte.as_str(),
                 );
                 conn.execute(&sql, params_ref.as_slice())
             }
             None => conn.execute(
-                "INSERT OR IGNORE INTO insight_matches (log_id, session_uuid) \
-                 SELECT i.log_id, i.session_uuid \
-                 FROM insight_sessions s \
-                 JOIN interactions i ON i.session_uuid = s.session_uuid",
+                &format!(
+                    "INSERT OR IGNORE INTO insight_matches (log_id, session_uuid) \
+                     SELECT i.log_id, i.session_uuid \
+                     FROM insight_sessions s \
+                     JOIN interactions i ON i.session_uuid = s.session_uuid \
+                     WHERE {IS_ANSWER_ROW}"
+                ),
                 [],
             ),
         }
@@ -7803,6 +7916,7 @@ fn conversation_insights_timed(
             conn,
             &format!(
                 "SELECT CASE \
+                   WHEN n = 0 THEN '0' \
                    WHEN n <= 1 THEN '1' \
                    WHEN n = 2 THEN '2' \
                    WHEN n <= 5 THEN '3–5' \
@@ -7880,18 +7994,104 @@ fn conversation_insights_timed(
         phases.mark("first_messages");
 
         // ── What answered ──
-        let recognition_types = if !sections.quality { Vec::new() } else { insight_buckets(
+        //
+        // Every typed question and how it was answered. That is the rows the
+        // recognizer saw (they carry a `recognition_type`) *plus* the follow-up
+        // questions of a GenAI conversation: those are logged as their own
+        // `GenerativeAI` rows and never pass the recognizer, so they have no
+        // recognition type — and leaving them out put this chart's GenAI share
+        // at 3.3% on a week where it was 6.3%. Dialog steps and FAQ clicks are
+        // choices, not typed questions, and stay out.
+        let mut recognition_types = if !sections.quality { Vec::new() } else { insight_buckets(
             conn,
             &format!(
-                "SELECT i.recognition_type, COUNT(*) c \
+                "SELECT CASE WHEN COALESCE(i.recognition_type, '') != '' \
+                             THEN i.recognition_type ELSE 'GenerativeAI' END AS how, \
+                        COUNT(*) c \
                  FROM {answer_from} \
                  WHERE COALESCE(i.recognition_type, '') != '' \
-                 GROUP BY i.recognition_type ORDER BY c DESC LIMIT ?1"
+                    OR i.main_interaction_type = 'GenerativeAI' \
+                 GROUP BY how ORDER BY c DESC LIMIT ?1"
             ),
-            &[&INSIGHT_TOP_N],
+            // Every group, not the top N: the GenAI tile's two numbers are
+            // totals over all of them. There are a handful of recognition
+            // types, so this is the same read; the chart is cut after.
+            &[&-1i64],
             "(none)",
         )? };
+        // The GenAI tile is this chart's own GenerativeAI share — the same
+        // rows, the same denominator — so the headline and the chart cannot
+        // show two GenAI percentages again.
+        let (typed_questions, genai_answers) = if sections.quality {
+            (
+                Some(recognition_types.iter().map(|b| b.count).sum::<i64>()),
+                Some(
+                    recognition_types
+                        .iter()
+                        .filter(|b| b.label == "GenerativeAI")
+                        .map(|b| b.count)
+                        .sum::<i64>(),
+                ),
+            )
+        } else {
+            (None, None)
+        };
+        recognition_types.truncate(INSIGHT_TOP_N as usize);
         phases.mark("recognition_types");
+
+        // ── Feedback, per answer ──
+        //
+        // What people report is "what share of the ratings was positive" and
+        // "what share of the answers got one", and both are about answers, not
+        // conversations — so unlike the `has_*_feedback` flags this is counted
+        // per turn, and it means the same thing in both readings.
+        //
+        // A rating is its own `Feedback` interaction naming the answer it is
+        // about (`originatingInteractionId`); older rows carry the score on the
+        // answer itself, and then the answer *is* its own origin. Ratings are
+        // gathered from the matched conversations — a rating is rarely the turn
+        // that matched a search — and then met against the answers in this
+        // reading, so an answer counts as rated exactly when a rating names it.
+        // Positive means every rating it got was a thumbs up. `json_valid`
+        // first: `json_extract` on a malformed payload is an error, not a null.
+        //
+        // `IN (SELECT …)` over a materialized list, not a join: nothing indexes
+        // `interaction_uuid`, and the `LEFT JOIN` this was first written as
+        // re-searched the ratings once per answer — 10.8 s of an 11.2 s read on
+        // the 120k-interaction bench. An `IN` list is built once into an
+        // ephemeral index and probed per row.
+        // The answer total needs no read of its own: `interaction_count`
+        // counts answers, and the matching turns are answers only.
+        let answer_count = match unit {
+            InsightUnit::Conversations => interaction_count,
+            InsightUnit::Interactions => matched_interactions,
+        };
+        let (rated_answers, positive_answers) = if !sections.quality {
+            (None, None)
+        } else {
+            let (rated, positive) = conn.query_row(
+                &format!(
+                    "WITH r AS MATERIALIZED ( \
+                       SELECT COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
+                                json_extract(i.feedback_info, '$.originatingInteractionId') END, \
+                                i.interaction_uuid) AS oid, \
+                              MIN(CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END) AS pos \
+                       FROM insight_sessions s \
+                       JOIN interactions i ON i.session_uuid = s.session_uuid \
+                       WHERE {FEEDBACK_ROW} \
+                       GROUP BY oid) \
+                     SELECT COALESCE(SUM(i.interaction_uuid IN (SELECT oid FROM r)), 0), \
+                            COALESCE(SUM(i.interaction_uuid IN (SELECT oid FROM r WHERE pos = 1)), 0) \
+                     FROM {answer_from} \
+                     WHERE {IS_ANSWER_ROW}"
+                ),
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .map_err(insight_err)?;
+            (Some(rated), Some(positive))
+        };
+        phases.mark("feedback");
 
         // `entity_index` carries `log_id`, so in interactions mode this is the
         // entity the *matching turn* triggered rather than one anything in the
@@ -8009,6 +8209,11 @@ fn conversation_insights_timed(
             pos_feedback_sessions,
             neg_feedback_sessions,
             mixed_feedback_sessions,
+            answer_count,
+            rated_answers,
+            positive_answers,
+            typed_questions,
+            genai_answers,
             zero_recog_sessions,
             low_recog_sessions,
             low_recog_threshold,
@@ -10219,7 +10424,12 @@ async fn flag_session(
         let fconn = fstate.conn.as_mut().ok_or("Flagged database not initialized.")?;
 
         let flagged_at = now_iso();
-        let interaction_count = rows.len() as i64;
+        // Answers, as everywhere else this app shows an interaction count; the
+        // copied rows themselves are all kept, events included.
+        let interaction_count = rows
+            .iter()
+            .filter(|r| is_answer_type(&r.main_interaction_type))
+            .count() as i64;
 
         fconn
             .execute(
@@ -10655,6 +10865,7 @@ pub fn run() {
             save_export_xlsx,
             get_gap_interactions,
             set_gap_fixed,
+            pick_screen_color,
             export_settings_backup,
             import_settings_backup,
             set_db_path,
@@ -11581,6 +11792,53 @@ mod tests {
     /// it has recorded. Both of its invariants hold, so without the durable
     /// `pending_finalize` marker nothing would trigger a rebuild and the stale
     /// counts would survive indefinitely.
+    /// A conversation's interaction count is its answers, and a database
+    /// summarised before that rule is recounted once when it is opened — and
+    /// only once, which is what the version stamp is for.
+    #[test]
+    fn the_summary_counts_answers_and_an_older_database_is_recounted_once() {
+        let dir = std::env::temp_dir().join(format!("cai-answers-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let _ = fs::create_dir_all(&dir);
+        let db_path = dir.join("t.db");
+        let db_str = db_path.to_str().unwrap();
+        let count = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT interaction_count FROM session_summary WHERE session_uuid = 'x'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("summary row")
+        };
+        {
+            let conn = open_db(db_str).expect("open");
+            for (log_id, main_type) in [(1, "Event"), (2, "Question"), (3, "Feedback"), (4, "Dialog"), (5, "LinkClick")] {
+                insert_row(&conn, Row { log_id, session: "x", ts: "2026-06-01T09:00:00", value: "v", main_type, all_types: main_type, feedback: "", quality: 0.8, recog_type: "Faq", contexts: "" });
+            }
+            rebuild_session_summary(&conn).expect("rebuild");
+            assert_eq!(count(&conn), 2, "the Question and the Dialog answer; the rest are not interactions");
+            assert!(is_answer_type("Question") && !is_answer_type("Event"));
+        }
+        // What a database summarised by an older build looks like: every row
+        // counted, and no rules stamp.
+        {
+            let conn = Connection::open(db_str).expect("raw open");
+            conn.execute("UPDATE session_summary SET interaction_count = 5", []).expect("old count");
+            conn.execute("DELETE FROM app_meta WHERE key = ?1", params![META_SESSION_SUMMARY_RULES])
+                .expect("unstamp");
+        }
+        {
+            let conn = open_db(db_str).expect("reopen");
+            assert_eq!(count(&conn), 2, "recounted on open");
+            assert_eq!(meta_flag_version(&conn, META_SESSION_SUMMARY_RULES), SESSION_SUMMARY_RULES_VERSION);
+            conn.execute("UPDATE session_summary SET interaction_count = 42", []).expect("marker");
+        }
+        let conn = open_db(db_str).expect("third open");
+        assert_eq!(count(&conn), 42, "a stamped database is not rebuilt again");
+        drop(conn);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_abandoned_run_is_repaired_on_open() {
         let dir = std::env::temp_dir().join(format!("cai-abandoned-test-{}", std::process::id()));
@@ -13938,6 +14196,125 @@ mod insights {
         .expect("insights")
     }
 
+    /// "How the answer was found" covers every typed question: the ones the
+    /// recognizer saw, and the follow-ups of a GenAI conversation, which are
+    /// logged as their own `GenerativeAI` rows with no recognition type.
+    #[test]
+    fn a_genai_follow_up_is_counted_as_found_by_genai() {
+        let conn = seed(&[Sess { uuid: "a", turns: 2, ..Default::default() }]);
+        // Seeded turns are typed questions recognised as `Article` (u1, u2).
+        let add = |log: i64, kind: &str, recog: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, timestamp_end, culture, main_interaction_type, \
+                 all_interaction_types, interaction_value, output_text, recognition_type, \
+                 recognition_quality, imported_at) \
+                 VALUES (?1, 'u'||?1, 'a', '2026-06-01T09:05:00', '2026-06-01T09:05:00', 'nl', \
+                         ?2, ?2, 'v', 'o', ?3, 0, 0)",
+                params![log, kind, recog],
+            )
+            .expect("insert");
+        };
+        add(10, "QA", "GenerativeAI"); // handed to GenAI by the recognizer
+        add(11, "GenerativeAI", ""); // a follow-up in the GenAI conversation
+        add(12, "Dialog", ""); // a button in a Dialog: a choice, not a question
+        add(13, "Event", ""); // the bot's own prompt
+        rebuild_session_summary(&conn).expect("summary");
+
+        for unit in [InsightUnit::Conversations, InsightUnit::Interactions] {
+            let d = conversation_insights(
+                &conn,
+                &GetSessionsArgs::default(),
+                unit,
+                InsightSections::default(),
+                &mut InsightScopeCache::default(),
+            )
+            .expect("insights");
+            let at = |label: &str| {
+                d.recognition_types.iter().find(|b| b.label == label).map(|b| b.count)
+            };
+            assert_eq!(at("GenerativeAI"), Some(2), "both kinds of GenAI answer");
+            // The tile reads the chart's own numbers.
+            assert_eq!((d.genai_answers, d.typed_questions), (Some(2), Some(4)));
+            assert_eq!(at("Article"), Some(2));
+            assert_eq!(
+                d.recognition_types.iter().map(|b| b.count).sum::<i64>(),
+                4,
+                "the Dialog step and the event are not typed questions"
+            );
+        }
+    }
+
+    /// Feedback is counted per answer, the way the Interaction Log records it:
+    /// a rating is an interaction of its own naming the answer it rates.
+    ///
+    /// The fixture is shaped like a real export — a `Feedback` row pointing at
+    /// an answer, the `show_feedback` prompt as an `Event`, an older row that
+    /// carries its score on the answer itself, and a malformed payload — and
+    /// the numbers are the two people report: the positive share of the rated
+    /// answers, and the share of answers that were rated at all.
+    #[test]
+    fn feedback_is_counted_per_answer_and_the_rating_rows_are_not_answers() {
+        let conn = seed(&[
+            Sess { uuid: "a", turns: 3, ..Default::default() },
+            Sess { uuid: "b", turns: 2, ..Default::default() },
+        ]);
+        // Answers are log 1–3 (session a, uuids u1–u3) and 4–5 (b, u4–u5).
+        let add = |log: i64, session: &str, kind: &str, feedback: &str| {
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, timestamp_end, culture, main_interaction_type, \
+                 all_interaction_types, interaction_value, output_text, feedback_info, imported_at) \
+                 VALUES (?1, 'u'||?1, ?2, '2026-06-01T09:05:00', '2026-06-01T09:05:00', 'nl', \
+                         ?3, ?3, '', '', ?4, 0)",
+                params![log, session, kind, feedback],
+            )
+            .expect("insert");
+        };
+        add(10, "a", "Event", "");
+        add(11, "a", "Feedback", r#"{"label": "yes", "score": 1, "originatingInteractionId": "u1"}"#);
+        add(12, "a", "Feedback", r#"{"label": "no", "score": -1, "originatingInteractionId": "u2"}"#);
+        add(13, "b", "Feedback", r#"{"score": 1, "originatingInteractionId": "#);
+        conn.execute(
+            r#"UPDATE interactions SET feedback_info = '{"score": 1}' WHERE log_id = 4"#,
+            [],
+        )
+        .expect("rate an answer in place");
+        rebuild_session_summary(&conn).expect("summary");
+
+        for unit in [InsightUnit::Conversations, InsightUnit::Interactions] {
+            let d = conversation_insights(
+                &conn,
+                &GetSessionsArgs::default(),
+                unit,
+                InsightSections::default(),
+                &mut InsightScopeCache::default(),
+            )
+            .expect("insights");
+            assert_eq!(d.answer_count, 5, "the rating, prompt and broken rows are not answers");
+            assert_eq!(d.interaction_count, 5, "the conversations' interactions are their answers");
+            if unit == InsightUnit::Interactions {
+                assert_eq!(d.matched_interactions, 5, "an event is not a matching interaction");
+            }
+            assert_eq!(d.rated_answers, Some(3), "u1 and u2 by reference, u4 in place");
+            assert_eq!(d.positive_answers, Some(2), "u1 and u4");
+        }
+
+        // The ratings are not read unless Quality is.
+        let volume = conversation_insights(
+            &conn,
+            &GetSessionsArgs::default(),
+            InsightUnit::Conversations,
+            InsightSections { volume: true, quality: false, content: false },
+            &mut InsightScopeCache::default(),
+        )
+        .expect("insights");
+        // The answer count is headline and always read; the ratings are
+        // Quality's, and absent — not zero — when it was not asked for.
+        assert_eq!(volume.answer_count, 5);
+        assert_eq!((volume.rated_answers, volume.positive_answers), (None, None));
+    }
+
     /// A section nobody asked for is not read — and one that was asked for
     /// comes back exactly as it does in a full read.
     ///
@@ -14317,6 +14694,63 @@ mod insights {
     /// produces a plausible percentage. Only known answers tell them apart —
     /// and these are the same predicates `session_summary_insert_sql` uses, so
     /// a drift in either spelling shows up here.
+    /// The portal's definitions, which the report people compare against:
+    /// interactions are answers, and a turn is counted under its own culture.
+    ///
+    /// Measured against a real week before this changed: 121,323 interactions
+    /// here against the report's 86,333, because 27% of the log's rows are the
+    /// bot's own events, rating rows and link clicks; and a Chinese row of 65
+    /// interactions against the report's 5, because this counted every turn of
+    /// a conversation under the conversation's culture.
+    #[test]
+    fn a_segment_counts_answers_under_the_culture_of_the_turn() {
+        let q = |session, culture, main_type, quality| Turn {
+            session,
+            culture,
+            feedback: "",
+            recog_type: if main_type == "Question" { "Article" } else { "" },
+            quality,
+            main_type,
+        };
+        let conn = seed_segments(
+            &[
+                // s1 starts in nl and switches to zh for one answer.
+                q("s1", "nl", "Event", 0.0),
+                q("s1", "nl", "Question", 90.0),
+                q("s1", "zh", "Question", 70.0),
+                q("s1", "nl", "LinkClick", 0.0),
+                // s2 is nl throughout; one rating row, which is not an answer.
+                q("s2", "nl", "Question", 0.0),
+                Turn { session: "s2", culture: "nl", feedback: r#"{"score": 1}"#, recog_type: "", quality: 0.0, main_type: "Feedback" },
+            ],
+            &[("channel", "web", "s1"), ("channel", "web", "s2")],
+        );
+        let out = segments(&conn, &[("culture", ""), ("context", "channel")]);
+
+        let t = &out.total;
+        assert_eq!((t.sessions, t.interactions), (2, 3), "three answers, not six rows");
+        assert_eq!(t.feedback, 1, "the rating row is still a rating");
+
+        let cultures = &out.groups[0];
+        let zh = seg_row(cultures, "zh");
+        assert_eq!((zh.sessions, zh.interactions), (1, 1), "only the turn that was in zh");
+        let nl = seg_row(cultures, "nl");
+        assert_eq!((nl.sessions, nl.interactions), (2, 2));
+        assert!(cultures.overlapping, "s1 is under two cultures, and the table says so");
+        assert_eq!(
+            cultures.rows.iter().map(|r| r.interactions).sum::<i64>(),
+            t.interactions,
+            "answers still partition"
+        );
+
+        // A context row is unchanged by the culture split: s1's two cultures
+        // are summed back into one conversation, counted once.
+        let web = seg_row(&out.groups[1], "web");
+        assert_eq!((web.sessions, web.interactions), (2, 3));
+        assert_eq!((web.recognized, web.unrecognized), (2, 1));
+        assert_eq!(web.quality_sum, 160.0, "the renderer divides by all three: 53.33%");
+    }
+
     #[test]
     fn a_segment_row_counts_feedback_and_recognition_as_the_summary_does() {
         let conn = seed_segments(
@@ -15315,6 +15749,17 @@ mod conv_search {
         let got = gap_rows(&conn, &args).expect("gap");
         assert_eq!(ids(&got), vec![3, 1], "newest first; strict <, GenAI and empty questions out");
         assert!(got.rows.iter().all(|r| r.fixed_at.is_none()));
+
+        // The conversation's translation language rides along for the chat
+        // header's badge; a conversation without one says so with "".
+        conn.execute(
+            "INSERT INTO context_index (name, value, session_uuid) VALUES ('translation_language', 'en', 's3')",
+            [],
+        )
+        .expect("context");
+        let got = gap_rows(&conn, &args).expect("gap");
+        let lang = |id: i64| got.rows.iter().find(|r| r.log_id == id).unwrap().translation_language.clone();
+        assert_eq!((lang(3).as_str(), lang(1).as_str()), ("en", ""));
 
         set_gap_fixed_rows(&conn, &[1], true, None).expect("fix");
         let got = gap_rows(&conn, &args).expect("gap");
