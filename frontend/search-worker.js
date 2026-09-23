@@ -882,6 +882,251 @@ function matchEntity(entity) {
   return orGroupsMatchFields(_orRegexGroups, fields)
 }
 
+// ── The search bar as an expression ──────────────────────────────────────────
+//
+// The Content bar takes the same chips as the Conversations bar: text, ids,
+// entities, context and metadata tags, joined by AND / OR / AND NOT and grouped
+// with brackets. The main thread serialises them to the same string the
+// Conversations bar sends (`exprToQuery`), and this is the worker's reading of
+// it — a port of `scan_search_tokens` / `parse_search_expr` in lib.rs, with the
+// same rules: keywords upper-case only, quoting escapes anything, strictly left
+// to right with brackets overriding, runs of one operator folded into one
+// n-ary node, malformed input read generously rather than rejected.
+//
+// Operators combine at the **item** level — the content equivalent of the
+// conversation-level AND on the other side. Inside one text leaf the old rule
+// still holds: all its terms must be found in the same answer.
+
+function unquoteToken(s) {
+  const t = String(s || "").trim()
+  return t.length >= 2 && t[0] === '"' && t[t.length - 1] === '"' ? t.slice(1, -1) : t
+}
+
+function parseTagToken(word) {
+  const low = word.toLowerCase()
+  const kind = low.startsWith("ctx:") ? "context" : low.startsWith("meta:") ? "metadata" : null
+  if (!kind) return null
+  const rest = word.slice(kind === "context" ? 4 : 5)
+  let name
+  let after
+  if (rest[0] === '"') {
+    const close = rest.indexOf('"', 1)
+    if (close < 0) return null
+    name = rest.slice(1, close)
+    after = rest.slice(close + 1)
+  } else {
+    const eq = rest.indexOf("=")
+    name = eq < 0 ? rest : rest.slice(0, eq)
+    after = eq < 0 ? "" : rest.slice(eq)
+  }
+  name = name.trim()
+  if (!name) return null
+  let value = null
+  if (after[0] === "=") {
+    const raw = unquoteToken(after.slice(1)).trim()
+    value = raw === "*" || raw === "" ? null : raw
+  }
+  return { k: "tag", kind, name, value }
+}
+
+function parseIdToken(word) {
+  let m = /^qa-(\d+)$/i.exec(word)
+  if (m) return { k: "id", kind: "article", id: Number(m[1]) }
+  m = /^dn-(\d+)(?:-(\d+))?$/i.exec(word)
+  if (!m) return null
+  return m[2] == null
+    ? { k: "id", kind: "dialog", id: Number(m[1]) }
+    : { k: "id", kind: "node", id: Number(m[1]), node: Number(m[2]) }
+}
+
+function scanExprTokens(input, regexMode) {
+  const s = String(input || "")
+  const out = []
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]
+    if (/\s/.test(c)) {
+      i++
+      continue
+    }
+    if (!regexMode && (c === "(" || c === ")")) {
+      out.push({ k: c === "(" ? "open" : "close" })
+      i++
+      continue
+    }
+    const start = i
+    let quoted = false
+    while (i < s.length) {
+      const ch = s[i]
+      if (ch === '"') {
+        quoted = true
+        i++
+        while (i < s.length && s[i] !== '"') i++
+        if (i < s.length) i++
+        continue
+      }
+      if (/\s/.test(ch) || (!regexMode && (ch === "(" || ch === ")"))) break
+      i++
+    }
+    const word = s.slice(start, i)
+    if (!word) {
+      i++
+      continue
+    }
+    if (/^entity:/i.test(word)) {
+      const name = unquoteToken(word.slice(7)).trim()
+      if (name) {
+        out.push({ k: "entity", name })
+        continue
+      }
+    }
+    const tag = parseTagToken(word)
+    if (tag) {
+      out.push(tag)
+      continue
+    }
+    if (!quoted) {
+      if (word === "AND" || word === "OR" || word === "NOT") {
+        out.push({ k: word.toLowerCase() })
+        continue
+      }
+      const id = parseIdToken(word)
+      if (id) {
+        out.push(id)
+        continue
+      }
+    }
+    out.push({ k: "text", raw: word })
+  }
+  return out
+}
+
+function parseExprTokens(toks, pos, depth) {
+  const terms = []
+  const ors = []
+  for (;;) {
+    while (toks[pos.i] && (toks[pos.i].k === "and" || toks[pos.i].k === "or")) pos.i++
+    const t = parseExprTerm(toks, pos, depth)
+    if (!t) {
+      if (ors.length) ors.pop()
+      break
+    }
+    terms.push(t)
+    const nx = toks[pos.i]
+    if (!nx) break
+    if (nx.k === "and") {
+      pos.i++
+      ors.push(false)
+    } else if (nx.k === "or") {
+      pos.i++
+      ors.push(true)
+    } else if (nx.k === "not" || nx.k === "open" || nx.k === "id" || nx.k === "entity" || nx.k === "tag" || nx.k === "text") {
+      ors.push(false)
+    } else break
+  }
+  if (!terms.length) return null
+  let result = terms.shift()
+  let idx = 0
+  while (idx < ors.length && idx < terms.length) {
+    const isOr = ors[idx]
+    const run = [terms[idx]]
+    while (idx + 1 < ors.length && idx + 1 < terms.length && ors[idx + 1] === isOr) {
+      idx++
+      run.push(terms[idx])
+    }
+    result = { k: isOr ? "or" : "and", kids: [result].concat(run) }
+    idx++
+  }
+  return result
+}
+
+function parseExprTerm(toks, pos, depth) {
+  const t = toks[pos.i]
+  if (!t) return null
+  if (t.k === "not") {
+    pos.i++
+    if (depth > 32) return null
+    const inner = parseExprTerm(toks, pos, depth + 1)
+    if (!inner) return null
+    return inner.k === "not" ? inner.kid : { k: "not", kid: inner }
+  }
+  if (t.k === "open") {
+    pos.i++
+    if (depth > 32) return null
+    const inner = parseExprTokens(toks, pos, depth + 1)
+    if (toks[pos.i] && toks[pos.i].k === "close") pos.i++
+    return inner
+  }
+  if (t.k === "close") {
+    if (depth === 0) {
+      pos.i++
+      return parseExprTerm(toks, pos, depth)
+    }
+    return null
+  }
+  if (t.k === "and" || t.k === "or") return null
+  if (t.k === "text") {
+    const parts = []
+    while (toks[pos.i] && toks[pos.i].k === "text") parts.push(toks[pos.i++].raw)
+    return { k: "text", raw: parts.join(" ") }
+  }
+  pos.i++
+  return t
+}
+
+/// The expression tree for a Content query string, or `null` for nothing.
+function parseContentExpr(input, regexMode) {
+  return parseExprTokens(scanExprTokens(input, regexMode), { i: 0 }, 0)
+}
+
+/// Every text leaf of a tree, in order.
+function exprTextLeaves(n, out) {
+  const acc = out || []
+  if (!n) return acc
+  if (n.k === "text") acc.push(n)
+  else if (n.k === "not") exprTextLeaves(n.kid, acc)
+  else if (n.kids) for (const k of n.kids) exprTextLeaves(k, acc)
+  return acc
+}
+
+function tagSetHas(set, name, value) {
+  const vals = set[name]
+  if (!vals) return false
+  if (value == null) return true
+  const want = value.toLowerCase()
+  return vals.some((v) => String(v).toLowerCase() === want)
+}
+
+function exprLeafMatches(n, item) {
+  if (n.k === "text") {
+    _orRegexGroups = n.groups
+    return item._kind === "article" ? matchArticle(item) : matchDialog(item)
+  }
+  if (n.k === "id") {
+    if (n.kind === "article") return item._kind === "article" && item.Id === n.id
+    if (item._kind === "article" || item.id !== n.id) return false
+    return n.kind === "dialog" || (item.nodes || []).some((nd) => nd.id === n.node)
+  }
+  if (n.k === "entity") {
+    const upper = n.name.toUpperCase()
+    const phrases =
+      item._kind === "article" ? item._searchQuestionsUpper : item._entityQuestionTexts
+    return (phrases || []).some((p) => phraseEntityUpper.get(p) === upper)
+  }
+  if (n.k === "tag") {
+    const sets = (n.kind === "metadata" ? item._metaSets : item._ctxSets) || []
+    return sets.some((set) => tagSetHas(set, n.name, n.value))
+  }
+  return false
+}
+
+function evalContentExpr(n, item) {
+  if (n.k === "and") return n.kids.every((k) => evalContentExpr(k, item))
+  if (n.k === "or") return n.kids.some((k) => evalContentExpr(k, item))
+  if (n.k === "not") return !evalContentExpr(n.kid, item)
+  return exprLeafMatches(n, item)
+}
+
 // ── Message handler ───────────────────────────────────────────────────────────
 self.onmessage = function (e) {
   const msg = e.data
@@ -952,12 +1197,25 @@ self.onmessage = function (e) {
     contentContextFilters = msg.contentContextFilters || []
     contentMetadataFilters = msg.contentMetadataFilters || []
 
-    const q = query
+    // An expression — anything more than one run of text — is read into a
+    // tree; a lone text leaf is exactly the old query and takes the old path.
+    let tree = msg.expr ? parseContentExpr(msg.expr, searchRegex) : null
+    if (tree && tree.k === "text") tree = null
+    const textLeaves = tree ? exprTextLeaves(tree) : []
+    // What the entity cache, the Entities tab and the highlight read: the
+    // words that were searched for, never the expression.
+    const q = tree ? textLeaves.map((l) => l.raw).join(" | ") : query
 
     // ── Build OR-groups of AND-term regexes ONCE for this search ──────
     const orGroups = q ? parseOrGroups(q) : []
     _orRegexGroups = q ? buildOrRegexGroups(orGroups) : []
-    const invalidRegex = q && searchRegex && compiledGroupsHaveInvalidRegex(_orRegexGroups)
+    let leavesInvalid = false
+    for (const leaf of textLeaves) {
+      leaf.groups = buildOrRegexGroups(parseOrGroups(leaf.raw))
+      if (searchRegex && compiledGroupsHaveInvalidRegex(leaf.groups)) leavesInvalid = true
+    }
+    const invalidRegex =
+      leavesInvalid || (q && searchRegex && compiledGroupsHaveInvalidRegex(_orRegexGroups))
     if (invalidRegex) {
       const filteredAllIdx = new Int32Array(0)
       const filteredArticlesIdx = new Int32Array(0)
@@ -1026,7 +1284,7 @@ self.onmessage = function (e) {
     }
 
     // Short-circuit: no query and no filter → return everything
-    const noQuery = !q || !hasValidQuery
+    const noQuery = !tree && (!q || !hasValidQuery)
     const hasCtxFilter = contentContextFilters.length > 0
     const hasMetaFilter = contentMetadataFilters.length > 0
 
@@ -1042,7 +1300,11 @@ self.onmessage = function (e) {
     const needsMatch = !noQuery || hasCtxFilter || hasMetaFilter
     if (needsMatch) {
       for (const item of allItems) {
-        if (noQuery) {
+        if (tree) {
+          // The Context · Metadata panel still narrows, ANDed at the item
+          // level; the same-answer pairing with text is a one-leaf rule.
+          item._mc = matchesContentContext(item) && evalContentExpr(tree, item)
+        } else if (noQuery) {
           item._mc = matchesContentContext(item)
         } else if (hasCtxFilter) {
           item._mc = item._kind === "article"
@@ -1054,6 +1316,8 @@ self.onmessage = function (e) {
         }
         if (item._mc && hasMetaFilter) item._mc = matchesContentMetadata(item)
       }
+      // The Entities tab and the highlight read the union of the text leaves.
+      if (tree) _orRegexGroups = q ? buildOrRegexGroups(orGroups) : []
     }
 
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
@@ -1130,6 +1394,9 @@ self.onmessage = function (e) {
         )
           return false
         if (noQuery) return true
+        // An expression with no words in it names Articles and Dialogs, not
+        // entities; the Entities tab is not narrowed by it.
+        if (tree && !textLeaves.length) return true
         return matchEntity(entity)
       })
     }

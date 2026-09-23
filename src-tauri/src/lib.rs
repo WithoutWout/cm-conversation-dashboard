@@ -4113,6 +4113,53 @@ enum SearchExpr {
     /// A run of free text, in the term grammar the bar has always used:
     /// space-separated AND terms, `|` OR groups, `"quoted phrases"`.
     Text(String),
+    /// A context or metadata tag the conversation carried: `ctx:"name"="value"`
+    /// or `meta:"name"="value"`, with `="*"` (or no value) for "set at all".
+    Tag(TagLeaf),
+}
+
+/// A tag leaf. The table is chosen from `kind`, never taken from the wire.
+#[derive(Clone, Debug, PartialEq)]
+struct TagLeaf {
+    metadata: bool,
+    name: String,
+    /// `None` is "the key is set, to anything".
+    value: Option<String>,
+}
+
+impl TagLeaf {
+    /// `"name"="value"`, `name=value`, `"name"` or `"name"="*"` — the part
+    /// after `ctx:` / `meta:`. `None` when there is no name.
+    fn parse(rest: &str, metadata: bool) -> Option<Self> {
+        let chars: Vec<char> = rest.chars().collect();
+        let i: usize;
+        let name: String;
+        if chars.first() == Some(&'"') {
+            let close = chars[1..].iter().position(|&c| c == '"')? + 1;
+            name = chars[1..close].iter().collect();
+            i = close + 1;
+        } else {
+            let end = chars.iter().position(|&c| c == '=').unwrap_or(chars.len());
+            name = chars[..end].iter().collect();
+            i = end;
+        }
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let value = if chars.get(i) == Some(&'=') {
+            let raw: String = chars[i + 1..].iter().collect();
+            let raw = raw.trim();
+            if raw == "*" || raw == "\"*\"" || raw.is_empty() {
+                None
+            } else {
+                Some(unquote_token(raw))
+            }
+        } else {
+            None
+        };
+        Some(TagLeaf { metadata, name, value })
+    }
 }
 
 impl SearchExpr {
@@ -4122,9 +4169,11 @@ impl SearchExpr {
     /// An expression with no positive leaf therefore narrows conversations
     /// without narrowing turns, and `match_rows` has to be `None` — Insights
     /// would otherwise read "zero matching interactions" where the truth is
-    /// "nothing singled any of them out".
+    /// "nothing singled any of them out". A tag leaf is the same: a context
+    /// value belongs to the conversation, not to any one of its turns.
     fn has_positive_leaf(&self) -> bool {
         match self {
+            SearchExpr::Tag(_) => false,
             SearchExpr::Id(_) | SearchExpr::Entity(_) | SearchExpr::Text(_) => true,
             SearchExpr::And(cs) | SearchExpr::Or(cs) => cs.iter().any(Self::has_positive_leaf),
             SearchExpr::Not(_) => false,
@@ -4142,6 +4191,7 @@ enum SearchTok {
     Not,
     Id(IdTarget),
     Entity(String),
+    Tag(TagLeaf),
     /// The raw source slice, quotes and all — `tokenize_segment` needs to see
     /// them to tell a phrase from two words.
     Text(String),
@@ -4209,6 +4259,15 @@ fn scan_search_tokens(input: &str, regex_mode: bool) -> Vec<SearchTok> {
             let name = unquote_token(rest);
             if !name.trim().is_empty() {
                 out.push(SearchTok::Entity(name));
+                continue;
+            }
+        }
+        let tag = strip_prefix_ci(&raw, "ctx:")
+            .map(|r| (r, false))
+            .or_else(|| strip_prefix_ci(&raw, "meta:").map(|r| (r, true)));
+        if let Some((rest, metadata)) = tag {
+            if let Some(t) = TagLeaf::parse(rest, metadata) {
+                out.push(SearchTok::Tag(t));
                 continue;
             }
         }
@@ -4306,7 +4365,7 @@ fn parse_expr(toks: &[SearchTok], pos: &mut usize, depth: usize) -> Option<Searc
             // renderer has split them) join with AND, the same default the
             // operator chip takes.
             Some(SearchTok::Open) | Some(SearchTok::Id(_)) | Some(SearchTok::Entity(_))
-            | Some(SearchTok::Text(_)) => ors.push(false),
+            | Some(SearchTok::Tag(_)) | Some(SearchTok::Text(_)) => ors.push(false),
             _ => break,
         }
     }
@@ -4382,6 +4441,11 @@ fn parse_term(toks: &[SearchTok], pos: &mut usize, depth: usize) -> Option<Searc
             let name = name.trim().to_lowercase();
             *pos += 1;
             Some(SearchExpr::Entity(name))
+        }
+        SearchTok::Tag(t) => {
+            let t = t.clone();
+            *pos += 1;
+            Some(SearchExpr::Tag(t))
         }
         SearchTok::Text(_) => {
             let mut parts: Vec<String> = Vec::new();
@@ -4525,6 +4589,8 @@ const MATCH_NOTHING: &str = "SELECT '' AS session_uuid, NULL AS match_log_id WHE
 struct SearchCtx<'a> {
     fts_available: bool,
     entity_available: bool,
+    context_available: bool,
+    metadata_available: bool,
     /// Which message columns a text leaf reads, or `None` for entities only.
     text_scope: Option<&'a str>,
     /// The **E** toggle: a text leaf also matches entity name / matched text / id.
@@ -4657,6 +4723,7 @@ impl<'a> ExprSql<'a> {
         match e {
             SearchExpr::Id(t) => Ok((self.leaf_id(t), false)),
             SearchExpr::Entity(name) => Ok((self.leaf_entity(name), false)),
+            SearchExpr::Tag(t) => Ok((self.leaf_tag(t), false)),
             SearchExpr::Text(text) => Ok((self.leaf_text(text)?, false)),
             SearchExpr::Not(inner) => {
                 let (i, neg) = self.compile(inner)?;
@@ -4807,6 +4874,38 @@ impl<'a> ExprSql<'a> {
         self.add_node(format!(
             "SELECT e.session_uuid, e.log_id AS match_log_id FROM {from} \
              WHERE (e.name = {p}){entity_row_filter}"
+        ))
+    }
+
+    /// A context or metadata tag, as a condition like any other.
+    ///
+    /// The same relation as the tag filter panel's `EXISTS`, but a leaf, so it
+    /// can be ORed with a word or negated inside a group — which the panel,
+    /// ANDed onto the whole search, never could. Conversation-level by nature:
+    /// `match_log_id` is NULL, because no turn is *why* a conversation carries
+    /// a context value. The value compares case-insensitively, as the Segments
+    /// table groups it: `True` and `true` are one answer.
+    fn leaf_tag(&mut self, t: &TagLeaf) -> usize {
+        self.modes.push("tag".to_string());
+        let (table, available) = if t.metadata {
+            ("metadata_index", self.ctx.metadata_available)
+        } else {
+            ("context_index", self.ctx.context_available)
+        };
+        if !available {
+            return self.add_node(MATCH_NOTHING.to_string());
+        }
+        let pn = self.param(Box::new(t.name.clone()));
+        let value_cond = match &t.value {
+            Some(v) => {
+                let pv = self.param(Box::new(v.clone()));
+                format!(" AND t.value = {pv} COLLATE NOCASE")
+            }
+            None => String::new(),
+        };
+        self.add_node(format!(
+            "SELECT DISTINCT t.session_uuid, NULL AS match_log_id FROM {table} t \
+             WHERE t.name = {pn}{value_cond}"
         ))
     }
 
@@ -5322,6 +5421,8 @@ fn build_session_filter_query(
     let ctx = SearchCtx {
         fts_available: table_exists(conn, "interactions_fts"),
         entity_available: table_exists(conn, "entity_index"),
+        context_available: table_exists(conn, "context_index"),
+        metadata_available: table_exists(conn, "metadata_index"),
         // "none" is both message toggles off, which is only meaningful
         // alongside the entity toggle. With nothing selected at all, search the
         // text — an empty result set would read as "no matches" rather than
@@ -8319,7 +8420,7 @@ fn ai_export_header(
             "feedback_targets": "Each thumbs up/down already joined to the answer it rated, so this join does not need redoing. target_resolution says how certain that join is: 'originatingInteractionId' = the log stated it; 'previousBotOutputFallback' = inferred from the preceding answer, so treat it as probable rather than certain.",
             "is_feedback_target": "Present as true only on turns that received feedback; absent on all others.",
             "interaction_scope": "whole_conversations = every turn of each matching conversation. matched_turns = only the turns that satisfied the search, so a conversation's chat_trace is a subset of it and the turns around a match are not present.",
-            "query": "search_context.query is a boolean expression, evaluated strictly left to right with parentheses overriding: upper-case AND / OR / NOT join the terms, qa-<n> is an Article, dn-<n> a Dialog, dn-<d>-<n> one of its nodes, entity:<name> an entity the recognizer fired, and anything else is free text (space = all of these words in one message, | = either group, \"...\" = that exact phrase). AND means both somewhere in the conversation, not both in the same turn.",
+            "query": "search_context.query is a boolean expression, evaluated strictly left to right with parentheses overriding: upper-case AND / OR / NOT join the terms, qa-<n> is an Article, dn-<n> a Dialog, dn-<d>-<n> one of its nodes, entity:<name> an entity the recognizer fired, ctx:\"<key>\"=\"<value>\" / meta:\"<key>\"=\"<value>\" a context or metadata value the conversation carried (\"*\" = any value), and anything else is free text (space = all of these words in one message, | = either group, \"...\" = that exact phrase). AND means both somewhere in the conversation, not both in the same turn.",
             "conventions": "Empty fields are omitted rather than sent as null, so a missing key means no value. Answer HTML has been stripped to plain text."
         },
     })
@@ -14860,6 +14961,57 @@ mod conv_search {
             query_scope: Some(scope.to_string()),
             ..Default::default()
         }
+    }
+
+    /// A context or metadata tag is a leaf like any other: it can be ORed with
+    /// a word and negated inside a group, which the tag panel — ANDed onto the
+    /// whole search — never could.
+    #[test]
+    fn a_tag_chip_combines_with_words_and_negation() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "stay", user: "waar kan ik parkeren", bot: "hier", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "day", user: "waar kan ik parkeren", bot: "daar", ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "other", user: "openingstijden", bot: "tien uur", ..Default::default() });
+        conn.execute_batch(
+            "INSERT INTO context_index(name, value, session_uuid) VALUES ('Verblijf','True','stay'); \
+             INSERT INTO context_index(name, value, session_uuid) VALUES ('Verblijf','false','day'); \
+             INSERT INTO metadata_index(name, value, session_uuid) VALUES ('nochat','true','other');",
+        )
+        .expect("tags");
+        rebuild_session_summary(&conn).expect("summary");
+        let q = |s: &str| found(&conn, &text_args(s, "both"));
+
+        // Case-insensitive on the value, as Segments groups it.
+        assert_eq!(q(r#"ctx:"Verblijf"="true""#), vec!["stay"]);
+        assert_eq!(q(r#"ctx:"Verblijf"="*""#), vec!["day", "stay"]);
+        assert_eq!(q(r#"parkeren AND NOT ctx:"Verblijf"="true""#), vec!["day"]);
+        assert_eq!(q(r#"ctx:"Verblijf"="true" OR meta:"nochat"="true""#), vec!["other", "stay"]);
+        // A tag alone narrows conversations, never turns.
+        let fq = build_session_filter_query(&conn, &text_args(r#"meta:nochat=true"#, "both"))
+            .expect("build");
+        assert!(fq.match_rows.is_none(), "a tag leaf singled out a turn");
+    }
+
+    #[test]
+    fn a_tag_token_reads_its_name_and_value() {
+        let tag = |metadata: bool, name: &str, value: Option<&str>| {
+            Some(SearchExpr::Tag(TagLeaf {
+                metadata,
+                name: name.to_string(),
+                value: value.map(str::to_string),
+            }))
+        };
+        assert_eq!(parse_search_expr(r#"ctx:"Verblijf"="true""#, false), tag(false, "Verblijf", Some("true")));
+        assert_eq!(parse_search_expr(r#"meta:"a b"="c d""#, false), tag(true, "a b", Some("c d")));
+        assert_eq!(parse_search_expr("meta:nochat=true", false), tag(true, "nochat", Some("true")));
+        assert_eq!(parse_search_expr(r#"Meta:"x"="*""#, false), tag(true, "x", None));
+        assert_eq!(parse_search_expr("ctx:channel", false), tag(false, "channel", None));
+        // Quoted whole, or with no name, it is text.
+        assert_eq!(
+            parse_search_expr(r#""ctx:x""#, false),
+            Some(SearchExpr::Text(r#""ctx:x""#.to_string()))
+        );
+        assert_eq!(parse_search_expr("ctx:", false), Some(SearchExpr::Text("ctx:".to_string())));
     }
 
     /// A column filter in FTS5 binds to the phrase that follows it and nothing

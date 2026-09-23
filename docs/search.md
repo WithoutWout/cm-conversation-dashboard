@@ -9,6 +9,7 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 ## Content search semantics
 
 - `search-worker.js` is the source of truth for result inclusion. Renderer helpers may mirror parts of search only for snippets, highlights, and modal display.
+- **The Content bar is one expression too** — see "The Content bar takes the same chips" below. A query that is one run of text goes to the worker as `query` alone and takes exactly the old path; only a real expression is sent as `expr`.
 - Plain search supports space-separated AND terms, `|` OR groups, quoted exact phrases, case sensitivity (`Aa`), whole word (`\b`), and regex (`.*`).
 - Invalid regex mode returns an explicit `invalid_regex` result from the worker; the renderer must show that as an error state, not as a valid zero-result search.
 - When content context filters and a text query are both active, the same answer output must satisfy both the context filter and the text query.
@@ -91,6 +92,8 @@ op     := "AND" | "OR" | "AND NOT" | "NOT"  -- a bare NOT between terms is AND N
 term   := "(" expr ")" | "NOT" term | leaf
 leaf   := qa-<n> | dn-<n> | dn-<d>-<n>      -- an IdTarget, unquoted
         | entity:<word> | entity:"<phrase>"
+        | ctx:"<name>"="<value>"            -- a context tag; ="*" is any value
+        | meta:"<name>"="<value>"           -- a metadata tag, the same shape
         | <text>                            -- the term grammar above, verbatim
 ```
 
@@ -123,6 +126,56 @@ single n-ary node, so three Articles are one `UNION ALL` and not two nested ones
   expression says all four. The AI export header is `schema_version` 6 and its
   legend states the grammar; a file that does not describe its own filter
   language is misleading to the model reading it.
+
+### Context and metadata are leaves too
+
+The Context · Metadata panel filters are ANDed onto the whole search, so they
+could never be ORed with a word or excluded inside a group. A tag chip can:
+`parkeren AND NOT ctx:"Verblijf"="true"`. The type-ahead offers every context
+and metadata value (from the popover's own option lists, minus hidden metadata),
+and the panel stays as it was beside it.
+
+- **`leaf_tag` is conversation-level.** `match_log_id` is NULL: no turn is *why* a
+  conversation carries a context value. So a tag counts as no positive leaf
+  (`has_positive_leaf`), and a search of tags alone narrows conversations
+  without singling out turns — `match_rows` is `None`, exactly as for a
+  negation.
+- **The value compares `COLLATE NOCASE`**, the way Segments groups it (`True`
+  and `true` are one answer). The name is exact: the chips come from the index.
+- `="*"` (or no value) is "the key is set at all" — the panel's `any`. "Not set"
+  is `NOT` in front of it.
+- `TagLeaf::parse` and `_exprParseTagToken` are the two halves of one token;
+  `a_tag_token_reads_its_name_and_value` and `search-bubbles.test.js` quote the
+  same strings.
+
+### The Content bar takes the same chips
+
+The Content bar is the same field: text, Articles, Dialogs, nodes, entities and
+tags as chips, joined by and / or / not, grouped with `( )`. The chip model and
+its normalising, serialising and drawing are shared with the Conversations bar
+(`exprNormalize`, `exprToQuery`, `exprTokensHtml`); the worker reads the string
+with its own port of the grammar (`parseContentExpr`), under the same rules.
+
+- **It is still live.** What is typed but not yet a chip is part of the search,
+  ANDed after the chips, on the old 500 ms debounce. Enter turns it into a chip.
+- **A plain run of text is the old search, byte for byte.** `contentNeedsExpr`
+  sends `expr` only when there is more than one condition or a non-text one, and
+  the worker treats a lone text leaf as `query`. `content-expr.test.js` pins it.
+- **AND / OR / NOT combine at the item level** — an Article is in or out. Inside
+  one text leaf the old rule holds: all its words in the *same* answer. So
+  `campers nacht` (one chip) and `campers AND nacht` (two) are different
+  questions, and the difference is visible in the chips.
+- **Leaves:** text → the old matcher; `qa-N` / `dn-N` → the item itself;
+  `dn-D-N` → Dialog D, if it has node N; `entity:` → items whose questions
+  resolve to that entity (the same `phraseEntityUpper` map the card chip uses);
+  `ctx:` / `meta:` → any output's context set / any Answer's metadata set,
+  values compared case-insensitively.
+- **The panel still narrows**, ANDed at the item level. The same-answer pairing
+  of panel context with text is a one-leaf rule and only applies to a plain text
+  query.
+- **Highlighting reads the words, never the expression** (`contentTextTerms`),
+  and leaves out negated chips: nothing a `not` chip names is a reason a card is
+  on screen.
 
 ### AND is conversation-level
 

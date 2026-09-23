@@ -64,7 +64,7 @@ frontend/
   tests/
     extract.js      — pulls named functions out of index.html so tests run the real source
     collections.test.js, export-integrity.test.js,
-    conv-search.test.js, update-modal.test.js,
+    conv-search.test.js, update-modal.test.js, content-expr.test.js,
     settings-backup.test.js, metadata-filter.test.js, context-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
@@ -348,7 +348,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 
 Three distinct search types:
 
-1. **Content search** — searches Dialogs and Articles and their content. Main search bar under the Content tab.
+1. **Content search** — searches Dialogs and Articles and their content. Main search bar under the Content tab. It takes the same chips as the Conversations bar (text, ids, entities, `ctx:` / `meta:` tags, and / or / not, brackets), evaluated per item by the worker; see `docs/search.md` → "The Content bar takes the same chips".
 2. **Conversations search** — searches conversations and their context (e.g. filter by context). Can be very resource-intensive; use debounce, lazy loading, worker offloading, and only load necessary data when the user presses the search button or Enter. The search bar is **one boolean expression** over text, entities, Articles, Dialogs and their nodes, joined by AND / OR / AND NOT and grouped with brackets; it travels in the `query` string and `parse_search_expr` in `lib.rs` reads it. See `docs/search.md` → "The search bar is one expression".
 3. **Chat search** — searches within a single chat. A chat is first found and opened via Conversations search; Chat search then operates within that opened conversation.
 
@@ -367,7 +367,8 @@ The orientation map for the whole window. It says what is on screen and where;
   brand | file tags | Export IDs button | Collections button | Settings button (gear)
 
 <div.global-search-bar>
-  search input | [Aa] [\b] [.*] [¬T] [ND] | tag filter button (Context · Metadata)
+  chip field (#contentTokens + input, #contentSuggest type-ahead) |
+  [( )] [Aa] [\b] [.*] [¬T] [ND] | tag filter button (Context · Metadata)
 
 <div.tab-bar>
   All Results (sub-stats: art · dlg · t.dlg)
@@ -446,7 +447,8 @@ The orientation map for the whole window. It says what is on screen and where;
 <div.conv-sidebar-header>
   [( )] | expression field | search submit | [.*] | [U] [B] [E]
     the field is one boolean expression, read strictly left to right:
-    chips for text, entities, Articles, Dialogs and nodes, an operator chip
+    chips for text, entities, Articles, Dialogs, nodes and context /
+    metadata values (ctx:"k"="v" · meta:"k"="v"), an operator chip
     between each pair (click cycles and / or / and not), and bracket pairs
     drawn as one nested band. A dashed, faint leading "not" toggle excludes
     the whole search. Committing puts what is typed into a chip.

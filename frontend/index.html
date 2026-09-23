@@ -208,25 +208,47 @@
         color: var(--muted);
         pointer-events: none;
       }
-      .search-wrap-global input {
-        width: 100%;
+      /* The field is the wrapper, not the <input>: chips sit inside it beside
+         the caret, the same way the Conversations bar works. */
+      .content-search-inner {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        min-height: 36px;
         background: var(--bg);
         border: 1px solid var(--border);
         border-radius: 8px;
-        color: var(--text);
-        padding: 8px 34px 8px 34px;
-        font-size: 0.88rem;
-        outline: none;
+        padding: 3px 34px 3px 34px;
+        cursor: text;
         transition: border-color 0.15s;
       }
-      .search-wrap-global input.regex-error {
+      .content-search-inner:focus-within {
+        border-color: var(--accent);
+      }
+      .content-search-inner:has(input.regex-error) {
         border-color: var(--red) !important;
+      }
+      .search-wrap-global input {
+        flex: 1 1 90px;
+        min-width: 90px;
+        width: auto;
+        background: none;
+        border: none;
+        color: var(--text);
+        padding: 5px 0;
+        font-size: 0.88rem;
+        outline: none;
       }
       .search-wrap-global input::placeholder {
         color: var(--muted);
       }
-      .search-wrap-global input:focus {
-        border-color: var(--accent);
+      .search-wrap-global .conv-suggest {
+        z-index: 80;
+      }
+      .search-wrap-global.is-suggesting::after,
+      .search-wrap-global.is-suggesting::before {
+        display: none !important;
       }
       .clear-btn {
         position: absolute;
@@ -4128,6 +4150,18 @@
       .conv-search-inner:focus-within {
         border-color: var(--accent);
       }
+      .conv-token.is-tag {
+        background: rgba(45, 212, 191, 0.14);
+        border-color: var(--teal);
+        color: var(--teal);
+      }
+      .conv-token-kind {
+        font-size: 0.58rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+        margin-right: 4px;
+      }
       .conv-tokens {
         display: contents;
       }
@@ -4400,6 +4434,12 @@
         border-color: rgba(124, 106, 247, 0.25);
       }
       .conv-suggest-badge.is-tdialog {
+        background: rgba(45, 212, 191, 0.12);
+        color: var(--teal);
+        border-color: rgba(45, 212, 191, 0.25);
+      }
+      .conv-suggest-badge.is-ctxtag,
+      .conv-suggest-badge.is-metatag {
         background: rgba(45, 212, 191, 0.12);
         color: var(--teal);
         border-color: rgba(45, 212, 191, 0.25);
@@ -9451,7 +9491,7 @@
         <div class="search-row">
           <div
             class="search-wrap-global"
-            data-tooltip='space = AND · | = OR · "..." = exact phrase'
+            data-tooltip='Enter makes a chip · and / or / not between chips · ( ) groups · inside a chip: space = AND, | = OR, "..." = phrase'
           >
             <svg
               width="14"
@@ -9464,14 +9504,26 @@
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
-            <input
-              id="g-search"
-              type="text"
-              placeholder="Search…"
-              autocomplete="off"
-              spellcheck="false"
-            />
+            <div class="content-search-inner" id="contentSearchInner">
+              <span class="conv-tokens" id="contentTokens"></span>
+              <input
+                id="g-search"
+                type="text"
+                placeholder="Search…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
             <button class="clear-btn" id="clearSearch">&#x2715;</button>
+            <div class="conv-suggest" id="contentSuggest" hidden>
+              <div class="conv-suggest-list" id="contentSuggestList" role="listbox"></div>
+              <div class="conv-suggest-hint">
+                <span><kbd>↑</kbd><kbd>↓</kbd> select</span>
+                <span><kbd>Tab</kbd> add</span>
+                <span><kbd>Enter</kbd> chip</span>
+                <span><kbd>Esc</kbd> close</span>
+              </div>
+            </div>
           </div>
           <span class="search-spinner-inline" id="searchSpinner"></span>
           <button
@@ -9482,6 +9534,14 @@
             &#x2715; Cancel
           </button>
           <div class="search-opts">
+            <button
+              class="sopt"
+              id="opt-group"
+              title="Open a group, or close the one that is open"
+              data-tooltip="Group — everything after ( is one condition"
+            >
+              ( )
+            </button>
             <button
               class="sopt"
               id="opt-case"
@@ -16531,9 +16591,7 @@
         if (eTab) eTab.classList.add("active")
         if (ePanel) ePanel.classList.add("active")
         // Set search to the entity name
-        gQuery = name
-        const searchInput = document.getElementById("g-search")
-        if (searchInput) searchInput.value = name
+        setContentSearchText(name)
         const clearBtn = document.getElementById("search-clear")
         if (clearBtn) clearBtn.style.display = name ? "" : "none"
         window.addEventListener(
@@ -17095,6 +17153,9 @@
           type: "search",
           id: ++searchSeq,
           query: gQuery,
+          // The chips as one expression, or null when the search is one run of
+          // text — which the worker then reads exactly as it always has.
+          expr: contentNeedsExpr() ? contentQueryString() : null,
           searchCase,
           searchWord,
           searchRegex,
@@ -17273,35 +17334,408 @@
       searchWorker.onmessage = function (e) {
         if (e.data.type === "results") handleSearchResults(e.data)
       }
+      // ── The Content bar as chips ──────────────────────────────────────
+      //
+      // The same field as the Conversations bar — text, Articles, Dialogs,
+      // entities, context and metadata as chips, joined by and / or / not and
+      // grouped with brackets — over the content export instead of the
+      // database. The chip model, its normalising, its serialising and its
+      // drawing are shared (`exprNormalize`, `exprToQuery`, `exprTokensHtml`);
+      // the worker reads the string with its own port of the grammar
+      // (`parseContentExpr` in search-worker.js).
+      //
+      // What stays different is the rhythm. Content search has always been
+      // live — every keystroke, debounced — and still is: what is typed but not
+      // yet a chip is part of the search, ANDed after the chips. Enter turns it
+      // into a chip. A query that is one run of text (the common case) goes to
+      // the worker exactly as before, so nothing about a plain search changed.
+      let contentExpr = []
+      let _contentSuggestRows = []
+      let _contentSuggestIdx = -1
+      const CONTENT_EXPR_HANDLERS = {
+        remove: "removeContentToken",
+        cycle: "cycleContentOp",
+        lead: "toggleContentLeadNot",
+        edit: "editContentText",
+        pick: null,
+        nodeRows: null,
+      }
+
+      function contentPendingText() {
+        const inp = document.getElementById("g-search")
+        return inp ? inp.value.trim() : ""
+      }
+
+      /// The words searched for — what highlighting and every "matches only"
+      /// view read. Never the expression: that would mark `AND` and `ctx:`.
+      /// A negated chip is left out: nothing it names is a reason a card is here.
+      function contentTextTerms() {
+        const parts = []
+        contentExpr.forEach((it, i) => {
+          if (it.t !== "text") return
+          const prev = contentExpr[i - 1]
+          if (prev && prev.t === "op" && prev.op === "not") return
+          if (!prev && contentExpr[0] !== it) return
+          parts.push(it.value)
+        })
+        // A leading `not` excludes the first condition.
+        if (contentExpr[0] && contentExpr[0].t === "op" && contentExpr[0].op === "not") {
+          const first = contentExpr[1]
+          if (first && first.t === "text") parts.splice(parts.indexOf(first.value), 1)
+        }
+        for (const it of convScanExprText(contentPendingText(), searchRegex)) {
+          if (it.t === "text") parts.push(it.value)
+        }
+        return parts.join(" | ")
+      }
+
+      /// The whole query as the worker reads it: the chips, then what is being
+      /// typed, ANDed on.
+      function contentQueryString() {
+        const chips = exprToQuery(contentExpr)
+        const pend = contentPendingText()
+        return chips && pend ? chips + " AND " + pend : chips || pend
+      }
+
+      /// Whether the query is more than one run of text. When it is not, the
+      /// worker is sent the text alone and takes its old path.
+      function contentNeedsExpr() {
+        const pend = contentPendingText()
+        if (contentExpr.length > 1) return true
+        if (contentExpr.length === 1 && (contentExpr[0].t !== "text" || pend)) return true
+        return convScanExprText(pend, searchRegex).some((it) => it.t !== "text")
+      }
+
+      function renderContentTokens() {
+        const host = document.getElementById("contentTokens")
+        if (host) host.innerHTML = exprTokensHtml(contentExpr, CONTENT_EXPR_HANDLERS)
+        const grp = document.getElementById("opt-group")
+        if (grp) {
+          let d = 0
+          for (const it of contentExpr) d += it.t === "(" ? 1 : it.t === ")" ? -1 : 0
+          grp.textContent = d > 0 ? " ) " : "( )"
+          grp.classList.toggle("on", d > 0)
+          grp.disabled = searchRegex
+        }
+        const clearBtn = document.getElementById("clearSearch")
+        if (clearBtn)
+          clearBtn.classList.toggle("visible", contentExpr.length > 0 || !!contentPendingText())
+        const inp = document.getElementById("g-search")
+        if (inp) inp.placeholder = contentExpr.length ? "" : "Search…"
+      }
+
+      /// Re-run the search after the chips changed.
+      function _contentExprChanged() {
+        contentExpr = exprNormalize(contentExpr)
+        renderContentTokens()
+        gQuery = contentTextTerms()
+        triggerSearch()
+      }
+
+      function removeContentToken(i) {
+        const it = contentExpr[i]
+        if (!it) return
+        if (it.t === "(" || it.t === ")") {
+          // Remove the partner as well; half a group is not a state anyone
+          // asked for.
+          const step = it.t === "(" ? 1 : -1
+          let depth = 0
+          for (let j = i; j >= 0 && j < contentExpr.length; j += step) {
+            if (contentExpr[j].t === it.t) depth++
+            else if (contentExpr[j].t === (step === 1 ? ")" : "(") && --depth === 0) {
+              contentExpr.splice(Math.max(i, j), 1)
+              contentExpr.splice(Math.min(i, j), 1)
+              _contentExprChanged()
+              return
+            }
+          }
+        }
+        contentExpr.splice(i, 1)
+        _contentExprChanged()
+      }
+
+      function cycleContentOp(i) {
+        const it = contentExpr[i]
+        if (!it || it.t !== "op") return
+        const prev = contentExpr[i - 1]
+        if (!prev || prev.t === "(") contentExpr.splice(i, 1)
+        else it.op = it.op === "and" ? "or" : it.op === "or" ? "not" : "and"
+        _contentExprChanged()
+      }
+
+      function toggleContentLeadNot() {
+        contentExpr.unshift({ t: "op", op: "not" })
+        _contentExprChanged()
+      }
+
+      function editContentText(i) {
+        _exprEditText("#contentTokens", contentExpr, i, renderContentTokens, (v) => {
+          if (v) contentExpr[i] = { t: "text", value: v }
+          else contentExpr.splice(i, 1)
+          _contentExprChanged()
+        })
+      }
+
+      function toggleContentGroup() {
+        commitContentPendingText()
+        let d = 0
+        for (const it of contentExpr) d += it.t === "(" ? 1 : it.t === ")" ? -1 : 0
+        contentExpr.push({ t: d > 0 ? ")" : "(" })
+        closeContentSuggest()
+        _contentExprChanged()
+        document.getElementById("g-search").focus()
+      }
+
+      /// Append a chip, guessing the operator the way the other bar does: two
+      /// of the same non-text kind mean OR, anything else AND.
+      function _contentAppend(item) {
+        const prev = contentExpr[contentExpr.length - 1]
+        if (prev && (_convIsOperand(prev) || prev.t === ")")) {
+          const same = _convIsOperand(prev) && prev.t === item.t
+          contentExpr.push({ t: "op", op: same && item.t !== "text" ? "or" : "and" })
+        }
+        contentExpr.push(item)
+      }
+
+      /// What is typed becomes chips. Typed syntax is expanded here, so a
+      /// pasted expression behaves exactly like one built by hand.
+      function commitContentPendingText() {
+        const inp = document.getElementById("g-search")
+        const raw = inp ? inp.value.trim() : ""
+        if (inp) inp.value = ""
+        if (!raw) return false
+        for (const it of convScanExprText(raw, searchRegex)) {
+          if (_convIsOperand(it)) _contentAppend(it)
+          else contentExpr.push(it)
+        }
+        contentExpr = exprNormalize(contentExpr)
+        return true
+      }
+
+      /// Replace the whole search with plain text — for the paths that set the
+      /// search on the user's behalf (jumping to an entity, a dialog).
+      function setContentSearchText(text) {
+        contentExpr = []
+        const inp = document.getElementById("g-search")
+        if (inp) inp.value = text || ""
+        renderContentTokens()
+        gQuery = contentTextTerms()
+      }
+
+      // ── Content type-ahead ──
+
+      /// Entities from the content export, as suggestions.
+      function contentEntityCandidates() {
+        const out = []
+        for (const e of allEntities || []) {
+          const name = String(e.name || "")
+          if (!name) continue
+          const words = (e.words || [])
+            .map((w) => String(w.text || "").trim().toLowerCase())
+            .filter(Boolean)
+          out.push({
+            key: "e:" + name.toLowerCase(),
+            kind: "entity",
+            value: name.toLowerCase(),
+            label: name,
+            num: "",
+            idText: "",
+            weight: words.length,
+            unit: "words",
+            words,
+            hay: (name + " " + words.join(" ")).toLowerCase(),
+          })
+        }
+        return out
+      }
+
+      function contentSuggestFor(rawInput) {
+        const raw = (rawInput || "").trim().toLowerCase()
+        if (!raw) return []
+        const taken = new Set(
+          contentExpr.filter((it) => _convIsOperand(it) && it.t !== "text").map(_exprItemKey),
+        )
+        const tags = exprTagCandidates(contentContextOptions, "context")
+          .concat(exprTagCandidates(contentMetadataOptions, "metadata"))
+          .map((c) => ({ ...c, unit: "items" }))
+        const pool = convContentIndex().concat(contentEntityCandidates(), tags)
+        const tokens = raw.split(/\s+/).filter(Boolean)
+        const hits = []
+        for (const c of pool) {
+          if (taken.has(c.key)) continue
+          const rank = _convSuggestRank(c, tokens, raw)
+          if (rank >= 0) hits.push({ c, rank })
+        }
+        hits.sort(
+          (a, b) =>
+            a.rank - b.rank ||
+            (b.c.weight || 0) - (a.c.weight || 0) ||
+            (a.c.label || "").length - (b.c.label || "").length,
+        )
+        return hits.slice(0, CONV_SUGGEST_MAX).map((h) => h.c)
+      }
+
+      function openContentSuggest(rawInput) {
+        const pop = document.getElementById("contentSuggest")
+        const list = document.getElementById("contentSuggestList")
+        if (!pop || !list) return
+        _contentSuggestRows = contentSuggestFor(rawInput)
+        _contentSuggestIdx = -1
+        if (!_contentSuggestRows.length) {
+          closeContentSuggest()
+          return
+        }
+        const raw = (rawInput || "").trim().toLowerCase()
+        list.innerHTML = _contentSuggestRows
+          .map((c, i) => {
+            const meta =
+              c.kind === "entity" || c.kind === "ctxtag" || c.kind === "metatag"
+                ? insPlural(c.weight, c.unit || "items")
+                : c.label
+                ? c.idText
+                : "by id"
+            return (
+              '<div class="conv-suggest-row" role="option" onmousemove="_contentSuggestHover(' +
+              i +
+              ')" onclick="_contentSuggestTake(' +
+              i +
+              ')"><span class="conv-suggest-badge is-' +
+              esc(c.kind) +
+              '">' +
+              esc(CONV_SUGGEST_BADGES[c.kind] || c.kind) +
+              '</span><span class="conv-suggest-name">' +
+              _convMarkSuggest(c.label || c.idText, raw) +
+              '</span><span class="conv-suggest-meta">' +
+              esc(meta) +
+              "</span></div>"
+            )
+          })
+          .join("")
+        pop.hidden = false
+        const wrap = document.querySelector(".search-wrap-global")
+        if (wrap) wrap.classList.add("is-suggesting")
+        _contentSuggestPaint()
+      }
+
+      function closeContentSuggest() {
+        const pop = document.getElementById("contentSuggest")
+        _contentSuggestRows = []
+        _contentSuggestIdx = -1
+        if (pop) pop.hidden = true
+        const wrap = document.querySelector(".search-wrap-global")
+        if (wrap) wrap.classList.remove("is-suggesting")
+      }
+
+      function _contentSuggestPaint() {
+        const rows = document.querySelectorAll("#contentSuggestList .conv-suggest-row")
+        rows.forEach((r, i) => r.classList.toggle("active", i === _contentSuggestIdx))
+        const active = rows[_contentSuggestIdx]
+        if (active) active.scrollIntoView({ block: "nearest" })
+      }
+
+      function _contentSuggestHover(i) {
+        if (i === _contentSuggestIdx) return
+        _contentSuggestIdx = i
+        _contentSuggestPaint()
+      }
+
+      function _contentSuggestTake(i) {
+        const at = i == null ? Math.max(0, _contentSuggestIdx) : i
+        const cand = _contentSuggestRows[at]
+        if (!cand) return
+        const inp = document.getElementById("g-search")
+        if (inp) {
+          inp.value = ""
+          inp.focus()
+        }
+        _contentAppend(_convItemFor(cand))
+        closeContentSuggest()
+        _contentExprChanged()
+      }
+
+      document.getElementById("contentSearchInner").addEventListener("mousedown", (e) => {
+        if (e.target.closest(".conv-token, .clear-btn")) return
+        if (e.target.id === "g-search") return
+        e.preventDefault()
+        document.getElementById("g-search").focus()
+      })
+      document.addEventListener("mousedown", (e) => {
+        const pop = document.getElementById("contentSuggest")
+        if (!pop || pop.hidden) return
+        if (e.target.closest("#contentSuggest, .search-wrap-global")) return
+        closeContentSuggest()
+      })
+      document.getElementById("opt-group").addEventListener("click", toggleContentGroup)
+
       document.getElementById("g-search").addEventListener("keydown", (e) => {
+        const pop = document.getElementById("contentSuggest")
+        if (pop && !pop.hidden) {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault()
+            const n = _contentSuggestRows.length
+            _contentSuggestIdx = (_contentSuggestIdx + (e.key === "ArrowDown" ? 1 : -1) + n) % n
+            _contentSuggestPaint()
+            return
+          }
+          if (e.key === "Tab" || (e.key === "Enter" && _contentSuggestIdx >= 0)) {
+            e.preventDefault()
+            _contentSuggestTake()
+            return
+          }
+          if (e.key === "Escape") {
+            e.preventDefault()
+            closeContentSuggest()
+            return
+          }
+        }
+        if (e.key === "Backspace" && !e.target.value && contentExpr.length) {
+          e.preventDefault()
+          removeContentToken(contentExpr.length - 1)
+          return
+        }
+        if ((e.key === "(" || e.key === ")") && !searchRegex && !e.target.value.trim()) {
+          e.preventDefault()
+          contentExpr.push({ t: e.key })
+          _contentExprChanged()
+          return
+        }
+        if (e.key === "Enter") {
+          e.preventDefault()
+          clearTimeout(_searchDebounce)
+          commitContentPendingText()
+          closeContentSuggest()
+          _contentExprChanged()
+          return
+        }
         if (e.key !== "Escape") return
         e.target.value = ""
-        document.getElementById("clearSearch").classList.remove("visible")
-        gQuery = ""
-        triggerSearch()
+        contentExpr = []
+        _contentExprChanged()
       })
       let _searchDebounce = null
       document.getElementById("g-search").addEventListener("input", (e) => {
         const val = e.target.value.trim()
         document
           .getElementById("clearSearch")
-          .classList.toggle("visible", val.length > 0)
+          .classList.toggle("visible", val.length > 0 || contentExpr.length > 0)
+        if (val) openContentSuggest(val)
+        else closeContentSuggest()
         clearTimeout(_searchDebounce)
         if (!val) {
-          gQuery = ""
+          gQuery = contentTextTerms()
           triggerSearch()
           return
         }
         _searchDebounce = setTimeout(() => {
-          gQuery = val
+          gQuery = contentTextTerms()
           triggerSearch()
         }, 500)
       })
       document.getElementById("clearSearch").addEventListener("click", () => {
         document.getElementById("g-search").value = ""
-        document.getElementById("clearSearch").classList.remove("visible")
-        gQuery = ""
-        triggerSearch()
+        contentExpr = []
+        closeContentSuggest()
+        _contentExprChanged()
       })
       document.getElementById("searchCancel").addEventListener("click", () => {
         // Bump searchSeq so any in-flight worker result is discarded
@@ -17321,6 +17755,14 @@
       document.getElementById("opt-regex").addEventListener("click", () => {
         searchRegex = !searchRegex
         document.getElementById("opt-regex").classList.toggle("on", searchRegex)
+        // Under .* a bracket belongs to the pattern, so the chip field's own
+        // groups go — the same rule as the Conversations bar.
+        if (searchRegex) {
+          contentExpr = contentExpr.filter((it) => it.t !== "(" && it.t !== ")")
+          contentExpr = exprNormalize(contentExpr)
+        }
+        renderContentTokens()
+        gQuery = contentTextTerms()
         triggerSearch()
       })
       document.getElementById("opt-content").addEventListener("click", () => {
@@ -33188,7 +33630,13 @@
       //
       // items: {t:"text",value} · {t:"entity",value,label} ·
       //        {t:"id",kind,idText,label} · {t:"op",op:"and"|"or"|"not"} ·
+      //        {t:"tag",kind:"context"|"metadata",name,value|null} ·
       //        {t:"("} · {t:")"}
+      //
+      // The same item shape drives the Content search bar (`contentExpr`): the
+      // pure halves — normalising, serialising, drawing the chips — are shared
+      // (`exprNormalize`, `exprToQuery`, `exprTokensHtml`), and each field
+      // keeps its own state and handlers.
       let convExpr = []
       let _convSuggestRows = []
       let _convSuggestIdx = -1
@@ -33201,7 +33649,69 @@
       const CONV_SUGGEST_MAX = 8
 
       function _convIsOperand(it) {
-        return !!it && (it.t === "text" || it.t === "entity" || it.t === "id")
+        return (
+          !!it && (it.t === "text" || it.t === "entity" || it.t === "id" || it.t === "tag")
+        )
+      }
+
+      /// What makes two chips the same chip — so a suggestion is never offered
+      /// twice, and a second chip naming the same thing is dropped.
+      function _exprItemKey(it) {
+        if (it.t === "entity") return "e:" + it.value
+        if (it.t === "tag") return "t:" + it.kind + ":" + it.name + "=" + (it.value == null ? "*" : it.value)
+        return it.idText
+      }
+
+      /// One tag chip as the backend reads it: `ctx:"name"="value"`, with `*`
+      /// for "set to anything". Quotes inside a name or value are dropped by
+      /// splitting, never by a regex holding a quote — see `_convEscapeText`.
+      function _exprTagToken(it) {
+        const q = (v) => '"' + String(v).split('"').join("") + '"'
+        return (
+          (it.kind === "metadata" ? "meta:" : "ctx:") +
+          q(it.name) +
+          "=" +
+          (it.value == null ? q("*") : q(it.value))
+        )
+      }
+
+      /// The inverse of `_exprTagToken` — the renderer's mirror of
+      /// `TagLeaf::parse` in lib.rs. `null` when the word is not a tag.
+      function _exprParseTagToken(word) {
+        const w = String(word || "")
+        const low = w.toLowerCase()
+        const kind = low.startsWith("ctx:")
+          ? "context"
+          : low.startsWith("meta:")
+          ? "metadata"
+          : null
+        if (!kind) return null
+        const rest = w.slice(kind === "context" ? 4 : 5)
+        let name
+        let after
+        if (rest.startsWith('"')) {
+          const close = rest.indexOf('"', 1)
+          if (close < 0) return null
+          name = rest.slice(1, close)
+          after = rest.slice(close + 1)
+        } else {
+          const eq = rest.indexOf("=")
+          name = eq < 0 ? rest : rest.slice(0, eq)
+          after = eq < 0 ? "" : rest.slice(eq)
+        }
+        name = name.trim()
+        if (!name) return null
+        let value = null
+        if (after.startsWith("=")) {
+          const raw = _convUnquote(after.slice(1)).trim()
+          value = raw === "*" || raw === "" ? null : raw
+        }
+        return { t: "tag", kind, name, value }
+      }
+
+      /// How a tag chip reads.
+      function _exprTagLabel(it) {
+        return it.value == null ? it.name + " · any" : it.name + " = " + it.value
       }
 
       /// Every Article, Dialog and Transactional Dialog, flattened for the
@@ -33281,6 +33791,33 @@
         }
         _convEntityIndex = out
         _convEntityIndexSrc = entityOptions
+        return out
+      }
+
+      /// Context and metadata values as suggestions, from a `{name, value,
+      /// count}` option list (the tag popovers' own lists). `__any__` becomes
+      /// "set to anything"; `__not_set__` is not offered — `not` in front of
+      /// the any-chip says it. Hidden metadata is never offered.
+      function exprTagCandidates(options, kind) {
+        const out = []
+        for (const o of options || []) {
+          if (!o || !o.name) continue
+          if (o.value === "__not_set__") continue
+          if (kind === "metadata" && metaHidden(o.name, o.value)) continue
+          const value = o.value === "__any__" ? null : String(o.value)
+          const label = _exprTagLabel({ name: o.name, value })
+          out.push({
+            key: _exprItemKey({ t: "tag", kind, name: o.name, value }),
+            kind: kind === "metadata" ? "metatag" : "ctxtag",
+            name: o.name,
+            value,
+            label,
+            idText: "",
+            num: "",
+            weight: o.count || 0,
+            hay: (o.name + " " + (value || "") + " " + o.name + "=" + (value || "")).toLowerCase(),
+          })
+        }
         return out
       }
 
@@ -33462,7 +33999,11 @@
         // condition is exact and does not depend on it — so gating the
         // suggestions on E left the field unable to offer a chip that would
         // have worked perfectly well once placed.
-        const pool = content.concat(convEntityIndex())
+        const pool = content.concat(
+          convEntityIndex(),
+          contextOptionsLoaded ? exprTagCandidates(contextOptions, "context") : [],
+          metadataOptionsLoaded ? exprTagCandidates(metadataOptions, "metadata") : [],
+        )
         const tokens = raw.split(/\s+/).filter(Boolean)
         const hits = []
         const seen = new Set()
@@ -33527,6 +34068,8 @@
         tdialog: "T. Dialog",
         node: "Node",
         entity: "Entity",
+        ctxtag: "Context",
+        metatag: "Metadata",
       }
 
       function openConvSuggest(rawInput) {
@@ -33561,8 +34104,8 @@
             // A row with no title of its own already *is* its id, so repeating
             // it on the right would be the same string twice.
             const meta =
-              c.kind === "entity"
-                ? insPlural(c.weight, "conversations")
+              c.kind === "entity" || c.kind === "ctxtag" || c.kind === "metatag"
+                ? insPlural(c.weight, c.unit || "conversations")
                 : c.label
                 ? c.idText
                 : "by id"
@@ -33739,6 +34282,14 @@
         if (cand.kind === "entity") {
           return { t: "entity", value: String(cand.value), label: String(cand.value) }
         }
+        if (cand.kind === "ctxtag" || cand.kind === "metatag") {
+          return {
+            t: "tag",
+            kind: cand.kind === "metatag" ? "metadata" : "context",
+            name: cand.name,
+            value: cand.value,
+          }
+        }
         return {
           t: "id",
           kind: cand.kind,
@@ -33752,7 +34303,7 @@
         const tok = convExpr[i]
         if (!tok) return
         // Picking what it already says is a no-op, not a fresh search.
-        if (tok.idText === cand.idText) {
+        if (tok.idText && tok.idText === cand.idText) {
           closeConvSuggest()
           return
         }
@@ -33771,7 +34322,7 @@
         const keep = []
         for (const it of convExpr) {
           if (_convIsOperand(it) && it.t !== "text") {
-            const key = it.t === "entity" ? "e:" + it.value : it.idText
+            const key = _exprItemKey(it)
             if (seen.has(key)) {
               // The operator that introduced it goes with it.
               if (keep.length && keep[keep.length - 1].t === "op") keep.pop()
@@ -33789,7 +34340,7 @@
       function _convTokenKeys() {
         return convExpr
           .filter((it) => _convIsOperand(it) && it.t !== "text")
-          .map((it) => (it.t === "entity" ? "e:" + it.value : it.idText))
+          .map(_exprItemKey)
       }
 
       /// Append an operand, inserting the operator that most likely joins it.
@@ -33912,9 +34463,13 @@
       /// in while building a group, and it closes itself on the way out
       /// (`convExprToQuery`).
       function normalizeConvExpr() {
+        convExpr = exprNormalize(convExpr)
+      }
+
+      function exprNormalize(list) {
         const out = []
         let depth = 0
-        for (const it of convExpr) {
+        for (const it of list) {
           const prev = out[out.length - 1]
           if (it.t === ")") {
             if (depth === 0) continue
@@ -33948,7 +34503,7 @@
           out.push(it)
         }
         while (out.length && out[out.length - 1].t === "op") out.pop()
-        convExpr = out
+        return out
       }
 
       /// One text chip, spelled so the backend reads it back as text.
@@ -33982,7 +34537,7 @@
             word === "OR" ||
             word === "NOT" ||
             /[()]/.test(word) ||
-            /^entity:/i.test(word) ||
+            /^(?:entity|ctx|meta):/i.test(word) ||
             !!convParseIdToken(word)
           // Quotes are stripped by splitting rather than by a regex holding a
           // `"`: `frontend/tests/extract.js` is a brace matcher that does not
@@ -34012,10 +34567,14 @@
       /// the string in the Insights chip and in an AI export says what it means
       /// without the reader having to know the left-to-right rule.
       function convExprToQuery() {
+        return exprToQuery(convExpr)
+      }
+
+      function exprToQuery(list) {
         const parts = []
         let depth = 0
         let lastWasOpen = true
-        for (const it of convExpr) {
+        for (const it of list) {
           if (it.t === "(") {
             if (!lastWasOpen && parts.length && parts[parts.length - 1] !== "(")
               parts.push("(")
@@ -34047,6 +34606,8 @@
               ? it.idText
               : it.t === "entity"
               ? _convEntityToken(it.value)
+              : it.t === "tag"
+              ? _exprTagToken(it)
               : _convEscapeText(it.value),
           )
           lastWasOpen = false
@@ -34114,6 +34675,12 @@
               out.push({ t: "entity", value: name.toLowerCase(), label: name })
               continue
             }
+          }
+          const tag = _exprParseTagToken(word)
+          if (tag) {
+            flush()
+            out.push(tag)
+            continue
           }
           if (!quoted) {
             if (word === "AND" || word === "OR" || word === "NOT") {
@@ -34206,21 +34773,42 @@
       function renderConvTokens() {
         const host = document.getElementById("convTokens")
         if (!host) return
+        host.innerHTML = exprTokensHtml(convExpr, CONV_EXPR_HANDLERS)
+      }
+
+      /// The inline handlers a chip field's buttons call — the only thing the
+      /// Conversations and Content fields draw differently.
+      const CONV_EXPR_HANDLERS = {
+        remove: "removeConvToken",
+        cycle: "cycleConvOp",
+        lead: "toggleConvLeadNot",
+        edit: "editConvText",
+        pick: "openConvNodePicker",
+        nodeRows: (it) => convTokenNodeRows(it),
+      }
+
+      /// Draw a chip field. Pure over its list: which buttons call what comes
+      /// from `H`.
+      function exprTokensHtml(list, H) {
         let html = ""
         let open = 0
         // Only the very first condition can carry an exclusion of its own; an
         // exclusion anywhere else is written after the thing it narrows.
-        if (convExpr.length && convExpr[0].t !== "op") {
+        if (list.length && list[0].t !== "op") {
           html +=
             '<button class="conv-op is-lead" title="Exclude everything below" ' +
-            'onclick="event.stopPropagation();toggleConvLeadNot()">not</button>'
+            'onclick="event.stopPropagation();' +
+            H.lead +
+            '()">not</button>'
         }
-        convExpr.forEach((it, i) => {
+        list.forEach((it, i) => {
           if (it.t === "(") {
             open++
             html +=
               '<span class="conv-group"><button class="conv-paren" title="Remove group" ' +
-              'onclick="event.stopPropagation();removeConvToken(' +
+              'onclick="event.stopPropagation();' +
+              H.remove +
+              "(" +
               i +
               ')">(</button>'
             return
@@ -34228,7 +34816,9 @@
           if (it.t === ")") {
             html +=
               '<button class="conv-paren" title="Remove group" ' +
-              'onclick="event.stopPropagation();removeConvToken(' +
+              'onclick="event.stopPropagation();' +
+              H.remove +
+              "(" +
               i +
               ')">)</button>'
             if (open > 0) {
@@ -34246,54 +34836,74 @@
               (it.op === "not"
                 ? "Excluding what follows — click to switch"
                 : "Click to switch: and / or / not") +
-              '" onclick="event.stopPropagation();cycleConvOp(' +
+              '" onclick="event.stopPropagation();' +
+              H.cycle +
+              "(" +
               i +
               ')">' +
               label +
               "</button>"
             return
           }
-          html += _convChipHtml(it, i)
+          html += _convChipHtml(it, i, H)
         })
         while (open-- > 0) html += "</span>"
-        host.innerHTML = html
+        return html
       }
 
-      function _convChipHtml(it, i) {
+      function _convChipHtml(it, i, H) {
+        const h = H || CONV_EXPR_HANDLERS
         let cls = "text"
         let text = ""
         let title = ""
         let pickable = false
         if (it.t === "id") {
-          const nodes = convTokenNodeRows(it)
-          pickable = !!nodes
+          const nodes = h.nodeRows ? h.nodeRows(it) : null
+          pickable = !!nodes && !!h.pick
           cls = it.kind === "node" ? "dialog" : it.kind
           text = it.idText
           title =
             (it.label ? it.idText + " — " + it.label : it.idText) +
-            (nodes ? " · click to pick a node" : "")
+            (pickable ? " · click to pick a node" : "")
         } else if (it.t === "entity") {
           cls = "entity"
           text = it.value
           title = "Entity: " + it.value
+        } else if (it.t === "tag") {
+          cls = "tag"
+          text = _exprTagLabel(it)
+          title =
+            (it.kind === "metadata" ? "Metadata" : "Context") +
+            ": " +
+            (it.value == null ? it.name + " is set, to any value" : it.name + " = " + it.value)
         } else {
           text = it.value
           title = "Text: " + it.value + " · click to edit"
         }
+        const tagKind =
+          it.t === "tag"
+            ? '<span class="conv-token-kind">' +
+              (it.kind === "metadata" ? "meta" : "ctx") +
+              "</span>"
+            : ""
         const label =
           it.t === "id" && pickable
-            ? '<button class="conv-token-label" onclick="event.stopPropagation();openConvNodePicker(' +
+            ? '<button class="conv-token-label" onclick="event.stopPropagation();' +
+              h.pick +
+              "(" +
               i +
               ')">' +
               esc(text) +
               ' <span class="conv-token-caret">&#x25BE;</span></button>'
             : it.t === "text"
-            ? '<button class="conv-token-label" onclick="event.stopPropagation();editConvText(' +
+            ? '<button class="conv-token-label" onclick="event.stopPropagation();' +
+              h.edit +
+              "(" +
               i +
               ')">' +
               esc(text) +
               "</button>"
-            : '<span class="conv-token-label">' + esc(text) + "</span>"
+            : '<span class="conv-token-label">' + tagKind + esc(text) + "</span>"
         return (
           '<span class="conv-token is-' +
           esc(cls) +
@@ -34304,7 +34914,9 @@
           esc(title) +
           '">' +
           label +
-          '<button class="conv-token-x" title="Remove" onclick="event.stopPropagation();removeConvToken(' +
+          '<button class="conv-token-x" title="Remove" onclick="event.stopPropagation();' +
+          h.remove +
+          "(" +
           i +
           ')">&#x2715;</button></span>'
         )
@@ -34315,10 +34927,21 @@
       /// Rebuilding a five-condition search to fix a typo in the first one is
       /// not an edit, it is a retype.
       function editConvText(i) {
+        _exprEditText("#convTokens", convExpr, i, renderConvTokens, (v) => {
+          if (v) convExpr[i] = { t: "text", value: v }
+          else convExpr.splice(i, 1)
+          normalizeConvExpr()
+          _afterConvExprChange(false)
+        })
+      }
+
+      /// Turn a text chip's label into an input, in place. `commit` gets the
+      /// new text ("" to remove the chip) only when it actually changed.
+      function _exprEditText(hostSel, list, i, redraw, commit) {
         const el = document.querySelector(
-          '#convTokens .conv-token[data-token-index="' + i + '"] .conv-token-label',
+          hostSel + ' .conv-token[data-token-index="' + i + '"] .conv-token-label',
         )
-        const item = convExpr[i]
+        const item = list[i]
         if (!el || !item || item.t !== "text") return
         const inp = document.createElement("input")
         inp.className = "conv-token-edit"
@@ -34331,19 +34954,12 @@
         const finish = (save) => {
           if (done) return
           done = true
-          if (!save) {
-            renderConvTokens()
-            return
-          }
           const v = inp.value.trim()
-          if (v === item.value) {
-            renderConvTokens()
+          if (!save || v === item.value) {
+            redraw()
             return
           }
-          if (v) convExpr[i] = { t: "text", value: v }
-          else convExpr.splice(i, 1)
-          normalizeConvExpr()
-          _afterConvExprChange(false)
+          commit(v)
         }
         inp.addEventListener("input", () => {
           inp.size = Math.max(4, inp.value.length)
@@ -34404,6 +35020,18 @@
       /// `ensureEntityIdMap` is idempotent and already guarded on the database,
       /// so this needs no flag of its own.
       function _convWarmSuggestSources() {
+        // The tag lists back the context and metadata suggestions. Loaded
+        // once, the same lists the tag popover reads.
+        for (const k of ["context", "metadata"]) {
+          const kind = CTX_KINDS[k]
+          if (kind.loaded()) continue
+          Promise.resolve(kind.load())
+            .then((rows) => {
+              kind.setOptions(rows || [])
+              kind.setLoaded(true)
+            })
+            .catch(() => {})
+        }
         if (entityOptionsLoaded) return
         // `get_entity_options` is one full scan of `entity_index`, which on a
         // real database is not instant — and the first keystroke of a cold
