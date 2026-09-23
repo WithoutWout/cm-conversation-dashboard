@@ -6,9 +6,14 @@ version = 3
 name = "CAIDashboard"
 version = "0.20.0"
 dependencies = [
+ "block2",
+ "core-foundation",
+ "core-graphics",
  "csv",
  "log",
  "notify",
+ "objc2",
+ "objc2-app-kit",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",

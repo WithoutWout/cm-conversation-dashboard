@@ -76,3 +76,14 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 # leave the app unable to update itself at the office. `zip` is the other half
 # of the default feature set and is still needed for the release artifacts.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "zip"] }
+
+# The Insights pipette on macOS: AppKit's NSColorSampler, and the CoreGraphics
+# window list that notices a sampler overlay left on screen (`src/screen_color.rs`).
+# All of these are already in the tree through Tauri, at these versions; naming
+# them only turns on the classes the pipette needs.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSColor", "NSColorSampler", "NSColorSpace"] }
+core-foundation = "0.10"
+core-graphics = "0.25"

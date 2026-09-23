@@ -73,12 +73,12 @@ each other. That is the whole design constraint here.
 - **The selected Context/Metadata key survives the switch**, so the two readings
   of one key can be compared in two clicks.
 
-**Two cards are conversation-only, and the body says so rather than hiding it.**
-*Feedback* — a thumb rates the conversation, not the turn that happened to match,
-and showing it per-turn invites exactly the misreading the mode exists to prevent
-("43% of my matching turns got a thumbs down" when it is 43% of their
-conversations). *Opening questions* — a property of the conversation with no
-per-turn reading at all. The "Thumbs down" tile goes with them.
+**One card is conversation-only, and the body says so rather than hiding it.**
+*Opening questions* — a property of the conversation with no per-turn reading at
+all. *Feedback* used to be the second: it was read from per-conversation flags,
+and a per-turn reading of those would have said "43% of my matching turns got a
+thumbs down" when it was 43% of their conversations. It is counted per answer
+now (see `Feedback, per answer`), which is a per-turn fact, so it reads in both.
 
 **One card keeps its own unit in both readings.** *Conversation length* bins
 conversations either way; what changes is what is being binned — every turn, or
@@ -321,6 +321,36 @@ without anyone choosing them.
   simply not have recoloured them. `a custom export palette recolours every
   mark, and leaks nothing from the screen` pins it.
 - The emailed report's inline colours come from the same theme.
+- **The pipette beside every colour samples the whole screen**, so a brand
+  colour can be taken from a logo in any other window. One button, two routes:
+  Windows runs WebView2, which is Chromium and has the `EyeDropper` API, so the
+  renderer samples by itself; WKWebView on macOS has no `EyeDropper`, so there
+  the button calls `pick_screen_color`, which opens AppKit's `NSColorSampler`
+  (`src-tauri/src/screen_color.rs`) — the system Colours panel's own loupe,
+  needing no Screen Recording permission. The colour is converted to sRGB
+  before it becomes hex, because on a P3 display the sampler answers in the
+  display's space. Esc is a cancel on both routes and changes nothing. One pick
+  at a time, in the renderer and in Rust.
+- **After every macOS pick, the app checks the sampler actually left.** On
+  macOS 27.0 a pick from this app delivered its colour and then left the
+  system's `ColorSampler.xpc` overlay up: a full-screen window that swallowed
+  every click, hover and scroll on the Mac — even after the app quit — until
+  that helper was killed. TextEdit's pipette on the same machine closes
+  cleanly; the cause was not found. So `rescue_stuck_overlay` reads the
+  on-screen window list 0.6 s and 1.5 s after the handler, and if windows owned
+  by `ColorSampler` are still there it ends that helper (never this app, never
+  pid 1) and logs a warning. launchd starts it again on the next pick.
+  With the sampler held in `ACTIVE` for the whole session, a pick by hand has
+  since closed on its own without the rescue firing, so the rescue is a safety
+  net, not the fix — but whether holding the sampler is what fixed it is not
+  proven. Two things are: `tauri dev` restarting the app mid-pick (any Rust
+  edit does it) orphans the overlay beyond any rescue, and synthetic clicks
+  cannot test any of this — in a plain AppKit program they did not reliably
+  complete a pick either, so it is checked by hand.
+- **The modal's body scrolls, not the box.** It is a flex column with the body
+  `overflow-y: auto; min-height: 0`; without that the `90vh` cap let the
+  controls spill below the window, where the fixed overlay could not reach
+  them. The export modal has the same rule.
 
 ### Export language
 
@@ -364,11 +394,58 @@ heatmap and the Segments table are what they are.
 
 ## Numbers that had to be got right
 
-- **The feedback split is four disjoint groups**, which is why
-  `mixed_feedback_sessions` exists. `has_pos_feedback` and `has_neg_feedback` are
-  independent flags — one conversation can carry a thumbs up *and* a thumbs down
-  — so "no feedback" is not `total − up − down`. Without the overlap the stack
-  over-counts the rated conversations and under-states how many nobody rated.
+- **A GenAI answer is logged in one of two ways, and both count.** A question
+  the recognizer hands to GenAI is a `QA` row with `recognition_type =
+  'GenerativeAI'`; a follow-up asked inside the GenAI conversation is a row of
+  its own, `main_interaction_type = 'GenerativeAI'`, that never passes the
+  recognizer and has **no** recognition type (933 and 910 of them on the
+  reference database). *How the answer was found* used to count only rows with
+  a recognition type, so it dropped the second kind and showed GenAI at 3.3% of
+  typed questions where it was 6.3%; it now files a `GenerativeAI` row under
+  GenerativeAI. Dialog steps and FAQ clicks are choices, not typed questions,
+  and stay out of that chart. **The GenAI tile is that bar's own share** —
+  `genai_answers / typed_questions`, taken from the same grouped read
+  (fetched in full, then cut to the top N for the chart) — so the headline and
+  the chart show one GenAI percentage. It used to be the share of
+  conversations with any GenAI answer (5.7% beside the chart's 6.3%, which read
+  as a contradiction); that conversation count survives as the tile's sub-line.
+  Read with Quality, so without it there is no GenAI tile rather than a 0%.
+  The chart's percentages are out of `typed_questions` in **both** readings: in
+  the interactions reading they used to be out of every matching answer, which
+  put the GenAI bar at 1.7% beside the tile's 6.3%.
+- **Feedback, per answer.** What people report is two numbers: the share of
+  the ratings that was positive, and the share of the answers that got a rating.
+  Both are about answers, so the Feedback card, its note and the two tiles
+  (*Positive feedback*, *Answers rated*) are counted per answer
+  (`answer_count`, `rated_answers`, `positive_answers`, read with Quality).
+  - **A rating is never stored on the answer.** In the Interaction Log it is an
+    interaction of its own, type `Feedback`, naming the answer through
+    `feedback_info.originatingInteractionId` — on the reference database all
+    3,325 ratings were, one per answer, never an answer rated both ways. An
+    answer counts as rated exactly when a rating names it; an older row with the
+    score on the answer itself is its own origin. Ratings are gathered from the
+    matched *conversations*, because a rating is rarely the turn a search
+    matched, then met against the answers of the reading.
+  - **What an answer is** is `IS_ANSWER_ROW`: every row but `Feedback`, `Event`
+    and `LinkClick`. The rating rows are not answers, and neither are the
+    `Event` rows — the greeting and `show_feedback`, the bot asking for the
+    rating. Counting them would put the ratings, and the prompts asking for
+    them, in the denominator of "how many answers were rated".
+  - **The bar is the rated answers only**, so its green share *is* the
+    positive percentage. Unrated answers are not a slice of it: the positive
+    share would otherwise shrink every time fewer people bothered to rate. How
+    many were rated is in the note and its own tile, where ~3% is a number
+    rather than a sliver.
+  - **Nothing rated is a dash, never `0%`**, and with Quality not read there
+    are no feedback tiles at all rather than a false zero.
+  - **`IN (SELECT …)`, not a join.** Nothing indexes `interaction_uuid`; the
+    `LEFT JOIN` this was first written as re-searched the ratings per answer and
+    took 10.8 s of an 11.2 s read on the 120k bench. The materialized `IN` list
+    is ~90–100 ms.
+  - The per-conversation flags (`has_pos_feedback`, `has_neg_feedback`,
+    `mixed_feedback_sessions`) still exist — the conversation list's feedback
+    pills filter on them — and the payload still carries their sums, which the
+    dashboard no longer draws.
 - **A tag value's share is of the conversations that set the key** (`withKey`),
   not of the whole result. Against the whole result every value of a rarely-set
   key reads as negligible, which is a statement about the key rather than about
@@ -605,7 +682,7 @@ carrying feedback volume, positive share, recognition rate, recognition quality
 and interaction count. The dashboard could answer any one of those questions and
 none of the comparisons between them.
 
-### It always counts every interaction of the matched conversations
+### It always counts every answer of the matched conversations
 
 In **both readings**, and that is the one place this card deliberately ignores
 the unit toggle. A segment is a set of *conversations* — `context_index` and
@@ -615,9 +692,45 @@ and "every turn" under the other would be two different reports wearing one
 title, pasted into the same spreadsheet column. The card note says so in those
 words. `INS_SEGMENT_NOTE` is where it is written, once.
 
-Culture is grouped by the **conversation's** culture (`insight_sessions.culture`)
-rather than the turn's, for the same reason: mixing a session-keyed block with a
-turn-keyed one in one table is how two rows of it come to mean different things.
+Culture is grouped by **each turn's own** culture (`interactions.culture`,
+falling back to the conversation's when a turn has none). It used to be the
+conversation's, to keep every block a set of conversations — but the report this
+table is compared against counts per turn, and a real week showed the cost: a
+Chinese row of 65 interactions here against 5 in the report, because every turn
+of five Chinese conversations was filed under Chinese. So `insight_segment_stats`
+has one row per conversation *per culture its turns were in*; context and
+metadata join on `session_uuid` and sum all of them, so their rows are
+unchanged, and `INSIGHT_SEGMENT_SUMS` counts `COUNT(DISTINCT session_uuid)` so
+the split never counts a conversation twice. A conversation that switched
+language is under two culture rows, which the block says (`overlapping`) — the
+interactions still partition, only the conversation counts overlap.
+
+### Interactions are answers
+
+Everywhere this app shows an interaction count, it counts **answers**:
+`IS_ANSWER_ROW` (spelled once, through the `answer_row!` macro, and as
+`is_answer_type` for rows already in Rust) — every row but `Event`, `Feedback`
+and `LinkClick`. Those are the bot's own events (the greeting, the
+`show_feedback` prompt), the rating rows and clicks, and on the reference
+database they are 27% of the log. Counting them is what put this table at
+121,323 interactions for a week the report called 86,333.
+
+- **`session_summary.interaction_count` is answers.** So the conversation list's
+  "N interactions", *Median length*, the length chart, the Insights total and
+  this table all count the same thing, from one column. A conversation that is
+  only a greeting has 0 and gets its own "0" bar on the length chart.
+- **Older databases are recounted once on open** (`SESSION_SUMMARY_RULES_VERSION`,
+  the `summary` migration phase) and stamped, so it happens once.
+- **The interactions reading matches answers only** (`insight_matches` joins
+  `interactions` through `IS_ANSWER_ROW`), so its hero, its charts and "of all
+  interactions" count what the tile counts, and the bot's events no longer land
+  in *Not scored*.
+- The Flagged view stores the answer count of a conversation when it is
+  flagged; conversations flagged before this keep the count they were given.
+- **Not changed, on purpose:** the AI export writes every row of a conversation,
+  events included — it is the log, not a count — and its progress says "log
+  rows". Its size warning is estimated from the summed `interaction_count`, so it
+  now reads roughly a quarter low; it was always labelled "very roughly".
 
 ### The four ratios, and their denominators
 
@@ -629,7 +742,7 @@ this table is copied far more often than it is hovered.
 | --- | --- |
 | Positive feedback | the turns that were rated at all |
 | Recognition rate | the turns the recognizer *scored* — `recognized + unrecognized`. GenAI answers are in **neither** half |
-| Recognition quality | the mean `recognition_quality` of the turns it matched |
+| Recognition quality | the turns the recognizer *scored*, like the rate — the mean over `recognized + unrecognized`, **zeros included**. That is the portal's definition; the mean over the matched turns only read ~6 points higher (85.57% here against 79.06% in the report for the same week) |
 
 - **`FEEDBACK_ROW` and `FEEDBACK_POS_ROW` are spelled exactly as
   `session_summary_insert_sql` spells them**, both forms of the JSON separator
@@ -952,10 +1065,12 @@ it is the whole difference between 88 ms and 12 ms.)
   it silently disappear, with no error and no empty state.
 - **Cards are filtered by the choice, not by emptiness.** A section that was not
   read comes back as empty arrays and most of its cards drop out on their own —
-  but **Feedback** is built from the headline counters, which are always read.
-  Filtering by emptiness would leave that one chart stranded under a heading for
-  a section nobody asked for. `a section that was not chosen contributes no
-  card, not even a derived one` is built around exactly that card.
+  and they are filtered by the choice anyway. **Feedback** was the reason: it
+  was built from the always-read headline counters and would have been
+  stranded under a heading for a section nobody asked for. It now reads
+  Quality's own per-answer fields, so `a section that was not chosen
+  contributes no card, not even a derived one` pins that no Quality card and
+  no feedback tile appear when Quality was not read.
 - **The two tag sections are off by default** and marked *slower*: they are the
   expensive half, and they say nothing until a key is chosen. Volume, Quality
   and Content are on, because between them they answer what people open this

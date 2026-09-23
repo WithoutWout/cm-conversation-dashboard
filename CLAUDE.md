@@ -56,6 +56,7 @@ src-tauri/
     self_update.rs  — Portable-exe self-update: install-kind detection, the
                       rename swap and its rollback, stale-backup cleanup
     xlsx.rs         — Minimal one-sheet .xlsx writer over the `zip` crate
+    screen_color.rs — The Insights pipette on macOS (NSColorSampler) and its stuck-overlay rescue
   tauri.conf.json   — App config, window setup, frontendDist: ../frontend, updater pubkey
   Cargo.toml        — Rust dependencies (tauri, serde, reqwest, notify, tauri-plugin-opener, tauri-plugin-dialog, tauri-plugin-updater)
   capabilities/
@@ -70,7 +71,8 @@ frontend/
     settings-backup.test.js, metadata-filter.test.js, context-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
-    db-migration-progress.test.js, search-bubbles.test.js
+    db-migration-progress.test.js, search-bubbles.test.js,
+    share-content-order.test.js, gap-sort.test.js, gap-fix.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -111,6 +113,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
 | `get_gap_interactions` | `getGapInteractions({fromUtc, toUtc, threshold})` | The low- and zero-recognition interactions of a UTC range, newest first, each with its fixed mark — `{rows, truncated}`. See `docs/gap.md` |
 | `set_gap_fixed`       | `setGapFixed(logIds, fixed, note?)` | Marks or unmarks interactions as fixed in `gap_fixed`; returns the stored timestamp |
+| `pick_screen_color`   | `pickScreenColor()`              | macOS only: opens AppKit's `NSColorSampler` and returns the picked colour as sRGB `#rrggbb`, or `null` on Esc; ends the system sampler helper if its overlay outstays the pick. `Err("unsupported")` elsewhere — Windows uses the webview's `EyeDropper`. See `docs/insights.md` → "Insights settings" |
 | `export_settings_backup` | `exportSettingsBackup(defaultName, payload)` | Merges the Analytics API credentials into the renderer's payload and writes the backup (`0600`). See `docs/settings-and-updates.md` → "Settings backup" |
 | `import_settings_backup` | `importSettingsBackup()`          | Picks a backup, restores the Analytics API credentials from it, returns everything else — `{ ok, canceled, settings, appVersion, schemaVersion, analyticsRestored }` |
 
@@ -146,7 +149,7 @@ There are also Conversations DB commands exposed through `window.backend` for im
 | `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher once the folder settles after export files change — see `One drop, one notification` |
 | `ai-export-progress`  | `{ phase, sessionCount?, interactionCount? }` | Phase boundaries inside `export_conversations_for_ai` — `"querying"` once the save dialog is answered, `"writing"` once the result set is known |
 | `update-progress`     | `{ phase, downloaded, total? }` | Download/install progress for `install_update`. `total` is absent when the server sends no `Content-Length` |
-| `db-migrating`        | `{ phase, done? }`   | Phase updates for the one-time migrations `open_db` runs — `"answerIndex"`, `"contexts"` (with a running row count), `"compacting"`. Silent on every open that has nothing to migrate. See `docs/import.md` |
+| `db-migrating`        | `{ phase, done? }`   | Phase updates for the one-time migrations `open_db` runs — `"answerIndex"`, `"contexts"` (with a running row count), `"compacting"`, `"summary"` (recounting interactions as answers — see `docs/insights.md` → "Interactions are answers"). Silent on every open that has nothing to migrate. See `docs/import.md` |
 
 ### One drop, one notification
 
@@ -411,10 +414,15 @@ The orientation map for the whole window. It says what is on screen and where;
            text filter · count · Export .xlsx
   left:    windowed list — Question · Response · Recognition · When · ✓ fixed
            (sortable headers; ↑↓ move, F toggles fixed, C copies)
-  right:   header (when · culture · score · Mark fixed · Mark all N fixed ·
+  right:   header (language badge — translation language, else culture ·
+           when · score · Mark fixed · Mark all N fixed ·
            Copy question · Open in Conversations) · the question's words as
            copy chips · the conversation, read-only, the row's turn marked ·
-           entity finder (name or word → words, Open in CM.com)
+           "Fix this": unknown words (Copy · Add to entity… → closest
+           entities, the word copied, the entity opened) · recognised as
+           (Edit entity) · answered by (Edit Article/Dialog) · Articles using
+           these entities · what they asked next — every line with Edit ↗ and
+           copy-link; typing in its search box finds entities instead
 
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
@@ -428,11 +436,13 @@ The orientation map for the whole window. It says what is on screen and where;
               with what it answers and what it costs (fast / medium / slower)
     Build N sections
   body, once built (one scrolling canvas, not tabs; section headings are sticky):
-    stat tiles (conversations · interactions · median length · GenAI ·
-                thumbs down · zero recognition · under threshold)
+    stat tiles (conversations · interactions · median length · positive
+                feedback · answers rated · GenAI · zero recognition ·
+                under threshold)
     Volume   — per day · by hour (UTC) · day × hour heatmap · length
-    Quality  — lowest recognition score · feedback (conversations only)
-               · how the answer was found · Dialog outcome
+    Quality  — lowest recognition score · positive feedback (per answer:
+               share of rated answers that were positive, and share of
+               answers rated) · how the answer was found · Dialog outcome
     Context  — one key button (searchable picker) + its values
     Metadata — one key button (searchable picker) + its values
     Content  — entities · opening questions (conversations only) ·
@@ -559,7 +569,8 @@ Mirrors the active tab's current result set, then lets you refine *what gets sha
 
 - **`getExportItemsForCurrentView()` is the only set that matters.** Rendering and all three copy actions read it, so the list on screen and the text on the clipboard cannot disagree. It applies `_exportDropped` (per-row ✕) and `_exportFilter` (the modal's own filter box) on top of `getActiveExportItems()`. Both reset on every open — the modal always *starts* as an honest mirror of the tab.
 - **The primary button names its own count** (`Copy 5 links`, `Copy table (5 rows)`). Once a filter or a removal can shrink the set, "Copy all as links" is a claim the button can't back up.
-- **Each view gets a one-line description** (`EXPORT_VIEW_HINTS`). "Grouped" does three things at once — sections, ID order, and Dialog → Article relations *replacing* the response column — and none of that is inferable from the word.
+- **Every view is in number order**: Articles, then Dialogs, then Transactional Dialogs, each by id (`groupedExportItems`, applied in `getExportItemsForCurrentView`, so the clipboard follows). A shared list is looked up by its numbers, not by search rank.
+- **Each view gets a one-line description** (`EXPORT_VIEW_HINTS`). "Grouped" does two things beyond the order — sections, and Dialog → Article relations *replacing* the response column — and neither is inferable from the word.
 - **A type badge sits on every row** because `dn-` prefixes both Dialogs and Transactional Dialogs: in the flat List view the ID alone could not tell them apart. In the Table view the badge rides inside the ID cell rather than taking a fourth column, so `_copyExportTable`'s clipboard output keeps its original three columns.
 - **An unset `cmBaseUrl` is stated, not implied.** Without it every "link" copy silently degrades to plain IDs; the header shows an amber chip that opens Settings.
 - `_exportRowHtml` is shared by List and Grouped. They were near-identical copies before, which is how Grouped's relation column drifted out of List.
@@ -600,6 +611,7 @@ Always use these terms in the UI:
 | `cm-sort-dialogs`          | Dialogs sort choice |
 | `cm-flow-direction`        | Dialog graph layout direction |
 | `cm-view`                  | Last selected main view: `content` · `conversations` · `flagged` · `gap` |
+| `cm-gap-sort`              | JSON `{key, dir}` — the GAP list's sort column (`time` · `recognition` · `question` · `response`) and direction (`1` / `-1`). Read field by field; anything else falls back to newest first |
 | `cm-conv-db-path`          | Last selected conversations database (`CONV_DB_STORAGE_KEY`) |
 | `conv-low-recog-threshold` | Low recognition threshold |
 | `cm-metadata-hidden`       | JSON array of rule strings — metadata keys (`key`) or values (`key = value`, `*` wildcard) left out of every metadata picker. Display only; see `docs/search.md` → "Hidden metadata" |
