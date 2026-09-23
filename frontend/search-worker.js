@@ -921,12 +921,36 @@ function parseTagToken(word) {
   }
   name = name.trim()
   if (!name) return null
-  let value = null
-  if (after[0] === "=") {
-    const raw = unquoteToken(after.slice(1)).trim()
-    value = raw === "*" || raw === "" ? null : raw
+  return { k: "tag", kind, name, values: after[0] === "=" ? parseTagValues(after.slice(1)) : [] }
+}
+
+/// `"a","b"` / `a,b` — the value list of a tag, any of which matches. `*`
+/// anywhere means any value, which is an empty list. The mirror of the loop in
+/// `TagLeaf::parse`.
+function parseTagValues(src) {
+  const out = []
+  let any = false
+  let j = 0
+  while (j < src.length) {
+    let v
+    if (src[j] === '"') {
+      const close = src.indexOf('"', j + 1)
+      const end = close < 0 ? src.length : close
+      v = src.slice(j + 1, end)
+      j = end + 1
+    } else {
+      const comma = src.indexOf(",", j)
+      const end = comma < 0 ? src.length : comma
+      v = src.slice(j, end)
+      j = end
+    }
+    v = v.trim()
+    if (v === "*") any = true
+    else if (v && !out.some((x) => x.toLowerCase() === v.toLowerCase())) out.push(v)
+    while (j < src.length && src[j] !== ",") j++
+    j++
   }
-  return { k: "tag", kind, name, value }
+  return any ? [] : out
 }
 
 function parseIdToken(word) {
@@ -1089,12 +1113,12 @@ function exprTextLeaves(n, out) {
   return acc
 }
 
-function tagSetHas(set, name, value) {
+function tagSetHas(set, name, values) {
   const vals = set[name]
   if (!vals) return false
-  if (value == null) return true
-  const want = value.toLowerCase()
-  return vals.some((v) => String(v).toLowerCase() === want)
+  if (!values.length) return true
+  const want = values.map((v) => v.toLowerCase())
+  return vals.some((v) => want.includes(String(v).toLowerCase()))
 }
 
 function exprLeafMatches(n, item) {
@@ -1115,7 +1139,7 @@ function exprLeafMatches(n, item) {
   }
   if (n.k === "tag") {
     const sets = (n.kind === "metadata" ? item._metaSets : item._ctxSets) || []
-    return sets.some((set) => tagSetHas(set, n.name, n.value))
+    return sets.some((set) => tagSetHas(set, n.name, n.values))
   }
   return false
 }

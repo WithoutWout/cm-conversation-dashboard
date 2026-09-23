@@ -4824,6 +4824,132 @@
         color: var(--teal);
         border-color: rgba(45, 212, 191, 0.25);
       }
+      .conv-suggest-types {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 6px 5px;
+        border-bottom: 1px solid var(--border);
+      }
+      .conv-suggest-types[hidden] {
+        display: none;
+      }
+      .conv-suggest-type {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.68rem;
+        padding: 2px 8px;
+      }
+      .conv-suggest-type .n {
+        opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+      }
+      .conv-suggest-type:hover {
+        color: var(--text);
+      }
+      .conv-suggest-type.active {
+        background: color-mix(in srgb, var(--accent) 20%, transparent);
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .conv-suggest-none {
+        color: var(--muted);
+        font-size: 0.74rem;
+        padding: 8px 10px;
+      }
+      .expr-picker {
+        position: fixed;
+        z-index: 450;
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+        animation: pop-in 0.12s ease-out;
+      }
+      .expr-picker[hidden] {
+        display: none;
+      }
+      .expr-picker-head {
+        padding: 6px;
+        border-bottom: 1px solid var(--border);
+      }
+      .expr-picker-head[hidden] {
+        display: none;
+      }
+      .expr-picker-head input {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.76rem;
+        padding: 4px 8px;
+      }
+      .expr-picker-list {
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+        padding: 4px;
+      }
+      .expr-picker-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        background: none;
+        border: 0;
+        border-radius: 6px;
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.78rem;
+        padding: 5px 8px;
+        text-align: left;
+      }
+      .expr-picker-row:hover {
+        background: var(--surface2);
+      }
+      .expr-picker-row.is-any {
+        border-bottom: 1px solid var(--border);
+        border-radius: 6px 6px 0 0;
+        margin-bottom: 2px;
+      }
+      .expr-picker-check {
+        width: 12px;
+        color: var(--teal);
+        flex: none;
+      }
+      .expr-picker-row.on .expr-picker-label {
+        color: var(--teal);
+      }
+      .expr-picker-label {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .expr-picker-meta {
+        color: var(--muted);
+        font-size: 0.68rem;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+      .expr-picker-foot,
+      .expr-picker-empty {
+        color: var(--muted);
+        font-size: 0.66rem;
+        padding: 6px 10px;
+        border-top: 1px solid var(--border);
+      }
+      .expr-picker-empty {
+        border-top: 0;
+      }
       .conv-suggest-badge.is-ctxtag,
       .conv-suggest-badge.is-metatag {
         background: rgba(45, 212, 191, 0.12);
@@ -9923,10 +10049,12 @@
             </div>
             <button class="clear-btn" id="clearSearch">&#x2715;</button>
             <div class="conv-suggest" id="contentSuggest" hidden>
+              <div class="conv-suggest-types" id="contentSuggestTypes" hidden></div>
               <div class="conv-suggest-list" id="contentSuggestList" role="listbox"></div>
               <div class="conv-suggest-hint">
                 <span><kbd>↑</kbd><kbd>↓</kbd> select</span>
                 <span><kbd>Tab</kbd> add</span>
+                <span><kbd>Alt</kbd><kbd>←</kbd><kbd>→</kbd> type</span>
                 <span><kbd>Enter</kbd> chip</span>
                 <span><kbd>Esc</kbd> close</span>
               </div>
@@ -10479,6 +10607,7 @@
                   <div class="conv-submit-spinner"></div>
                 </button>
                 <div class="conv-suggest" id="convSuggest" hidden>
+                  <div class="conv-suggest-types" id="convSuggestTypes" hidden></div>
                   <div
                     class="conv-suggest-list"
                     id="convSuggestList"
@@ -10487,6 +10616,7 @@
                   <div class="conv-suggest-hint">
                     <span><kbd>↑</kbd><kbd>↓</kbd> select</span>
                     <span><kbd>Tab</kbd> add</span>
+                    <span><kbd>Alt</kbd><kbd>←</kbd><kbd>→</kbd> type</span>
                     <span id="convSuggestEnterHint"
                       ><kbd>Enter</kbd> search</span
                     >
@@ -17854,8 +17984,9 @@
         cycle: "cycleContentOp",
         lead: "toggleContentLeadNot",
         edit: "editContentText",
-        pick: null,
-        nodeRows: null,
+        pick: "openContentNodePicker",
+        tagPick: "openContentTagPicker",
+        nodeRows: (it) => convTokenNodeRows(it),
       }
 
       function contentPendingText() {
@@ -18046,12 +18177,13 @@
         return out
       }
 
+      let _contentSuggestType = "all"
+      let _contentSuggestCounts = null
+
       function contentSuggestFor(rawInput) {
         const raw = (rawInput || "").trim().toLowerCase()
         if (!raw) return []
-        const taken = new Set(
-          contentExpr.filter((it) => _convIsOperand(it) && it.t !== "text").map(_exprItemKey),
-        )
+        const taken = new Set(_exprTakenKeys(contentExpr))
         const tags = exprTagCandidates(contentContextOptions, "context")
           .concat(exprTagCandidates(contentMetadataOptions, "metadata"))
           .map((c) => ({ ...c, unit: "items" }))
@@ -18069,7 +18201,14 @@
             (b.c.weight || 0) - (a.c.weight || 0) ||
             (a.c.label || "").length - (b.c.label || "").length,
         )
-        return hits.slice(0, CONV_SUGGEST_MAX).map((h) => h.c)
+        const { rows, counts } = exprSuggestNarrow(hits, _contentSuggestType)
+        _contentSuggestCounts = counts
+        return rows
+      }
+
+      function setContentSuggestType(type) {
+        _contentSuggestType = type
+        openContentSuggest(contentPendingText())
       }
 
       function openContentSuggest(rawInput) {
@@ -18078,7 +18217,13 @@
         if (!pop || !list) return
         _contentSuggestRows = contentSuggestFor(rawInput)
         _contentSuggestIdx = -1
-        if (!_contentSuggestRows.length) {
+        const counts = _contentSuggestCounts
+        const types = document.getElementById("contentSuggestTypes")
+        if (types) {
+          types.innerHTML = exprSuggestTypesHtml(counts, _contentSuggestType, "setContentSuggestType")
+          types.hidden = !types.innerHTML
+        }
+        if (!_contentSuggestRows.length && !(counts && counts.all)) {
           closeContentSuggest()
           return
         }
@@ -18107,7 +18252,8 @@
               "</span></div>"
             )
           })
-          .join("")
+          .join("") ||
+          '<div class="conv-suggest-none">Nothing of this type — pick another above.</div>'
         pop.hidden = false
         const wrap = document.querySelector(".search-wrap-global")
         if (wrap) wrap.classList.add("is-suggesting")
@@ -18115,6 +18261,7 @@
       }
 
       function closeContentSuggest() {
+        _contentSuggestType = "all"
         const pop = document.getElementById("contentSuggest")
         _contentSuggestRows = []
         _contentSuggestIdx = -1
@@ -18167,6 +18314,13 @@
       document.getElementById("g-search").addEventListener("keydown", (e) => {
         const pop = document.getElementById("contentSuggest")
         if (pop && !pop.hidden) {
+          if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && _contentSuggestCounts) {
+            e.preventDefault()
+            setContentSuggestType(
+              exprSuggestCycle(_contentSuggestCounts, _contentSuggestType, e.key === "ArrowRight" ? 1 : -1),
+            )
+            return
+          }
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault()
             const n = _contentSuggestRows.length
@@ -34805,20 +34959,61 @@
       /// twice, and a second chip naming the same thing is dropped.
       function _exprItemKey(it) {
         if (it.t === "entity") return "e:" + it.value
-        if (it.t === "tag") return "t:" + it.kind + ":" + it.name + "=" + (it.value == null ? "*" : it.value)
+        if (it.t === "tag")
+          return (
+            "t:" +
+            it.kind +
+            ":" +
+            it.name +
+            "=" +
+            (_exprTagValues(it).length
+              ? _exprTagValues(it)
+                  .map((v) => v.toLowerCase())
+                  .sort()
+                  .join(",")
+              : "*")
+          )
         return it.idText
       }
 
-      /// One tag chip as the backend reads it: `ctx:"name"="value"`, with `*`
-      /// for "set to anything". Quotes inside a name or value are dropped by
-      /// splitting, never by a regex holding a quote — see `_convEscapeText`.
+      /// A tag item's values — any of which matches; empty is "any value".
+      /// Read through here so an item written by an older build (a single
+      /// `value`) still reads.
+      function _exprTagValues(it) {
+        if (Array.isArray(it.values)) return it.values
+        return it.value == null ? [] : [String(it.value)]
+      }
+
+      /// The chips a list already has, as the keys suggestions carry. A tag
+      /// chip holding several values takes each of them — `true` is not worth
+      /// offering again while a chip already says `true or false`.
+      function _exprTakenKeys(list) {
+        const out = []
+        for (const it of list) {
+          if (!_convIsOperand(it) || it.t === "text") continue
+          if (it.t !== "tag") {
+            out.push(_exprItemKey(it))
+            continue
+          }
+          const vals = _exprTagValues(it)
+          if (!vals.length) out.push(_exprItemKey(it))
+          for (const v of vals) out.push(_exprItemKey({ t: "tag", kind: it.kind, name: it.name, values: [v] }))
+        }
+        return out
+      }
+
+      /// One tag chip as the backend reads it: `ctx:"name"="value"`, several
+      /// values as `ctx:"name"="a","b"` (any of them), `*` for "set to
+      /// anything". Quotes inside a name or value are dropped by splitting,
+      /// never by a regex holding a quote — see `_convEscapeText`.
       function _exprTagToken(it) {
         const q = (v) => '"' + String(v).split('"').join("") + '"'
+        const values = _exprTagValues(it)
         return (
           (it.kind === "metadata" ? "meta:" : "ctx:") +
           q(it.name) +
           "=" +
-          (it.value == null ? q("*") : q(it.value))
+          (values.length ? values.map(q).join(",") : q("*"))
         )
       }
 
@@ -34848,17 +35043,42 @@
         }
         name = name.trim()
         if (!name) return null
-        let value = null
+        const values = []
+        let any = false
         if (after.startsWith("=")) {
-          const raw = _convUnquote(after.slice(1)).trim()
-          value = raw === "*" || raw === "" ? null : raw
+          // The mirror of the value loop in `TagLeaf::parse`.
+          const src = after.slice(1)
+          let j = 0
+          while (j < src.length) {
+            let v
+            if (src[j] === '"') {
+              const close = src.indexOf('"', j + 1)
+              const end = close < 0 ? src.length : close
+              v = src.slice(j + 1, end)
+              j = end + 1
+            } else {
+              const comma = src.indexOf(",", j)
+              const end = comma < 0 ? src.length : comma
+              v = src.slice(j, end)
+              j = end
+            }
+            v = v.trim()
+            if (v === "*") any = true
+            else if (v && !values.some((x) => x.toLowerCase() === v.toLowerCase())) values.push(v)
+            while (j < src.length && src[j] !== ",") j++
+            j++
+          }
         }
-        return { t: "tag", kind, name, value }
+        return { t: "tag", kind, name, values: any ? [] : values }
       }
 
       /// How a tag chip reads.
       function _exprTagLabel(it) {
-        return it.value == null ? it.name + " · any" : it.name + " = " + it.value
+        const v = _exprTagValues(it)
+        if (!v.length) return it.name + " · any"
+        if (v.length === 1) return it.name + " = " + v[0]
+        if (v.length === 2) return it.name + " = " + v[0] + " or " + v[1]
+        return it.name + " = " + v[0] + " +" + (v.length - 1)
       }
 
       /// Every Article, Dialog and Transactional Dialog, flattened for the
@@ -34952,9 +35172,10 @@
           if (o.value === "__not_set__") continue
           if (kind === "metadata" && metaHidden(o.name, o.value)) continue
           const value = o.value === "__any__" ? null : String(o.value)
-          const label = _exprTagLabel({ name: o.name, value })
+          const values = value == null ? [] : [value]
+          const label = _exprTagLabel({ name: o.name, values })
           out.push({
-            key: _exprItemKey({ t: "tag", kind, name: o.name, value }),
+            key: _exprItemKey({ t: "tag", kind, name: o.name, values }),
             kind: kind === "metadata" ? "metatag" : "ctxtag",
             name: o.name,
             value,
@@ -35124,11 +35345,15 @@
       ///
       /// Both pools at once, ranked together. There is no mode to be in any
       /// more, and the badge on each row is what says which kind it is.
+      let _convSuggestType = "all"
+      let _convSuggestCounts = null
+
       function convSuggestFor(rawInput) {
         const raw = (rawInput || "").trim().toLowerCase()
         if (!raw) return []
         const taken = new Set(_convTokenKeys())
         const nodeRows = _convNodeSuggest(raw)
+        _convSuggestCounts = null
         if (nodeRows) {
           return nodeRows
             .filter((r) => !taken.has(r.key))
@@ -35178,7 +35403,9 @@
             (a.c.label || "").length - (b.c.label || "").length ||
             (a.c.label || "").localeCompare(b.c.label || ""),
         )
-        return hits.slice(0, CONV_SUGGEST_MAX).map((h) => h.c)
+        const { rows, counts } = exprSuggestNarrow(hits, _convSuggestType)
+        _convSuggestCounts = counts
+        return rows
       }
 
       /// Escape `text` and mark the typed run inside it.
@@ -35219,6 +35446,64 @@
         metatag: "Metadata",
       }
 
+      /// The kinds a suggestion list can be narrowed to, in the order the bar
+      /// shows them. A Transactional Dialog and a node count as Dialogs.
+      const EXPR_SUGGEST_TYPES = [
+        { key: "article", label: "Articles", kinds: ["article"] },
+        { key: "dialog", label: "Dialogs", kinds: ["dialog", "tdialog", "node"] },
+        { key: "entity", label: "Entities", kinds: ["entity"] },
+        { key: "context", label: "Context", kinds: ["ctxtag"] },
+        { key: "metadata", label: "Metadata", kinds: ["metatag"] },
+      ]
+
+      /// Narrow ranked hits to one type, and count every type — the counts are
+      /// what the bar shows, taken before the list is cut to its eight rows,
+      /// so "Metadata 23" is true even while none of them is on screen.
+      function exprSuggestNarrow(hits, type) {
+        const counts = { all: hits.length }
+        for (const t of EXPR_SUGGEST_TYPES) counts[t.key] = 0
+        const typeOf = (kind) => (EXPR_SUGGEST_TYPES.find((t) => t.kinds.includes(kind)) || {}).key
+        for (const h of hits) {
+          const k = typeOf(h.c.kind)
+          if (k) counts[k]++
+        }
+        const want = EXPR_SUGGEST_TYPES.find((t) => t.key === type)
+        const rows = (want ? hits.filter((h) => want.kinds.includes(h.c.kind)) : hits)
+          .slice(0, CONV_SUGGEST_MAX)
+          .map((h) => h.c)
+        return { rows, counts }
+      }
+
+      /// The type bar above a suggestion list. Only types that have a hit are
+      /// offered, plus the one that is selected, so it never shows a dead end.
+      function exprSuggestTypesHtml(counts, active, pickFn) {
+        if (!counts || counts.all === 0) return ""
+        const btn = (key, label, n) =>
+          '<button class="conv-suggest-type' +
+          (active === key ? " active" : "") +
+          '" onmousedown="event.preventDefault()" onclick="' +
+          pickFn +
+          "('" +
+          key +
+          "')\">" +
+          esc(label) +
+          ' <span class="n">' +
+          n +
+          "</span></button>"
+        let html = btn("all", "All", counts.all)
+        for (const t of EXPR_SUGGEST_TYPES) {
+          if (counts[t.key] || active === t.key) html += btn(t.key, t.label, counts[t.key])
+        }
+        return html
+      }
+
+      /// The next type with hits, for Alt+← / Alt+→.
+      function exprSuggestCycle(counts, active, dir) {
+        const keys = ["all"].concat(EXPR_SUGGEST_TYPES.filter((t) => counts && counts[t.key]).map((t) => t.key))
+        const at = Math.max(0, keys.indexOf(active))
+        return keys[(at + dir + keys.length) % keys.length]
+      }
+
       function openConvSuggest(rawInput) {
         _convSuggestEditIdx = -1
         // Nothing is preselected, so Enter searches for what was typed. With
@@ -35239,7 +35524,14 @@
         const input = document.getElementById("convSearch")
         if (!pop || !list) return
         _convSuggestRows = rows
-        if (!_convSuggestRows.length) {
+        // The type bar belongs to the type-ahead, not to the node picker.
+        const counts = anchor ? null : _convSuggestCounts
+        const types = document.getElementById("convSuggestTypes")
+        if (types) {
+          types.innerHTML = exprSuggestTypesHtml(counts, _convSuggestType, "setConvSuggestType")
+          types.hidden = !types.innerHTML
+        }
+        if (!_convSuggestRows.length && !(counts && counts.all)) {
           closeConvSuggest()
           return
         }
@@ -35286,7 +35578,8 @@
               "</span></div>"
             )
           })
-          .join("")
+          .join("") ||
+          '<div class="conv-suggest-none">Nothing of this type — pick another above.</div>'
         const wrap = document.querySelector(".conv-search-wrap")
         if (anchor && wrap) {
           const a = anchor.getBoundingClientRect()
@@ -35371,7 +35664,14 @@
         _convSuggestShow(rows, "", at, anchor)
       }
 
+      function setConvSuggestType(type) {
+        _convSuggestType = type
+        const input = document.getElementById("convSearch")
+        if (input) openConvSuggest(input.value)
+      }
+
       function closeConvSuggest() {
+        _convSuggestType = "all"
         const pop = document.getElementById("convSuggest")
         const input = document.getElementById("convSearch")
         _convSuggestRows = []
@@ -35434,7 +35734,7 @@
             t: "tag",
             kind: cand.kind === "metatag" ? "metadata" : "context",
             name: cand.name,
-            value: cand.value,
+            values: cand.value == null ? [] : [cand.value],
           }
         }
         return {
@@ -35485,9 +35785,7 @@
 
       /// The chips already placed, so a suggestion is never offered twice.
       function _convTokenKeys() {
-        return convExpr
-          .filter((it) => _convIsOperand(it) && it.t !== "text")
-          .map(_exprItemKey)
+        return _exprTakenKeys(convExpr)
       }
 
       /// Append an operand, inserting the operator that most likely joins it.
@@ -35931,6 +36229,7 @@
         lead: "toggleConvLeadNot",
         edit: "editConvText",
         pick: "openConvNodePicker",
+        tagPick: "openConvTagPicker",
         nodeRows: (it) => convTokenNodeRows(it),
       }
 
@@ -36019,10 +36318,13 @@
         } else if (it.t === "tag") {
           cls = "tag"
           text = _exprTagLabel(it)
+          pickable = !!h.tagPick
+          const vals = _exprTagValues(it)
           title =
             (it.kind === "metadata" ? "Metadata" : "Context") +
             ": " +
-            (it.value == null ? it.name + " is set, to any value" : it.name + " = " + it.value)
+            (vals.length ? it.name + " = " + vals.join(" or ") : it.name + " is set, to any value") +
+            (pickable ? " · click to pick values" : "")
         } else {
           text = it.value
           title = "Text: " + it.value + " · click to edit"
@@ -36034,12 +36336,13 @@
               "</span>"
             : ""
         const label =
-          it.t === "id" && pickable
+          (it.t === "id" || it.t === "tag") && pickable
             ? '<button class="conv-token-label" onclick="event.stopPropagation();' +
-              h.pick +
+              (it.t === "tag" ? h.tagPick : h.pick) +
               "(" +
               i +
               ')">' +
+              tagKind +
               esc(text) +
               ' <span class="conv-token-caret">&#x25BE;</span></button>'
             : it.t === "text"
@@ -36163,6 +36466,257 @@
         return parts.filter(Boolean).join(" | ")
       }
 
+      // ── The chip picker ──────────────────────────────────────────────
+      //
+      // A chip that names one of several things opens a list of them where it
+      // sits: a tag chip lists its key's values — tick several to match any of
+      // them, or "Any value" — and in the Content bar a Dialog chip lists its
+      // nodes, the same choice the Conversations bar's node picker offers. One
+      // popover for both bars; `field` says whose chip it is.
+      let _exprPick = null // {field, i}
+
+      function _exprField(field) {
+        return field === "content"
+          ? {
+              list: () => contentExpr,
+              host: "#contentTokens",
+              changed: () => _contentExprChanged(),
+              tagOptions: (kind) =>
+                kind === "metadata" ? contentMetadataOptions : contentContextOptions,
+              unit: "items",
+            }
+          : {
+              list: () => convExpr,
+              host: "#convTokens",
+              changed: () => {
+                convHasSearched = true
+                _afterConvExprChange(true)
+              },
+              tagOptions: (kind) => CTX_KINDS[kind].options(),
+              unit: "conversations",
+            }
+      }
+
+      function openConvTagPicker(i) {
+        closeConvSuggest()
+        _exprOpenPicker("conv", i)
+      }
+      function openContentTagPicker(i) {
+        closeContentSuggest()
+        _exprOpenPicker("content", i)
+      }
+      function openContentNodePicker(i) {
+        closeContentSuggest()
+        _exprOpenPicker("content", i)
+      }
+
+      async function _exprOpenPicker(field, i) {
+        const F = _exprField(field)
+        const tok = F.list()[i]
+        if (!tok) return
+        // The value list of a Conversations tag is loaded on first use.
+        if (tok.t === "tag" && field === "conv") {
+          const kind = CTX_KINDS[tok.kind]
+          if (!kind.loaded()) {
+            try {
+              kind.setOptions((await kind.load()) || [])
+              kind.setLoaded(true)
+            } catch (e) {
+              kind.setOptions([])
+            }
+          }
+        }
+        _exprPick = { field, i, q: "" }
+        _exprRenderPicker(true)
+      }
+
+      function _exprPickerEl() {
+        let el = document.getElementById("exprPicker")
+        if (!el) {
+          el = document.createElement("div")
+          el.id = "exprPicker"
+          el.className = "expr-picker"
+          el.hidden = true
+          el.innerHTML =
+            '<div class="expr-picker-head"><input type="search" id="exprPickerQ" placeholder="Filter…" autocomplete="off" spellcheck="false"></div>' +
+            '<div class="expr-picker-list" id="exprPickerList"></div>' +
+            '<div class="expr-picker-foot" id="exprPickerFoot"></div>'
+          document.body.appendChild(el)
+          el.querySelector("#exprPickerQ").addEventListener("input", (e) => {
+            if (!_exprPick) return
+            _exprPick.q = e.target.value
+            _exprRenderPicker(false)
+          })
+          el.addEventListener("mousedown", (e) => e.stopPropagation())
+        }
+        return el
+      }
+
+      /// The rows for the chip being picked: `{key, label, count, on}`.
+      function _exprPickerRows() {
+        const F = _exprField(_exprPick.field)
+        const tok = F.list()[_exprPick.i]
+        if (!tok) return null
+        if (tok.t === "id") {
+          const rows = convTokenNodeRows(tok)
+          if (!rows) return null
+          return rows.map((r) => ({
+            key: r.idText,
+            label: r.kind === "dialog" ? "Whole dialog · " + (r.label || r.idText) : r.label || "Node " + r.num,
+            meta: r.idText,
+            on: r.isCurrent,
+            single: true,
+            cand: r,
+          }))
+        }
+        const picked = _exprTagValues(tok).map((v) => v.toLowerCase())
+        const opts = (F.tagOptions(tok.kind) || []).filter((o) => o && o.name === tok.name)
+        const any = opts.find((o) => o.value === "__any__")
+        const rows = [
+          {
+            key: "__any__",
+            label: "Any value",
+            meta: any ? insPlural(any.count, F.unit) : "",
+            on: !picked.length,
+          },
+        ]
+        const seen = new Set()
+        for (const o of opts) {
+          const v = String(o.value)
+          if (v === "__any__" || v === "__not_set__") continue
+          if (tok.kind === "metadata" && metaHidden(o.name, v)) continue
+          seen.add(v.toLowerCase())
+          rows.push({ key: v, label: v === "" ? "(empty)" : v, meta: insPlural(o.count, F.unit), on: picked.includes(v.toLowerCase()) })
+        }
+        // A value the chip carries that the lists do not (typed by hand, or
+        // not in this data) stays visible and ticked, so it can be taken off.
+        for (const v of _exprTagValues(tok)) {
+          if (!seen.has(v.toLowerCase())) rows.splice(1, 0, { key: v, label: v, meta: "", on: true })
+        }
+        return rows
+      }
+
+      function _exprRenderPicker(reposition) {
+        if (!_exprPick) return
+        const el = _exprPickerEl()
+        const rows = _exprPickerRows()
+        if (!rows) {
+          closeExprPicker()
+          return
+        }
+        const F = _exprField(_exprPick.field)
+        const tok = F.list()[_exprPick.i]
+        const q = (_exprPick.q || "").trim().toLowerCase()
+        const shown = q ? rows.filter((r) => r.key === "__any__" || r.label.toLowerCase().includes(q)) : rows
+        const multi = tok.t === "tag"
+        document.getElementById("exprPickerList").innerHTML =
+          shown
+            .map(
+              (r) =>
+                '<button class="expr-picker-row' +
+                (r.on ? " on" : "") +
+                (r.key === "__any__" ? " is-any" : "") +
+                '" data-key="' +
+                esc(r.key) +
+                '"><span class="expr-picker-check">' +
+                (r.on ? "✓" : "") +
+                '</span><span class="expr-picker-label">' +
+                esc(r.label) +
+                '</span><span class="expr-picker-meta">' +
+                esc(r.meta || "") +
+                "</span></button>",
+            )
+            .join("") || '<div class="expr-picker-empty">No value matches.</div>'
+        document.getElementById("exprPickerFoot").textContent = multi
+          ? "Tick several to match any of them"
+          : "Pick the node to narrow to"
+        const qEl = document.getElementById("exprPickerQ")
+        qEl.parentElement.hidden = rows.length <= 8
+        document.querySelectorAll("#exprPickerList .expr-picker-row").forEach((b) =>
+          b.addEventListener("click", () => _exprPickRow(b.dataset.key)),
+        )
+        el.hidden = false
+        if (reposition) {
+          qEl.value = ""
+          _exprPlacePicker()
+          if (!qEl.parentElement.hidden) qEl.focus()
+        }
+      }
+
+      function _exprPlacePicker() {
+        const el = _exprPickerEl()
+        const F = _exprField(_exprPick.field)
+        const anchor = document.querySelector(
+          F.host + ' .conv-token[data-token-index="' + _exprPick.i + '"]',
+        )
+        if (!anchor) return
+        const a = anchor.getBoundingClientRect()
+        const width = 300
+        el.style.width = width + "px"
+        el.style.left = Math.max(8, Math.min(a.left, window.innerWidth - width - 8)) + "px"
+        const below = window.innerHeight - a.bottom
+        if (below >= 240 || below >= a.top) {
+          el.style.top = a.bottom + 6 + "px"
+          el.style.bottom = ""
+          el.style.maxHeight = Math.max(160, below - 16) + "px"
+        } else {
+          el.style.top = ""
+          el.style.bottom = window.innerHeight - a.top + 6 + "px"
+          el.style.maxHeight = Math.max(160, a.top - 16) + "px"
+        }
+      }
+
+      function _exprPickRow(key) {
+        if (!_exprPick) return
+        const F = _exprField(_exprPick.field)
+        const list = F.list()
+        const tok = list[_exprPick.i]
+        if (!tok) return
+        if (tok.t === "id") {
+          const row = (_exprPickerRows() || []).find((r) => r.key === key)
+          if (row && row.cand.idText !== tok.idText) {
+            list[_exprPick.i] = _convItemFor(row.cand)
+            F.changed()
+          }
+          closeExprPicker()
+          return
+        }
+        let values = _exprTagValues(tok).slice()
+        if (key === "__any__") values = []
+        else {
+          const at = values.findIndex((v) => v.toLowerCase() === key.toLowerCase())
+          if (at >= 0) values.splice(at, 1)
+          else values.push(key)
+        }
+        list[_exprPick.i] = { t: "tag", kind: tok.kind, name: tok.name, values }
+        F.changed()
+        // Stays open: building "web or app" is two ticks, not two openings.
+        _exprRenderPicker(false)
+        _exprPlacePicker()
+      }
+
+      function closeExprPicker() {
+        _exprPick = null
+        const el = document.getElementById("exprPicker")
+        if (el) el.hidden = true
+      }
+
+      document.addEventListener("mousedown", (e) => {
+        if (!_exprPick) return
+        if (e.target.closest("#exprPicker, .conv-token-label")) return
+        closeExprPicker()
+      })
+      document.addEventListener(
+        "keydown",
+        (e) => {
+          if (e.key === "Escape" && _exprPick) {
+            e.stopPropagation()
+            closeExprPicker()
+          }
+        },
+        true,
+      )
+
       /// Warm the entity list so the first keystroke has something to offer.
       /// `ensureEntityIdMap` is idempotent and already guarded on the database,
       /// so this needs no flag of its own.
@@ -36235,6 +36789,13 @@
         // closed, which is what stops a new list from redefining Enter and
         // Escape for someone who never uses it.
         if (convSuggestIsOpen()) {
+          if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && _convSuggestCounts) {
+            e.preventDefault()
+            setConvSuggestType(
+              exprSuggestCycle(_convSuggestCounts, _convSuggestType, e.key === "ArrowRight" ? 1 : -1),
+            )
+            return
+          }
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault()
             _convSuggestMove(e.key === "ArrowDown" ? 1 : -1)

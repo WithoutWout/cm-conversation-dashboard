@@ -56,7 +56,7 @@ const article = (Id, question, Outputs) => ({
 })
 const ARTS = [
   article(1, "waar kan ik parkeren", [answer("parkeren kost tien euro", "any", { nochat: "true" })]),
-  article(2, "openingstijden", [answer("wij zijn open om tien uur", "any")]),
+  article(2, "openingstijden", [answer("wij zijn open om tien uur", "app")]),
   article(3, "parkeren voor campers", [
     answer("campers parkeren apart", "web"),
     answer("kosten per nacht", "any"),
@@ -112,9 +112,10 @@ eq("strictly left to right", parse("qa-1 OR qa-2 AND boos").k, "and")
 eq(
   "a tag reads its name and value",
   parse('ctx:"Channel"="web"'),
-  { k: "tag", kind: "context", name: "Channel", value: "web" },
+  { k: "tag", kind: "context", name: "Channel", values: ["web"] },
 )
-eq("a star is any value", parse('meta:"nochat"="*"').value, null)
+eq("a star is any value", parse('meta:"nochat"="*"').values, [])
+eq("several values are one tag", parse('ctx:"Channel"="web","a, b"').values, ["web", "a, b"])
 eq("a node id is a node", parse("dn-50-7"), { k: "id", kind: "node", id: 50, node: 7 })
 eq("NOT NOT is nothing", parse("NOT NOT qa-1"), { k: "id", kind: "article", id: 1 })
 eq("an unclosed group closes itself", parse("( qa-1 OR qa-2").k, "or")
@@ -135,6 +136,7 @@ eq("a node id needs the node", search("", "dn-50-8"), [])
 eq("a context tag", search("", 'ctx:"Channel"="web"'), ["a3"])
 eq("…compares values case-insensitively", search("", 'ctx:"Channel"="WEB"'), ["a3"])
 eq("a metadata tag", search("", 'meta:"nochat"="true"'), ["a1"])
+eq("a tag with two values matches either", search("", 'ctx:"Channel"="web","APP"'), ["a2", "a3"])
 eq("a tag combines with words", search("", 'parkeren AND NOT meta:"nochat"="*"'), plain.filter((k) => k !== "a1"))
 eq("a leading NOT excludes", search("", "NOT parkeren").includes("a2"), true)
 eq("an invalid pattern in any leaf is reported", search("", "qa-1 OR a(", { searchRegex: true }), "invalid_regex")

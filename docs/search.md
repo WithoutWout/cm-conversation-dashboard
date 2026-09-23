@@ -144,6 +144,24 @@ and the panel stays as it was beside it.
   and `true` are one answer). The name is exact: the chips come from the index.
 - `="*"` (or no value) is "the key is set at all" — the panel's `any`. "Not set"
   is `NOT` in front of it.
+- **A tag chip can hold several values, any of which matches:**
+  `ctx:"Channel"="web","app"`. One token rather than an OR group of tags,
+  because under `.*` a bracket belongs to the pattern and the chip must still
+  mean exactly what it says. The backend reads it as `t.value COLLATE NOCASE IN
+  (…)`; the worker as "any of".
+- **A tag chip opens its key's values where it sits** (`_exprOpenPicker`), the
+  way a Dialog chip opens its nodes: tick several, or *Any value*. It stays open
+  between ticks. The same popover is the Content bar's node picker.
+
+### Narrowing the suggestions by type
+
+The type-ahead offers Articles, Dialogs (with Transactional Dialogs and nodes),
+entities, context and metadata values in one ranked list, and a bar above it
+narrows to one type — clicked, or **Alt ←/→**. The counts beside each type are
+taken before the list is cut to its eight rows (`exprSuggestNarrow`), so
+"Metadata 23" is true while none of them is on screen, and a type with no hit
+is not offered. A value already inside a chip — including one of several in a
+multi-value tag chip — is not suggested again (`_exprTakenKeys`).
 - `TagLeaf::parse` and `_exprParseTagToken` are the two halves of one token;
   `a_tag_token_reads_its_name_and_value` and `search-bubbles.test.js` quote the
   same strings.

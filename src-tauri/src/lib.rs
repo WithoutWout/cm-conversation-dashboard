@@ -4331,13 +4331,18 @@ enum SearchExpr {
 struct TagLeaf {
     metadata: bool,
     name: String,
-    /// `None` is "the key is set, to anything".
-    value: Option<String>,
+    /// Any of these values; empty is "the key is set, to anything".
+    values: Vec<String>,
 }
 
 impl TagLeaf {
-    /// `"name"="value"`, `name=value`, `"name"` or `"name"="*"` — the part
-    /// after `ctx:` / `meta:`. `None` when there is no name.
+    /// `"name"="value"`, `"name"="a","b"` (any of them), `name=value`,
+    /// `"name"` or `"name"="*"` — the part after `ctx:` / `meta:`. `None` when
+    /// there is no name.
+    ///
+    /// Several values are a comma-separated list inside the one token, not an
+    /// OR group of tags: under `.*` a bracket belongs to the pattern, and a
+    /// tag picked to three values must still mean exactly that.
     fn parse(rest: &str, metadata: bool) -> Option<Self> {
         let chars: Vec<char> = rest.chars().collect();
         let i: usize;
@@ -4355,18 +4360,45 @@ impl TagLeaf {
         if name.is_empty() {
             return None;
         }
-        let value = if chars.get(i) == Some(&'=') {
-            let raw: String = chars[i + 1..].iter().collect();
-            let raw = raw.trim();
-            if raw == "*" || raw == "\"*\"" || raw.is_empty() {
-                None
-            } else {
-                Some(unquote_token(raw))
+        let mut values: Vec<String> = Vec::new();
+        if chars.get(i) == Some(&'=') {
+            let mut j = i + 1;
+            while j < chars.len() {
+                let v: String;
+                if chars[j] == '"' {
+                    let close = chars[j + 1..]
+                        .iter()
+                        .position(|&c| c == '"')
+                        .map(|p| j + 1 + p)
+                        .unwrap_or(chars.len());
+                    v = chars[j + 1..close.min(chars.len())].iter().collect();
+                    j = (close + 1).min(chars.len());
+                } else {
+                    let end = chars[j..]
+                        .iter()
+                        .position(|&c| c == ',')
+                        .map(|p| j + p)
+                        .unwrap_or(chars.len());
+                    v = chars[j..end].iter().collect();
+                    j = end;
+                }
+                let v = v.trim().to_string();
+                if !v.is_empty() && v != "*" && !values.iter().any(|x| x.eq_ignore_ascii_case(&v)) {
+                    values.push(v);
+                }
+                // Past the separator, if there is one.
+                while j < chars.len() && chars[j] != ',' {
+                    j += 1;
+                }
+                j += 1;
             }
-        } else {
-            None
-        };
-        Some(TagLeaf { metadata, name, value })
+            // `"*"` among the values means any value: the list is moot.
+            let raw: String = chars[i + 1..].iter().collect();
+            if raw.split(',').any(|p| matches!(p.trim(), "*" | "\"*\"")) {
+                values.clear();
+            }
+        }
+        Some(TagLeaf { metadata, name, values })
     }
 }
 
@@ -5104,12 +5136,16 @@ impl<'a> ExprSql<'a> {
             return self.add_node(MATCH_NOTHING.to_string());
         }
         let pn = self.param(Box::new(t.name.clone()));
-        let value_cond = match &t.value {
-            Some(v) => {
-                let pv = self.param(Box::new(v.clone()));
-                format!(" AND t.value = {pv} COLLATE NOCASE")
-            }
-            None => String::new(),
+        let value_cond = if t.values.is_empty() {
+            String::new()
+        } else {
+            let ps: Vec<String> = t
+                .values
+                .clone()
+                .into_iter()
+                .map(|v| self.param(Box::new(v)))
+                .collect();
+            format!(" AND t.value COLLATE NOCASE IN ({})", ps.join(", "))
         };
         self.add_node(format!(
             "SELECT DISTINCT t.session_uuid, NULL AS match_log_id FROM {table} t \
@@ -15204,6 +15240,8 @@ mod conv_search {
         assert_eq!(q(r#"ctx:"Verblijf"="*""#), vec!["day", "stay"]);
         assert_eq!(q(r#"parkeren AND NOT ctx:"Verblijf"="true""#), vec!["day"]);
         assert_eq!(q(r#"ctx:"Verblijf"="true" OR meta:"nochat"="true""#), vec!["other", "stay"]);
+        // A chip picked to two values matches either.
+        assert_eq!(q(r#"ctx:"Verblijf"="TRUE","false""#), vec!["day", "stay"]);
         // A tag alone narrows conversations, never turns.
         let fq = build_session_filter_query(&conn, &text_args(r#"meta:nochat=true"#, "both"))
             .expect("build");
@@ -15216,9 +15254,23 @@ mod conv_search {
             Some(SearchExpr::Tag(TagLeaf {
                 metadata,
                 name: name.to_string(),
-                value: value.map(str::to_string),
+                values: value.map(|v| vec![v.to_string()]).unwrap_or_default(),
             }))
         };
+        let tags = |metadata: bool, name: &str, values: &[&str]| {
+            Some(SearchExpr::Tag(TagLeaf {
+                metadata,
+                name: name.to_string(),
+                values: values.iter().map(|v| v.to_string()).collect(),
+            }))
+        };
+        // Several values are one token, any of them.
+        assert_eq!(
+            parse_search_expr(r#"ctx:"Channel"="web","app, mobile","web""#, false),
+            tags(false, "Channel", &["web", "app, mobile"])
+        );
+        assert_eq!(parse_search_expr("ctx:Channel=web,app", false), tags(false, "Channel", &["web", "app"]));
+        assert_eq!(parse_search_expr(r#"ctx:"Channel"="web","*""#, false), tags(false, "Channel", &[]));
         assert_eq!(parse_search_expr(r#"ctx:"Verblijf"="true""#, false), tag(false, "Verblijf", Some("true")));
         assert_eq!(parse_search_expr(r#"meta:"a b"="c d""#, false), tag(true, "a b", Some("c d")));
         assert_eq!(parse_search_expr("meta:nochat=true", false), tag(true, "nochat", Some("true")));
