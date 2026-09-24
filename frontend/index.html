@@ -1782,6 +1782,195 @@
       #view-gap.active {
         display: flex;
       }
+      /* One view, two work lists: each mode's controls and panes carry the
+         class of the mode they belong to, and the view says which is on. */
+      #view-gap:not([data-mode="recog"]) .gap-recog-only,
+      #view-gap:not([data-mode="feedback"]) .gap-fb-only,
+      #view-gap:not([data-mode="genai"]) .gap-ai-only {
+        display: none !important;
+      }
+      .gap-ai-grid,
+      .gap-ai-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 124px;
+      }
+      .gap-ai-row {
+        display: grid;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 34px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+        cursor: pointer;
+        font-size: 0.78rem;
+      }
+      .gap-ai-row:hover {
+        background: var(--surface);
+      }
+      .gap-ai-row.active {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .gap-ai-row > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .gap-ai-answer {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.8rem;
+        line-height: 1.5;
+        max-height: 30%;
+        overflow-y: auto;
+      }
+      .gap-ai-answer[hidden] {
+        display: none;
+      }
+      .gap-ai-answer .gap-fix-label {
+        margin-bottom: 4px;
+      }
+      .gap-fb-min {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+      .gap-fb-min select {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.74rem;
+        padding: 3px 6px;
+      }
+      .gap-fb-grid {
+        grid-template-columns: minmax(0, 1fr) 64px 92px 150px;
+      }
+      .gap-head .gap-num,
+      .gap-fb-row .gap-num {
+        text-align: right;
+      }
+      .gap-fb-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 64px 92px 150px;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        height: 36px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+        cursor: pointer;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .gap-fb-row:hover {
+        background: var(--surface);
+      }
+      .gap-fb-row.active {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .gap-fb-what {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .gap-fb-id {
+        flex: none;
+        color: var(--muted);
+        font-size: 0.7rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .gap-fb-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+      }
+      .gap-fb-title.none {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .gap-fb-neg {
+        color: var(--red);
+      }
+      /* The share as a figure and a bar: the list is read down this column. */
+      .gap-fb-share {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .gap-fb-bar {
+        width: 64px;
+        height: 6px;
+        border-radius: 3px;
+        background: color-mix(in srgb, var(--red) 45%, transparent);
+        overflow: hidden;
+      }
+      .gap-fb-bar i {
+        display: block;
+        height: 100%;
+        background: var(--green);
+      }
+      .gap-fb-pct {
+        min-width: 42px;
+        text-align: right;
+        font-weight: 600;
+      }
+      .gap-fb-pct.bad {
+        color: var(--red);
+      }
+      .gap-fb-pct.meh {
+        color: var(--orange);
+      }
+      .gap-fb-pct.good {
+        color: var(--green);
+      }
+      .gap-fb-answers {
+        flex: 0 0 34%;
+        overflow-y: auto;
+        border-bottom: 1px solid var(--border);
+      }
+      .gap-fb-answers[hidden] {
+        display: none;
+      }
+      .gap-fb-answer {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+        cursor: pointer;
+        font-size: 0.78rem;
+      }
+      .gap-fb-answer:hover {
+        background: var(--surface);
+      }
+      .gap-fb-answer.active {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+      }
+      .gap-fb-answer .gap-fb-q {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .gap-fb-answer .gap-fb-when {
+        color: var(--muted);
+        font-size: 0.7rem;
+        font-variant-numeric: tabular-nums;
+      }
+      .gap-fb-answer .pos {
+        color: var(--green);
+      }
+      .gap-fb-answer .neg {
+        color: var(--red);
+      }
       .gap-toolbar {
         display: flex;
         flex-wrap: wrap;
@@ -1879,7 +2068,7 @@
       .gap-head,
       .gap-row {
         display: grid;
-        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) 84px 124px 30px;
+        grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) 112px 124px 30px;
         align-items: center;
         gap: 10px;
         padding: 0 12px;
@@ -1901,6 +2090,9 @@
         padding: 0;
         text-align: left;
         text-transform: uppercase;
+        /* The sort arrow is appended to the label; wrapped, it dropped onto a
+           second line under it. Columns are sized to hold label + arrow. */
+        white-space: nowrap;
       }
       .gap-head .gap-col-s,
       .gap-row .gap-col-s {
@@ -5509,6 +5701,37 @@
          a large database is not instant, and "nothing on screen" is
          indistinguishable from "finished, and empty" — which is the wrong
          answer to give someone who is waiting. */
+      /* The conversations database opening, shown wherever you are: every
+         view that reads it waits for it, and a first open after an upgrade is
+         a minute of migrations. See docs/loading-states.md. */
+      .db-opening-pill {
+        display: none;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 10px;
+        margin: 0 6px;
+        border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+        color: var(--text);
+        font-size: 0.72rem;
+        white-space: nowrap;
+        max-width: 360px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .db-opening-pill.visible {
+        display: inline-flex;
+        animation: fade-in 0.14s ease-out;
+      }
+      .db-opening-pill.leaving {
+        animation: fade-out 0.14s ease-in forwards;
+      }
+      .db-opening-pill .mini-spinner {
+        width: 11px;
+        height: 11px;
+        flex: none;
+      }
       .pane-loading {
         display: flex;
         flex-direction: column;
@@ -8956,6 +9179,13 @@
         font-weight: 700;
         padding-bottom: 7px;
       }
+      /* A subtotal closes the block above it: the same weight as the Total,
+         with a rule that says which rows it is the sum of. */
+      tr.ins-table-sum th,
+      tr.ins-table-sum td {
+        font-weight: 700;
+        border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+      }
       tr.ins-table-head td {
         color: var(--text);
         font-weight: 600;
@@ -9340,6 +9570,30 @@
       .ins-keybar-note {
         font-size: 0.67rem;
         color: var(--muted);
+      }
+      .ins-seg-scope {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 0.67rem;
+        color: var(--muted);
+      }
+      .ins-seg-scope button {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.67rem;
+        padding: 2px 8px;
+      }
+      .ins-seg-scope button.on {
+        border-color: var(--accent);
+        color: var(--text);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+      }
+      .ins-seg-scope-note {
+        color: var(--accent);
       }
       /* Fixed and outside the scrolling body, like the tooltip, so it is never
          clipped by the card it grew out of. Positioned from the button's rect
@@ -10070,7 +10324,7 @@
           class="view-btn"
           id="viewBtnGap"
           onclick="switchView('gap')"
-          title="GAP analysis — the questions the bot recognised badly, as a work list"
+          title="Analysis — what the bot recognised badly, what people rated, and what GenAI answered, as work lists"
         >
           <svg
             width="12"
@@ -10083,8 +10337,12 @@
             <circle cx="12" cy="12" r="9" />
             <path d="M12 7v5l3 2" />
           </svg>
-          GAP
+          Analysis
         </button>
+      </div>
+      <div class="db-opening-pill" id="dbOpeningPill" role="status" aria-live="polite">
+        <span class="mini-spinner"></span>
+        <span id="dbOpeningLabel">Opening database…</span>
       </div>
       <div class="header-files" id="fileNames"></div>
       <button class="icon-btn" id="refreshBtn" title="Refresh data">
@@ -11075,8 +11333,13 @@
       list — question · response · recognition · fixed — with the chat each came
       from, the words to copy and the entities to change. See docs/gap.md.
     -->
-    <div id="view-gap">
+    <div id="view-gap" data-mode="recog">
       <div class="gap-toolbar">
+        <div class="gap-pills gap-mode" id="gapModePills" title="What to look at: questions the bot did not recognise, answers people rated, or everything GenAI answered">
+          <button class="conv-pill active" data-gap-mode="recog">Recognition</button>
+          <button class="conv-pill" data-gap-mode="feedback">Feedback</button>
+          <button class="conv-pill" data-gap-mode="genai">GenAI</button>
+        </div>
         <div class="gap-range" id="gapRangeWrap">
           <button class="conv-date-range-btn gap-range-btn" id="gapRangeBtn" onclick="gapToggleCal()">
             <span style="font-size: 0.85rem"><svg class=ui-icon><use href=#i-calendar /></svg></span>
@@ -11085,13 +11348,13 @@
           </button>
           <div class="gap-cal-pop" id="gapCalPop" hidden></div>
         </div>
-        <span class="gap-threshold" id="gapThreshold"></span>
-        <div class="gap-pills" id="gapKindPills">
+        <span class="gap-threshold gap-recog-only" id="gapThreshold"></span>
+        <div class="gap-pills gap-recog-only" id="gapKindPills">
           <button class="conv-pill active" data-gap-kind="all">All</button>
           <button class="conv-pill" data-gap-kind="low">Low</button>
           <button class="conv-pill" data-gap-kind="zero">Zero</button>
         </div>
-        <div class="gap-pills" id="gapStatusPills">
+        <div class="gap-pills gap-recog-only" id="gapStatusPills">
           <button class="conv-pill active" data-gap-status="all">Any</button>
           <button class="conv-pill" data-gap-status="open">Open</button>
           <button class="conv-pill" data-gap-status="fixed">Fixed</button>
@@ -11099,18 +11362,49 @@
         <input
           type="search"
           id="gapFilter"
-          class="gap-filter"
+          class="gap-filter gap-recog-only"
           placeholder="Filter questions and responses…"
           autocomplete="off"
           spellcheck="false"
         />
-        <span class="gap-count" id="gapCount"></span>
+        <span class="gap-count gap-recog-only" id="gapCount"></span>
+        <div class="gap-pills gap-fb-only" id="gapFbGroupPills">
+          <button class="conv-pill active" data-gap-fb-group="answer" title="Each Article and each Dialog node that answered">Per answer</button>
+          <button class="conv-pill" data-gap-fb-group="content" title="Dialog nodes added up into their Dialog">Per Article · Dialog</button>
+        </div>
+        <label class="gap-fb-min gap-fb-only" title="Leave out what was rated too rarely for its share to mean much">
+          At least
+          <select id="gapFbMin">
+            <option value="1">1 rating</option>
+            <option value="3" selected>3 ratings</option>
+            <option value="5">5 ratings</option>
+            <option value="10">10 ratings</option>
+          </select>
+        </label>
+        <input
+          type="search"
+          id="gapFbFilter"
+          class="gap-filter gap-fb-only"
+          placeholder="Filter by id, title or question…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <span class="gap-count gap-fb-only" id="gapFbCount"></span>
+        <input
+          type="search"
+          id="gapAiFilter"
+          class="gap-filter gap-ai-only"
+          placeholder="Filter questions and answers…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <span class="gap-count gap-ai-only" id="gapAiCount"></span>
         <button class="btn-secondary gap-export" id="gapExportBtn" title="Save what is listed, as it is sorted, as an Excel workbook">
           <svg class=ui-icon><use href=#i-download /></svg> Export .xlsx
         </button>
       </div>
       <div class="gap-layout">
-        <div class="gap-list-wrap">
+        <div class="gap-list-wrap gap-recog-only">
           <div class="gap-head" id="gapHead">
             <button class="gap-col-q" data-gap-sort="question">Question</button>
             <button class="gap-col-r" data-gap-sort="response">Response</button>
@@ -11122,7 +11416,44 @@
             <div class="gap-spacer" id="gapSpacer"></div>
           </div>
         </div>
-        <div class="gap-side">
+        <div class="gap-list-wrap gap-fb-only">
+          <div class="gap-head gap-fb-grid" id="gapFbHead">
+            <button data-gap-fb-sort="name">Article / Dialog</button>
+            <button class="gap-num" data-gap-fb-sort="rated">Rated</button>
+            <button class="gap-num" data-gap-fb-sort="neg">Thumbs down</button>
+            <button class="gap-num" data-gap-fb-sort="share">Positive</button>
+          </div>
+          <div class="gap-list gap-fb-list" id="gapFbList" tabindex="0"></div>
+        </div>
+        <div class="gap-list-wrap gap-ai-only">
+          <div class="gap-head gap-ai-grid">
+            <span>Question</span>
+            <span>GenAI answer</span>
+            <span>When</span>
+          </div>
+          <div class="gap-list" id="gapAiList" tabindex="0">
+            <div class="gap-spacer" id="gapAiSpacer"></div>
+          </div>
+        </div>
+        <div class="gap-side gap-ai-only">
+          <div class="gap-chat-header" id="gapAiHeader">
+            <div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">
+              Select a question to read the GenAI answer and the conversation around it.
+            </div>
+          </div>
+          <div class="gap-ai-answer" id="gapAiAnswer" hidden></div>
+          <div class="chat-thread gap-thread" id="gapAiThread"></div>
+        </div>
+        <div class="gap-side gap-fb-only">
+          <div class="gap-chat-header" id="gapFbHeader">
+            <div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">
+              Select an Article or Dialog to see the answers people rated.
+            </div>
+          </div>
+          <div class="gap-fb-answers" id="gapFbAnswers" hidden></div>
+          <div class="chat-thread gap-thread" id="gapFbThread"></div>
+        </div>
+        <div class="gap-side gap-recog-only">
           <div class="gap-chat-header" id="gapChatHeader">
             <div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">
               Select a row to see the conversation it came from.
@@ -11409,10 +11740,11 @@
             >
               <label for="setting-timezone">Display timezone</label>
               <p class="hint" style="margin-bottom: 6px">
-                Where conversation times, the date filter and the Insights
-                charts are read. Import and Stored data stay in UTC, like the
-                database &mdash; there the day you pick is exactly the set of
-                rows that moves.
+                The clock every date and time in the app is read in &mdash;
+                conversations, the date filter, Insights, Analysis, and the
+                Import and Stored data calendars. The database stores UTC and
+                the Analytics API is asked in UTC; a day you pick here is
+                translated, so it arrives complete.
               </p>
               <select id="setting-timezone" style="max-width: 320px"></select>
             </div>
@@ -12788,6 +13120,8 @@
           saveExportXlsx: (defaultName, sheet) =>
             invoke("save_export_xlsx", { defaultName, sheet }),
           getGapInteractions: (args) => invoke("get_gap_interactions", { args }),
+          getGapFeedback: (args) => invoke("get_gap_feedback", { args }),
+          getGapGenAi: (args) => invoke("get_gap_genai", { args }),
           pickScreenColor: () => invoke("pick_screen_color"),
           setGapFixed: (logIds, fixed, note) =>
             invoke("set_gap_fixed", { logIds, fixed, note: note == null ? null : note }),
@@ -12827,8 +13161,8 @@
             invoke("get_insight_tags", { args, unit, keys }),
           getInsightTagValues: (args, unit, kind, name) =>
             invoke("get_insight_tag_values", { args, unit, kind, name }),
-          getInsightSegments: (args, unit, breakdowns, withKeys) =>
-            invoke("get_insight_segments", { args, unit, breakdowns, withKeys }),
+          getInsightSegments: (args, unit, breakdowns, withKeys, totalOnly) =>
+            invoke("get_insight_segments", { args, unit, breakdowns, withKeys, totalOnly: !!totalOnly }),
           getConversationInsights: (args, unit, sections) =>
             invoke("get_conversation_insights", { args, unit, sections }),
           // Frees the resolved result set the Insights temp tables hold. Called
@@ -12869,6 +13203,9 @@
             invoke("record_imported_window", { startUtc, endUtc }),
           deleteInteractionsByDates: (dates) =>
             invoke("delete_interactions_by_dates", { args: { dates } }),
+          // Days of the display timezone, as the UTC instants they span.
+          deleteInteractionsBetween: (ranges) =>
+            invoke("delete_interactions_between", { args: { ranges } }),
           // Flagged conversations commands
           flagSession: (sessionUuid, flaggedLogIds, sourceDbPath) =>
             invoke("flag_session", {
@@ -13030,6 +13367,8 @@
         window.backend.recordImportedWindow = () => Promise.resolve()
       if (!window.backend.deleteInteractionsByDates)
         window.backend.deleteInteractionsByDates = _convStub
+      if (!window.backend.deleteInteractionsBetween)
+        window.backend.deleteInteractionsBetween = _convStub
       if (!window.backend.flagSession)
         window.backend.flagSession = _convStub
       if (!window.backend.getFlaggedSessions)
@@ -13051,6 +13390,135 @@
         window.backend.deleteFlaggedFolder = _convStub
       if (!window.backend.moveToFlaggedFolder)
         window.backend.moveToFlaggedFolder = _convStub
+
+      // ── Opening the conversations database ─────────────────────────
+      //
+      // One open at a time, and every read waits for it. The saved database is
+      // opened in the background at launch, and until that returns the backend
+      // has no connection: a read in the meantime failed with "No database
+      // open." — the GAP list said it could not read the range, a search said
+      // nothing matched — and entering Conversations started a *second* open of
+      // the same file alongside the first. See docs/loading-states.md →
+      // "The database is still opening".
+      let _convDbOpening = null // {path, promise} while an open is in flight
+      let convDbOpenedPath = "" // what the backend has open, as far as we know
+      let convDbPhaseLabel = "" // the migration phase being run, if one is
+      const _rawSetDbPath = window.backend.setDbPath
+
+      function convDbIsOpening() {
+        return !!_convDbOpening
+      }
+
+      /// Open `path`, or join the open of it already in flight. A different
+      /// path waits for the current open to settle first, so the backend never
+      /// runs two.
+      function convDbOpen(path) {
+        if (_convDbOpening && _convDbOpening.path === path) return _convDbOpening.promise
+        const before = _convDbOpening ? _convDbOpening.promise.catch(() => {}) : Promise.resolve()
+        const entry = { path, promise: null }
+        entry.promise = before
+          .then(() => _rawSetDbPath(path))
+          .then(
+            () => {
+              convDbOpenedPath = path
+            },
+            (e) => {
+              if (convDbOpenedPath === path) convDbOpenedPath = ""
+              throw e
+            },
+          )
+          .finally(() => {
+            if (_convDbOpening === entry) {
+              _convDbOpening = null
+              convDbPhaseLabel = ""
+              convDbOpeningChanged()
+            }
+          })
+        _convDbOpening = entry
+        convDbOpeningChanged()
+        return entry.promise
+      }
+
+      /// Resolves once no open is in flight — whether it worked or not. A read
+      /// after a failed open then fails on its own, with the backend's message.
+      function convDbWhenReady() {
+        return _convDbOpening ? _convDbOpening.promise.catch(() => {}) : Promise.resolve()
+      }
+
+      /// What a pane waiting on the database says. Pure, for the test.
+      function convDbWaitText(label, note, opening, phase) {
+        if (!opening) return { label, note }
+        return {
+          label: "Opening the database…",
+          note: phase || "It opens once per launch; this continues as soon as it is ready.",
+        }
+      }
+
+      /// Relabel everything that is showing a database wait: the header pill,
+      /// and any pane spinner — which was drawn with the words it would say
+      /// once the database is open, and says them from now on.
+      function convDbOpeningChanged() {
+        const on = convDbIsOpening()
+        const text = document.getElementById("dbOpeningLabel")
+        if (text) text.textContent = convDbPhaseLabel || "Opening database…"
+        const pill = document.getElementById("dbOpeningPill")
+        if (pill) {
+          pill.title = convDbPhaseLabel
+            ? convDbPhaseLabel + " This runs once, after an update."
+            : "Opening the conversations database. Anything that reads it waits until it is ready."
+        }
+        gateLoading("dbOpening", on, (v) => fadeIndicator(pill, v, "visible"))
+        for (const el of document.querySelectorAll(".pane-loading[data-label]")) {
+          const t = convDbWaitText(el.dataset.label, el.dataset.note || "", on, convDbPhaseLabel)
+          const l = el.querySelector(".pane-loading-label")
+          const n = el.querySelector(".pane-loading-note")
+          if (l) l.textContent = t.label
+          if (n) {
+            n.textContent = t.note
+            n.hidden = !t.note
+          }
+        }
+        const overlay = document.getElementById("convSearchLoadingOverlay")
+        const olabel = overlay && overlay.querySelector(".conv-search-loading-label")
+        if (olabel && overlay.dataset.label) {
+          olabel.textContent = on ? "Opening the database… " + (convDbPhaseLabel || "the search runs as soon as it is ready.") : overlay.dataset.label
+        }
+      }
+
+      // Every command that reads or writes the conversations database waits
+      // for an open in flight. In one place, rather than at forty call sites
+      // that would each have to remember.
+      for (const name of [
+        "getSessions",
+        "exportConversationsForAi",
+        "getInsightTags",
+        "getInsightTagValues",
+        "getInsightSegments",
+        "getConversationInsights",
+        "releaseInsightScope",
+        "getSessionInteractions",
+        "getDateRange",
+        "getContextOptions",
+        "getEntityOptions",
+        "getMetadataOptions",
+        "getDbDailyStats",
+        "getDbHourCoverage",
+        "recordImportedWindow",
+        "deleteInteractionsByDates",
+        "deleteInteractionsBetween",
+        "getGapInteractions",
+        "getGapFeedback",
+        "getGapGenAi",
+        "setGapFixed",
+        "importInteractionsCsv",
+        "beginImportRun",
+        "finalizeImportRun",
+        "compactDatabase",
+      ]) {
+        const fn = window.backend[name]
+        if (typeof fn !== "function") continue
+        window.backend[name] = (...args) => convDbWhenReady().then(() => fn(...args))
+      }
 
       // ── State ───────────────────────────────────────────────────────
       let gQuery = ""
@@ -20898,6 +21366,8 @@
         { key: "cm-insights-segments" },
         { key: "cm-insights-segment-layout" },
         { key: "cm-insights-segment-presets" },
+        { key: "cm-insights-segment-total-only" },
+        { key: "cm-insights-segment-utc-days" },
         // Web build only; absent keys are simply omitted from the file. On the
         // desktop the equivalent lives in analytics-api.json and is merged in
         // by Rust, secret included.
@@ -22904,7 +23374,15 @@
       // the open conversation and the place in the entity finder.
       let gapLoadedKey = ""
       let gapEntitiesFor = null // the entity list the finder was last drawn from
-      let gapSavedScroll = null // {list, chat, entities} while the view is away
+      // Scroll positions per mode, saved as a mode's panes are hidden — by
+      // leaving the view or by switching mode — because a hidden pane reads
+      // (and keeps) a scroll of 0.
+      const GAP_SCROLL_PANES = {
+        recog: [["gapList", "list"], ["gapChatThread", "chat"], ["gapEntityList", "entities"]],
+        feedback: [["gapFbList", "list"], ["gapFbAnswers", "answers"], ["gapFbThread", "chat"]],
+        genai: [["gapAiList", "list"], ["gapAiAnswer", "answer"], ["gapAiThread", "chat"]],
+      }
+      const gapSavedScroll = { recog: null, feedback: null, genai: null }
       let gapRange = null // {from, to} as local YYYY-MM-DD
       let _gapView = null // cached filtered + sorted list
       const gapSessionCache = new Map()
@@ -22983,8 +23461,24 @@
       /// Called as the view is left: `display: none` does not keep a scroll
       /// position in WebKit, so it is kept here.
       function gapRememberScroll() {
-        const at = (id) => document.getElementById(id)?.scrollTop || 0
-        gapSavedScroll = { list: at("gapList"), chat: at("gapChatThread"), entities: at("gapEntityList") }
+        const saved = {}
+        for (const [id, key] of GAP_SCROLL_PANES[gapMode]) {
+          saved[key] = document.getElementById(id)?.scrollTop || 0
+        }
+        gapSavedScroll[gapMode] = saved
+      }
+
+      /// Put a mode's saved scroll positions back, once. Synchronously, not in
+      /// a frame: the panes are already shown, and a frame does not arrive in a
+      /// window that is not composited.
+      function gapRestoreScroll(mode) {
+        const saved = gapSavedScroll[mode]
+        gapSavedScroll[mode] = null
+        if (!saved) return
+        for (const [id, key] of GAP_SCROLL_PANES[mode]) {
+          const el = document.getElementById(id)
+          if (el) el.scrollTop = saved[key] || 0
+        }
       }
 
       async function onEnterGapView() {
@@ -22994,31 +23488,34 @@
         }
         gapRenderRangeLabel()
         gapRenderThreshold()
+        // The EntitiesExport CSV has no ids; the conversations database does.
+        // Unawaited, like the Entities tab: the finder draws now and its links
+        // are upgraded in place (`_refreshEntityLinks`) once the ids land.
+        ensureEntityIdMap()
         if (gapEntitiesFor !== allEntities) {
           gapEntitiesFor = allEntities
           gapRenderEntities()
         }
+        gapApplyMode()
+        if (gapMode === "feedback") {
+          await gapFbEnter()
+          return
+        }
+        if (gapMode === "genai") {
+          await gapAiEnter()
+          return
+        }
         if (gapLoadedKey && gapLoadedKey === gapStateKey()) {
           // The same list: put it back exactly where it was.
-          const saved = gapSavedScroll
-          gapSavedScroll = null
           // Synchronously, not in a frame: the view is already shown (switchView
           // toggles it before calling here), so the scroll can be set now —
           // and a frame does not arrive in a window that is not composited,
           // which left the rows painted for the top of the list.
-          if (saved) {
-            const set = (id, v) => {
-              const el = document.getElementById(id)
-              if (el) el.scrollTop = v
-            }
-            set("gapList", saved.list)
-            set("gapChatThread", saved.chat)
-            set("gapEntityList", saved.entities)
-          }
+          gapRestoreScroll("recog")
           gapPaintRows()
           return
         }
-        gapSavedScroll = null
+        gapSavedScroll.recog = null
         await loadGapRows()
       }
 
@@ -23702,14 +24199,14 @@
         if (!url) return gapEditHtml("", "Add “" + gapAddWord + "”")
         return (
           '<a class="btn-open-url" data-entity-open="' + esc(name) + '" href="' + esc(url) +
-          '" title="Copy “' + esc(gapAddWord) + '” and open ' + esc(name) + ' in CM.com" target="_blank" data-word="' +
+          '" title="Copy “' + esc(gapAddWord) + '” — ' + esc(_entityLinkTitle(name)) + '" target="_blank" data-word="' +
           esc(gapAddWord) + '" onclick="gapCopyText(this.dataset.word)">' + extLinkSvg() + " Add “" + esc(gapAddWord) + "”</a>"
         )
       }
 
-      /// `GAP 2026-09-23 September.xlsx` — the day it was made, and the month
-      /// (or months) the range covers.
-      function gapExportName() {
+      /// `Analysis recognition 2026-09-23 September.xlsx` — which list, the day
+      /// it was made, and the month (or months) the range covers.
+      function gapExportName(what) {
         const monthOf = (day) => {
           try {
             return new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, 1)).toLocaleString("en-GB", {
@@ -23722,7 +24219,7 @@
         }
         const a = monthOf(gapRange.from)
         const b = monthOf(gapRange.to)
-        return "GAP " + gapToday() + " " + (a === b ? a : a + "-" + b) + ".xlsx"
+        return "Analysis " + what + " " + gapToday() + " " + (a === b ? a : a + "-" + b) + ".xlsx"
       }
 
       async function gapExport() {
@@ -23741,7 +24238,7 @@
           return Array.isArray(a) ? a.join(", ") : ""
         }
         const sheet = {
-          name: "GAP",
+          name: "Recognition",
           headers: [
             "Date / time",
             "Question",
@@ -23772,7 +24269,679 @@
           })),
         }
         try {
-          const res = await window.backend.saveExportXlsx(gapExportName(), sheet)
+          const res = await window.backend.saveExportXlsx(gapExportName("recognition"), sheet)
+          if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
+          else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
+        } catch (e) {
+          showImportToast("error", "Could not save the workbook. " + String(e))
+        }
+      }
+
+      // ── Feedback ──
+      //
+      // The other half of the work list: not what the bot failed to recognise,
+      // but what it answered and was told was wrong. Every answer rated in the
+      // range (`get_gap_feedback`), grouped per thing that answered and ranked
+      // by the share of its ratings that were positive — lowest first.
+      // See docs/gap.md → "Feedback".
+      let gapMode = "recog" // recog | feedback | genai
+      let gapFbRows = []
+      let gapFbTruncated = false
+      let gapFbLoadedKey = ""
+      let gapFbSeq = 0
+      let gapFbGroup = "answer" // answer | content
+      let gapFbMin = 3
+      let gapFbQuery = ""
+      let gapFbSort = { key: "share", dir: 1 }
+      let gapFbActive = null // the selected item's key
+      let gapFbActiveAnswer = null // the selected rated answer's logId
+
+      function gapFbStateKey() {
+        return JSON.stringify([convDbPath || "", gapRange && gapRange.from, gapRange && gapRange.to])
+      }
+
+      /// The rated answers grouped per Article and Dialog node — or, `content`,
+      /// with the nodes added up into their Dialog.
+      ///
+      /// An answer is counted under **every** id it carries: a Dialog node that
+      /// answered with an Article's text is both, and its rating is about both.
+      /// One with no id at all — the fallback, a GenAI answer — goes under "".
+      /// Pure, so `gap-fb.test.js` can hold it to the numbers.
+      function gapFbItems(rows, group) {
+        const items = new Map()
+        for (const r of rows || []) {
+          const keys = new Set()
+          for (const raw of parseJsonSafe(r.articleIds || "") || []) {
+            const id = String(raw)
+            if (/^qa-\d+$/.test(id)) {
+              keys.add(id)
+              continue
+            }
+            const m = /^dn-(\d+)(?:-(\d+))?$/.exec(id)
+            if (m) keys.add(group === "content" || !m[2] ? "dn-" + m[1] : id)
+          }
+          if (!keys.size) keys.add("")
+          for (const key of keys) {
+            let it = items.get(key)
+            if (!it) items.set(key, (it = { key, rated: 0, neg: 0, rows: [] }))
+            it.rated++
+            if (r.score < 0) it.neg++
+            it.rows.push(r)
+          }
+        }
+        return [...items.values()].map((it) => ({ ...it, share: (it.rated - it.neg) / it.rated }))
+      }
+
+      /// What an item is called: its id, and the title the content export gives
+      /// it when that is loaded.
+      function gapFbRef(key) {
+        if (!key) return { kind: "none", label: "—", title: "No Article or Dialog — the fallback, or a GenAI answer", url: "" }
+        return gapContentRef(key) || { kind: "none", label: key, title: "", url: "" }
+      }
+
+      let _gapFbView = null
+      let _gapFbViewKey = ""
+      function gapFbView() {
+        const vkey = JSON.stringify([gapFbLoadedKey, gapFbGroup, gapFbMin, gapFbQuery, gapFbSort])
+        if (_gapFbView && _gapFbViewKey === vkey) return _gapFbView
+        const q = gapFbQuery.trim().toLowerCase()
+        let list = gapFbItems(gapFbRows, gapFbGroup).filter((it) => it.rated >= gapFbMin)
+        for (const it of list) it.ref = gapFbRef(it.key)
+        if (q) {
+          list = list.filter((it) =>
+            (it.ref.label + " " + it.ref.title + " " + it.rows.map((r) => r.question).join(" "))
+              .toLowerCase()
+              .includes(q),
+          )
+        }
+        const d = gapFbSort.dir
+        const by = {
+          share: (a, b) => a.share - b.share || b.neg - a.neg,
+          neg: (a, b) => a.neg - b.neg,
+          rated: (a, b) => a.rated - b.rated,
+          name: (a, b) => (a.ref.title || a.ref.label).localeCompare(b.ref.title || b.ref.label),
+        }[gapFbSort.key]
+        list.sort((a, b) => d * by(a, b) || b.rated - a.rated || a.key.localeCompare(b.key))
+        _gapFbView = list
+        _gapFbViewKey = vkey
+        return list
+      }
+
+      function gapApplyMode() {
+        document.getElementById("view-gap").dataset.mode = gapMode
+        document.querySelectorAll("[data-gap-mode]").forEach((b) =>
+          b.classList.toggle("active", b.dataset.gapMode === gapMode),
+        )
+        document.getElementById("gapExportBtn").title =
+          gapMode === "feedback"
+            ? "Save the Articles and Dialogs listed, as they are sorted, as an Excel workbook"
+            : gapMode === "genai"
+            ? "Save the GenAI questions and answers listed as an Excel workbook"
+            : "Save what is listed, as it is sorted, as an Excel workbook"
+      }
+
+      async function gapSetMode(mode) {
+        if (mode === gapMode) return
+        gapRememberScroll()
+        gapMode = mode === "feedback" || mode === "genai" ? mode : "recog"
+        gapApplyMode()
+        if (gapMode === "feedback") {
+          await gapFbEnter()
+          return
+        }
+        if (gapMode === "genai") {
+          await gapAiEnter()
+          return
+        }
+        if (gapLoadedKey && gapLoadedKey === gapStateKey()) {
+          gapRestoreScroll("recog")
+          gapPaintRows()
+        } else {
+          gapSavedScroll.recog = null
+          await loadGapRows()
+        }
+      }
+
+      async function gapFbEnter() {
+        if (gapFbLoadedKey && gapFbLoadedKey === gapFbStateKey()) {
+          gapRestoreScroll("feedback")
+          return
+        }
+        gapSavedScroll.feedback = null
+        await loadGapFeedback()
+      }
+
+      async function loadGapFeedback() {
+        const list = document.getElementById("gapFbList")
+        if (!convDbPath) {
+          gapFbRows = []
+          gapFbLoadedKey = ""
+          list.innerHTML =
+            '<div class="gap-empty">Open a conversations database to see what people rated.' +
+            '<br><button class="btn-primary" onclick="openDbSetupModal()">Open database…</button></div>'
+          document.getElementById("gapFbCount").textContent = ""
+          return
+        }
+        if (!gapRange || !gapRange.from || !gapRange.to) return
+        const seq = ++gapFbSeq
+        const key = gapFbStateKey()
+        const bounds = insZoneDayBounds(gapRange.from, gapRange.to, insZone())
+        setPaneLoading("gapFbList", "Reading…")
+        try {
+          const res = await window.backend.getGapFeedback({ fromUtc: bounds.from, toUtc: bounds.to })
+          if (seq !== gapFbSeq) return
+          gapFbRows = (res && res.rows) || []
+          gapFbTruncated = !!(res && res.truncated)
+          gapFbLoadedKey = key
+          _gapFbView = null
+        } catch (e) {
+          if (seq !== gapFbSeq) return
+          gapFbRows = []
+          gapFbLoadedKey = "" // retried on the next visit
+          list.innerHTML = '<div class="gap-empty">Could not read the range. ' + esc(String(e)) + "</div>"
+          return
+        } finally {
+          clearPaneLoading("gapFbList")
+        }
+        gapFbActive = null
+        gapFbActiveAnswer = null
+        gapFbRenderSide()
+        gapFbRenderList(true)
+      }
+
+      function gapFbShareTone(share) {
+        return share < 0.5 ? "bad" : share < 0.75 ? "meh" : "good"
+      }
+
+      function gapFbPct(share) {
+        return Math.round(share * 100) + "%"
+      }
+
+      function gapFbRenderList(resetScroll) {
+        const list = document.getElementById("gapFbList")
+        const view = gapFbView()
+        const all = gapFbItems(gapFbRows, gapFbGroup)
+        const neg = gapFbRows.filter((r) => r.score < 0).length
+        document.getElementById("gapFbCount").textContent =
+          view.length.toLocaleString() +
+          (view.length !== all.length ? " of " + all.length.toLocaleString() : "") +
+          " · " +
+          gapFbRows.length.toLocaleString() +
+          " rated answers, " +
+          neg.toLocaleString() +
+          " thumbs down" +
+          (gapFbTruncated ? " · first 20,000 only — narrow the range" : "")
+        document.querySelectorAll("#gapFbHead [data-gap-fb-sort]").forEach((b) => {
+          const on = b.dataset.gapFbSort === gapFbSort.key
+          b.classList.toggle("sorted", on)
+          b.textContent = b.textContent.replace(/ [↑↓]$/, "") + (on ? (gapFbSort.dir > 0 ? " ↑" : " ↓") : "")
+        })
+        if (!view.length) {
+          list.innerHTML = gapFbRows.length
+            ? '<div class="gap-empty">Nothing matches these filters' +
+              (gapFbMin > 1 ? " — try fewer ratings" : "") +
+              ".</div>"
+            : '<div class="gap-empty">Nobody rated an answer in this range.</div>'
+          return
+        }
+        list.innerHTML = view
+          .map((it) => {
+            const r = it.ref
+            const none = it.key === ""
+            const pct = Math.round(it.share * 100)
+            return (
+              '<div class="gap-fb-row' +
+              (it.key === gapFbActive ? " active" : "") +
+              '" data-key="' +
+              esc(it.key) +
+              '" onclick="gapFbSelect(this.dataset.key)"><span class="gap-fb-what" title="' +
+              esc(r.label + (r.title ? " · " + r.title : "")) +
+              '"><span class="gap-fb-id">' +
+              esc(none ? "" : r.label) +
+              '</span><span class="gap-fb-title' +
+              (none ? " none" : "") +
+              '">' +
+              esc(r.title || (none ? "" : "Not in the content export")) +
+              '</span></span><span class="gap-num">' +
+              it.rated.toLocaleString() +
+              '</span><span class="gap-num' +
+              (it.neg ? " gap-fb-neg" : "") +
+              '">' +
+              it.neg.toLocaleString() +
+              '</span><span class="gap-fb-share"><span class="gap-fb-bar"><i style="width:' +
+              pct +
+              '%"></i></span><span class="gap-fb-pct ' +
+              gapFbShareTone(it.share) +
+              '">' +
+              pct +
+              "%</span></span></div>"
+            )
+          })
+          .join("")
+        if (resetScroll) list.scrollTop = 0
+      }
+
+      function gapFbItemByKey(key) {
+        return gapFbView().find((it) => it.key === key) || null
+      }
+
+      function gapFbSelect(key) {
+        gapFbActive = key
+        gapFbActiveAnswer = null
+        document.querySelectorAll("#gapFbList .gap-fb-row").forEach((el) =>
+          el.classList.toggle("active", el.dataset.key === key),
+        )
+        gapFbRenderSide()
+        // The first thumbs-down is what someone opens an item to read.
+        const it = gapFbItemByKey(key)
+        const first = it && gapFbAnswersOf(it)[0]
+        if (first) gapFbOpenAnswer(first.logId)
+      }
+
+      /// An item's rated answers: thumbs down first, newest first within each.
+      function gapFbAnswersOf(it) {
+        return it.rows
+          .slice()
+          .sort((a, b) => a.score - b.score || (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0))
+      }
+
+      function gapFbRenderSide() {
+        const header = document.getElementById("gapFbHeader")
+        const answers = document.getElementById("gapFbAnswers")
+        const thread = document.getElementById("gapFbThread")
+        const it = gapFbActive == null ? null : gapFbItemByKey(gapFbActive)
+        if (!it) {
+          header.innerHTML =
+            '<div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">Select an Article or Dialog to see the answers people rated.</div>'
+          answers.hidden = true
+          answers.innerHTML = ""
+          thread.innerHTML = ""
+          return
+        }
+        const r = it.ref
+        const editLabel = r.kind === "article" ? "Edit Article" : r.kind === "node" ? "Edit node" : "Edit Dialog"
+        header.innerHTML =
+          '<span class="gap-chat-meta"><strong>' +
+          esc(it.key ? r.label : "No Article or Dialog") +
+          "</strong>" +
+          (r.title ? " · " + esc(r.title) : "") +
+          "<br>" +
+          it.rated.toLocaleString() +
+          " rated · " +
+          it.neg.toLocaleString() +
+          " thumbs down · " +
+          gapFbPct(it.share) +
+          " positive</span>" +
+          (r.url ? gapEditHtml(r.url, editLabel) : "") +
+          (it.key
+            ? '<button class="btn-secondary" data-key="' +
+              esc(it.key) +
+              '" onclick="gapFbOpenInConversations(this.dataset.key)" title="Every conversation with a thumbs-down on this, in the Conversations view">Thumbs down in Conversations</button>'
+            : "")
+        answers.hidden = false
+        answers.innerHTML = gapFbAnswersOf(it)
+          .map(
+            (a) =>
+              '<div class="gap-fb-answer' +
+              (a.logId === gapFbActiveAnswer ? " active" : "") +
+              '" data-log-id="' +
+              a.logId +
+              '" title="' +
+              esc(gapPlain(a.response)) +
+              '" onclick="gapFbOpenAnswer(' +
+              a.logId +
+              ')"><span class="' +
+              (a.score < 0 ? "neg" : "pos") +
+              '"><svg class=ui-icon><use href=#i-thumb-' +
+              (a.score < 0 ? "down" : "up") +
+              ' /></svg></span><span class="gap-fb-q">' +
+              esc(a.question || "(no question)") +
+              '</span><span class="gap-fb-when">' +
+              esc(fmtTs(a.timestamp)) +
+              "</span></div>",
+          )
+          .join("")
+        answers.scrollTop = 0
+        thread.innerHTML = ""
+      }
+
+      /// The conversation a rated answer came from, with that answer marked —
+      /// the same read-only thread, cache and mark the recognition list uses.
+      async function gapFbOpenAnswer(logId) {
+        gapFbActiveAnswer = logId
+        document.querySelectorAll("#gapFbAnswers .gap-fb-answer").forEach((el) =>
+          el.classList.toggle("active", Number(el.dataset.logId) === logId),
+        )
+        const row = gapFbRows.find((r) => r.logId === logId)
+        if (!row) return
+        const thread = document.getElementById("gapFbThread")
+        let rows = gapSessionCache.get(row.sessionUuid)
+        if (!rows) {
+          setPaneLoading("gapFbThread", "Loading conversation…")
+          try {
+            rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
+          } catch (e) {
+            rows = []
+          } finally {
+            clearPaneLoading("gapFbThread")
+          }
+          gapSessionCache.set(row.sessionUuid, rows)
+          if (gapFbActiveAnswer !== logId) return
+        }
+        thread.innerHTML = renderFlaggedThread(rows, {
+          markIds: new Set([String(logId)]),
+          markClass: "gap-mark",
+          readOnly: true,
+        })
+        requestAnimationFrame(() => {
+          const el = thread.querySelector('.chat-turn[data-turn-id="' + logId + '"]')
+          if (el) el.scrollIntoView({ block: "center" })
+        })
+      }
+
+      /// The Conversations view, searching this Article or Dialog with the
+      /// thumbs-down pill on — which matches the conversations where *this*
+      /// answer was rated down, not ones with a thumbs-down anywhere.
+      function gapFbOpenInConversations(key) {
+        const m = /^(qa|dn)-(.+)$/.exec(String(key || ""))
+        if (!m) return
+        convSessionFilter = "neg_feedback"
+        const pill = document.getElementById("feedbackFilterPill")
+        document.querySelectorAll("[data-conv-filter]").forEach((b) => b.classList.remove("active"))
+        pill.dataset.convFilter = "neg_feedback"
+        pill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-down /></svg> feedback"
+        pill.classList.add("active")
+        convExpr = []
+        searchConvsForId(m[2], m[1] === "qa" ? "article" : "dialog")
+      }
+
+      async function gapFbExport() {
+        const view = gapFbView()
+        if (!view.length) {
+          showImportToast("error", "Nothing listed to export.")
+          return
+        }
+        const sheet = {
+          name: "Feedback",
+          headers: ["Id", "Kind", "Title", "Rated", "Thumbs down", "Thumbs up", "Positive %"],
+          widths: [16, 10, 60, 9, 13, 11, 12],
+          rows: view.map((it) => ({
+            highlight: false,
+            cells: [
+              it.key || "",
+              it.key ? { article: "Article", node: "Dialog node", dialog: "Dialog" }[it.ref.kind] || "" : "None",
+              it.ref.title || "",
+              it.rated,
+              it.neg,
+              it.rated - it.neg,
+              Math.round(it.share * 1000) / 10,
+            ],
+          })),
+        }
+        try {
+          const res = await window.backend.saveExportXlsx(gapExportName("feedback"), sheet)
+          if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
+          else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
+        } catch (e) {
+          showImportToast("error", "Could not save the workbook. " + String(e))
+        }
+      }
+
+      // ── GenAI ──
+      //
+      // Everything GenAI answered in the range: the question, the answer, and
+      // the conversation around it. The third list, beside what the bot did
+      // not recognise and what people rated. See docs/gap.md → "GenAI".
+      let gapAiRows = []
+      let gapAiTruncated = false
+      let gapAiLoadedKey = ""
+      let gapAiSeq = 0
+      let gapAiQuery = ""
+      let gapAiActive = null
+      let _gapAiView = null
+
+      /// The interaction type as the Interaction Log records it. Most GenAI
+      /// turns are `GenerativeAI`; some are logged with main type `QA` and
+      /// `GenerativeAI` among their types — shown as the log has it rather
+      /// than under a label of this app's own. See docs/gap.md → "GenAI".
+      function gapAiType(r) {
+        return !r.mainType || r.mainType === "GenerativeAI"
+          ? "GenerativeAI"
+          : r.mainType + " + GenerativeAI"
+      }
+
+      /// The Article ids a GenAI answer drew on (`faqs_found`), as the chat's
+      /// "GenAI source articles" reads them.
+      function gapAiSources(r) {
+        const f = parseJsonSafe(r.faqsFound || "")
+        return f && Array.isArray(f.DataRetrievalResults) ? f.DataRetrievalResults : []
+      }
+
+      function gapAiView() {
+        if (_gapAiView) return _gapAiView
+        const q = gapAiQuery.trim().toLowerCase()
+        _gapAiView = gapAiRows.filter((r) => {
+          if (q) {
+            if (r._hay == null) r._hay = (r.question + " " + gapPlain(r.response)).toLowerCase()
+            if (!r._hay.includes(q)) return false
+          }
+          return true
+        })
+        return _gapAiView
+      }
+
+      async function gapAiEnter() {
+        if (gapAiLoadedKey && gapAiLoadedKey === gapFbStateKey()) {
+          gapRestoreScroll("genai")
+          gapAiPaint()
+          return
+        }
+        gapSavedScroll.genai = null
+        await loadGapGenAi()
+      }
+
+      async function loadGapGenAi() {
+        const list = document.getElementById("gapAiList")
+        if (!convDbPath) {
+          gapAiRows = []
+          gapAiLoadedKey = ""
+          _gapAiView = null
+          list.innerHTML =
+            '<div class="gap-empty">Open a conversations database to see what GenAI answered.' +
+            '<br><button class="btn-primary" onclick="openDbSetupModal()">Open database…</button></div>'
+          document.getElementById("gapAiCount").textContent = ""
+          return
+        }
+        if (!gapRange || !gapRange.from || !gapRange.to) return
+        const seq = ++gapAiSeq
+        const key = gapFbStateKey() // the database and the range, nothing else
+        const bounds = insZoneDayBounds(gapRange.from, gapRange.to, insZone())
+        setPaneLoading("gapAiList", "Reading…")
+        try {
+          const res = await window.backend.getGapGenAi({ fromUtc: bounds.from, toUtc: bounds.to })
+          if (seq !== gapAiSeq) return
+          gapAiRows = (res && res.rows) || []
+          gapAiTruncated = !!(res && res.truncated)
+          gapAiLoadedKey = key
+          _gapAiView = null
+        } catch (e) {
+          if (seq !== gapAiSeq) return
+          gapAiRows = []
+          gapAiLoadedKey = ""
+          _gapAiView = null
+          list.innerHTML = '<div class="gap-empty">Could not read the range. ' + esc(String(e)) + "</div>"
+          return
+        } finally {
+          clearPaneLoading("gapAiList")
+        }
+        gapAiActive = null
+        gapAiRenderSide(null)
+        gapAiRenderList(true)
+      }
+
+      function gapAiRenderList(resetScroll) {
+        const list = document.getElementById("gapAiList")
+        const view = gapAiView()
+        document.getElementById("gapAiCount").textContent =
+          view.length.toLocaleString() +
+          (view.length !== gapAiRows.length ? " of " + gapAiRows.length.toLocaleString() : "") +
+          " GenAI answers" +
+          (gapAiTruncated ? " · first 20,000 only — narrow the range" : "")
+        if (!view.length) {
+          list.innerHTML = gapAiRows.length
+            ? '<div class="gap-empty">Nothing matches these filters.</div>'
+            : '<div class="gap-empty">GenAI answered nothing in this range.</div>'
+          return
+        }
+        if (!list.querySelector("#gapAiSpacer")) {
+          list.innerHTML = '<div class="gap-spacer" id="gapAiSpacer"></div>'
+        }
+        document.getElementById("gapAiSpacer").style.height = view.length * GAP_ROW_H + "px"
+        if (resetScroll) list.scrollTop = 0
+        gapAiPaint()
+      }
+
+      /// Windowed like the recognition list: a month of GenAI answers is
+      /// thousands of rows, and only the ones in view exist.
+      function gapAiPaint() {
+        const list = document.getElementById("gapAiList")
+        const spacer = document.getElementById("gapAiSpacer")
+        if (!spacer) return
+        const view = gapAiView()
+        const first = Math.max(0, Math.floor(list.scrollTop / GAP_ROW_H) - 10)
+        const last = Math.min(view.length, Math.ceil((list.scrollTop + list.clientHeight) / GAP_ROW_H) + 10)
+        let html = ""
+        for (let i = first; i < last; i++) {
+          const r = view[i]
+          const answer = gapPlain(r.response)
+          html +=
+            '<div class="gap-ai-row' +
+            (r.logId === gapAiActive ? " active" : "") +
+            '" style="top:' +
+            i * GAP_ROW_H +
+            'px" onclick="gapAiSelect(' +
+            r.logId +
+            ')"><span class="gap-col-q" title="' +
+            esc(r.question) +
+            '">' +
+            esc(r.question) +
+            '</span><span class="gap-col-r" title="' +
+            esc(answer) +
+            '">' +
+            esc(answer || "—") +
+            '</span><span class="gap-col-t">' +
+            esc(fmtTs(r.timestamp)) +
+            "</span></div>"
+        }
+        list.querySelectorAll(".gap-ai-row").forEach((el) => el.remove())
+        spacer.insertAdjacentHTML("afterend", html)
+      }
+
+      function gapAiRenderSide(row) {
+        const header = document.getElementById("gapAiHeader")
+        const answer = document.getElementById("gapAiAnswer")
+        if (!row) {
+          header.innerHTML =
+            '<div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">Select a question to read the GenAI answer and the conversation around it.</div>'
+          answer.hidden = true
+          answer.innerHTML = ""
+          document.getElementById("gapAiThread").innerHTML = ""
+          return
+        }
+        const sources = gapAiSources(row)
+        header.innerHTML =
+          langBadgeHtml(row.culture, row.translationLanguage) +
+          '<span class="gap-chat-meta">' +
+          esc(fmtTs(row.timestamp)) +
+          " · " +
+          '<span title="The interaction type as the Interaction Log records it">' +
+          esc(gapAiType(row)) +
+          "</span></span>" +
+          haloConversationLink(row.sessionUuid) +
+          '<button class="btn-secondary" onclick="gapAiCopy(' +
+          row.logId +
+          ')">Copy question</button>' +
+          '<button class="btn-secondary" onclick="gapOpenInConversations(\'' +
+          esc(row.sessionUuid) +
+          "')\">Open in Conversations</button>"
+        answer.hidden = false
+        answer.innerHTML =
+          '<div class="gap-fix-label">GenAI answer</div>' +
+          parseCmOutput(row.response || "").body +
+          (sources.length
+            ? '<div class="gap-fix-label" style="margin-top:8px">Source Articles</div>' +
+              sources
+                .slice(0, 12)
+                .map((id) => {
+                  const ref = gapContentRef("qa-" + id)
+                  return ref ? gapRefRowHtml(ref) : ""
+                })
+                .join("")
+            : "")
+        answer.scrollTop = 0
+      }
+
+      async function gapAiSelect(logId) {
+        gapAiActive = logId
+        gapAiPaint()
+        const row = gapAiRows.find((r) => r.logId === logId)
+        if (!row) return
+        gapAiRenderSide(row)
+        const thread = document.getElementById("gapAiThread")
+        let rows = gapSessionCache.get(row.sessionUuid)
+        if (!rows) {
+          setPaneLoading("gapAiThread", "Loading conversation…")
+          try {
+            rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
+          } catch (e) {
+            rows = []
+          } finally {
+            clearPaneLoading("gapAiThread")
+          }
+          gapSessionCache.set(row.sessionUuid, rows)
+          if (gapAiActive !== logId) return
+        }
+        thread.innerHTML = renderFlaggedThread(rows, {
+          markIds: new Set([String(logId)]),
+          markClass: "gap-mark",
+          readOnly: true,
+        })
+        requestAnimationFrame(() => {
+          const el = thread.querySelector('.chat-turn[data-turn-id="' + logId + '"]')
+          if (el) el.scrollIntoView({ block: "center" })
+        })
+      }
+
+      function gapAiCopy(logId) {
+        const row = gapAiRows.find((r) => r.logId === logId)
+        if (row) gapCopyText(row.question)
+      }
+
+      async function gapAiExport() {
+        const view = gapAiView()
+        if (!view.length) {
+          showImportToast("error", "Nothing listed to export.")
+          return
+        }
+        const sheet = {
+          name: "GenAI",
+          headers: ["Date / time", "Question", "GenAI answer", "Interaction type", "Source Articles", "Culture", "Conversation"],
+          widths: [18, 50, 80, 22, 18, 8, 38],
+          rows: view.map((r) => ({
+            highlight: false,
+            cells: [
+              fmtTs(r.timestamp),
+              r.question,
+              gapPlain(r.response),
+              gapAiType(r),
+              gapAiSources(r).map((id) => "qa-" + id).join(", "),
+              r.culture || "",
+              r.sessionUuid,
+            ],
+          })),
+        }
+        try {
+          const res = await window.backend.saveExportXlsx(gapExportName("GenAI"), sheet)
           if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
           else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
         } catch (e) {
@@ -23818,9 +24987,95 @@
         return { lo: gapRange.from, hi: gapRange.to }
       }
 
+      // ── Which days hold data ──
+      //
+      // The same per-hour coverage the Import and Stored data calendars show
+      // (`get_db_hour_coverage`: UTC days, a bitmask of the hours imported),
+      // read here per *display-timezone* day — the days this calendar is in.
+      // A local day spans parts of two UTC days, so it is checked hour by hour
+      // against the UTC hours it covers. Loaded when the calendar opens; an
+      // import or a delete drops it (`gapCoverageInvalidate`).
+      let gapCoverage = null // Map: UTC "YYYY-MM-DD" → hour bitmask
+      let gapCoverageFor = ""
+      let gapCoverageSeq = 0
+
+      function gapCoverageInvalidate() {
+        gapCoverage = null
+        gapCoverageFor = ""
+      }
+
+      async function gapLoadCoverage() {
+        if (!convDbPath || (gapCoverage && gapCoverageFor === convDbPath)) return
+        const seq = ++gapCoverageSeq
+        try {
+          const rows = (await window.backend.getDbHourCoverage()) || []
+          if (seq !== gapCoverageSeq) return
+          gapCoverage = new Map(rows.map((d) => [d.date, d.hours]))
+          gapCoverageFor = convDbPath
+          gapRenderCal()
+        } catch (e) {
+          /* the calendar simply stays unmarked */
+        }
+      }
+
+      // ── Days of the display timezone ──
+      //
+      // The database, the API windows and the coverage bitmasks are all UTC;
+      // every calendar is in the display timezone. These are the only
+      // conversions between the two, shared by Analysis, Import and Stored data
+      // so the three cannot read one day three ways. See docs/import.md →
+      // "Calendars are in your timezone; storage and requests are UTC".
+
+      /// The day instant `ms` falls on in `zone`.
+      function zoneDayKey(ms, zone) {
+        return insUtcDayKey(ms + insOffsetAt(ms, zone) * 60000)
+      }
+
+      /// Now in `zone`, as its day and HH:MM.
+      function zoneNow(zone) {
+        const ms = Date.now()
+        const iso = new Date(ms + insOffsetAt(ms, zone) * 60000).toISOString()
+        return { day: iso.slice(0, 10), time: iso.slice(11, 16) }
+      }
+
+      /// A day and HH:MM of `zone`, as the instant it names.
+      function zoneInstant(day, time, zone) {
+        return new Date(Date.parse(insZoneStampToUtc(day, (time || "00:00") + ":00", zone) + "Z"))
+      }
+
+      /// Per-UTC-hour counts (`get_db_daily_stats().hours`) folded into days of
+      /// `zone`. UTC day totals cannot be regrouped: a local day is parts of two.
+      function zoneDayCounts(hours, zone) {
+        const out = new Map()
+        for (const h of hours || []) {
+          const ms = Date.UTC(+h.date.slice(0, 4), +h.date.slice(5, 7) - 1, +h.date.slice(8, 10), h.hour)
+          const key = zoneDayKey(ms, zone)
+          out.set(key, (out.get(key) || 0) + h.count)
+        }
+        return out
+      }
+
+      /// How many hours of the display-timezone day `key` are imported, of the
+      /// hours it has (23 or 25 across a DST change). Pure, for the test.
+      function zoneDayCoverage(key, coverage, zone) {
+        const b = insZoneDayBounds(key, key, zone)
+        const start = Date.parse(b.from + "Z")
+        const end = Date.parse(b.to + "Z")
+        if (!Number.isFinite(start) || !Number.isFinite(end)) return { covered: 0, total: 0 }
+        const total = Math.round((end + 1000 - start) / 3600000)
+        let covered = 0
+        for (let h = 0; h < total; h++) {
+          const iso = new Date(start + h * 3600000).toISOString()
+          const mask = coverage.get(iso.slice(0, 10))
+          if (mask && (mask >>> Number(iso.slice(11, 13))) & 1) covered++
+        }
+        return { covered, total }
+      }
+
       function _gapMonthHtml(monthDate, isFirst) {
         const today = gapToday()
         const { lo, hi } = _gapCalRange()
+        const zone = insZone()
         return calMonthHtml(monthDate, isFirst, {
           prevFn: "gapCalPrev",
           nextFn: "gapCalNext",
@@ -23829,12 +25084,25 @@
           keyFor: _calDayKey,
           classify: (key) => {
             let cls = "cal-day"
+            let title = ""
+            if (gapCoverage && key <= today) {
+              const c = zoneDayCoverage(key, gapCoverage, zone)
+              if (c.total && c.covered === c.total) {
+                cls += " has-data"
+                title = key + " — imported"
+              } else if (c.covered) {
+                cls += " partial-data"
+                title = key + " — partly imported: " + c.covered + " of " + c.total + " hours"
+              } else {
+                title = key + " — no data imported"
+              }
+            }
             if (key > today) cls += " disabled"
             else {
               if (key === today) cls += " today"
               cls += _calRangeCls(key, lo, hi)
             }
-            return { cls, title: "" }
+            return { cls, title }
           },
         })
       }
@@ -23856,7 +25124,15 @@
         pop.innerHTML =
           `<div class="day-cal-legend"><span>${
             gapPickPhase === 1 ? "Now pick the other end" : "Click a start day, then an end day"
-          }</span><span>Days in ${esc(insZoneLabel(insZone()))}</span></div>` +
+          }</span><span><span class="swatch full"></span>Imported</span><span><span class="swatch partial"></span>Partly imported</span>${
+            gapCoverage || !convDbPath ? "" : '<span><span class="mini-spinner"></span> Checking which days hold data…</span>'
+          }<span>${esc(
+            insZoneTimeLabel(
+              insZone(),
+              Date.UTC(gapCalMonth.getFullYear(), gapCalMonth.getMonth(), 1),
+              Date.UTC(gapCalMonth.getFullYear(), gapCalMonth.getMonth() + 2, 0),
+            ),
+          )}</span></div>` +
           `<div class="day-cal" id="gapCal"><div class="day-cal-month">${_gapMonthHtml(
             gapCalMonth,
             true,
@@ -23902,6 +25178,7 @@
         gapHover = ""
         gapCalMonth = null
         gapRenderCal()
+        gapLoadCoverage()
       }
 
       function gapCloseCal() {
@@ -23934,7 +25211,7 @@
         gapPreset = ""
         gapCloseCal()
         gapRenderRangeLabel()
-        loadGapRows()
+        gapReload()
       }
 
       function gapApplyPreset(k) {
@@ -23942,7 +25219,17 @@
         gapPreset = k
         gapCloseCal()
         gapRenderRangeLabel()
-        loadGapRows()
+        gapReload()
+      }
+
+      /// A new range: read it for the mode on screen. The other mode notices on
+      /// its next visit, because its loaded key no longer matches.
+      function gapReload() {
+        return gapMode === "feedback"
+          ? loadGapFeedback()
+          : gapMode === "genai"
+          ? loadGapGenAi()
+          : loadGapRows()
       }
 
       document.addEventListener("mousedown", (e) => {
@@ -24027,7 +25314,80 @@
         clearTimeout(_gapEntityTimer)
         _gapEntityTimer = setTimeout(gapRenderEntities, 120)
       })
-      document.getElementById("gapExportBtn").addEventListener("click", gapExport)
+      document.getElementById("gapExportBtn").addEventListener("click", () =>
+        gapMode === "feedback" ? gapFbExport() : gapMode === "genai" ? gapAiExport() : gapExport(),
+      )
+      document.getElementById("gapAiList").addEventListener("scroll", () => {
+        requestAnimationFrame(gapAiPaint)
+      })
+      let _gapAiFilterTimer = null
+      document.getElementById("gapAiFilter").addEventListener("input", (e) => {
+        clearTimeout(_gapAiFilterTimer)
+        _gapAiFilterTimer = setTimeout(() => {
+          gapAiQuery = e.target.value
+          _gapAiView = null
+          gapAiRenderList(true)
+        }, 150)
+      })
+      document.getElementById("gapAiList").addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return
+        const view = gapAiView()
+        if (!view.length) return
+        e.preventDefault()
+        const at = view.findIndex((r) => r.logId === gapAiActive)
+        const idx = Math.max(0, Math.min(view.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))
+        gapAiSelect(view[idx].logId)
+        const list = document.getElementById("gapAiList")
+        const top = idx * GAP_ROW_H
+        if (top < list.scrollTop) list.scrollTop = top
+        else if (top + GAP_ROW_H > list.scrollTop + list.clientHeight)
+          list.scrollTop = top + GAP_ROW_H - list.clientHeight
+      })
+      document.querySelectorAll("[data-gap-mode]").forEach((b) =>
+        b.addEventListener("click", () => gapSetMode(b.dataset.gapMode)),
+      )
+      document.querySelectorAll("[data-gap-fb-group]").forEach((b) =>
+        b.addEventListener("click", () => {
+          gapFbGroup = b.dataset.gapFbGroup
+          document.querySelectorAll("[data-gap-fb-group]").forEach((x) => x.classList.toggle("active", x === b))
+          // A key means something else under the other grouping.
+          gapFbActive = null
+          gapFbRenderSide()
+          gapFbRenderList(true)
+        }),
+      )
+      document.getElementById("gapFbMin").addEventListener("change", (e) => {
+        gapFbMin = Number(e.target.value) || 1
+        gapFbRenderList(true)
+      })
+      let _gapFbFilterTimer = null
+      document.getElementById("gapFbFilter").addEventListener("input", (e) => {
+        clearTimeout(_gapFbFilterTimer)
+        _gapFbFilterTimer = setTimeout(() => {
+          gapFbQuery = e.target.value
+          gapFbRenderList(true)
+        }, 150)
+      })
+      document.querySelectorAll("#gapFbHead [data-gap-fb-sort]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const key = b.dataset.gapFbSort
+          // Each column opens on the direction that puts the worst first.
+          const first = key === "share" || key === "name" ? 1 : -1
+          gapFbSort = gapFbSort.key === key ? { key, dir: -gapFbSort.dir } : { key, dir: first }
+          gapFbRenderList(true)
+        }),
+      )
+      document.getElementById("gapFbList").addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return
+        const view = gapFbView()
+        if (!view.length) return
+        e.preventDefault()
+        const at = view.findIndex((it) => it.key === gapFbActive)
+        const next = view[Math.max(0, Math.min(view.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))]
+        gapFbSelect(next.key)
+        const el = document.querySelector('#gapFbList .gap-fb-row[data-key="' + CSS.escape(next.key) + '"]')
+        if (el) el.scrollIntoView({ block: "nearest" })
+      })
 
       // ═══════════════════════════════════════════════════════════════
       // CONVERSATIONS VIEW
@@ -24170,7 +25530,7 @@
         // reason: this must not hang if the window isn't being composited.
         await yieldToPaint()
         try {
-          await window.backend.setDbPath(path)
+          await convDbOpen(path)
           insDropPayloadCache() // a different database entirely
           convDbPath = path
           localStorage.setItem(CONV_DB_STORAGE_KEY, path)
@@ -24221,8 +25581,21 @@
         // If a path is saved, try to open it
         if (convDbPath) {
           try {
-            await window.backend.setDbPath(convDbPath)
-            insDropPayloadCache()
+            // Joins the launch's open when it is still running, instead of
+            // starting a second one of the same file; opens only when nothing
+            // has (a launch open that failed, or none at all).
+            if (convDbOpenedPath !== convDbPath || convDbIsOpening()) {
+              const wasOpen = convDbOpenedPath === convDbPath
+              setConvOverlay(true, "Opening database…", false)
+              setConvDbBusy(true)
+              try {
+                await convDbOpen(convDbPath)
+              } finally {
+                setConvOverlay(false)
+                setConvDbBusy(false)
+              }
+              if (!wasOpen) insDropPayloadCache()
+            }
             window.backend
               .getDateRange()
               .then(({ min, max }) => initDatePicker(min, max))
@@ -24369,11 +25742,19 @@
       /// builds, and only a read the user can actually stop should pass one.
       /// A Cancel button on a wait nothing can interrupt is worse than no
       /// button, so this stays opt-in rather than becoming part of the block.
+      /// Every pane spinner here is a read of the conversations database, so
+      /// while that is still opening it says so — and keeps its own words in
+      /// `data-label` for `convDbOpeningChanged` to put back when it opens.
       function paneLoadingHtml(label, note, actionHtml) {
-        return `<div class="pane-loading"><div class="mini-spinner"></div>
-          <div>${esc(label)}</div>${
-            note ? `<div class="pane-loading-note">${esc(note)}</div>` : ""
-          }${actionHtml ? `<div class="pane-loading-action">${actionHtml}</div>` : ""}</div>`
+        const t = convDbWaitText(label, note || "", convDbIsOpening(), convDbPhaseLabel)
+        return `<div class="pane-loading" data-label="${esc(label)}" data-note="${esc(
+          note || "",
+        )}"><div class="mini-spinner"></div>
+          <div class="pane-loading-label">${esc(t.label)}</div><div class="pane-loading-note"${
+            t.note ? "" : " hidden"
+          }>${esc(t.note)}</div>${
+            actionHtml ? `<div class="pane-loading-action">${actionHtml}</div>` : ""
+          }</div>`
       }
 
       /**
@@ -24422,7 +25803,17 @@
         if (!overlay) return
         const text = overlay.querySelector(".conv-search-loading-label")
         const cancel = document.getElementById("convSearchCancel")
-        if (text && label) text.textContent = label
+        if (label) {
+          // A search queued behind the open says so; an open's own overlay
+          // (not cancellable) already talks about the open.
+          overlay.dataset.label = cancellable === false ? "" : label
+          if (text)
+            text.textContent =
+              cancellable !== false && convDbIsOpening()
+                ? "Opening the database… " +
+                  (convDbPhaseLabel || "the search runs as soon as it is ready.")
+                : label
+        }
         if (cancel) cancel.style.display = cancellable === false ? "none" : ""
         gateLoading("convOverlay", !!visible, (on) =>
           fadeIndicator(overlay, on, "visible"),
@@ -24508,6 +25899,9 @@
           showImportToast("success", msg)
           contextOptionsLoaded = false // refresh context options on next panel open
           metadataOptionsLoaded = false
+          // An entity that fired for the first time has an id now.
+          entityOptionsLoaded = false
+          gapCoverageInvalidate()
           // Refresh date picker bounds without resetting user's selection
           window.backend
             .getDateRange()
@@ -25153,17 +26547,23 @@
           Culture: "Kultur",
           // Segments
           "Segment comparison": "Segmentvergleich",
-          "Every answer of the conversations in each slice, in both readings; bot events, rating rows and link clicks are not counted as interactions. Culture is each turn's own. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score over those same turns, zeros included.":
-            "Jede Antwort der Gespräche in jedem Segment, in beiden Lesarten; Bot-Ereignisse, Bewertungszeilen und Link-Klicks zählen nicht als Interaktionen. Die Sprache ist die jeder einzelnen Interaktion. Positives Feedback ist ein Anteil der bewerteten Interaktionen; die Erkennungsrate ist ein Anteil der Interaktionen, die der Erkenner bewertet hat, GenAI-Antworten gehören also zu keiner der beiden Hälften; die Erkennungsqualität ist der mittlere Score über dieselben Interaktionen, Nullen eingeschlossen.",
+          "Counted as CM.com's dashboards count, in both readings: the interactions inside the date range, each under the context it carried itself; active sessions are the conversations that started in the range. Bot events, rating rows, link clicks and Dialogs started by an event are not interactions. Culture is each turn's own. Feedback is one rating per answer, the latest; positive feedback is a share of those. Recognition rate is the share of QA interactions answered by any means; recognition quality is the mean over QA recognised by entities or an exception event and unrecognised QA at 0.":
+            "Gezählt wie die Dashboards von CM.com zählen, in beiden Lesarten: die Interaktionen im Zeitraum, jede unter dem Kontext, den sie selbst trug; aktive Sitzungen sind die Gespräche, die im Zeitraum begonnen haben. Bot-Ereignisse, Bewertungszeilen, Link-Klicks und von einem Ereignis gestartete Dialoge sind keine Interaktionen. Die Sprache ist die jeder einzelnen Interaktion. Feedback ist eine Bewertung pro Antwort, die letzte; positives Feedback ist ein Anteil davon. Die Erkennungsrate ist der Anteil der QA-Interaktionen, die auf irgendeine Weise beantwortet wurden; die Erkennungsqualität ist der Mittelwert über QA, die per Entitäten oder Exception Event erkannt wurden, und nicht erkannte QA mit 0.",
+          "The Total is the search as filtered; each row counts every conversation in the date range.":
+            "Die Gesamtzeile ist die gefilterte Suche; jede Zeile zählt alle Gespräche im Zeitraum.",
+          "Days are UTC days, as CM.com counts them.":
+            "Die Tage sind UTC-Tage, wie CM.com sie zählt.",
           "some conversations switched language, so their conversation counts overlap":
             "einige Gespräche wechselten die Sprache, daher überschneiden sich ihre Gesprächszahlen",
           Segment: "Segment",
           Total: "Gesamt",
+          Subtotal: "Zwischensumme",
           "Feedback interactions": "Feedback-Interaktionen",
           "Positive feedback": "Positives Feedback",
           "Recognition rate": "Erkennungsrate",
           "Recognition quality": "Erkennungsqualität",
           Conversations: "Gespräche",
+          "Active sessions": "Aktive Sitzungen",
           "{n} not shown": "{n} nicht angezeigt",
           "some conversations set two values, so these rows overlap":
             "manche Gespräche setzen zwei Werte, daher überschneiden sich diese Zeilen",
@@ -25199,7 +26599,7 @@
           "{name} not set": "{name} nicht gesetzt",
           "{name} set": "{name} gesetzt",
           "(empty)": "(leer)",
-          "times in {zone}": "Zeiten in {zone}",
+          "{place} time": "Zeitzone {place}",
           // Tables and charts
           Label: "Bezeichnung",
           Weekday: "Wochentag",
@@ -25308,17 +26708,23 @@
           Cultures: "Culturen",
           Culture: "Cultuur",
           "Segment comparison": "Segmentvergelijking",
-          "Every answer of the conversations in each slice, in both readings; bot events, rating rows and link clicks are not counted as interactions. Culture is each turn's own. Positive feedback is a share of the rated turns; recognition rate is a share of the turns the recognizer scored, so GenAI answers are in neither half of it; recognition quality is the mean score over those same turns, zeros included.":
-            "Elk antwoord van de gesprekken in elk segment, in beide lezingen; bot-events, beoordelingsregels en linkklikken tellen niet als interacties. De taal is die van elke afzonderlijke interactie. Positieve feedback is een aandeel van de beoordeelde interacties; het herkenningspercentage is een aandeel van de interacties die de herkenner scoorde, dus GenAI-antwoorden vallen in geen van beide helften; de herkenningskwaliteit is de gemiddelde score over diezelfde interacties, nullen meegerekend.",
+          "Counted as CM.com's dashboards count, in both readings: the interactions inside the date range, each under the context it carried itself; active sessions are the conversations that started in the range. Bot events, rating rows, link clicks and Dialogs started by an event are not interactions. Culture is each turn's own. Feedback is one rating per answer, the latest; positive feedback is a share of those. Recognition rate is the share of QA interactions answered by any means; recognition quality is the mean over QA recognised by entities or an exception event and unrecognised QA at 0.":
+            "Geteld zoals de dashboards van CM.com tellen, in beide lezingen: de interacties binnen de periode, elk onder de context die ze zelf droeg; actieve sessies zijn de gesprekken die in de periode begonnen. Bot-events, beoordelingsregels, linkklikken en door een event gestarte dialogen zijn geen interacties. De taal is die van elke afzonderlijke interactie. Feedback is één beoordeling per antwoord, de laatste; positieve feedback is een aandeel daarvan. Het herkenningspercentage is het aandeel QA-interacties dat op enige manier beantwoord is; de herkenningskwaliteit is het gemiddelde over QA herkend via entiteiten of een exception event, en niet-herkende QA als 0.",
+          "The Total is the search as filtered; each row counts every conversation in the date range.":
+            "De totaalregel is de gefilterde zoekopdracht; elke regel telt alle gesprekken in de periode.",
+          "Days are UTC days, as CM.com counts them.":
+            "De dagen zijn UTC-dagen, zoals CM.com ze telt.",
           "some conversations switched language, so their conversation counts overlap":
             "sommige gesprekken wisselden van taal, dus hun gespreksaantallen overlappen",
           Segment: "Segment",
           Total: "Totaal",
+          Subtotal: "Subtotaal",
           "Feedback interactions": "Feedback-interacties",
           "Positive feedback": "Positieve feedback",
           "Recognition rate": "Herkenningspercentage",
           "Recognition quality": "Herkenningskwaliteit",
           Conversations: "Gesprekken",
+          "Active sessions": "Actieve sessies",
           "{n} not shown": "{n} niet getoond",
           "some conversations set two values, so these rows overlap":
             "sommige gesprekken zetten twee waarden, dus deze rijen overlappen",
@@ -25352,7 +26758,7 @@
           "{name} not set": "{name} niet gezet",
           "{name} set": "{name} gezet",
           "(empty)": "(leeg)",
-          "times in {zone}": "tijden in {zone}",
+          "{place} time": "tijdzone {place}",
           Label: "Label",
           Weekday: "Weekdag",
           Share: "Aandeel",
@@ -26206,7 +27612,7 @@
           lines.push({
             text: [
               o.capUnit ? insUnitLine(d) : "",
-              o.capZone ? insT("times in {zone}", { zone: insZoneLabel(zone || insZone()) }) : "",
+              o.capZone ? insZoneTimeLabel(zone || insZone(), ...insSpanMs(d)) : "",
             ]
               .filter(Boolean)
               .join(" · "),
@@ -26636,6 +28042,40 @@
         return seg.replace(/_/g, " ")
       }
 
+      /// An offset in minutes as people write it: `UTC+2`, `UTC+5:30`, `UTC-3`.
+      function insOffsetText(min) {
+        if (!min) return "UTC"
+        const a = Math.abs(min)
+        const m = a % 60
+        return "UTC" + (min < 0 ? "-" : "+") + Math.floor(a / 60) + (m ? ":" + String(m).padStart(2, "0") : "")
+      }
+
+      /// How a clock is named on screen: "Amsterdam time (UTC+2)", or "UTC".
+      ///
+      /// "Days in Amsterdam" read like a place rather than a clock, so the
+      /// label says *time*, and carries the offset — taken over the span that
+      /// is actually shown (`fromMs`–`toMs`, now when absent), never a fixed
+      /// one: a span across a DST change carries both, "UTC+1/+2", because
+      /// either alone would be wrong for part of it. `form: "axis"` drops the
+      /// parentheses for a label that already sits inside some.
+      function insZoneTimeLabel(zone, fromMs, toMs, form) {
+        const z = String(zone || "UTC")
+        if (z === "UTC" || z === "Etc/UTC") return "UTC"
+        const from = Number.isFinite(fromMs) ? fromMs : Date.now()
+        const to = Number.isFinite(toMs) ? toMs : from
+        const a = insOffsetAt(from, z)
+        const b = insOffsetAt(to, z)
+        const off = a === b ? insOffsetText(a) : insOffsetText(a) + "/" + insOffsetText(b).slice(3)
+        const name = insT("{place} time", { place: insZoneLabel(z) })
+        return form === "axis" ? name + ", " + off : name + " (" + off + ")"
+      }
+
+      /// The instants a payload spans, for `insZoneTimeLabel`.
+      function insSpanMs(d) {
+        const at = (s) => (s ? Date.parse(String(s).slice(0, 19) + "Z") : NaN)
+        return d ? [at(d.firstTs), at(d.lastTs)] : [NaN, NaN]
+      }
+
       /// Minutes to add to a UTC instant to get the wall clock in `zone`.
       ///
       /// Memoized per `(zone, day)`. The offset is read at `00:00Z` and at
@@ -26706,13 +28146,13 @@
         const text = document.getElementById("insTzBadgeText")
         if (!badge || !text) return
         const zone = insZone()
-        text.textContent = insZoneLabel(zone)
+        text.textContent = insZoneTimeLabel(zone, ...insSpanMs(insData))
         badge.title =
           zone === "UTC"
             ? "Days and hours on this screen are UTC days and hours, which is how the database stores them."
-            : "The database stores every timestamp in UTC. Days and hours here — and the conversation date filter — are read in " +
+            : "The database stores every timestamp in UTC. Days and hours here — and every other calendar in the app, Import and Stored data included — are read in " +
               zone +
-              ", set under Settings › Conversations. Import and Stored data stay in UTC, because there the day you pick is exactly the set of rows that moves."
+              ", set under Settings › Conversations."
       }
 
       /// A `YYYY-MM-DD` key out of a millisecond instant read as UTC.
@@ -27068,7 +28508,7 @@
         // Passed in rather than read, so a test can pin a zone without
         // touching global state. Every caller on this screen omits it.
         const tz = zone || insZone()
-        const tzName = insZoneLabel(tz)
+        const tzName = insZoneTimeLabel(tz, ...insSpanMs(d), "axis")
         const series = insTimeSeries(d, tz)
         const cards = []
         const push = (section, id, title, note, spec) => {
@@ -27287,7 +28727,16 @@
             section: "Segments",
             id: "segments",
             title: insT("Segment comparison"),
-            note: insT(INS_SEGMENT_NOTE),
+            // A copied table has to say what its rows were counted over — the
+            // Total and the rows are different sets under "Total row only".
+            note:
+              insT(INS_SEGMENT_NOTE) +
+              (d.segments.rowsScope === "range"
+                ? " " + insT("The Total is the search as filtered; each row counts every conversation in the date range.")
+                : "") +
+              (d.segments.utcDays
+                ? " " + insT("Days are UTC days, as CM.com counts them.")
+                : ""),
             table: segTable,
           })
         }
@@ -28582,6 +30031,12 @@
         )
       }
 
+      /// The recognition-quality denominator. A payload from before it was sent
+      /// divided by every scored turn, which is what this falls back to.
+      function insSegQualityN(r) {
+        return r.qualityN != null ? r.qualityN : r.recognized + r.unrecognized
+      }
+
       /// A share, or an em dash when there is nothing to take a share of.
       ///
       /// `0%` of nothing is a claim; a dash is the absence of one. The
@@ -28616,10 +30071,11 @@
         },
         {
           label: "Recognition quality",
-          // Over every turn the recognizer attempted, zeros included — the
-          // portal's definition, and the one the report is compared against.
-          text: (r) => insSegShare(r.qualitySum / 100, r.recognized + r.unrecognized),
-          data: (r) => insSegShare(r.qualitySum / 100, r.recognized + r.unrecognized),
+          // CM.com's definition: the mean over QA recognised by entities or an
+          // exception event, and QA not recognised at 0 — intents and GenAI
+          // have no meaningful quality and are not in `qualityN`.
+          text: (r) => insSegShare(r.qualitySum / 100, insSegQualityN(r)),
+          data: (r) => insSegShare(r.qualitySum / 100, insSegQualityN(r)),
         },
         {
           label: "Interactions",
@@ -28627,7 +30083,8 @@
           data: (r) => r.interactions || 0,
         },
         {
-          label: "Conversations",
+          // CM.com's Active Sessions: conversations that started in the range.
+          label: "Active sessions",
           text: (r) => insNum(r.sessions),
           data: (r) => r.sessions || 0,
         },
@@ -28640,12 +30097,15 @@
       /// answer that. Stated in the card note rather than in a tooltip, because
       /// this table is copied far more often than it is hovered.
       const INS_SEGMENT_NOTE =
-        "Every answer of the conversations in each slice, in both readings; bot " +
-        "events, rating rows and link clicks are not counted as interactions. " +
-        "Culture is each turn's own. Positive feedback is a share of the rated " +
-        "turns; recognition rate is a share of the turns the recognizer scored, " +
-        "so GenAI answers are in neither half of it; recognition quality is the " +
-        "mean score over those same turns, zeros included."
+        "Counted as CM.com's dashboards count, in both readings: the interactions " +
+        "inside the date range, each under the context it carried itself; active " +
+        "sessions are the conversations that started in the range. Bot " +
+        "events, rating rows, link clicks and Dialogs started by an event are not " +
+        "interactions. Culture is each turn's own. Feedback is one rating per " +
+        "answer, the latest; positive feedback is a share of those. Recognition " +
+        "rate is the share of QA interactions answered by any means; recognition " +
+        "quality is the mean over QA recognised by entities or an exception event " +
+        "and unrecognised QA at 0."
 
       /// Which slices the table is comparing, remembered between sessions.
       ///
@@ -28674,6 +30134,94 @@
           return fallback
         }
       })()
+
+      /// "Total row only": the search's filters narrow the Total row, and the
+      /// breakdown rows count every conversation in the date range — the shape
+      /// of the report people pull from CM.com, whose Total carries a filter
+      /// its rows do not. Remembered, because a report is rebuilt the same way
+      /// every week. See docs/insights.md → "Filters on the Total row only".
+      let insSegTotalOnly = (() => {
+        try {
+          return localStorage.getItem("cm-insights-segment-total-only") === "1"
+        } catch (e) {
+          return false
+        }
+      })()
+
+      function insSetSegTotalOnly(on) {
+        if (!!on === insSegTotalOnly) return
+        insSegTotalOnly = !!on
+        try {
+          localStorage.setItem("cm-insights-segment-total-only", insSegTotalOnly ? "1" : "0")
+        } catch (e) {
+          /* not remembered, but still applied */
+        }
+        insEnsureSegments()
+        insRenderBody()
+      }
+
+      /// "UTC days": the table cuts the same calendar days at UTC midnight
+      /// instead of the display timezone's, because CM.com's dashboards count
+      /// UTC days and in Amsterdam the two weeks are two hours apart — enough
+      /// for a week to read 86,569 interactions here against CM.com's 86,504.
+      /// Only this table: it is the one people hold against a CM.com report.
+      /// See docs/insights.md → "UTC days".
+      let insSegUtcDays = (() => {
+        try {
+          return localStorage.getItem("cm-insights-segment-utc-days") === "1"
+        } catch (e) {
+          return false
+        }
+      })()
+
+      function insSetSegUtcDays(on) {
+        if (!!on === insSegUtcDays) return
+        insSegUtcDays = !!on
+        try {
+          localStorage.setItem("cm-insights-segment-utc-days", insSegUtcDays ? "1" : "0")
+        } catch (e) {
+          /* not remembered, but still applied */
+        }
+        insEnsureSegments()
+        insRenderBody()
+      }
+
+      /// The search the Segments table reads: `args`, or — with `utc` — the same
+      /// calendar days re-cut at UTC midnight. The days are read back out of the
+      /// bounds rather than from the calendar, so the table follows whatever
+      /// search the dashboard was built from. A search without a date range has
+      /// no days to re-cut and is returned as is.
+      ///
+      /// New args are a new scope-cache fingerprint, so the first UTC read
+      /// resolves the search again, and so does the next section read after it.
+      function insSegArgs(args, utc, zone) {
+        if (!args || !utc || (!args.dateFrom && !args.dateTo)) return args
+        const out = Object.assign({}, args)
+        if (args.dateFrom) out.dateFrom = insZoneDayOf(args.dateFrom, zone) + "T00:00:00"
+        if (args.dateTo) out.dateTo = insZoneDayOf(args.dateTo, zone) + "T23:59:59"
+        return out
+      }
+
+      /// Whether the UTC switch changes anything here: a date range, read in a
+      /// zone other than UTC.
+      function insSegUtcMatters() {
+        const z = insZone()
+        return !!(insArgs && (insArgs.dateFrom || insArgs.dateTo)) && z !== "UTC" && z !== "Etc/UTC"
+      }
+
+      /// What the table on screen was read with — the one key both the
+      /// idempotence check and the read agree on.
+      function insSegSig() {
+        return JSON.stringify([insSegKeys, insSegTotalOnly, insSegUtcDays && insSegUtcMatters()])
+      }
+
+      /// What the rows of the table on screen were counted over, in words.
+      function insSegScopeNote(seg) {
+        if (!seg) return ""
+        return seg.rowsScope === "range"
+          ? "Total: the search as filtered · rows: every conversation in the date range"
+          : ""
+      }
 
       function insSaveSegKeys() {
         try {
@@ -28764,7 +30312,7 @@
         const entries = []
         for (const e of raw.entries) {
           if (!e || typeof e !== "object") continue
-          if (e.t === "total" || e.t === "gap") {
+          if (e.t === "total" || e.t === "gap" || e.t === "sum") {
             entries.push({ t: e.t, label: e.label == null ? null : String(e.label) })
           } else if (e.t === "head") {
             entries.push({
@@ -28910,11 +30458,26 @@
               }
         const resolved = insSegResolve(seg, layout)
         const rows = []
+        // What a subtotal adds up: the data rows since the last heading, total
+        // or subtotal. `null` until one of them has numbers, so a subtotal of
+        // rows that are all "no data" is dashes too, not zeros.
+        let acc = null
         resolved.entries.forEach((e, at) => {
           if (e.t === "gap") {
             rows.push({ kind: "gap", at, label: "", cells: [], data: [] })
             return
           }
+          if (e.t === "sum") {
+            rows.push({
+              kind: "sum",
+              at,
+              label: e.label == null ? insT("Subtotal") : e.label,
+              ...cells(acc),
+            })
+            acc = null
+            return
+          }
+          if (e.t !== "row") acc = null
           if (e.t === "total") {
             rows.push({
               kind: "total",
@@ -28956,6 +30519,10 @@
               data: [],
             })
             return
+          }
+          if (e.row) {
+            acc = acc || { sessions: 0, interactions: 0, feedback: 0, feedbackPos: 0, recognized: 0, unrecognized: 0, qualitySum: 0, qualityN: 0 }
+            for (const k in acc) acc[k] += Number(k === "qualityN" ? insSegQualityN(e.row) : e.row[k] || 0)
           }
           const renamed = e.label != null
           rows.push({
@@ -29157,11 +30724,18 @@
         insSegEdited()
       }
 
+      /// A subtotal adds up the rows above it, back to the nearest heading,
+      /// total or subtotal — the way a spreadsheet's subtotal reads — so it is
+      /// added after the last line, where it sums the block it lands under.
       function insSegAddLine(kind) {
         const layout = insSegEnsureLayout()
         if (!layout) return
         layout.entries.push(
-          kind === "head" ? { t: "head", gid: null, label: "Heading" } : { t: "gap", label: null },
+          kind === "head"
+            ? { t: "head", gid: null, label: "Heading" }
+            : kind === "sum" || kind === "total"
+            ? { t: kind, label: null }
+            : { t: "gap", label: null },
         )
         insSegEdited()
       }
@@ -29690,6 +31264,30 @@
             <span class="ins-keypick-caret">&#9662;</span>
           </button>
           ${chips}
+          <span class="ins-seg-scope" title="Which rows the search's filters narrow. With “Total row only” the Total is the search as filtered, and each breakdown row counts every conversation in the date range — how CM.com reports are usually built.">
+            Filters apply to
+            <button class="${insSegTotalOnly ? "" : "on"}" onclick="insSetSegTotalOnly(false)">every row</button>
+            <button class="${insSegTotalOnly ? "on" : ""}" onclick="insSetSegTotalOnly(true)">Total row only</button>
+          </span>
+          <span class="ins-seg-scope" title="${esc(
+            insSegUtcMatters()
+              ? "Where each day of the date range begins and ends. CM.com's dashboards count UTC days; the rest of this app reads days in " +
+                  insZoneTimeLabel(insZone()) +
+                  ", which moves a week by the offset."
+              : "Where each day of the date range begins and ends. It changes nothing here: " +
+                  (insArgs && (insArgs.dateFrom || insArgs.dateTo)
+                    ? "the app already reads days in UTC."
+                    : "the search has no date range."),
+          )}">
+            Days:
+            <button class="${insSegUtcDays ? "" : "on"}" onclick="insSetSegUtcDays(false)">${esc(insZoneTimeLabel(insZone()))}</button>
+            <button class="${insSegUtcDays ? "on" : ""}" onclick="insSetSegUtcDays(true)">UTC, as CM.com</button>
+          </span>
+          ${
+            insSegScopeNote(seg)
+              ? `<span class="ins-keybar-note ins-seg-scope-note">${esc(insSegScopeNote(seg))}</span>`
+              : ""
+          }
           <span class="ins-keybar-note">${
             available
               ? insPlural(available, "keys") +
@@ -29741,7 +31339,7 @@
       function insEnsureSegments() {
         const d = insData
         if (!d || !insSections.segments || d.segmentsPending) return
-        if (d.segments && d.segmentsSig === JSON.stringify(insSegKeys)) return
+        if (d.segments && d.segmentsSig === insSegSig()) return
         insLoadSegments(d, insLoadSeq)
       }
 
@@ -29760,7 +31358,8 @@
       }
 
       async function insLoadSegments(d, seq) {
-        const sig = JSON.stringify(insSegKeys)
+        const sig = insSegSig()
+        const utc = insSegUtcDays && insSegUtcMatters()
         const want = insSegKeys.map((b) => ({ kind: b.kind, name: b.name }))
         // The picker's key lists are the fixed cost of the call — two scans of
         // the whole join each, and ~470ms of a 533ms first read on a 120k
@@ -29772,10 +31371,11 @@
         d.segmentsPending = true
         try {
           const seg = await window.backend.getInsightSegments(
-            insArgs,
+            insSegArgs(insArgs, utc, insZone()),
             insUnit,
             want,
             withKeys,
+            insSegTotalOnly,
           )
           // A newer read, a cancellation (`null`), or a payload since replaced:
           // in all three the answer is no longer this screen's.
@@ -29789,6 +31389,7 @@
               seg.metadataKeys = d.segments.metadataKeys
             }
             seg.keysLoaded = true
+            seg.utcDays = utc
             d.segments = seg
             d.segmentsSig = sig
             d.segmentsError = null
@@ -29864,6 +31465,13 @@
         }
         return `<div class="ins-seg-bar editing">
           <button onclick="insSegAddLine('head')">+ Heading</button>
+          <button onclick="insSegAddLine('sum')"
+            title="A line adding up the rows above it, back to the nearest heading, total or subtotal">+ Subtotal</button>
+          ${
+            table.rows.some((r) => r.kind === "total")
+              ? ""
+              : `<button onclick="insSegAddLine('total')" title="Put the Total line back">+ Total</button>`
+          }
           <button onclick="insSegAddLine('gap')">+ Blank line</button>
           ${
             insSegLayout
@@ -30892,7 +32500,7 @@
           (d.firstTs && d.lastTs
             ? ` · ${esc(insZoneDayOf(d.firstTs, insZone()))} → ${esc(
                 insZoneDayOf(d.lastTs, insZone()),
-              )} ${esc(insZoneLabel(insZone()))}`
+              )} · ${esc(insZoneTimeLabel(insZone(), ...insSpanMs(d)))}`
             : "") +
           `</div>`
 
@@ -31034,7 +32642,7 @@
               )}${r.note ? " — " + esc(r.note) : ""}</td></tr>`
             continue
           }
-          const weight = r.kind === "total" ? ";font-weight:700" : ""
+          const weight = r.kind === "total" || r.kind === "sum" ? ";font-weight:700" : ""
           html +=
             `<tr><td style="${td};text-align:left;padding-right:18px${weight}${
               r.kind === "value" ? ";padding-left:12px" : ""
@@ -31064,8 +32672,8 @@
                 insZoneDayOf(d.firstTs, insZone()) +
                 " → " +
                 insZoneDayOf(d.lastTs, insZone()) +
-                " " +
-                insZoneLabel(insZone())
+                " · " +
+                insZoneTimeLabel(insZone(), ...insSpanMs(d))
               : ""),
           "",
         ]
@@ -31723,8 +33331,6 @@
       let _impDbDays = new Map()
       /// UTC date → bitmask of hours 0..23 that already hold interactions.
       let _impDbHours = new Map()
-      /// All 24 hour bits set.
-      const IMP_ALL_HOURS = (1 << 24) - 1
       let _impSkipExisting = true
       let _impPhase = "setup" // setup | running | finished
       let _impCancelled = false
@@ -31765,76 +33371,73 @@
         return true
       }
 
-      /// "full" (every hour present), "partial" (some hours), or "" (none).
+      /// "full" (every hour of the local day covered), "partial" (some), or
+      /// "" (none) — per day of the display timezone, from the UTC hour masks.
       function _impDayCoverage(dateKey) {
-        const mask = _impDbHours.get(dateKey)
-        if (!mask) return ""
-        return mask === IMP_ALL_HOURS ? "full" : "partial"
+        const c = zoneDayCoverage(dateKey, _impDbHours, insZone())
+        if (!c.covered) return ""
+        return c.covered === c.total ? "full" : "partial"
       }
 
-      function _impMissingHours(dateKey) {
-        const mask = _impDbHours.get(dateKey) || 0
-        let n = 0
-        for (let h = 0; h < 24; h++) if (!((mask >> h) & 1)) n++
-        return n
-      }
-
-      /**
-       * Combine a UTC date string and a UTC HH:MM into a Date.
-       *
-       * The whole import picker is UTC — the database, the request windows and
-       * the coverage outlines all are, so a local-time picker only made the
-       * calendar describe a different day than the one a click would fetch.
-       */
-      function _impUtcDate(dateStr, timeStr) {
-        const [y, m, d] = dateStr.split("-").map(Number)
-        const [hh, mm] = (timeStr || "00:00").split(":").map(Number)
-        return new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, 0, 0))
+      /// A picked day and HH:MM — in the display timezone, like every other
+      /// calendar in the app — as the instant it names.
+      function _impDate(dateStr, timeStr) {
+        return zoneInstant(dateStr, timeStr, insZone())
       }
 
       /**
-       * Split a UTC date range into one request per UTC day.
+       * Split a range into one queue item per day of the display timezone,
+       * each carrying the API windows that make it up.
        *
-       * Each chunk runs 00:00:00 → 23:59:59 of a UTC day (clipped to the
-       * selected range at both ends), so every window is strictly under 24
-       * hours — the API rejects a span of exactly 24h — and chunks are
-       * consecutive with no overlap.
+       * A local day is parts of two UTC days (at UTC+2, 25 Sep is
+       * `24T22:00Z → 25T21:59:59Z`), and a window must stay inside one UTC day
+       * — that is what the coverage masks and `record_imported_window` are
+       * keyed by. So an item holds one or two windows, cut at UTC midnight, and
+       * every window is strictly under 24 hours. Items and windows are
+       * consecutive with no overlap. The list on screen is in the days people
+       * read everywhere else; the requests are in the days the data is stored.
        */
       function buildImportQueue(fromUtc, toUtc, opts) {
         const skipExisting = !!(opts && opts.skipExisting)
+        const zone = (opts && opts.zone) || insZone()
         const startMs = fromUtc.getTime()
         const endMs = toUtc.getTime()
-        const chunks = []
-        let cur = startMs
+        const items = []
+        let day = zoneDayKey(startMs, zone)
         // Guard against a pathological range producing an unbounded loop.
         let guard = 0
-        while (cur < endMs && guard++ < 1000) {
-          const d = new Date(cur)
-          const nextUtcMidnight = Date.UTC(
-            d.getUTCFullYear(),
-            d.getUTCMonth(),
-            d.getUTCDate() + 1,
-          )
-          // 23:59:59 of the UTC day `cur` falls in.
-          const dayEnd = nextUtcMidnight - 1000
-          const chunkEnd = Math.min(endMs, dayEnd)
-          if (chunkEnd - cur >= 1000) {
-            const startUtc = _impIsoZ(cur)
-            const endUtc = _impIsoZ(chunkEnd)
-            chunks.push({
-              key: _impUtcKey(cur),
-              startUtc,
-              endUtc,
-              // Only the hours this chunk actually covers count as "already
+        while (guard++ < 1000) {
+          const b = insZoneDayBounds(day, day, zone)
+          const dayStart = Date.parse(b.from + "Z")
+          const dayEnd = Date.parse(b.to + "Z")
+          if (!(dayStart <= endMs)) break
+          const s = Math.max(startMs, dayStart)
+          const e = Math.min(endMs, dayEnd)
+          const windows = []
+          let cur = s
+          while (cur < e) {
+            const d = new Date(cur)
+            const nextUtcMidnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
+            const wEnd = Math.min(e, nextUtcMidnight - 1000)
+            if (wEnd - cur >= 1000) windows.push({ startUtc: _impIsoZ(cur), endUtc: _impIsoZ(wEnd) })
+            cur = nextUtcMidnight
+          }
+          if (windows.length) {
+            items.push({
+              key: day,
+              windows,
+              startUtc: windows[0].startUtc,
+              endUtc: windows[windows.length - 1].endUtc,
+              // Only the hours this day actually covers count as "already
               // imported" — a day imported in part is still re-fetched.
-              existing: _impWindowCovered(startUtc, endUtc),
+              existing: windows.every((w) => _impWindowCovered(w.startUtc, w.endUtc)),
               status: "queued",
               detail: "",
             })
           }
-          cur = nextUtcMidnight
+          day = insShiftDay(day, 1)
         }
-        return skipExisting ? chunks.filter((c) => !c.existing) : chunks
+        return skipExisting ? items.filter((c) => !c.existing) : items
       }
 
       // ── logging ──
@@ -32161,7 +33764,26 @@
         item.status = "downloading"
         item.detail = ""
         _impRenderProgress()
-        return _impFetchWindow(item, item.startUtc, item.endUtc, 0).then(
+        return (async () => {
+          const parts = []
+          try {
+            for (const w of item.windows || [{ startUtc: item.startUtc, endUtc: item.endUtc }]) {
+              // A local day half of which is already in (its evening came with
+              // the previous run) fetches only the half that is missing.
+              if (_impSkipExisting && _impWindowCovered(w.startUtc, w.endUtc)) {
+                _impLogLine(`Skip ${item.key} ${w.startUtc} → ${w.endUtc} (already imported)`)
+                continue
+              }
+              parts.push(...(await _impFetchWindow(item, w.startUtc, w.endUtc, 0)))
+            }
+          } catch (e) {
+            // The day failed after an earlier window of it downloaded: nothing
+            // of it is imported, so nothing of it may be left on disk either.
+            await _impCleanup(parts.map((p) => p.tempPath))
+            throw e
+          }
+          return parts
+        })().then(
           (parts) => ({ ok: true, parts }),
           (error) => ({ ok: false, error }),
         )
@@ -32311,6 +33933,9 @@
         if (totals.inserted > 0 || totals.days > 0) {
           contextOptionsLoaded = false
           metadataOptionsLoaded = false
+          // An entity that fired for the first time has an id now.
+          entityOptionsLoaded = false
+          gapCoverageInvalidate()
           window.backend
             .getDateRange()
             .then(({ min, max }) => initDatePicker(min, max))
@@ -32358,11 +33983,10 @@
           window.backend.getDbDailyStats().catch(() => null),
           window.backend.getDbHourCoverage(since).catch(() => null),
         ])
-        for (const d of (stats && stats.days) || []) days.set(d.date, d.count)
-        for (const d of coverage || []) {
-          hours.set(d.date, d.hours)
-          if (!days.has(d.date)) days.set(d.date, d.count)
-        }
+        // Counts per day of the display timezone, folded from UTC hours; the
+        // coverage masks stay UTC and are read per local day where needed.
+        for (const [k, n] of zoneDayCounts((stats && stats.hours) || [], insZone())) days.set(k, n)
+        for (const d of coverage || []) hours.set(d.date, d.hours)
         _impDbDays = days
         _impDbHours = hours
       }
@@ -32373,14 +33997,20 @@
       /// "to 23:59" covers the whole day rather than stopping 59s short.
       function _impToInstant() {
         return new Date(
-          _impUtcDate(_impToDate, _impToTime).getTime() + 59 * 1000,
+          _impDate(_impToDate, _impToTime).getTime() + 59 * 1000,
         )
       }
 
       function _impPreview() {
         if (!_impFromDate || !_impToDate)
           return { error: "Pick a start and end date." }
-        const from = _impUtcDate(_impFromDate, _impFromTime)
+        const picked = _impDate(_impFromDate, _impFromTime)
+        // The API refuses a window starting even a second past its retention
+        // limit, and the oldest day the calendar offers begins before it — so
+        // the first request starts at the limit (with a minute of slack for
+        // the time the queue takes to reach it), not at that day's midnight.
+        const floor = Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS + 60 * 1000
+        const from = new Date(Math.max(picked.getTime(), floor))
         const to = _impToInstant()
         if (to <= from) return { error: "The end must be after the start." }
         const all = buildImportQueue(from, to, { skipExisting: false })
@@ -32519,13 +34149,19 @@
                _impToDate ? esc(_impFmtDate(_impToDate)) : "Pick a date…"
              }</button>
              <input type="time" id="impToTime" value="${esc(_impToTime)}" />
-             <button class="import-now-btn" onclick="impSetNow()" title="Set the end to the current UTC time">Now</button>
+             <button class="import-now-btn" onclick="impSetNow()" title="Set the end to now">Now</button>
            </div>
            <div class="day-cal" id="impCal">${_impCalHtml()}</div>
            <div class="day-cal-legend">
              <span><span class="swatch full"></span>Fully imported</span>
              <span><span class="swatch partial"></span>Partly imported</span>
-             <span>All dates and times are UTC, like the data</span>
+             <span>${esc(
+               insZoneTimeLabel(
+                 insZone(),
+                 _impFromDate ? _impDate(_impFromDate, _impFromTime).getTime() : NaN,
+                 _impToDate ? _impToInstant().getTime() : NaN,
+               ),
+             )} &middot; requests are sent in UTC</span>
            </div>
            <div>${summary}</div>
            <label class="radio-option" style="margin-top:10px;display:flex">
@@ -32559,8 +34195,8 @@
         return out.join("")
       }
 
-      /// Format a UTC day key for display. Forced to the UTC timezone so the
-      /// label can never name a different day than the key it came from.
+      /// Format a day key for display. Formatted as UTC because a key is a plain
+      /// calendar date — any other zone could name a different day than it.
       function _impFmtDate(key) {
         const d = new Date(key + "T00:00:00Z")
         return d.toLocaleDateString("en-GB", {
@@ -32573,12 +34209,12 @@
 
       /**
        * The month the calendar is scrolled to, as a plain (year, month) pair
-       * carried in a Date. Seeded from the UTC month so that near midnight the
-       * grid shows the month the picker actually works in.
+       * carried in a Date. Seeded from today in the display timezone, the
+       * zone the picker works in.
        */
       function _impDefaultCalMonth() {
-        const now = new Date()
-        return new Date(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)
+        const today = zoneNow(insZone()).day
+        return new Date(+today.slice(0, 4), +today.slice(5, 7) - 2, 1)
       }
 
       function _impCalHtml() {
@@ -32675,8 +34311,9 @@
       }
 
       function _impMonthHtml(monthDate, isFirst) {
-        const today = _impUtcKey(Date.now())
-        const oldest = _impUtcKey(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS)
+        const zone = insZone()
+        const today = zoneNow(zone).day
+        const oldest = zoneDayKey(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS, zone)
         const selStart = _impFromDate
         const selEnd =
           _impPickPhase === 1 && _impPickHover
@@ -32709,12 +34346,12 @@
             const count = _impDbDays.get(key) || 0
             let title = ""
             if (coverage === "full") {
-              title = `${count.toLocaleString()} interactions — all 24 hours imported`
+              title = `${count.toLocaleString()} interactions — every hour imported`
             } else if (coverage === "partial") {
-              const missing = _impMissingHours(key)
-              title = `${count.toLocaleString()} interactions — only ${
-                24 - missing
-              } of 24 hours imported, ${missing} still missing`
+              const c = zoneDayCoverage(key, _impDbHours, zone)
+              title = `${count.toLocaleString()} interactions — only ${c.covered} of ${
+                c.total
+              } hours imported, ${c.total - c.covered} still missing`
             }
             return { cls, title }
           },
@@ -32989,11 +34626,9 @@
         _impRenderModal()
       }
       function impSetNow() {
-        const now = new Date()
-        _impToDate = _impUtcKey(now.getTime())
-        _impToTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
-          now.getUTCMinutes(),
-        ).padStart(2, "0")}`
+        const now = zoneNow(insZone())
+        _impToDate = now.day
+        _impToTime = now.time
         if (!_impFromDate) _impFromDate = _impToDate
         if (_impToDate < _impFromDate) _impFromDate = _impToDate
         _impPickPhase = 0
@@ -33027,7 +34662,7 @@
           for (const c of _impQueue) {
             if (c.existing) {
               c.status = "skipped"
-              c.detail = `all 24 hours already imported (${(
+              c.detail = `already imported (${(
                 _impDbDays.get(c.key) || 0
               ).toLocaleString()} rows)`
             }
@@ -33076,7 +34711,7 @@
           } · activeSessionOnly ${!!cfg.activeSessionOnly} · retention ${dataRetentionDays}d · skip imported ${_impSkipExisting}`,
         )
         _impLogLine(
-          `Database ${convDbPath || "(none)"} · ${_impDbDays.size} day(s) already stored`,
+          `Database ${convDbPath || "(none)"} · ${_impDbDays.size} day(s) already stored · days are ${insZoneTimeLabel(insZone())}, windows UTC`,
         )
       }
 
@@ -33121,24 +34756,23 @@
        * Clamped to the API's 90-day retention window.
        */
       function _impApplyDefaultRange() {
-        const now = new Date()
-        let start = new Date(now.getTime() - IMP_DAY_MS)
+        // Day keys are days of the display timezone, like the calendar's.
+        const zone = insZone()
+        const now = zoneNow(zone)
+        let start = insShiftDay(now.day, -1)
         if (_impDbDays.size > 0) {
-          // The day keys are UTC, so resume from the next UTC midnight.
+          // Resume from the day after the newest one holding data — or, if
+          // that is still today, re-check today rather than a future day.
           const newest = [..._impDbDays.keys()].sort().pop()
-          const newestStart = new Date(newest + "T00:00:00Z")
-          const next = new Date(newestStart.getTime() + IMP_DAY_MS)
-          // If the DB is already current, re-check today rather than a future day.
-          start = next > now ? newestStart : next
+          const next = insShiftDay(newest, 1)
+          start = next > now.day ? newest : next
         }
-        const oldest = new Date(now.getTime() - IMP_RETENTION_DAYS * IMP_DAY_MS)
+        const oldest = zoneDayKey(Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS, zone)
         if (start < oldest) start = oldest
-        _impFromDate = _impUtcKey(start.getTime())
+        _impFromDate = start
         _impFromTime = "00:00"
-        _impToDate = _impUtcKey(now.getTime())
-        _impToTime = `${String(now.getUTCHours()).padStart(2, "0")}:${String(
-          now.getUTCMinutes(),
-        ).padStart(2, "0")}`
+        _impToDate = now.day
+        _impToTime = now.time
         _impCalMonth = _impDefaultCalMonth()
       }
 
@@ -33419,8 +35053,9 @@
       // day — ranges are what cleanup actually needs ("everything before March",
       // "that bad import week") and they stay readable at hundreds of days.
       //
-      // Days are UTC, matching how interactions are stored and deleted, so the
-      // day you click is exactly the set of rows that disappears.
+      // Days are days of the display timezone, like every other calendar; a
+      // delete sends each as the instants it spans (`delete_interactions_between`),
+      // so the day you click is exactly the set of rows that disappears.
       let _manageDbStats = null
       let _manageDbConfirming = false
       let _mdbDayCounts = new Map()
@@ -33498,9 +35133,13 @@
           )}</div>`
           return
         }
-        _mdbDayCounts = new Map()
-        for (const d of _manageDbStats.days || [])
-          _mdbDayCounts.set(d.date, d.count)
+        // The backend's day totals are UTC; the calendar's days are local, so
+        // they are rebuilt from the per-hour counts — and replace `days`, which
+        // every quick action and readout below reads.
+        _mdbDayCounts = zoneDayCounts(_manageDbStats.hours || [], insZone())
+        _manageDbStats.days = [..._mdbDayCounts]
+          .map(([date, count]) => ({ date, count }))
+          .sort((a, b) => (a.date < b.date ? 1 : -1))
         // Same per-hour coverage the Import calendar shows, so a day that is only
         // partly imported reads the same in both places.
         _mdbDayHours = new Map()
@@ -33523,7 +35162,7 @@
         _cdataResize(() => renderManageDbBody())
       }
 
-      // ── Manage DB: date helpers (UTC keys, no timezone maths) ─────────
+      // ── Manage DB: date helpers (plain day keys of the display timezone) ──
       function _mdbKey(y, m, day) {
         return _calDayKey(y, m, day)
       }
@@ -33542,7 +35181,7 @@
         return Math.round((ms(hi) - ms(lo)) / 86400000) + 1
       }
       function _mdbTodayKey() {
-        return new Date().toISOString().slice(0, 10)
+        return zoneNow(insZone()).day
       }
       /// The range as an ordered pair, following the hover preview mid-pick.
       function _mdbRange() {
@@ -33578,10 +35217,10 @@
           keyFor: _mdbKey,
           classify: (key) => {
             const count = _mdbDayCounts.get(key) || 0
-            const mask = _mdbDayHours.get(key)
             let cls = "cal-day"
             if (count) {
-              cls += mask && mask !== IMP_ALL_HOURS ? " partial-data" : " has-data"
+              const c = zoneDayCoverage(key, _mdbDayHours, insZone())
+              cls += c.covered && c.covered < c.total ? " partial-data" : " has-data"
             }
             // Future days can hold no data, so there is nothing to select there.
             if (key > today) {
@@ -33725,7 +35364,7 @@
               <span><span class="swatch full"></span>Fully imported</span>
               <span><span class="swatch partial"></span>Partly imported</span>
               <span><span class="swatch doomed"></span>Selected to delete</span>
-              <span>Days are UTC &middot; hover for counts</span>
+              <span>${esc(insZoneTimeLabel(insZone()))} &middot; hover for counts</span>
             </div>
             <div class="day-cal danger" id="mdbCal">
               <div class="day-cal-month">${_mdbMonthHtml(
@@ -33838,9 +35477,7 @@
       /// Everything past the retention window — the maintenance sweep the
       /// retention setting otherwise only performs during an import.
       function mdbSelectStale() {
-        const cutoff = new Date(Date.now() - dataRetentionDays * 86400000)
-          .toISOString()
-          .slice(0, 10)
+        const cutoff = zoneDayKey(Date.now() - dataRetentionDays * 86400000, insZone())
         const stale = (_manageDbStats?.days || []).filter(
           (d) => d.date < cutoff,
         )
@@ -33896,10 +35533,25 @@
       async function manageDbConfirmDelete() {
         const dates = _mdbSelectedDays().map((d) => d.date)
         if (!dates.length) return
+        // Each local day as the instants it spans, consecutive days merged
+        // into one range — the rows between are exactly the rows shown.
+        const zone = insZone()
+        const ranges = []
+        for (const day of dates.slice().sort()) {
+          const b = insZoneDayBounds(day, day, zone)
+          const last = ranges[ranges.length - 1]
+          if (last && last.day === insShiftDay(day, -1)) {
+            last.toUtc = b.to
+            last.day = day
+          } else ranges.push({ fromUtc: b.from, toUtc: b.to, day })
+        }
         const deleteBtn = document.getElementById("manageDbDeleteBtn")
         if (deleteBtn) deleteBtn.disabled = true
         try {
-          const res = await window.backend.deleteInteractionsByDates(dates)
+          const res = await window.backend.deleteInteractionsBetween(
+            ranges.map(({ fromUtc, toUtc }) => ({ fromUtc, toUtc })),
+          )
+          gapCoverageInvalidate()
           insDropPayloadCache() // rows are gone; every aggregate is now stale
           const deleted = res?.deleted ?? 0
           showImportToast(
@@ -37247,9 +38899,28 @@
           if (prev && prev.t === "op" && prev.op === "not") return
           if (it.t === "text") parts.push(it.value)
           else if (it.t === "entity") parts.push(it.value)
-          else parts.push(String(it.idText).replace(/^(?:qa|dn)-/i, ""))
+          else if (it.t === "id") parts.push(String(it.idText || "").replace(/^(?:qa|dn)-/i, ""))
+          // A context or metadata chip is not text in any message, so it has
+          // nothing to put in the chat's search box — it used to arrive there
+          // as "undefined". A `meta:` chip is marked on its message instead,
+          // through `_convChatMetaFilters`; context belongs to the conversation.
         })
         return parts.filter(Boolean).join(" | ")
+      }
+
+      /// The `meta:` chips of the search, as the `{name, value}` filters the
+      /// chat marks messages with — the same shape the panel's filters have.
+      /// Negated chips are left out: they are why a message is *not* there.
+      function _convChatMetaFilters() {
+        const out = []
+        convExpr.forEach((it, i) => {
+          if (!it || it.t !== "tag" || it.kind !== "metadata") return
+          const prev = convExpr[i - 1]
+          if (prev && prev.t === "op" && prev.op === "not") return
+          const values = it.values && it.values.length ? it.values : ["__any__"]
+          for (const value of values) out.push({ name: it.name, value })
+        })
+        return out
       }
 
       // ── The chip picker ──────────────────────────────────────────────
@@ -38081,9 +39752,10 @@
         // …and the metadata filters, for the same reason: a tag filter is a
         // reason this conversation is in the list, so the chat has to be able
         // to say which message carries it.
-        setChatMetaFilters(
-          lastConvSearchArgs && lastConvSearchArgs.metadataFilters,
-        )
+        setChatMetaFilters([
+          ...((lastConvSearchArgs && lastConvSearchArgs.metadataFilters) || []),
+          ..._convChatMetaFilters(),
+        ])
         document
           .getElementById("chatOptRegex")
           .classList.toggle("on", chatSearchRegex)
@@ -39782,6 +41454,26 @@
             const id = String((t.userRow || t.botRows[0])?.logId ?? "")
             if (id) matchedIds.add(id)
           }
+          // Under a feedback pill the list matched only the answers that were
+          // rated, so the chat does too: of the turns the search matched, the
+          // ones carrying that thumb. The others stay dimmed, one scroll away.
+          // Only when that leaves something — the chat search is text-only and
+          // can miss the reason a chip or tag matched in the backend.
+          const want =
+            convSessionFilter === "neg_feedback"
+              ? -1
+              : convSessionFilter === "pos_feedback"
+              ? 1
+              : 0
+          if (want) {
+            const rated = [...matchedIds].filter(
+              (id) => feedbackOriginTurnScores.get(id) === want,
+            )
+            if (rated.length) {
+              matchedIds.clear()
+              for (const id of rated) matchedIds.add(id)
+            }
+          }
           chatMatchIds = [...matchedIds]
         }
         _chatSyncMatchNav()
@@ -39938,10 +41630,26 @@
         })
 
       // ── Init DB on load if path is stored ───────────────────────────
+      // The migration phases, wherever the open came from — the launch's own
+      // open reports them too, and it is the one that runs after an update.
+      window.backend
+        .onDbMigrating((ev) => {
+          const p = (ev && ev.payload) || {}
+          const label = DB_MIGRATION_LABELS[p.phase]
+          if (!label || !convDbIsOpening()) return
+          convDbPhaseLabel =
+            label +
+            (p.phase === "contexts" && p.done > 0
+              ? " " + p.done.toLocaleString() + " conversations moved."
+              : "")
+          convDbOpeningChanged()
+        })
+        .catch(() => {})
       if (convDbPath) {
-        window.backend.setDbPath(convDbPath).catch(() => {
+        convDbOpen(convDbPath).catch(() => {
           convDbPath = ""
           localStorage.removeItem(CONV_DB_STORAGE_KEY)
+          updateConvDbStatus()
         })
       }
       updateConvDbStatus()

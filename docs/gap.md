@@ -1,11 +1,19 @@
-# GAP analysis
+# Analysis (formerly GAP)
 
 The questions the bot recognised badly, as a work list: pick a date range, go
 down the rows, open the conversation each came from, find the entity that should
 have caught it, fix it in CM.com, tick it off, and export what is left.
 
 _Read this before changing the GAP view (`#view-gap`), `get_gap_interactions`,
-`set_gap_fixed`, `save_export_xlsx` or `xlsx.rs`._
+`get_gap_feedback`, `set_gap_fixed`, `save_export_xlsx` or `xlsx.rs`._
+
+The view is called **Analysis** on screen (it was "GAP"; the code, the
+`#view-gap` id, the `cm-view` value `gap` and this file keep the old name, so
+nothing saved is lost). It has three work lists behind a **Recognition |
+Feedback | GenAI** switch at the start of the toolbar, sharing the range picker
+— `#view-gap[data-mode]` shows the panes and controls of the one that is on.
+Everything below up to "Feedback" is the Recognition list. Exports are
+`Analysis {recognition|feedback|GenAI} {today} {Month}.xlsx`.
 
 ---
 
@@ -40,7 +48,15 @@ popover under the range button, with the presets underneath as quick buttons.
 Unlike those two calendars its days are in the **display timezone** (the legend
 says which): they name moments, as the conversation date filter's do, not rows.
 `insZoneDayBounds` turns them into UTC bounds — the same conversion that filter
-uses. `gap_rows` validates both bounds as `YYYY-MM-DDTHH:MM:SS` and the
+uses. **Days that hold data are marked** as on Import and Stored data — green
+when every hour is imported, orange when some are, a tooltip with the count —
+from the same `get_db_hour_coverage`, loaded when the calendar opens and dropped
+after an import or a delete (`gapCoverageInvalidate`). That coverage is per UTC
+day, and a display-timezone day spans two of them, so `zoneDayCoverage` checks a
+local day hour by hour against the UTC hours it covers (23 or 25 across a DST
+change; `gap-fb.test.js`). The consequence is honest rather than odd: in
+Amsterdam the first imported UTC day reads as *partly* imported locally, because
+its first two local hours fall on the UTC day before. `gap_rows` validates both bounds as `YYYY-MM-DDTHH:MM:SS` and the
 threshold as 1–99 before anything runs.
 
 ## Leaving and coming back
@@ -124,6 +140,16 @@ the row shows the database's time, not the renderer's.
   - **Recognised as** — `entityMatches`, by the entity's own `entityId`, so the
     link is direct even for an entity the imported conversations never
     otherwise fired.
+  - **Every other entity link needs the id map.** The EntitiesExport CSV has
+    no id column; the only ids are in `entity_index`, loaded with the entity
+    options (`ensureEntityIdMap`). `onEnterGapView` asks for it — the view used
+    not to, so every *Add "word"* and finder link went to the Entities list
+    page unless the Conversations entity picker had happened to be opened
+    first. The links render at once and `_refreshEntityLinks` upgrades them in
+    place when the ids land. An import resets `entityOptionsLoaded`, so an
+    entity firing for the first time gets its link without a restart. One that
+    has never fired in any imported conversation has no id anywhere and keeps
+    the list-page link, with a tooltip saying why.
   - **Answered by** — the turn's `article_ids` as Article / Dialog-node links;
     for a zero it says the fallback answered, rather than linking the fallback.
   - **No Article for this** — when CM.com set `missingArticle` (or the turn is a
@@ -138,9 +164,72 @@ the row shows the database's time, not the renderer's.
 - Typing in the panel's search box still searches entities by name and word,
   as the finder did; clearing it brings the panel back.
 
+## Feedback
+
+The other half of what the bot gets wrong: not what it failed to recognise, but
+what it answered and was told was wrong. The Feedback mode lists every Article
+and Dialog node that answered a rated question in the range, with how often it
+was rated, how often down, and the positive share — lowest first.
+
+- **`get_gap_feedback` returns rated *answers*, not ratings.** Each rating is
+  resolved to the answer it names (`originatingInteractionId`, or the row
+  itself for an older in-place score) and an answer comes back once, scored by
+  its **latest** rating — CM.com's rule ("one feedback item per interaction –
+  the latest one"), and the Insights feedback card's, so none of them can
+  disagree about the same answer. The range is the rating's time.
+- **The alias is `origin_uuid`, never `oid`.** `oid` is SQLite's own name for
+  the rowid; over one table `GROUP BY oid` grouped by the *rating's* rowid and an
+  answer rated twice came back twice. The test that caught it is
+  `the_gap_feedback_list_is_the_rated_answers_once_each`.
+- **Grouping is the renderer's** (`gapFbItems`, pinned by `gap-fb.test.js`), so
+  switching *Per answer* ↔ *Per Article · Dialog* is instant. An answer counts
+  under **every** id in its `article_ids` — a Dialog node that answered with an
+  Article's text is about both. Per Dialog, the nodes add up into `dn-<id>`. An
+  answer with no id (the fallback, GenAI) is one line of its own, not dropped.
+- **"At least N ratings"** (default 3) keeps a single thumbs-down from topping
+  the list at 0%. The count line says how many items it left out.
+- Selecting an item lists its rated questions, thumbs down first, and opens the
+  first; each opens its conversation with the rated answer marked, through the
+  same cache and `renderFlaggedThread` the Recognition list uses. *Thumbs down
+  in Conversations* searches the item's id chip with the 👎 pill on — which,
+  since the rated-answer rule in `docs/search.md`, finds exactly these.
+- **The two modes keep separate panes and separate state**, so switching loses
+  neither list's place. Scroll positions are saved per mode as its panes are
+  hidden (`gapSavedScroll[mode]`), because a hidden pane reads a scroll of 0 —
+  one shared snapshot lost the hidden mode's position on every switch.
+- A new range re-reads the mode on screen only (`gapReload`); the other notices
+  on its next visit because its loaded key no longer matches.
+- Export writes the listed items as they are sorted:
+  `GAP feedback {today} {Month}.xlsx`.
+
+## GenAI
+
+Everything GenAI answered in the range, newest first: the question, the answer,
+and the conversation around it. It is not feedback on GenAI — just what was
+asked and what it said.
+
+- **`get_gap_genai` is the GenAI pill's predicate, row for row**
+  (`main_interaction_type` or `all_interaction_types` naming `GenerativeAI`),
+  so this list and the conversation list cannot disagree about which turns are
+  GenAI. A turn with no question text is left out.
+- **No split of this app's own invention.** About half the GenAI turns are
+  logged with main type `QA` and `GenerativeAI` among `all_interaction_types`
+  (391 of 715 on the reference database). There was a *GenAI only / With
+  another answer* pill and a `+QA` badge for them; neither is a CM.com term and
+  they read as something the portal never shows, so they are gone. The header
+  and the export state the type exactly as the log records it
+  (`gapAiType`: `GenerativeAI`, or `QA + GenerativeAI`).
+- Selecting one shows the answer formatted (`parseCmOutput(…).body`), the
+  source Articles from `faqs_found` with Edit links, the Halo Studio link for
+  the conversation (`haloConversationLink`, when a Halo Studio URL is set in
+  Settings), and the conversation with the turn marked; the list is windowed
+  like the Recognition list.
+- The backend also returns each answer's worst rating (`score`), unused on
+  screen for now.
+
 ## The export
 
-`GAP {today} {Month}.xlsx` — `GAP 2026-09-23 September.xlsx`, or
+`Analysis recognition {today} {Month}.xlsx` — `GAP 2026-09-23 September.xlsx`, or
 `September-October` when the range spans two. Columns: date/time (display
 timezone), question, response (plain), recognition % (a number, so it sorts),
 kind, Articles/Dialogs, culture, fixed, fixed at, conversation id. Fixed rows are

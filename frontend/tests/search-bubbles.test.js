@@ -40,6 +40,7 @@ const NAMES = [
   "convOpenGroupDepth",
   "convTextTerms",
   "_convChatQuery",
+  "_convChatMetaFilters",
   "exprNormalize",
   "exprToQuery",
   "_exprItemKey",
@@ -639,6 +640,29 @@ eq(
   }),
   ctx.labelsFor("verblijf")),
   [],
+)
+
+// A tag chip is not text in any message, so the chat's search box has nothing
+// to take from it — it used to read "undefined".
+eq(
+  "a context or metadata chip puts nothing in the chat's search box",
+  (ctx.setUp({
+    expr: [TEXT("parkeren"), OP("and"), TAG("context", "Verblijf", "true"), OP("or"), TAG("metadata", "topic", "Parking")],
+  }),
+  ctx._convChatQuery()),
+  "parkeren",
+)
+eq(
+  "…and a metadata chip marks its message instead; a negated one does not",
+  (ctx.setUp({
+    expr: [TAG("metadata", "topic", ["Parking", "Tickets"]), OP("and"), TAG("metadata", "nochat"), OP("not"), TAG("metadata", "x", "y"), OP("and"), TAG("context", "c", "d")],
+  }),
+  JSON.parse(JSON.stringify(ctx._convChatMetaFilters()))),
+  [
+    { name: "topic", value: "Parking" },
+    { name: "topic", value: "Tickets" },
+    { name: "nochat", value: "__any__" },
+  ],
 )
 
 console.log(out.join("\n"))

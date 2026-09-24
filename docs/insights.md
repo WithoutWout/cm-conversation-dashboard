@@ -101,8 +101,15 @@ different days either side of midnight, in one window.
 
 There is now **one display timezone** (`cm-display-timezone`, `""` meaning
 follow the system), and it drives the chat and session timestamps, the Insights
-day and hour buckets, and the conversation date filter. Import and Stored data
-stay UTC — see `docs/import.md`.
+day and hour buckets, the conversation date filter, Analysis, and — since they
+became local too — the Import and Stored data calendars (`docs/import.md` →
+"Calendars are in your timezone; storage and requests are UTC").
+
+**It is named as a clock, with its offset** (`insZoneTimeLabel`): "Amsterdam
+time (UTC+2)", never "Days in Amsterdam", which read like a place. The offset is
+the one over the span shown — a range across a DST change carries both,
+"UTC+1/+2" — so it is never the fixed offset that is wrong half the year.
+`insZoneLabel` stays the bare place name, and the test that pins it still holds.
 
 **The timezone never crosses the bridge, and no SQL mentions one.** The backend
 returns `day_hours`: one row per UTC day per UTC hour. `insTimeSeries` folds it
@@ -682,15 +689,141 @@ carrying feedback volume, positive share, recognition rate, recognition quality
 and interaction count. The dashboard could answer any one of those questions and
 none of the comparisons between them.
 
-### It always counts every answer of the matched conversations
+### Counted as CM.com counts
 
-In **both readings**, and that is the one place this card deliberately ignores
-the unit toggle. A segment is a set of *conversations* — `context_index` and
-`metadata_index` are keyed by `session_uuid` and there is no per-turn context to
-count instead — so a table whose rows meant "matching turns" under one toggle
-and "every turn" under the other would be two different reports wearing one
-title, pasted into the same spreadsheet column. The card note says so in those
-words. `INS_SEGMENT_NOTE` is where it is written, once.
+The table exists to reproduce the report people pull from CM.com's CAIC
+dashboards, so it counts by **their** rules — CM.com's knowledge-centre pages
+(Management Report, Feedback, Common Slicers) where they are documented, and a
+real week where they are not. Against the report for 14–20 Sep 2026 (filter
+`nochat = false`, UTC days): feedback **2,457 / 58.49% exact**, recognition rate
+92.84% against 92.82%, quality 79.10% against 79.06%, interactions 86,504
+against 86,333 (+0.2%); the IT and ZH rows exact in every column.
+`segments_match_the_cm_report_for_a_real_week` (`CAI_TEST_DB`) prints the table
+beside the report and pins the two exact figures.
+
+- **Interactions inside the date range, not conversations touching it.** The
+  conversation date filter selects conversations; this table then counts only
+  their interactions inside the range (`interaction_scope_sql`). A conversation
+  that ran past midnight — 3% of them run over 12 hours — used to bring 10% of a
+  day's interactions in from other days. The Interactions reading's matching
+  turns are clipped the same way — to the range and to the context filters — so
+  its charts never show a bar outside the range.
+- **Context is the interaction's own.** Each interaction stores the context set
+  it had at that moment (`contexts_id`); `context_pairs` expands every stored
+  set into its `(name, value)` pairs once (backfilled on open, extended as sets
+  are interned). The panel's context filters are applied to those per
+  interaction, and a Context breakdown puts each interaction under the value
+  *it* carried. Counting by the conversation's values made "Channel = web" 13%
+  too large. The rollup is keyed by conversation × culture × context set, which
+  stays near the size of the session set because the sets are shared.
+- **Names and values fold case**, in the per-interaction filter, the breakdown
+  and the conversation-level filter alike: one export carries `nochat` *and*
+  `noChat`, and matching one spelling halved the table.
+- **Interactions** (`CM_INTERACTION_ROW`): every row but Events, LinkClicks and
+  Feedback — and not a Dialog an Event started (`Event` among its types). CM.com's
+  "Total # of QA, (T-) Dialog, FAQClick and FAQSearch interactions".
+- **Feedback is one rating per answer, the latest** (`LATEST_RATING_SELECT`,
+  SQLite's bare-column-with-`MAX(log_id)` rule), met against the answers in
+  scope whenever it was given. The same rule now drives the Insights feedback
+  card, the Analysis Feedback list and the GenAI rating.
+- **Recognition rate** is QA interactions not "No Recognition" over all QA
+  interactions — intents and GenAI/HALO answers count as recognised.
+  **Recognition quality** is the mean over QA recognised by Entity Recognition or
+  an Exception Event (100) and unrecognised QA (0), divided by its own count
+  (`qualityN`); intents and GenAI have no meaningful quality.
+- **Their days are UTC — confirmed per day.** 19 Sep: 324 ratings, 63.58%
+  positive on UTC days, exact; on Amsterdam days 63.27%. 15 Sep: 377 ratings,
+  58.62%, recognition rate 93.26% on UTC days, all exact; Amsterdam days give
+  378. The Segments table's **Days: UTC, as CM.com** switch reads them that
+  way without moving the rest of the app — see "UTC days" below.
+- **Every breakdown row of the reference report matches on feedback exactly**
+  — Web, App, InPark, Verblijf, DuringStay (`activeDuringStay = true`),
+  Subscription, Translations, NL (`translation = false`), DE, EN, ES, FR, IT —
+  with recognition rate within ~0.05 and quality within ~0.1. Those rows were
+  pulled **without** the `nochat` filter the Total row carries (Web + App and NL +
+  Translations both sum to 2,512 ratings — the unfiltered total). The table here
+  applies one filter set to every row, so reproducing that sheet means reading
+  the Total and the breakdowns as two searches.
+- **Metadata stays per conversation** — it is carried by answers and CM.com's
+  dashboards do not filter on it.
+- **A session counts on the day it started** — the column is CM.com's *Active
+  sessions*: conversations that started in the range and have an in-scope
+  interaction there (`started` in the rollup). An interaction counts on the day
+  it happened, so a conversation begun before the range still brings its
+  interactions. 19 Sep: 2,003 against 2,008; 15 Sep: 2,080 against 2,090 — it
+  was 3% high, 2,070 and 2,152, when every conversation with activity counted.
+  The small remainder is this app's own "real user input" rule on every search:
+  without it the count is 2,006 and 2,089. Session mode is not a factor — the
+  customer's dashboard only has *Public*, and the import already asks for
+  Production with `activeSessionOnly`. `a_session_counts_on_the_day_it_started`.
+- **CM.com's own figures move after the fact.** The reference week read 2,457
+  ratings / 86,333 interactions in the report and 2,459 / 86,367 on its
+  dashboard days later, with nothing re-imported here. A re-import is the first
+  thing to try when feedback is a rating or two short.
+- **Rules tested against the week and rejected** (none came closer than each
+  interaction's own context): the next or the previous interaction's context,
+  a missing value filled from the rest of the conversation, the conversation's
+  first or last value, and dropping the real-user-input rule. There are no
+  duplicate rows and no context carrying two values of one key.
+- **Still open:** interactions within ±0.25% per day (+31 on 19 Sep, −2 on
+  15 Sep) — no exclusion rule moves both days the same way, so it reads as a
+  data difference; one day's Interactions Export from the portal would name the
+  rows. Recognition quality stays ~0.02–0.1 points high. DuringStay's
+  interaction count (6,309 in the report against 5,156) is the one row that
+  does not fit and may be a different key.
+
+### Filters on the Total row only
+
+The report this table reproduces has a filtered Total (`nochat = false`) above
+unfiltered rows — its rows are the whole week. **Filters apply to: every row ·
+Total row only** (`cm-insights-segment-total-only`) builds exactly that in one
+table: the Total is the search as it stands, and each breakdown row counts every
+conversation with real user input in the date range (`range_sessions_sql`),
+nothing else. On the reference week it reproduces every row's feedback exactly
+under a Total of 2,457 (`segments_match_the_cm_report_for_a_real_week`).
+
+- **The rollup is rebuilt for the rows**, so afterwards it no longer describes
+  the search: `conversation_segments_scoped` returns whether it still does, and
+  `get_insight_segments` records that rather than `true` — a later read reusing
+  it would count the whole range as the search.
+- **The picker's key lists are read before the rebuild**: which keys *this
+  result* has is a question about the search.
+- **With nothing but a date range there is nothing to leave out** and the
+  setting changes nothing (`search_is_filtered`); `rowsScope` says `"search"`.
+- **The table says which it is**: a line beside the chips on screen, and a
+  sentence appended to the card note, which every export carries — a pasted
+  table with a Total that is not the sum of its rows must explain itself.
+
+### UTC days
+
+CM.com's dashboards cut days at UTC midnight; this app reads every date in the
+display timezone. In Amsterdam the two weeks are two hours apart, and a real
+week read 2,455 ratings / 86,569 interactions here against 2,457 / 86,504 on UTC
+days — the whole of the difference to the report, which the UTC week matches
+exactly. **Days: \<zone\> time · UTC, as CM.com** (`cm-insights-segment-utc-days`)
+re-cuts the same calendar days for this table only, so the report can be
+rebuilt without switching the whole app to UTC.
+
+- **Entirely in the renderer.** `insSegArgs` reads the picked days back out of
+  the search's bounds (`insZoneDayOf`) and hands `get_insight_segments` the same
+  search with `T00:00:00` / `T23:59:59` bounds. Nothing in Rust knows.
+- **It costs a re-resolve.** Different bounds are a different scope-cache
+  fingerprint, so the first UTC read resolves the search again — and the next
+  read of another section resolves it back. Cheap for a date-only search; a
+  heavy text search pays its resolve twice. A second cache entry would avoid
+  it, and is not worth it for one table.
+- **Always shown, applied only when it can matter**: a date range, in a zone
+  that is not UTC (`insSegUtcMatters`); otherwise its tooltip says why it
+  changes nothing. It was hidden in those cases at first and read as missing.
+  It is part of `insSegSig`, so switching the zone to UTC with the setting on
+  does not re-read a table that would not change.
+- **The table says so**: the card note gains "Days are UTC days, as CM.com
+  counts them." (translated), which every export carries. The dates chip above
+  still names the days that were picked; they are the same days.
+
+Both readings count the same way — that is still the one place this card
+ignores the unit toggle, because a report pasted into one spreadsheet column
+cannot mean two things.
 
 Culture is grouped by **each turn's own** culture (`interactions.culture`,
 falling back to the conversation's when a turn has none). It used to be the
@@ -706,6 +839,9 @@ language is under two culture rows, which the block says (`overlapping`) — the
 interactions still partition, only the conversation counts overlap.
 
 ### Interactions are answers
+
+_Everywhere but the Segments table, which counts CM.com's interactions — see
+"Counted as CM.com counts"._
 
 Everywhere this app shows an interaction count, it counts **answers**:
 `IS_ANSWER_ROW` (spelled once, through the `answer_row!` macro, and as
@@ -733,6 +869,10 @@ database they are 27% of the log. Counting them is what put this table at
   now reads roughly a quarter low; it was always labelled "very roughly".
 
 ### The four ratios, and their denominators
+
+_Superseded for the Segments table by "Counted as CM.com counts": recognition
+is over QA interactions, quality has its own denominator, feedback is the latest
+rating. The history below is why the portal's definitions were chased at all._
 
 A header has no room to say which set a percentage is over, and that is the whole
 question — "93% recognition" of what? Each is stated in the note instead, since
@@ -946,6 +1086,17 @@ reachable without a second model of the table.
   interaction count, a filter above eight, a Restore per row and Restore all.
   `insSegRestoreRow` puts a row back after the last line of its own breakdown
   when that block is still there, at the end otherwise.
+- **A subtotal is a fourth kind of line** (`{t: "sum"}`, *+ Subtotal*): the
+  data rows above it back to the nearest heading, total or subtotal — the way a
+  spreadsheet's subtotal reads, so it is added at the end and sums the block it
+  lands under, and a blank line does not end a block. Its shares are
+  re-derived from the **summed counts** (every row carries `feedback`,
+  `feedbackPos`, `recognized`, `unrecognized`, `qualitySum`), never averaged —
+  the mean of two percentages is not a percentage. Rows with no data add
+  nothing, and a subtotal of only such rows is dashes. **Conversations are
+  summed as they stand**, so under a key whose rows overlap (the heading says
+  so) a subtotal counts a conversation once per row it is in, exactly as the
+  rows above it do. *+ Total* appears only when the Total line was removed.
 - **Every edit addresses a line by its index and re-renders**, so an index can
   never be stale: there is no moment between an edit and the redraw in which one
   is held.

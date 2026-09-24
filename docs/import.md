@@ -37,7 +37,7 @@ Responsibilities are split deliberately — keep them separate when extending th
 - **Duplicate detection is `INSERT OR IGNORE` on the `log_id` primary key**, so re-importing a day is always safe and idempotent. Skipping already-imported days is therefore an optimisation, not a correctness requirement — never build a separate dedupe mechanism.
 - **Do not replace this with unconditional overwrite (`INSERT OR REPLACE`) to save time.** It was measured as a fix for slow imports and found ~3.5× *slower* than `INSERT OR IGNORE`, not faster: `log_id` is already `INTEGER PRIMARY KEY`, so the "check" is the same rowid seek the insert must do regardless, and on a duplicate it skips the secondary indexes and FTS insert entirely — `OR REPLACE` instead deletes and re-inserts, re-maintaining every index, and would also break the `recognition_details` backfill and leave stale FTS rows. Import slowness has a real cause; see below.
 - **The database stores raw UTC** (the portal CSV's `03/25/2026 09:30:22` is the same instant as the API's `2026-03-25T09:30:22.605Z`), so `get_db_daily_stats` groups by UTC date. `parse_ts` normalizes both formats to `YYYY-MM-DDTHH:MM:SS` so rows from either source are byte-identical — every `DATE(timestamp_start)` and range comparison depends on that.
-- **Windowing:** the picker is **UTC end to end** — the date fields, the time fields, **Now** (`getUTCHours`), the calendar cells, and the default range all are, matching the database and the request windows. `_impUtcDate(dateStr, timeStr)` is the only place a picked date becomes an instant, and it goes through `Date.UTC`. `buildImportQueue` then cuts the range at UTC midnights so each request maps 1:1 to a DB day; one picked day is exactly one request, in any host timezone. A full day is `00:00:00Z` → `23:59:59Z` — **strictly under 24h**. That is *our* invariant, not an API rule: the SOP says a full-day request frequently *times out*, not that it is rejected, and the rule exists so a window maps onto one UTC day the calendar and skip logic can reason about. `validate_window` in `analytics_api.rs` enforces it, along with the SOP's 90-day retention limit (which is real).
+- **Windowing:** the picker is in the **display timezone** — the date fields, the time fields, **Now**, the calendar cells and the default range — and the requests are **UTC**. `_impDate(dateStr, timeStr)` (→ `zoneInstant`) is the only place a picked date becomes an instant. `buildImportQueue` makes one queue item per **local** day, each carrying the API windows that make it up, cut at UTC midnight: at UTC+2 a day is `…22:00Z → 23:59:59Z` of the UTC day before plus `00:00Z → 21:59:59Z` of its own. Every window stays inside one UTC day and is **strictly under 24h** — *our* invariant, not an API rule: the SOP says a full-day request frequently *times out*, not that it is rejected, and the rule exists so a window maps onto one UTC day the coverage masks and skip logic can reason about. `validate_window` in `analytics_api.rs` enforces it, along with the SOP's 90-day retention limit (which is real). The first request of a range never starts before that limit (`_impPreview` clamps it, with a minute of slack): the oldest day the calendar offers begins before it, and `validate_window` rejects a window starting even a second past it. See "Calendars are in your timezone; storage and requests are UTC" below.
 - **Pipeline:** while day *N* imports, day *N+1* downloads. Only ever one API request is in flight — the JS scheduler serialises downloads and a `tokio::sync::Semaphore(1)` in `AnalyticsState` enforces it at the client layer regardless. **This cap is self-imposed politeness, not an API constraint** — the SOP documents no rate limit and no concurrency limit, despite earlier comments here and in `analytics_api.rs` claiming it did. Raising it is a legitimate option if downloads ever become the bottleneck; as of the run-scoped-finalize work they were not. `_impStartFetch` returns a promise that never rejects (`{ ok, parts | error }`) because a download is started one iteration before it is awaited.
 - **Timeout subdivision vs backoff — two failures, two opposite responses.** The SOP warns full-day requests often time out, so a `Timeout` (408/504) halves the window (12h → 6h → …), sequentially, bounded by `IMP_MAX_SPLIT_DEPTH` and a one-hour floor — split only while *both* halves stay at or above an hour. Worst case ~6 requests per day, not an exponential fan-out. A `RateLimited` (429) or `ServerError` (5xx) instead **waits and retries the same window unchanged**, honouring `Retry-After` and otherwise backing off exponentially with jitter (`IMP_MAX_BACKOFF_ATTEMPTS`, `IMP_MAX_BACKOFF_MS`). All three used to be one `Timeout` kind, which meant the app responded to "you are sending too many requests" by splitting the window and sending *more*. `rate_limiting_is_not_mistaken_for_a_timeout` pins the distinction.
 - **A token is never handed out with less life left than a request may take.** `TOKEN_SKEW_SECS` is `FETCH_TIMEOUT_SECS + 60`, and that relationship is the point — `a_token_is_never_handed_out_with_less_life_than_a_fetch_needs` asserts it. It was 120s against a 300s request timeout, so any cached token with 121–300s of life started a request it could not finish. **That is the "the first download fails, then the retry works" bug**: a request is authorised once, when it is sent, so a token dying mid-transfer does not come back as a clean `401` we could refresh and retry — it comes back as a reset connection or a truncated body, which classifies as `Network` and is not retryable. The day failed; pressing Retry worked because by then the token was stale enough to be replaced up front. `usable_lifetime` floors the reserve at half the token's life so a short-lived token is still worth caching.
@@ -89,18 +89,64 @@ The Manage Database calendar still gates its outline on row count, so a fetched-
 
 The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Stored data calendar adopted it) — including the green/orange coverage outlines, which are inset shadows rather than borders so marking a day never shifts the grid by a pixel. Both calendars also share the class-only hover update (`_impUpdateCalClasses` / `_mdbUpdateCalClasses`): a full re-render on every `mousemove` fights the pointer.
 
-**Both calendars mean a UTC day**, via the shared `_calDayKey(y, m, day)` — plain string formatting, no `Date`, no timezone maths. The grid coordinates already *are* the calendar date, so there is nothing to convert; routing through a `Date` is what reintroduces the local offset. `_mdbKey` is a thin alias kept for readability at the Stored data call sites. What still differs between the wrappers:
+### Calendars are in your timezone; storage and requests are UTC
+
+**Every calendar means a day of the display timezone** — Import, Stored data,
+Analysis, the conversation date filter. The database stores UTC, the Analytics
+API is asked in UTC, and the coverage masks are per UTC day; the conversions
+between the two live in one place (`zoneDayKey`, `zoneInstant`,
+`zoneDayCounts`, `zoneDayCoverage`) so no two calendars can read one day two
+ways. `_calDayKey(y, m, day)` still builds a cell's key by plain string
+formatting — the grid coordinates *are* the calendar date — and the key now
+names a local day.
+
+These calendars used to be UTC, deliberately, because a UTC day was exactly the
+set of rows that appeared or disappeared. The cost was that every *reading*
+view is local: import "1–7 Sep" and local 1 Sep was two hours short (its first
+hours are on UTC 31 Aug), while the last two UTC hours of 7 Sep showed up as
+local 8 Sep. Nothing flagged it. What makes local days safe now is that nothing
+below is keyed per day any more:
+
+- **A queue item is a local day with one or two windows.** One window per UTC
+  day, so `record_imported_window` and the masks are untouched, and a request
+  never crosses a UTC day. `_impStartFetch` fetches them in order, skips a
+  window whose hours are already covered (a local day whose evening came with
+  the previous run fetches only its missing half), and deletes an earlier
+  window's temp files if a later one fails — nothing of a failed day is kept.
+- **Coverage is read per local day, hour by hour** (`zoneDayCoverage` over the
+  UTC masks): green when every hour of the local day is in, orange when some
+  are, 23 or 25 hours across a DST change. That is what removed the old
+  *ragged edges* — a range's first and last days are complete in the days you
+  read, so nothing stays orange and gets re-fetched forever.
+- **Counts are per local day** from `get_db_daily_stats().hours` (per UTC hour),
+  folded by `zoneDayCounts`. UTC day totals cannot be regrouped: a local day is
+  parts of two.
+- **Delete is by instants** (`delete_interactions_between`). Each selected local
+  day becomes the UTC range it spans, consecutive days merged, and the backend
+  deletes exactly the rows inside — satellites first, as before — then clears
+  only the request-coverage hours **wholly** inside the range
+  (`hours_wholly_inside`): an hour cut in two still holds rows, and forgetting it
+  would re-download them. `delete_interactions_by_dates` (UTC dates) remains for
+  compatibility and is no longer called.
+- **The retention quick action** picks local days before the local day of the
+  cutoff instant; `purge_old` itself was always by instant.
+
+What still differs between the wrappers:
 
 | | Import tab | Stored data tab |
 | --- | --- | --- |
 | Disabled | future, or older than the API's 90-day retention | future only — the DB may hold anything |
 | Range colour | accent | red (`.day-cal.danger`) |
 
-Both are UTC for the same reason: the data is. `DATE(timestamp_start)` is UTC, `delete_interactions_by_dates` matches on it, and the request windows the importer builds are UTC days — so on both tabs the day you click is exactly the set of rows that appears or disappears. Don't "unify" either one to local time.
+Both legends name the clock ("Amsterdam time (UTC+2)", `insZoneTimeLabel`),
+and Import adds "requests are sent in UTC"; the import summary still shows the
+request span in UTC, and the log states both. Tests: `import-days.test.js`
+(queue windows, DST days, "already imported" needing both halves, count
+folding) and `deleting_a_local_day_takes_its_rows_and_only_its_hours`,
+`only_whole_hours_inside_a_range_are_forgotten`,
+`hour_stats_split_a_day_by_hour`.
 
-**That rule got harder to keep, not easier.** The rest of the app now has a display timezone (`docs/insights.md` → "Reading this in your own timezone"): the session list, the chat, the conversation date filter and every Insights chart are read in the user's zone. These two calendars are the ones that must not follow, and the reason is the sentence above — they name rows, not moments. Both say so on screen rather than leaving it to be inferred, because a UTC calendar sitting next to a local one is exactly the situation that produces the mistake.
-
-The Import picker used to be local time. The mismatch showed up in two ways worth remembering, because each looks like its own separate bug:
+The Import picker used to be local time once before, and went back to UTC. The mismatch then showed up in two ways worth remembering, because each looks like its own separate bug — and both are why the local-day version is built the way it is:
 
 - **One picked day became two requests.** A local day spans two UTC days (at UTC+2, local 25 Mar is `24T22:00Z → 25T21:59Z`), so a contiguous selection always left two ragged UTC edges — the first day fetched only its tail, the last only its head. Both then rendered orange (partly imported) indefinitely and were re-fetched on the next run. Harmless thanks to `INSERT OR IGNORE`, but it read as the importer failing to finish.
 - **The outlines described a day you hadn't selected.** `keyFor` was local while `_impDbHours`/`_impDbDays` are keyed by the UTC date straight out of `get_db_hour_coverage`, so a cell's coverage colour and tooltip answered "is UTC day N complete?" while clicking it queued local day N. At UTC+2 the two overlap 22 of 24 hours, which is why it looked *almost* right rather than obviously wrong.

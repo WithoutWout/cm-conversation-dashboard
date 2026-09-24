@@ -67,9 +67,11 @@ const EXPORTS = [
   "insSetDisplayZone",
   "insZone",
   "insZoneLabel",
+  "insZoneTimeLabel",
   "insZoneDayBounds",
   "insZoneStampToUtc",
   "insZoneDayOf",
+  "insSegArgs",
   "insCacheDecide",
   "insLinkBuckets",
   "insParseContentLabel",
@@ -139,9 +141,11 @@ const {
   insSetDisplayZone,
   insZone,
   insZoneLabel,
+  insZoneTimeLabel,
   insZoneDayBounds,
   insZoneStampToUtc,
   insZoneDayOf,
+  insSegArgs,
   insCacheDecide,
   insLinkBuckets,
   insParseContentLabel,
@@ -778,7 +782,7 @@ test("a segment row's shares are of the rows that could have them", () => {
   // portal's definition: 24000 / 320, not 24000 / 300 (which read 80.00%).
   assert.strictEqual(row("Total").cells[col("Recognition quality")], "75.00%")
   assert.strictEqual(row("Total").cells[col("Interactions")], insNumOf(412))
-  assert.strictEqual(row("Total").cells[col("Conversations")], insNumOf(100))
+  assert.strictEqual(row("Total").cells[col("Active sessions")], insNumOf(100))
 
   // A share of nothing is a dash, never 0% — "0% positive" is a claim about
   // ratings nobody left, and it is exactly the row people ask about.
@@ -1048,6 +1052,69 @@ test("the arrangement decides the export, line for line", () => {
     if (!line.startsWith("|")) continue
     assert.strictEqual(line.replace(/\\\|/g, "").split("|").length - 2, width, line)
   }
+})
+
+// A subtotal is the sum of the rows above it, back to the nearest heading,
+// total or subtotal — and its shares are re-derived from the summed counts,
+// never averaged, since an average of two percentages is not a percentage.
+test("a subtotal adds up the block above it and re-derives its shares", () => {
+  const saved = insSegNaturalLayout(SEGMENTS)
+  // After the culture block, before the context block's heading…
+  const at = saved.entries.findIndex((e) => e.t === "head" && e.gid && e.gid.startsWith("context"))
+  saved.entries.splice(at, 0, { t: "gap", label: null }, { t: "sum", label: null })
+  // …and one at the very end, named, over the context block.
+  saved.entries.push({ t: "sum", label: "Channels" })
+  const table = insSegmentTable(SEGMENTS, saved)
+  const col = (label) => table.headers.indexOf(label) - 1
+  const sums = table.rows.filter((r) => r.kind === "sum")
+  assert.strictEqual(sums.length, 2)
+  const [culture, channels] = sums
+  assert.strictEqual(culture.label, "Subtotal")
+  // nl + en: a blank line between them and the subtotal does not end the block.
+  assert.strictEqual(culture.data[col("Interactions")], "412")
+  assert.strictEqual(culture.data[col("Active sessions")], "100")
+  assert.strictEqual(culture.data[col("Positive feedback")], "57.50%")
+  // web + app: 200 of 210 scored, 16000 / 210 — not the mean of 95.24% and "—".
+  assert.strictEqual(channels.label, "Channels")
+  assert.strictEqual(channels.data[col("Recognition rate")], "95.24%")
+  assert.strictEqual(channels.data[col("Recognition quality")], "76.19%")
+  assert.strictEqual(channels.data[col("Feedback interactions")], "4")
+  // A subtotal of nothing but rows this result has no numbers for is dashes.
+  const empty = insSegmentTable(SEGMENTS, {
+    entries: [
+      { t: "row", id: insSegRowId("context", "gone", "x"), label: null },
+      { t: "sum", label: null },
+    ],
+    dropped: [],
+  })
+  const sum = empty.rows.find((r) => r.kind === "sum")
+  assert.ok(sum.cells.every((c) => c === "—"), sum.cells.join(","))
+  // It survives being saved and read back.
+  const round = insSegNormalizeLayout(JSON.parse(JSON.stringify(saved)))
+  assert.strictEqual(round.entries.filter((e) => e.t === "sum").length, 2)
+  // And every text twin carries it like any other row.
+  assert.ok(insTableTsv(table).includes("Channels\t4\t"), insTableTsv(table))
+})
+
+// CM.com's recognition quality is over QA recognised by entities or an
+// exception event plus unrecognised QA — not every turn in the rate's
+// denominator — so it divides by its own count when the payload carries one.
+test("recognition quality divides by its own count, in rows and subtotals", () => {
+  const seg = {
+    total: { sessions: 2, interactions: 10, feedback: 0, feedbackPos: 0, recognized: 8, unrecognized: 2, qualitySum: 480, qualityN: 6 },
+    groups: [{ kind: "culture", name: "", foldedValues: 0, overlapping: false, rows: [
+      { label: "nl", sessions: 1, interactions: 5, feedback: 0, feedbackPos: 0, recognized: 4, unrecognized: 1, qualitySum: 300, qualityN: 4 },
+      { label: "en", sessions: 1, interactions: 5, feedback: 0, feedbackPos: 0, recognized: 4, unrecognized: 1, qualitySum: 180, qualityN: 2 },
+    ] }],
+  }
+  const layout = insSegNaturalLayout(seg)
+  layout.entries.push({ t: "sum", label: null })
+  const table = insSegmentTable(seg, layout)
+  const col = table.headers.indexOf("Recognition quality") - 1
+  const row = (l) => table.rows.find((r) => r.label === l)
+  assert.strictEqual(row("Total").data[col], "80.00%", "480 / 6, not 480 / 10")
+  assert.strictEqual(row("Culture: en").data[col], "90.00%")
+  assert.strictEqual(row("Subtotal").data[col], "80.00%", "the subtotal sums qualityN too")
 })
 
 // Dropping a line removes it before re-inserting it, which shifts every index
@@ -1382,6 +1449,31 @@ test("the heatmap week still starts on Monday after the shift", () => {
   assert.strictEqual(m.hourWeekday[0 * 24 + 14], 1, "Monday is not the first row")
 })
 
+test("UTC days re-cut the same calendar days at UTC midnight, and nothing else", () => {
+  const zone = "Europe/Amsterdam"
+  const b = insZoneDayBounds("2026-09-14", "2026-09-20", zone)
+  assert.strictEqual(b.from, "2026-09-13T22:00:00")
+  const args = { query: "x", dateFrom: b.from, dateTo: b.to, contextFilters: [{ name: "nochat" }] }
+  const utc = insSegArgs(args, true, zone)
+  // CM.com's week: 14 Sep 00:00Z to 20 Sep 23:59:59Z.
+  assert.strictEqual(utc.dateFrom, "2026-09-14T00:00:00")
+  assert.strictEqual(utc.dateTo, "2026-09-20T23:59:59")
+  assert.strictEqual(utc.query, "x")
+  assert.strictEqual(utc.contextFilters, args.contextFilters)
+  // The dashboard's own args are not touched — they are the scope fingerprint.
+  assert.strictEqual(args.dateFrom, "2026-09-13T22:00:00")
+  // Off, or no date range: the args themselves.
+  assert.strictEqual(insSegArgs(args, false, zone), args)
+  const open = { query: "x", dateFrom: null, dateTo: null }
+  assert.strictEqual(insSegArgs(open, true, zone), open)
+  // West of UTC the days move the other way.
+  const ny = insZoneDayBounds("2026-09-14", "2026-09-14", "America/New_York")
+  assert.deepStrictEqual(
+    [insSegArgs({ dateFrom: ny.from, dateTo: ny.to }, true, "America/New_York")].map((a) => [a.dateFrom, a.dateTo])[0],
+    ["2026-09-14T00:00:00", "2026-09-14T23:59:59"],
+  )
+})
+
 test("a local day becomes the instants that bound it, in the column's own shape", () => {
   const shape = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/
   for (const zone of ZONES) {
@@ -1414,6 +1506,19 @@ test("the zone label is a place, never an offset", () => {
   // An offset would be right for half the year and wrong for the other half,
   // and a chart spanning both has no single correct one to print.
   assert.ok(!/[+-]\d/.test(insZoneLabel("Europe/Amsterdam")))
+})
+
+// "Days in Amsterdam" read like a place. The label says *time*, and the offset
+// is the one over the span shown — both, across a DST change.
+test("a clock is named as a time, with the offset of the span it covers", () => {
+  const jun = Date.UTC(2026, 5, 15)
+  const dec = Date.UTC(2026, 11, 15)
+  assert.strictEqual(insZoneTimeLabel("Europe/Amsterdam", jun, jun), "Amsterdam time (UTC+2)")
+  assert.strictEqual(insZoneTimeLabel("Europe/Amsterdam", dec, dec), "Amsterdam time (UTC+1)")
+  assert.strictEqual(insZoneTimeLabel("Europe/Amsterdam", dec, jun), "Amsterdam time (UTC+1/+2)")
+  assert.strictEqual(insZoneTimeLabel("Asia/Kolkata", jun, jun), "Kolkata time (UTC+5:30)")
+  assert.strictEqual(insZoneTimeLabel("America/New_York", dec, dec, "axis"), "New York time, UTC-5")
+  assert.strictEqual(insZoneTimeLabel("UTC", jun, jun), "UTC")
 })
 
 // ── Content charts point at the things they name ───────────────────────────
@@ -1770,9 +1875,10 @@ test("the timezone is a header badge, not a caption on every chart", () => {
   // chart was actually drawn in, not a constant.
   const named = (z) =>
     insBuildCards(CONVS, INS_THEME_SCREEN, z).find((c) => c.id === "hour").spec.axisLabel
-  assert.strictEqual(named(ZONE), "Hour (Amsterdam)")
+  // CONVS is a June payload, so the offset is summer time.
+  assert.strictEqual(named(ZONE), "Hour (Amsterdam time, UTC+2)")
   assert.strictEqual(named("UTC"), "Hour (UTC)")
-  assert.strictEqual(named("America/New_York"), "Hour (New York)")
+  assert.strictEqual(named("America/New_York"), "Hour (New York time, UTC-4)")
 })
 
 // Every tooltip on this dashboard ends in a counted noun.
@@ -2106,7 +2212,7 @@ test("caption parts can each be left out", () => {
   const onlyZone = { ...none, capZone: true }
   const lines = insCaptionLines(card, CONVS, {}, "Europe/Amsterdam", onlyZone)
   assert.strictEqual(lines.length, 1)
-  assert.strictEqual(lines[0].text, "times in Amsterdam")
+  assert.match(lines[0].text, /^Amsterdam time \(UTC\+[12](\/\+2)?\)$/)
 })
 
 console.log(failures ? "\n" + failures + " failing" : "\nall insights tests passed")

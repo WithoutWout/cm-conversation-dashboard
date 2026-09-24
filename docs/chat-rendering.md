@@ -18,6 +18,11 @@ was asked — so now every turn is rendered and the match is found for you:
 - **`.is-match` on the turn, `.is-focus` on the thread.** Matching turns carry
   `.is-match`; while `#chatThread` has `.is-focus`, every other turn and system
   pill is at 30% opacity. Un-dimming is one class removal, not a re-render.
+- **Under a feedback pill the matches are the rated ones.** Of the turns the
+  chat search matched, only those carrying that thumb stay matched — the list
+  matched only rated answers (`docs/search.md`), so the chat says the same.
+  Only when that leaves something: the chat search is text-only and can miss
+  why a chip matched in the backend.
 - **The first match is centred** (`block: "center"`), pulsed once, and the
   floating navigator reads `Match 1 of N` with ↑ ↓. Enter / Shift+Enter in the
   chat search box walk the matches too.
@@ -71,6 +76,11 @@ The tag filter popover aggregates `OutputMetadata` across the whole database; `#
 
 **With a tag filter on, the chat says which message carries it.** `chatMetaFilters` mirrors the applied metadata filters into the opened chat exactly as `chatMatchEntities` mirrors the E toggle, and the matching bubble gets `.meta-match-highlight`, its tag button turns accent and stops being quiet, and the popover marks the value that did it. Without this a tag filter was the one filter whose reason was invisible: the conversation was in the list and nothing in it said why.
 
+- **`meta:` chips in the search bar mark messages too** (`_convChatMetaFilters`),
+  merged with the panel's filters; a negated chip is left out, since it is why
+  a message is *not* there. A `ctx:` chip marks nothing — context belongs to the
+  conversation — and **neither kind reaches the chat's search box**:
+  `_convChatQuery` used to turn a tag chip into the literal text `undefined`.
 - **Read from `lastConvSearchArgs`, not the live popover state.** `convMetadataFilters` changes as soon as a chip is clicked, so the chat would mark messages against a filter that had not been searched with yet.
 - **`__not_set__` is dropped, and that is the point.** It matched the session because *no* message carries the key, so there is no message to point at; marking every message would be noise dressed up as an answer. `setChatMetaFilters` filters it out rather than every call site remembering to.
 - **Any one filter is enough to mark a message.** The backend ANDs across names at the *session* level, so two different messages can legitimately satisfy two different names.

@@ -74,6 +74,9 @@ function harness({ emitDuring, listenThrows = false, failOpen = false }) {
       if (kind === "error") thrown = String(message)
     },
     loadSessions: () => Promise.resolve(),
+    // The shared opener is the invoke as far as this test is concerned — it
+    // joins or queues opens, which is `db-open.test.js`'s business.
+    convDbOpen: (p) => ctx.window.backend.setDbPath(p),
     convDbPath: null,
     contextOptionsLoaded: true,
     metadataOptionsLoaded: true,
