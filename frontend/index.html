@@ -143,6 +143,51 @@
         border-color: var(--accent);
         color: var(--text);
       }
+      .icon-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      /* Header buttons that belong to one side of the app. The view is a class
+         on <body>, set by `switchView` and once as the script starts. */
+      body:not(.view-is-content) .icon-btn.content-only,
+      body.view-is-content .icon-btn.not-content {
+        display: none;
+      }
+      /* The buttons a view switch brings in rise into the slot the others just
+         left, one after the other. Entrance only: the outgoing ones are
+         display:none at once, and the eye is on what arrives. `view-anim` is
+         set by a real switch only, so the first paint does not play it. */
+      @keyframes hdr-btn-in {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.94);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      body.view-anim.view-is-content .icon-btn.content-only,
+      body.view-anim:not(.view-is-content) .icon-btn.not-content {
+        animation: hdr-btn-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+      }
+      body.view-anim.view-is-content #collectionsBtn {
+        animation-delay: 0.05s;
+      }
+      /* Held at its first frame until the view behind it has painted. The
+         Content view lays out thousands of cards on the frame it appears, and
+         an animation whose clock started on that frame was over — Share
+         Content's entirely, having no delay — before anything was drawn. */
+      /* As specific as the rules that start it, and after them: the `animation`
+         shorthand there resets the play state, so a plainer selector loses. */
+      body.view-anim.view-anim-hold .icon-btn.content-only,
+      body.view-anim.view-anim-hold .icon-btn.not-content {
+        animation-play-state: paused;
+      }
+      .icon-btn .mini-spinner {
+        width: 12px;
+        height: 12px;
+      }
 
       /* === GLOBAL SEARCH === */
       .global-search-bar {
@@ -7942,6 +7987,11 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        /* Outranks the view-state selectors that start it. */
+        .icon-btn.content-only,
+        .icon-btn.not-content {
+          animation: none !important;
+        }
         .settings-tab-panel.active,
         .import-source-panel.panel-in,
         .panel.active,
@@ -9848,6 +9898,18 @@
            so it needs its own ground rather than the modal's. */
         background: #ffffff;
       }
+      /* A table has no export theme — it leaves as numbers, never as a picture
+         — so its preview is the screen's table on the screen's ground. On the
+         white chart ground its light text vanished and the zebra bands read as
+         dark bars. */
+      .ins-export-preview.ins-export-table {
+        background: var(--bg);
+        padding: 6px 12px;
+      }
+      /* Seven columns do not fit the chart-sized box without scrolling. */
+      .ins-export-box.is-table {
+        width: min(980px, 96vw);
+      }
       .ins-export-preview svg {
         display: block;
         margin: 0 auto;
@@ -10069,7 +10131,7 @@
     </style>
     <script src="vendor/vis-network.min.js"></script>
   </head>
-  <body>
+  <body class="view-is-content">
     <!--
       Icon sprite. Every icon in the app is defined exactly once here and drawn
       with `<use href="#i-…">`, which is what lets one definition serve both the
@@ -10378,7 +10440,13 @@
         </svg>
         Settings
       </button>
-      <button class="icon-btn" id="exportBtn">
+      <!--
+        Share Content and Collections act on the Content tab's results and are
+        shown only there; everywhere else the same slot holds Data, which is
+        about the conversations database behind every other view. See
+        `switchView`.
+      -->
+      <button class="icon-btn content-only" id="exportBtn">
         <svg
           width="12"
           height="12"
@@ -10393,7 +10461,7 @@
         </svg>
         Share Content
       </button>
-      <button class="icon-btn" id="collectionsBtn">
+      <button class="icon-btn content-only" id="collectionsBtn">
         <svg
           width="12"
           height="12"
@@ -10407,6 +10475,25 @@
           />
         </svg>
         Collections
+      </button>
+      <button
+        class="icon-btn not-content"
+        id="convDataBtn"
+        title="Import interactions, review what's stored, and manage the database file"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <ellipse cx="12" cy="5" rx="9" ry="3" />
+          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+        </svg>
+        Data
       </button>
     </header>
 
@@ -10872,31 +10959,6 @@
       </div>
       <!-- Toolbar -->
       <div class="conv-toolbar" id="convToolbar">
-        <!--
-          One entry point for everything about the data behind this view. The
-          toolbar used to carry a green line naming the open database plus two
-          buttons into two modals; the line is now in the modal header and in
-          Settings, where a value you set once belongs.
-        -->
-        <button
-          class="conv-toolbar-btn"
-          id="convDataBtn"
-          title="Import interactions, review what's stored, and manage the database file"
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <ellipse cx="12" cy="5" rx="9" ry="3" />
-            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-          </svg>
-          Data
-        </button>
         <button
           class="conv-toolbar-btn"
           id="convInsightsBtn"
@@ -22373,6 +22435,9 @@
       // (the view-switcher section below also assigns it, but let-TDZ would
       // otherwise cause ReferenceErrors in callbacks like onFlaggedSessionAdded).
       let currentView = localStorage.getItem("cm-view") || "content"
+      // Before the deferred `switchView`, so a start on another view never shows
+      // the Content-only header buttons first.
+      document.body.classList.toggle("view-is-content", currentView === "content")
 
       let activeFlagId = null
       let _noteSaveTimer = null
@@ -25395,10 +25460,64 @@
 
       // ── View switcher ───────────────────────────────────────────────
 
+      /// Run `change`, then slide every header item that stayed on screen from
+      /// where it was to where it now is (FLIP). Swapping Share Content and
+      /// Collections for Data changes the width of the button group, and
+      /// without this Refresh and Settings jump sideways by it. A transform
+      /// only, so nothing is laid out twice and no click waits for it. Returns
+      /// the slides paused at their start, for the caller to play once the new
+      /// view has painted.
+      function headerSlide(change) {
+        const header = document.querySelector("header")
+        const reduce =
+          window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        if (!header || reduce || !header.animate) {
+          change()
+          return []
+        }
+        const items = Array.from(header.children)
+        const before = new Map(
+          items.map((el) => [el, el.offsetParent ? el.getBoundingClientRect().left : null]),
+        )
+        change()
+        const slides = []
+        for (const el of items) {
+          const was = before.get(el)
+          if (was == null || !el.offsetParent) continue
+          const dx = was - el.getBoundingClientRect().left
+          if (Math.abs(dx) < 1) continue
+          const a = el.animate(
+            [{ transform: `translateX(${dx}px)` }, { transform: "none" }],
+            { duration: 260, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", fill: "backwards" },
+          )
+          // Held where it was until the caller plays it — see `switchView`.
+          a.pause()
+          slides.push(a)
+        }
+        return slides
+      }
+
       function switchView(name) {
         if (currentView === "gap" && name !== "gap") gapRememberScroll()
+        const crossesContent = (currentView === "content") !== (name === "content")
         currentView = name
         localStorage.setItem("cm-view", name)
+        // Only a switch that swaps the header buttons plays their entrance.
+        if (crossesContent) {
+          document.body.classList.add("view-anim", "view-anim-hold")
+          const slides = headerSlide(() =>
+            document.body.classList.toggle("view-is-content", name === "content"),
+          )
+          // Two frames: the first is the one the new view is laid out in.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              document.body.classList.remove("view-anim-hold")
+              for (const a of slides) a.play()
+            }),
+          )
+        } else {
+          document.body.classList.toggle("view-is-content", name === "content")
+        }
         document
           .getElementById("view-content")
           .classList.toggle("hidden", name !== "content")
@@ -32219,6 +32338,8 @@
             <button class="${insExportScope === "dashboard" ? "active" : ""}"
               onclick="insSetExportScope('dashboard')">Whole dashboard</button>
           </div>`
+        const box = body.closest(".ins-export-box")
+        if (box) box.classList.toggle("is-table", !!(insExportScope === "chart" && card && card.table))
         body.innerHTML =
           scope +
           (insExportScope === "chart" && card
@@ -32237,8 +32358,8 @@
       /// invite the question it cannot answer. The dashboard scope beside it
       /// still carries the table, as an HTML table in the rich-text report.
       function insExportTableBody(card) {
-        return `<div class="ins-export-preview ins-table-wrap"
-            style="max-height:280px;overflow:auto">${insSegmentTableHtml(
+        return `<div class="ins-export-preview ins-export-table ins-table-wrap"
+            style="max-height:320px;overflow:auto">${insSegmentTableHtml(
               card.table,
             )}</div>
           <div class="ins-export-group">

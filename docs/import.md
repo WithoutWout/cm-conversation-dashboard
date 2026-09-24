@@ -8,7 +8,7 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 
 ## The conversation data modal
 
-`#convDataModal` is the one place data enters or leaves the database. Three tabs — **Import**, **Stored data**, **Database** — behind a single toolbar button (`#convDataBtn`, labelled *Data*).
+`#convDataModal` is the one place data enters or leaves the database. Three tabs — **Import**, **Stored data**, **Database** — behind a single header button (`#convDataBtn`, labelled *Data*). It sits in the header on every view but Content, in the slot Share Content and Collections take on Content — the database is behind Conversations, Flagged and Analysis alike, and the Content tab never touches it.
 
 It replaced two modals reached from two adjacent toolbar buttons (*Import* and *Manage DB*). They already shared the 620px box, the two-month calendar and the day-coverage colours, and they answer neighbouring halves of one question — "what have I got, and what am I missing?" — so getting from one to the other meant closing a modal and hunting for another button.
 

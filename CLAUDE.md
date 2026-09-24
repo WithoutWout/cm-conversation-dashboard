@@ -377,7 +377,9 @@ The orientation map for the whole window. It says what is on screen and where;
 <header>
   brand | view switch: Content · Conversations · Flagged · Analysis (was GAP) |
   "Opening database…" pill while the conversations database opens | file tags |
-  Export IDs button | Collections button | Settings button (gear)
+  Refresh | Settings (gear) | then, on Content only: Share Content · Collections;
+  on every other view the same slot holds Data (opens #convDataModal). The
+  swap plays an entrance and slides Refresh/Settings (`headerSlide`)
 
 <div.global-search-bar>
   chip field (#contentTokens + input, #contentSuggest type-ahead) |
@@ -409,7 +411,7 @@ The orientation map for the whole window. It says what is on screen and where;
   entity list (words · Used by Articles/Dialogs · 💬 Conversations) | pagination
 
 <div.conv-toolbar>
-  Data (opens #convDataModal) | Insights (opens #insightsModal) | Export for AI
+  Insights (opens #insightsModal) | Export for AI
 
 <div#view-gap>   (header Analysis button — see docs/gap.md)
   toolbar: Recognition | Feedback | GenAI switch · range button → the shared two-month day calendar (display
