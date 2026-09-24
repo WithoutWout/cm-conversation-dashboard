@@ -1367,6 +1367,20 @@ CREATE TABLE IF NOT EXISTS context_blobs (
     json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_context_blobs_hash ON context_blobs(hash);
+-- Every (name, value) a stored context set carries, per set. `context_index`
+-- answers "did this *conversation* ever carry X"; this answers "did this
+-- *interaction* carry X", which is what CM.com's dashboards filter and group
+-- on — a conversation that switched from web to app is web for its first turns
+-- and app for the rest. Keyed by the set, not the interaction: the sets are
+-- deduplicated, so this stays a few hundred thousand narrow rows however many
+-- interactions share them. See docs/insights.md → "Counted as CM.com counts".
+CREATE TABLE IF NOT EXISTS context_pairs (
+    name    TEXT NOT NULL,
+    value   TEXT NOT NULL,
+    blob_id INTEGER NOT NULL,
+    PRIMARY KEY (name, value, blob_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_context_pairs_blob ON context_pairs(blob_id, name);
 CREATE TABLE IF NOT EXISTS session_summary (
     session_uuid                     TEXT PRIMARY KEY,
     first_ts                         TEXT NOT NULL,
@@ -1495,6 +1509,19 @@ const META_CONTEXTS_INTERNED: &str = "contexts_interned";
 ///
 /// 1. initial
 const CONTEXTS_INTERN_RULES_VERSION: i64 = 1;
+
+/// Set once `context_pairs` holds every stored context set's pairs. New sets
+/// add their own as they are interned.
+const META_CONTEXT_PAIRS_BUILT: &str = "context_pairs_built";
+
+/// The pairs of the context sets matching `{where}` — read exactly as the
+/// `context_index` backfill reads a context, so the two cannot disagree about
+/// what a name or a value is.
+const CONTEXT_PAIRS_INSERT: &str = "INSERT OR IGNORE INTO context_pairs (name, value, blob_id) \
+     SELECT json_extract(c.value, '$.name'), COALESCE(json_extract(c.value, '$.value'), ''), b.id \
+     FROM context_blobs b, json_each(b.json) c \
+     WHERE json_valid(b.json) AND json_extract(c.value, '$.name') IS NOT NULL \
+       AND json_extract(c.value, '$.name') != ''";
 
 /// The expression every reader uses in place of `interactions.contexts`.
 ///
@@ -2317,6 +2344,20 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
         }
     }
 
+    // Expand every stored context set into `context_pairs`, once. After this
+    // the interning above keeps it current. About half a second on a real
+    // database (25k sets, 574k pairs), so it rides along with the open.
+    if meta_flag_version(&conn, META_CONTEXT_PAIRS_BUILT) < 1 {
+        let started = Instant::now();
+        match conn.execute_batch(CONTEXT_PAIRS_INSERT) {
+            Ok(()) => {
+                set_meta_version(&conn, META_CONTEXT_PAIRS_BUILT, 1);
+                log::info!(target: "import", "built context_pairs in {}ms", started.elapsed().as_millis());
+            }
+            Err(e) => log::warn!(target: "import", "context_pairs backfill failed, will retry on next open: {e}"),
+        }
+    }
+
     // Backfill answer_index from existing interactions.
     //
     // Versioned rather than a bare flag, and gated on the version rather than
@@ -3021,6 +3062,233 @@ async fn get_gap_interactions(
     .map_err(|e| e.to_string())?
 }
 
+// ── GAP feedback ─────────────────────────────────────────────────────────────
+//
+// The other half of "what is the bot getting wrong": not what it failed to
+// recognise, but what it answered and was told was wrong. The renderer groups
+// these per Article / Dialog node / Dialog and ranks them by positive share.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GapFeedbackArgs {
+    from_utc: String,
+    to_utc: String,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapFeedbackRow {
+    /// The **answer** that was rated, not the rating row.
+    log_id: i64,
+    session_uuid: String,
+    timestamp: String,
+    question: String,
+    response: String,
+    article_ids: String,
+    culture: String,
+    translation_language: String,
+    /// The answer's latest rating: 1 up, -1 down. CM.com reports "one
+    /// feedback item per interaction – the latest one", and so does Insights.
+    score: i64,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapFeedbackResult {
+    rows: Vec<GapFeedbackRow>,
+    truncated: bool,
+}
+
+/// Every answer rated in a range, newest first.
+///
+/// A rating is its own `Feedback` row naming the answer it is about
+/// (`originatingInteractionId`); an older row carries the score on the answer
+/// itself, which is then its own origin — both exactly as the Insights feedback
+/// card reads them. The range is the *rating's* time, found through
+/// `idx_timestamp`; the answer is met through `idx_session_ts`, since the two
+/// share a conversation and nothing indexes `interaction_uuid` alone.
+///
+/// The alias is `origin_uuid`, never `oid`: that is SQLite's own name for the
+/// rowid, and over one table `GROUP BY oid` groups by the *rating's* rowid —
+/// an answer rated twice came back twice, once per thumb.
+fn gap_feedback_rows(conn: &Connection, args: &GapFeedbackArgs) -> Result<GapFeedbackResult, String> {
+    if !is_naive_utc_stamp(&args.from_utc) || !is_naive_utc_stamp(&args.to_utc) {
+        return Err("The date range must be YYYY-MM-DDTHH:MM:SS.".into());
+    }
+    let sql = format!(
+        "WITH r AS MATERIALIZED ( \
+           SELECT i.session_uuid AS session_uuid, \
+                  COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
+                           json_extract(i.feedback_info, '$.originatingInteractionId') END, \
+                           i.interaction_uuid) AS origin_uuid, \
+                  MAX(i.log_id) AS last_log, \
+                  CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE -1 END AS score \
+           FROM interactions i \
+           WHERE i.timestamp_start >= ?1 AND i.timestamp_start <= ?2 AND {FEEDBACK_ROW} \
+           GROUP BY i.session_uuid, origin_uuid) \
+         SELECT o.log_id, o.session_uuid, o.timestamp_start, \
+                COALESCE(o.interaction_value, ''), COALESCE(o.output_text, ''), \
+                COALESCE(o.article_ids, ''), COALESCE(o.culture, ''), r.score, \
+                COALESCE((SELECT c.value FROM context_index c \
+                          WHERE c.name = 'translation_language' \
+                            AND c.session_uuid = o.session_uuid \
+                          ORDER BY c.value LIMIT 1), '') \
+         FROM r JOIN interactions o \
+           ON o.session_uuid = r.session_uuid AND o.interaction_uuid = r.origin_uuid \
+         WHERE {answer} \
+         ORDER BY o.timestamp_start DESC, o.log_id DESC \
+         LIMIT ?3",
+        answer = answer_row!("o"),
+    );
+    let mut stmt = conn
+        .prepare_cached(&sql)
+        .map_err(|e| format!("Prepare error: {e}"))?;
+    let mut rows: Vec<GapFeedbackRow> = stmt
+        .query_map(params![args.from_utc, args.to_utc, GAP_ROW_LIMIT + 1], |r| {
+            Ok(GapFeedbackRow {
+                log_id: r.get(0)?,
+                session_uuid: r.get(1)?,
+                timestamp: r.get(2)?,
+                question: r.get(3)?,
+                response: r.get(4)?,
+                article_ids: r.get(5)?,
+                culture: r.get(6)?,
+                score: r.get(7)?,
+                translation_language: r.get(8)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+    let truncated = rows.len() as i64 > GAP_ROW_LIMIT;
+    rows.truncate(GAP_ROW_LIMIT as usize);
+    Ok(GapFeedbackResult { rows, truncated })
+}
+
+#[tauri::command]
+async fn get_gap_feedback(
+    db_state: State<'_, SharedDbState>,
+    args: GapFeedbackArgs,
+) -> Result<GapFeedbackResult, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        gap_feedback_rows(conn, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Analysis: GenAI ──────────────────────────────────────────────────────────
+//
+// Every question a generative answer was given to in a range, with the answer,
+// the sources it drew on, and how it was rated — the third work list beside
+// recognition and feedback. See docs/gap.md → "GenAI".
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapGenAiRow {
+    log_id: i64,
+    session_uuid: String,
+    timestamp: String,
+    question: String,
+    response: String,
+    /// `GenerativeAI` when GenAI answered alone, anything else when it rode
+    /// along with another answer type (`all_interaction_types` names both).
+    main_type: String,
+    faqs_found: String,
+    culture: String,
+    translation_language: String,
+    /// This answer's latest rating, or none when nobody rated it — the same
+    /// resolution as `gap_feedback_rows`.
+    score: Option<i64>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct GapGenAiResult {
+    rows: Vec<GapGenAiRow>,
+    truncated: bool,
+}
+
+/// The GenAI answers of a range, newest first.
+///
+/// "GenAI" is exactly the conversation list's GenAI pill, row for row
+/// (`main_interaction_type` or `all_interaction_types` naming it), so the two
+/// cannot disagree about which turns count. A turn with no question text is
+/// left out, as in the recognition list. The rating is looked up per row
+/// within its own conversation (`idx_session_ts`), where the handful of
+/// `Feedback` rows that could name it live.
+fn gap_genai_rows(conn: &Connection, args: &GapFeedbackArgs) -> Result<GapGenAiResult, String> {
+    if !is_naive_utc_stamp(&args.from_utc) || !is_naive_utc_stamp(&args.to_utc) {
+        return Err("The date range must be YYYY-MM-DDTHH:MM:SS.".into());
+    }
+    let sql = format!(
+        "SELECT o.log_id, o.session_uuid, o.timestamp_start, \
+                COALESCE(o.interaction_value, ''), COALESCE(o.output_text, ''), \
+                COALESCE(o.main_interaction_type, ''), COALESCE(o.faqs_found, ''), \
+                COALESCE(o.culture, ''), \
+                COALESCE((SELECT c.value FROM context_index c \
+                          WHERE c.name = 'translation_language' \
+                            AND c.session_uuid = o.session_uuid \
+                          ORDER BY c.value LIMIT 1), ''), \
+                (SELECT CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE -1 END \
+                 FROM interactions i \
+                 WHERE i.session_uuid = o.session_uuid AND {FEEDBACK_ROW} \
+                   AND COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
+                         json_extract(i.feedback_info, '$.originatingInteractionId') END, \
+                         i.interaction_uuid) = o.interaction_uuid \
+                 ORDER BY i.log_id DESC LIMIT 1) \
+         FROM interactions o \
+         WHERE o.timestamp_start >= ?1 AND o.timestamp_start <= ?2 \
+           AND (o.main_interaction_type = 'GenerativeAI' \
+                OR o.all_interaction_types LIKE '%GenerativeAI%') \
+           AND TRIM(COALESCE(o.interaction_value, '')) != '' \
+         ORDER BY o.timestamp_start DESC, o.log_id DESC \
+         LIMIT ?3"
+    );
+    let mut stmt = conn
+        .prepare_cached(&sql)
+        .map_err(|e| format!("Prepare error: {e}"))?;
+    let mut rows: Vec<GapGenAiRow> = stmt
+        .query_map(params![args.from_utc, args.to_utc, GAP_ROW_LIMIT + 1], |r| {
+            Ok(GapGenAiRow {
+                log_id: r.get(0)?,
+                session_uuid: r.get(1)?,
+                timestamp: r.get(2)?,
+                question: r.get(3)?,
+                response: r.get(4)?,
+                main_type: r.get(5)?,
+                faqs_found: r.get(6)?,
+                culture: r.get(7)?,
+                translation_language: r.get(8)?,
+                score: r.get(9)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .collect();
+    let truncated = rows.len() as i64 > GAP_ROW_LIMIT;
+    rows.truncate(GAP_ROW_LIMIT as usize);
+    Ok(GapGenAiResult { rows, truncated })
+}
+
+#[tauri::command]
+async fn get_gap_genai(
+    db_state: State<'_, SharedDbState>,
+    args: GapFeedbackArgs,
+) -> Result<GapGenAiResult, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        gap_genai_rows(conn, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Mark (or unmark) interactions as dealt with. Returns the timestamp written,
 /// so the renderer shows the same one the database holds.
 fn set_gap_fixed_rows(
@@ -3673,7 +3941,9 @@ fn intern_contexts(
                 params![hash, json],
             )
             .ok()?;
-            conn.last_insert_rowid()
+            let id = conn.last_insert_rowid();
+            let _ = conn.execute(&format!("{CONTEXT_PAIRS_INSERT} AND b.id = ?1"), params![id]);
+            id
         }
     };
     cache.insert(json.to_string(), id);
@@ -4399,6 +4669,18 @@ struct TagLeaf {
 }
 
 impl TagLeaf {
+    /// Whether one message's `output_metadata` carries this tag, read exactly
+    /// as the index reads it — the same flattening, the same excluded keys —
+    /// and compared as the tag leaf compares: the value ASCII case-folded, and
+    /// no values meaning "set at all".
+    fn carried_by(&self, output_metadata: &str) -> bool {
+        metadata_index_rows(output_metadata).iter().any(|(name, value)| {
+            *name == self.name
+                && (self.values.is_empty()
+                    || self.values.iter().any(|v| v.eq_ignore_ascii_case(value)))
+        })
+    }
+
     /// `"name"="value"`, `"name"="a","b"` (any of them), `name=value`,
     /// `"name"` or `"name"="*"` — the part after `ctx:` / `meta:`. `None` when
     /// there is no name.
@@ -4474,11 +4756,18 @@ impl SearchExpr {
     /// would otherwise read "zero matching interactions" where the truth is
     /// "nothing singled any of them out". A tag leaf is the same: a context
     /// value belongs to the conversation, not to any one of its turns.
-    fn has_positive_leaf(&self) -> bool {
+    ///
+    /// `meta_rows` is true under a feedback filter, where a `meta:` leaf is
+    /// row-level: it names the rated answer that carried the value, which is a
+    /// turn like any other. Context stays conversation-level — there is no
+    /// per-turn context to point at.
+    fn has_positive_leaf_in(&self, meta_rows: bool) -> bool {
         match self {
-            SearchExpr::Tag(_) => false,
+            SearchExpr::Tag(t) => meta_rows && t.metadata,
             SearchExpr::Id(_) | SearchExpr::Entity(_) | SearchExpr::Text(_) => true,
-            SearchExpr::And(cs) | SearchExpr::Or(cs) => cs.iter().any(Self::has_positive_leaf),
+            SearchExpr::And(cs) | SearchExpr::Or(cs) => {
+                cs.iter().any(|c| c.has_positive_leaf_in(meta_rows))
+            }
             SearchExpr::Not(_) => false,
         }
     }
@@ -4905,6 +5194,9 @@ struct SearchCtx<'a> {
     entity_from: &'a str,
     row_filter: &'a str,
     entity_row_filter: &'a str,
+    /// A feedback filter is on, so every leaf is asking about **the answer
+    /// that was rated** — see [`ExprSql::leaf_id`] and [`ExprSql::leaf_tag`].
+    rated_answers: bool,
 }
 
 /// Turns a [`SearchExpr`] into one CTE per node.
@@ -4929,6 +5221,8 @@ struct ExprSql<'a> {
     refs: Vec<usize>,
     id_targets: Vec<IdTarget>,
     regexes: Vec<regex::Regex>,
+    /// The `meta:` leaves that are tested on the rated answer itself.
+    meta_leaves: Vec<TagLeaf>,
     /// One per leaf, in compile order — `search_mode` for a one-leaf search.
     modes: Vec<String>,
 }
@@ -4943,6 +5237,7 @@ impl<'a> ExprSql<'a> {
             refs: Vec::new(),
             id_targets: Vec::new(),
             regexes: Vec::new(),
+            meta_leaves: Vec::new(),
             modes: Vec::new(),
         }
     }
@@ -4990,6 +5285,24 @@ impl<'a> ExprSql<'a> {
                         .ok()
                         .and_then(|i| matchers.get(i))
                         .map_or(false, |m| m.matches(article_ids, dialog_paths));
+                    Ok(hit as i32)
+                },
+            )
+            .ok();
+        }
+        if !self.meta_leaves.is_empty() {
+            let leaves = self.meta_leaves.clone();
+            conn.create_scalar_function(
+                "cai_meta_hit",
+                2,
+                flags,
+                move |ctx: &rusqlite::functions::Context<'_>| {
+                    let raw = ctx.get_raw(0).as_str().unwrap_or("");
+                    let idx = ctx.get_raw(1).as_i64().unwrap_or(-1);
+                    let hit = usize::try_from(idx)
+                        .ok()
+                        .and_then(|i| leaves.get(i))
+                        .map_or(false, |leaf| leaf.carried_by(raw));
                     Ok(hit as i32)
                 },
             )
@@ -5146,7 +5459,18 @@ impl<'a> ExprSql<'a> {
         } else {
             self.ctx.interactions_from
         };
-        conds.push(format!("cai_id_hit(i.article_ids, i.dialog_paths, {ti})"));
+        // Under a feedback filter the question is what *answered*, so a Dialog
+        // only counts when the rated answer came from one of its nodes. Its
+        // path alone is not enough: a row that dropped out of a Dialog carries
+        // that Dialog's path while the Article it answered with is what was
+        // rated — 230 of 502 thumbs-down on a real database looked like that,
+        // and every one of them used to be counted against the Dialog.
+        let paths = if self.ctx.rated_answers {
+            "''"
+        } else {
+            "i.dialog_paths"
+        };
+        conds.push(format!("cai_id_hit(i.article_ids, {paths}, {ti})"));
         self.add_node(format!(
             "SELECT i.session_uuid, i.log_id AS match_log_id FROM {from} \
              WHERE ({}){row_filter}",
@@ -5198,6 +5522,23 @@ impl<'a> ExprSql<'a> {
         if !available {
             return self.add_node(MATCH_NOTHING.to_string());
         }
+        // Metadata is carried by one answer, not by the conversation — the
+        // index is per conversation only because that is what a filter needs.
+        // Under a feedback filter the question is "did the *rated* answer carry
+        // it?", so the leaf is tested on those rows' own `output_metadata`.
+        // They are a few hundred per database, and `row_filter` hands them
+        // over through the materialized origin set, so this never parses the
+        // metadata of any other row.
+        if t.metadata && self.ctx.rated_answers {
+            let mi = self.meta_leaves.len();
+            self.meta_leaves.push(t.clone());
+            let from = self.ctx.interactions_from;
+            let row_filter = self.ctx.row_filter;
+            return self.add_node(format!(
+                "SELECT i.session_uuid, i.log_id AS match_log_id FROM {from} \
+                 WHERE cai_meta_hit(i.output_metadata, {mi}){row_filter}"
+            ));
+        }
         let pn = self.param(Box::new(t.name.clone()));
         let value_cond = if t.values.is_empty() {
             String::new()
@@ -5212,7 +5553,7 @@ impl<'a> ExprSql<'a> {
         };
         self.add_node(format!(
             "SELECT DISTINCT t.session_uuid, NULL AS match_log_id FROM {table} t \
-             WHERE t.name = {pn}{value_cond}"
+             WHERE t.name = {pn} COLLATE NOCASE{value_cond}"
         ))
     }
 
@@ -5548,7 +5889,7 @@ fn build_session_filter_query(
                 let pn = next_param(&mut param_idx);
                 param_values.push(Box::new(name.clone()));
                 subclauses.push(format!(
-                    "NOT EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn})"
+                    "NOT EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn} COLLATE NOCASE)"
                 ));
             }
             // "any" is the same EXISTS as a value filter with the value test
@@ -5558,7 +5899,7 @@ fn build_session_filter_query(
                 let pn = next_param(&mut param_idx);
                 param_values.push(Box::new(name.clone()));
                 subclauses.push(format!(
-                    "EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn})"
+                    "EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn} COLLATE NOCASE)"
                 ));
             }
             if !regular_values.is_empty() && !has_any {
@@ -5574,7 +5915,7 @@ fn build_session_filter_query(
                     .collect::<Vec<_>>()
                     .join(", ");
                 subclauses.push(format!(
-                    "EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn} AND ti.value IN ({value_placeholders}))"
+                    "EXISTS (SELECT 1 FROM {table} ti WHERE ti.session_uuid = s.session_uuid AND ti.name = {pn} COLLATE NOCASE AND ti.value COLLATE NOCASE IN ({value_placeholders}))"
                 ));
             }
             if subclauses.len() == 1 {
@@ -5747,6 +6088,7 @@ fn build_session_filter_query(
         entity_from: entity_from.as_str(),
         row_filter,
         entity_row_filter,
+        rated_answers: is_feedback_filter,
     };
 
     let expr = parse_search_expr(&query, query_regex);
@@ -5822,7 +6164,7 @@ fn build_session_filter_query(
         // conversation never says X" is not a turn. With none, the search
         // narrows conversations and nothing else, which is exactly what
         // `match_rows: None` states.
-        match_rows = if expr.has_positive_leaf() {
+        match_rows = if expr.has_positive_leaf_in(is_feedback_filter) {
             Some(if inline {
                 nodes[0].clone()
             } else {
@@ -5831,6 +6173,12 @@ fn build_session_filter_query(
                     ExprSql::node_name(root)
                 )
             })
+        } else if is_feedback_filter {
+            // Nothing in the expression points at a turn — a context chip, a
+            // negation — but the pill still does: the rated answers are the
+            // matching turns, exactly as with the pill alone. The callers join
+            // this to the conversations the search kept.
+            Some("SELECT session_uuid, match_log_id FROM feedback_origins".to_string())
         } else {
             None
         };
@@ -6256,7 +6604,8 @@ const INSIGHT_DROP_TEMP: &str = "\
 DROP TABLE IF EXISTS temp.insight_sessions;\
 DROP TABLE IF EXISTS temp.insight_matches;\
 DROP TABLE IF EXISTS temp.insight_weights;\
-DROP TABLE IF EXISTS temp.insight_segment_stats;";
+DROP TABLE IF EXISTS temp.insight_segment_stats;\
+DROP TABLE IF EXISTS temp.insight_ratings;";
 
 /// A turn that carries a thumbs rating at all, and one that carries a positive
 /// one.
@@ -6591,13 +6940,24 @@ DROP TABLE IF EXISTS temp.insight_segment_stats;\
 CREATE TEMP TABLE insight_segment_stats (\
     session_uuid TEXT NOT NULL,\
     culture      TEXT NOT NULL DEFAULT '',\
+    contexts_id  INTEGER NOT NULL DEFAULT 0,\
+    started      INTEGER NOT NULL DEFAULT 1,\
     interactions INTEGER NOT NULL DEFAULT 0,\
     feedback     INTEGER NOT NULL DEFAULT 0,\
     feedback_pos INTEGER NOT NULL DEFAULT 0,\
     recognized   INTEGER NOT NULL DEFAULT 0,\
     unrecognized INTEGER NOT NULL DEFAULT 0,\
     quality_sum  REAL NOT NULL DEFAULT 0,\
-    PRIMARY KEY (session_uuid, culture)\
+    quality_n    INTEGER NOT NULL DEFAULT 0,\
+    PRIMARY KEY (session_uuid, culture, contexts_id)\
+);\
+CREATE INDEX temp.idx_segment_stats_ctx ON insight_segment_stats(contexts_id);\
+DROP TABLE IF EXISTS temp.insight_ratings;\
+CREATE TEMP TABLE insight_ratings (\
+    session_uuid TEXT NOT NULL,\
+    origin_uuid  TEXT NOT NULL,\
+    pos          INTEGER NOT NULL,\
+    PRIMARY KEY (session_uuid, origin_uuid)\
 );";
 
 /// The seven sums every segment row is made of, over `insight_segment_stats g`.
@@ -6605,13 +6965,15 @@ CREATE TEMP TABLE insight_segment_stats (\
 /// Written once because the Total row and every breakdown row must be the same
 /// arithmetic — a total that is not the sum of its parts is the one failure
 /// this table cannot survive.
-const INSIGHT_SEGMENT_SUMS: &str = "COUNT(DISTINCT g.session_uuid), \
+const INSIGHT_SEGMENT_SUMS: &str = "COUNT(DISTINCT CASE WHEN g.started = 1 AND g.interactions > 0 \
+                                    THEN g.session_uuid END), \
      COALESCE(SUM(g.interactions), 0), \
      COALESCE(SUM(g.feedback), 0), \
      COALESCE(SUM(g.feedback_pos), 0), \
      COALESCE(SUM(g.recognized), 0), \
      COALESCE(SUM(g.unrecognized), 0), \
-     COALESCE(SUM(g.quality_sum), 0)";
+     COALESCE(SUM(g.quality_sum), 0), \
+     COALESCE(SUM(g.quality_n), 0)";
 
 /// One row of the Segments table.
 ///
@@ -6625,26 +6987,28 @@ const INSIGHT_SEGMENT_SUMS: &str = "COUNT(DISTINCT g.session_uuid), \
 #[serde(rename_all = "camelCase")]
 struct InsightSegmentRow {
     label: String,
+    /// CM.com's Active Sessions: conversations that *started* in the range and
+    /// had an interaction in scope — see `build_segment_stats_from`.
     sessions: i64,
-    /// Answers only — `IS_ANSWER_ROW`: the bot's own events, the rating rows
-    /// and link clicks are not interactions anyone reports. On the reference
-    /// database they are 27% of all rows.
+    /// CM.com's "Total # of QA, (T-) Dialog, FAQClick and FAQSearch
+    /// interactions" — `CM_INTERACTION_ROW`.
     interactions: i64,
-    /// Turns carrying a thumbs rating.
+    /// Answers that received feedback, one rating each: the latest.
     feedback: i64,
-    /// Of those, the ones rating the answer positively.
+    /// Of those, the ones whose latest rating was positive.
     feedback_pos: i64,
-    /// Turns the recognizer scored above zero.
+    /// QA interactions answered by any means — entities, exception events,
+    /// intents, GenAI/HALO. `recognized + unrecognized` is every QA
+    /// interaction, the recognition rate's denominator.
     recognized: i64,
-    /// Turns it attempted and scored zero. `recognized + unrecognized` is the
-    /// denominator of the recognition rate — GenAI answers and turns the
-    /// recognizer never saw are in neither.
+    /// QA interactions with recognition type "No Recognition".
     unrecognized: i64,
-    /// `SUM(recognition_quality)` over the recognized turns, 0–100 each. The
-    /// renderer divides it by `recognized + unrecognized`, so recognition
-    /// quality is the mean over every turn the recognizer attempted, zeros
-    /// included — the portal's definition.
+    /// `SUM(recognition_quality)` over QA recognised by Entity Recognition or
+    /// an Exception Event, and QA not recognised (at 0) — intents and GenAI
+    /// have no meaningful quality and are left out. The renderer divides it by
+    /// `quality_n`.
     quality_sum: f64,
+    quality_n: i64,
 }
 
 /// One breakdown: a key, and the rows its values produced.
@@ -6690,6 +7054,10 @@ struct InsightSegmentKey {
 #[serde(rename_all = "camelCase")]
 struct InsightSegments {
     total: InsightSegmentRow,
+    /// `"search"` when the breakdown rows are counted over the same search as
+    /// the Total, `"range"` when over the whole date range — the "Total row
+    /// only" setting, and only when the search had a filter to leave out.
+    rows_scope: String,
     groups: Vec<InsightSegmentGroup>,
     context_keys: Vec<InsightSegmentKey>,
     metadata_keys: Vec<InsightSegmentKey>,
@@ -6698,31 +7066,207 @@ struct InsightSegments {
     culture_values: i64,
 }
 
-/// Roll every interaction of the resolved result set up into one row per
-/// conversation.
+/// CM.com's interaction total: every interaction but the bot's own events,
+/// link clicks and ratings — and not a Dialog an Event started (its log row
+/// carries `Event` among its types). "Total # of QA, (T-) Dialog, FAQClick and
+/// FAQSearch interactions" on the Management Report.
+const CM_INTERACTION_ROW: &str = "(COALESCE(i.main_interaction_type, '') \
+     NOT IN ('Event', 'LinkClick', 'Feedback') \
+     AND NOT (i.main_interaction_type = 'Dialog' \
+              AND COALESCE(i.all_interaction_types, '') LIKE '%Event%'))";
+
+/// The latest rating of each answer — CM.com reports "one feedback item per
+/// interaction – the latest one". SQLite's bare-column rule for `MAX()` takes
+/// `pos` from the row holding the highest `log_id`, which is the latest rating.
+/// A rating names its answer through `originatingInteractionId`; an older row
+/// carries its score on the answer itself and is its own origin.
+const LATEST_RATING_SELECT: &str = "SELECT i.session_uuid AS session_uuid, \
+       COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
+                json_extract(i.feedback_info, '$.originatingInteractionId') END, \
+                i.interaction_uuid) AS origin_uuid, \
+       MAX(i.log_id) AS last_log, \
+       CASE WHEN (i.feedback_info LIKE '%\"score\": 1%' OR i.feedback_info LIKE '%\"score\":1%') \
+             AND i.feedback_info NOT LIKE '%\"score\": -1%' \
+             AND i.feedback_info NOT LIKE '%\"score\":-1%' THEN 1 ELSE 0 END AS pos";
+
+/// The conditions that put one *interaction* in scope, beyond its conversation
+/// being in the result set: the date range, and the Context filters matched
+/// against the interaction's own context (`context_pairs`), not against every
+/// value its conversation ever carried. That is how CM.com's dashboards count,
+/// and the difference was 13% on "Channel = web" for a real week.
 ///
-/// One pass over the scope's interactions, however many breakdowns follow.
-fn build_insight_segment_stats(conn: &Connection) -> Result<(), String> {
+/// Placeholders are numbered from `first`, so the fragment can join a statement
+/// that already has parameters. Returns `" AND …"` or an empty string.
+fn interaction_scope_sql(
+    args: &GetSessionsArgs,
+    alias: &str,
+    first: usize,
+) -> (String, Vec<Box<dyn ToSql>>) {
+    let mut conds: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+    let next = |v: Box<dyn ToSql>, params: &mut Vec<Box<dyn ToSql>>| {
+        params.push(v);
+        format!("?{}", first + params.len() - 1)
+    };
+    if let Some(df) = args.date_from.as_ref().filter(|d| !d.is_empty()) {
+        let p = next(Box::new(df.clone()), &mut params);
+        conds.push(format!("{alias}.timestamp_start >= {p}"));
+    }
+    if let Some(dt) = args.date_to.as_ref().filter(|d| !d.is_empty()) {
+        let p = next(Box::new(dt.clone()), &mut params);
+        conds.push(format!("{alias}.timestamp_start <= {p}"));
+    }
+    let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for f in args.context_filters.iter().flatten() {
+        groups.entry(f.name.clone()).or_default().push(f.value.clone());
+    }
+    for (name, values) in groups {
+        let mut alts: Vec<String> = Vec::new();
+        let pn = next(Box::new(name.clone()), &mut params);
+        // The name folds case as the value does: one export carries `nochat`
+        // and `noChat` for the same thing, and CM.com counts them as one.
+        let with_name = format!("SELECT blob_id FROM context_pairs WHERE name = {pn} COLLATE NOCASE");
+        if values.iter().any(|v| v == "__any__") {
+            alts.push(format!("{alias}.contexts_id IN ({with_name})"));
+        } else {
+            let regular: Vec<&String> = values
+                .iter()
+                .filter(|v| *v != "__not_set__" && *v != "__any__")
+                .collect();
+            if !regular.is_empty() {
+                let ps: Vec<String> = regular
+                    .iter()
+                    .map(|v| next(Box::new((*v).clone()), &mut params))
+                    .collect();
+                alts.push(format!(
+                    "{alias}.contexts_id IN ({with_name} AND value COLLATE NOCASE IN ({}))",
+                    ps.join(", ")
+                ));
+            }
+        }
+        if values.iter().any(|v| v == "__not_set__") {
+            alts.push(format!(
+                "({alias}.contexts_id IS NULL OR {alias}.contexts_id NOT IN ({with_name}))"
+            ));
+        }
+        if !alts.is_empty() {
+            conds.push(format!("({})", alts.join(" OR ")));
+        }
+    }
+    let sql = if conds.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", conds.join(" AND "))
+    };
+    (sql, params)
+}
+
+/// Roll the in-scope interactions of the resolved result set up into one row
+/// per conversation × turn culture × context set.
+///
+/// One pass over the scope's interactions, however many breakdowns follow. The
+/// context set is part of the key so a Context breakdown can count each
+/// interaction under the value *it* carried; there are only a few sets per
+/// conversation, so the table stays near the size of the session set. Every
+/// measure is CM.com's definition — see `InsightSegmentRow`.
+fn build_insight_segment_stats(conn: &Connection, args: &GetSessionsArgs) -> Result<(), String> {
+    build_segment_stats_from(conn, args, "insight_sessions")
+}
+
+/// Every conversation with real user input that overlaps the date range, as a
+/// relation shaped like `insight_sessions` — what the breakdown rows are
+/// counted over when the search's filters apply to the Total row only. The
+/// bounds are validated stamps, so they are written into the SQL rather than
+/// threaded through as parameters beside the scope's own.
+fn range_sessions_sql(args: &GetSessionsArgs) -> String {
+    let mut conds = vec!["has_real_user_input = 1".to_string()];
+    if let Some(df) = args.date_from.as_ref().filter(|d| is_naive_utc_stamp(d)) {
+        conds.push(format!("last_ts >= '{df}'"));
+    }
+    if let Some(dt) = args.date_to.as_ref().filter(|d| is_naive_utc_stamp(d)) {
+        conds.push(format!("first_ts <= '{dt}'"));
+    }
+    format!(
+        "(SELECT session_uuid, culture, first_ts FROM session_summary WHERE {})",
+        conds.join(" AND ")
+    )
+}
+
+/// Whether anything but the date range narrows this search. With nothing, the
+/// Total row and the breakdown rows are the same set either way.
+fn search_is_filtered(args: &GetSessionsArgs) -> bool {
+    args.query.as_ref().map_or(false, |q| !q.trim().is_empty())
+        || args.filter.as_deref().map_or(false, |f| f != "all")
+        || args.context_filters.as_ref().map_or(false, |f| !f.is_empty())
+        || args.metadata_filters.as_ref().map_or(false, |f| !f.is_empty())
+}
+
+/// The rollup over `sessions` — `insight_sessions`, or `range_sessions_sql`.
+fn build_segment_stats_from(conn: &Connection, args: &GetSessionsArgs, sessions: &str) -> Result<(), String> {
     conn.execute_batch(INSIGHT_SEGMENT_TABLE).map_err(insight_err)?;
+    // Ratings are read whenever they were given — a thumb on Sunday night's
+    // answer may land after midnight — and met against the answers in scope.
+    conn.execute(
+        &format!(
+            "INSERT OR REPLACE INTO insight_ratings (session_uuid, origin_uuid, pos) \
+             SELECT session_uuid, origin_uuid, pos FROM ({LATEST_RATING_SELECT} \
+               FROM {sessions} s JOIN interactions i ON i.session_uuid = s.session_uuid \
+               WHERE {FEEDBACK_ROW} GROUP BY i.session_uuid, origin_uuid)"
+        ),
+        [],
+    )
+    .map_err(insight_err)?;
+    let (scope, params) = interaction_scope_sql(args, "i", 1);
+    let refs: Vec<&dyn ToSql> = params.iter().map(|b| b.as_ref()).collect();
+    // CM.com's Active Sessions count a conversation on the day it *started*
+    // (19 Sep: 2,008 against 2,006 here; 15 Sep: 2,090 against 2,089), while
+    // its interactions count on the day they happened. So a conversation that
+    // began before the range still contributes its interactions, but is not one
+    // of the range's conversations. Bounds are validated stamps, written inline.
+    let mut started = Vec::new();
+    if let Some(df) = args.date_from.as_ref().filter(|d| is_naive_utc_stamp(d)) {
+        started.push(format!("s.first_ts >= '{df}'"));
+    }
+    if let Some(dt) = args.date_to.as_ref().filter(|d| is_naive_utc_stamp(d)) {
+        started.push(format!("s.first_ts <= '{dt}'"));
+    }
+    let started = if started.is_empty() {
+        "1".to_string()
+    } else {
+        format!("CASE WHEN {} THEN 1 ELSE 0 END", started.join(" AND "))
+    };
     conn.execute(
         &format!(
             "INSERT INTO insight_segment_stats \
-               (session_uuid, culture, interactions, feedback, feedback_pos, \
-                recognized, unrecognized, quality_sum) \
+               (session_uuid, culture, contexts_id, started, interactions, feedback, feedback_pos, \
+                recognized, unrecognized, quality_sum, quality_n) \
              SELECT s.session_uuid, \
                     COALESCE(NULLIF(i.culture, ''), s.culture) AS turn_culture, \
-                    COALESCE(SUM(CASE WHEN {IS_ANSWER_ROW} THEN 1 ELSE 0 END), 0), \
-                    COALESCE(SUM(CASE WHEN {FEEDBACK_ROW} THEN 1 ELSE 0 END), 0), \
-                    COALESCE(SUM(CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END), 0), \
-                    COALESCE(SUM(CASE WHEN {IS_SCORED_ROW} THEN 1 ELSE 0 END), 0), \
-                    COALESCE(SUM(CASE WHEN {IS_ZERO_RECOG_ROW} THEN 1 ELSE 0 END), 0), \
-                    COALESCE(SUM(CASE WHEN {IS_SCORED_ROW} \
-                                      THEN i.recognition_quality ELSE 0 END), 0) \
-             FROM insight_sessions s \
+                    COALESCE(i.contexts_id, 0) AS ctx, \
+                    {started}, \
+                    COALESCE(SUM(CASE WHEN {CM_INTERACTION_ROW} THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN r.pos IS NOT NULL THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN r.pos = 1 THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN i.main_interaction_type = 'QA' \
+                                       AND COALESCE(i.recognition_type, '') != 'No Recognition' \
+                                      THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN i.main_interaction_type = 'QA' \
+                                       AND i.recognition_type = 'No Recognition' \
+                                      THEN 1 ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN i.main_interaction_type = 'QA' \
+                                       AND i.recognition_type IN ('Entity Recognition', 'Exception Event', 'No Recognition') \
+                                      THEN COALESCE(i.recognition_quality, 0) ELSE 0 END), 0), \
+                    COALESCE(SUM(CASE WHEN i.main_interaction_type = 'QA' \
+                                       AND i.recognition_type IN ('Entity Recognition', 'Exception Event', 'No Recognition') \
+                                      THEN 1 ELSE 0 END), 0) \
+             FROM {sessions} s \
              JOIN interactions i ON i.session_uuid = s.session_uuid \
-             GROUP BY s.session_uuid, turn_culture"
+             LEFT JOIN insight_ratings r \
+               ON r.session_uuid = i.session_uuid AND r.origin_uuid = i.interaction_uuid \
+             WHERE 1 = 1{scope} \
+             GROUP BY s.session_uuid, turn_culture, ctx"
         ),
-        [],
+        refs.as_slice(),
     )
     .map_err(insight_err)?;
     Ok(())
@@ -6747,6 +7291,7 @@ fn insight_segment_rows(
                 recognized: r.get(5)?,
                 unrecognized: r.get(6)?,
                 quality_sum: r.get(7)?,
+                quality_n: r.get(8)?,
             })
         })
         .map_err(insight_err)?;
@@ -6783,6 +7328,7 @@ fn insight_segment_total(conn: &Connection) -> Result<InsightSegmentRow, String>
         recognized: 0,
         unrecognized: 0,
         quality_sum: 0.0,
+        quality_n: 0,
     }))
 }
 
@@ -6870,12 +7416,60 @@ fn insight_segment_group(
         "culture" => None,
         other => return Err(format!("Unknown breakdown kind: {other}")),
     };
-    let (rows, distinct, overlapping) = match table {
+    let (rows, distinct, overlapping) = match (table, breakdown.kind.as_str()) {
+        // A Context breakdown counts each interaction under the value its own
+        // context carried (`context_pairs` over the rollup's context set), as
+        // CM.com's dashboards do. Values fold case, like every tag here.
+        (Some(_), "context") => {
+            let rows = insight_segment_rows(
+                conn,
+                &format!(
+                    "WITH p AS MATERIALIZED (\
+                       SELECT blob_id, value FROM context_pairs \
+                       WHERE name = ?1 COLLATE NOCASE \
+                         AND blob_id IN (SELECT contexts_id FROM insight_segment_stats)\
+                     ), \
+                     v AS MATERIALIZED (\
+                       SELECT LOWER(p.value) AS v, p.value AS value, SUM(g.interactions) AS n \
+                       FROM p JOIN insight_segment_stats g ON g.contexts_id = p.blob_id \
+                       GROUP BY p.value\
+                     ) \
+                     SELECT (SELECT v2.value FROM v v2 WHERE v2.v = LOWER(p.value) \
+                             ORDER BY v2.n DESC, v2.value ASC LIMIT 1) AS label, \
+                            {INSIGHT_SEGMENT_SUMS} \
+                     FROM p JOIN insight_segment_stats g ON g.contexts_id = p.blob_id \
+                     GROUP BY LOWER(p.value) \
+                     ORDER BY COALESCE(SUM(g.interactions), 0) DESC, LOWER(p.value) ASC \
+                     LIMIT {INSIGHT_SEGMENT_VALUES_PER_KEY}"
+                ),
+                &[&breakdown.name],
+                "(empty)",
+            )?;
+            let (distinct, tagged, sessions): (i64, i64, i64) = conn
+                .query_row(
+                    "WITH p AS MATERIALIZED (\
+                       SELECT blob_id, value FROM context_pairs \
+                       WHERE name = ?1 COLLATE NOCASE \
+                         AND blob_id IN (SELECT contexts_id FROM insight_segment_stats)\
+                     ) \
+                     SELECT COUNT(DISTINCT v), COUNT(*), COUNT(DISTINCT session_uuid) FROM (\
+                       SELECT DISTINCT LOWER(p.value) AS v, g.session_uuid AS session_uuid \
+                       FROM p JOIN insight_segment_stats g ON g.contexts_id = p.blob_id\
+                     )",
+                    params![breakdown.name],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .map_err(insight_err)?;
+            // Interactions partition across the values — one interaction has
+            // one value of a key — but a conversation that changed value mid-way
+            // is a conversation on both rows.
+            (rows, distinct, tagged > sessions)
+        }
         // Grouped by the *turn's* culture, as the portal's report is, so a
         // conversation that switched language contributes to both rows and is
         // counted once in each. The rows can therefore add up to more
         // conversations than the total — never more interactions.
-        None => {
+        (None, _) => {
             let rows = insight_segment_rows(
                 conn,
                 &format!(
@@ -6898,7 +7492,10 @@ fn insight_segment_group(
                 .map_err(insight_err)?;
             (rows, distinct, overlapping)
         }
-        Some(table) => {
+        (Some(table), _) => {
+            // Metadata. Still per conversation: it is carried by answers, and
+            // CM.com's dashboards do not filter on it at all.
+            //
             // Values are compared case-insensitively: `True` and `true` are one
             // answer spelled two ways by two flows, and splitting them puts
             // half of one segment on a row nobody reads as the same thing.
@@ -7003,16 +7600,54 @@ fn insight_segment_group(
 /// database — and they answer a question about the result set, not about the
 /// breakdowns. Ticking another breakdown does not change them, so the renderer
 /// says so and the read drops to the breakdowns themselves.
+///
+/// `total_only`: the search's filters narrow the Total row only, and the
+/// breakdown rows are counted over every conversation in the date range — the
+/// shape of the report this table reproduces, whose Total carries a filter its
+/// rows do not. The rollup is rebuilt for the rows, so the caller must not treat
+/// it as describing the search afterwards: that is the returned `bool`, true
+/// when the table left behind is still the search's.
 fn conversation_segments(
     conn: &Connection,
+    args: &GetSessionsArgs,
     breakdowns: &[InsightSegmentBreakdown],
     fresh_stats: bool,
     with_keys: bool,
 ) -> Result<InsightSegments, String> {
+    conversation_segments_scoped(conn, args, breakdowns, fresh_stats, with_keys, false).map(|(s, _)| s)
+}
+
+fn conversation_segments_scoped(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+    breakdowns: &[InsightSegmentBreakdown],
+    fresh_stats: bool,
+    with_keys: bool,
+    total_only: bool,
+) -> Result<(InsightSegments, bool), String> {
     if !fresh_stats {
-        build_insight_segment_stats(conn)?;
+        build_insight_segment_stats(conn, args)?;
     }
     let total = insight_segment_total(conn)?;
+    // Read off the search's rollup before it is replaced: which keys *this
+    // result* has is a question about the search, whichever set the rows use.
+    let (context_keys, metadata_keys) = if with_keys {
+        (
+            insight_segment_keys(conn, "context_index")?,
+            insight_segment_keys(conn, "metadata_index")?,
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let split = total_only && search_is_filtered(args);
+    if split {
+        let range_only = GetSessionsArgs {
+            date_from: args.date_from.clone(),
+            date_to: args.date_to.clone(),
+            ..Default::default()
+        };
+        build_segment_stats_from(conn, &range_only, &range_sessions_sql(args))?;
+    }
     let mut groups = Vec::new();
     for breakdown in breakdowns {
         groups.push(insight_segment_group(conn, breakdown)?);
@@ -7024,24 +7659,20 @@ fn conversation_segments(
             |r| r.get(0),
         )
         .map_err(insight_err)?;
-    Ok(InsightSegments {
-        total,
-        groups,
-        // Empty here means "not asked for", which the renderer distinguishes by
-        // what it sent rather than by what came back — an empty list is also a
-        // legitimate answer, on a database with no context recorded at all.
-        context_keys: if with_keys {
-            insight_segment_keys(conn, "context_index")?
-        } else {
-            Vec::new()
+    Ok((
+        InsightSegments {
+            total,
+            rows_scope: if split { "range" } else { "search" }.to_string(),
+            groups,
+            // Empty here means "not asked for", which the renderer distinguishes
+            // by what it sent rather than by what came back — an empty list is
+            // also a legitimate answer, on a database with no context recorded.
+            context_keys,
+            metadata_keys,
+            culture_values,
         },
-        metadata_keys: if with_keys {
-            insight_segment_keys(conn, "metadata_index")?
-        } else {
-            Vec::new()
-        },
-        culture_values,
-    })
+        !split,
+    ))
 }
 
 /// The Segments table, over the same result set every other Insights read uses.
@@ -7056,9 +7687,11 @@ async fn get_insight_segments(
     unit: Option<String>,
     breakdowns: Option<Vec<InsightSegmentBreakdown>>,
     with_keys: Option<bool>,
+    total_only: Option<bool>,
 ) -> Result<Option<InsightSegments>, String> {
     let db = db_state.inner().clone();
     let breakdowns = breakdowns.unwrap_or_default();
+    let total_only = total_only.unwrap_or(false);
     // Absent means yes, which is what a caller that says nothing means.
     let with_keys = with_keys.unwrap_or(true);
     tauri::async_runtime::spawn_blocking(move || {
@@ -7077,11 +7710,13 @@ async fn get_insight_segments(
         )
         .and_then(|_| {
             let fresh = insight_scope.segment_stats;
-            let out = conversation_segments(conn, &breakdowns, fresh, with_keys);
+            let out = conversation_segments_scoped(conn, &args, &breakdowns, fresh, with_keys, total_only);
             // Recorded only on success: a rollup that failed part-way through
             // describes nothing, and reusing it would chart rows that are not
-            // the result of this search.
-            insight_scope.segment_stats = out.is_ok();
+            // the result of this search. Nor does one rebuilt for the rows of
+            // "Total row only" — it holds the whole range now.
+            insight_scope.segment_stats = matches!(out, Ok((_, true)));
+            let out = out.map(|(s, _)| s);
             insight_scope.restamp(conn);
             out
         });
@@ -7625,6 +8260,11 @@ WHERE session_uuid IS NOT NULL AND session_uuid != ''"#,
     let mut matched_interactions = 0i64;
     if unit == InsightUnit::Interactions {
         conn.execute_batch(INSIGHT_MATCH_TABLE).map_err(insight_err)?;
+        // The matching turns are the ones *inside* the date range and carrying
+        // the filtered context themselves — a conversation that started on
+        // Sunday night contributes only its Monday turns to a Monday. That is
+        // how CM.com counts; see docs/insights.md → "Counted as CM.com counts".
+        let (scope, scope_params) = interaction_scope_sql(args, "i", params_ref.len() + 1);
         match filter_query.match_rows.as_deref() {
             Some(match_rows) => {
                 let sql = format!(
@@ -7640,22 +8280,28 @@ SELECT m.match_log_id, m.session_uuid
 FROM ({match_rows}) m
 JOIN insight_sessions s ON s.session_uuid = m.session_uuid
 JOIN interactions i ON i.log_id = m.match_log_id
-WHERE m.match_log_id IS NOT NULL AND {IS_ANSWER_ROW}"#,
+WHERE m.match_log_id IS NOT NULL AND {IS_ANSWER_ROW}{scope}"#,
                     base_where = filter_query.base_where.as_str(),
                     search_cte = filter_query.search_cte.as_str(),
                 );
-                conn.execute(&sql, params_ref.as_slice())
+                let mut all: Vec<&dyn ToSql> = params_ref.clone();
+                all.extend(scope_params.iter().map(|b| b.as_ref()));
+                conn.execute(&sql, all.as_slice())
             }
-            None => conn.execute(
-                &format!(
-                    "INSERT OR IGNORE INTO insight_matches (log_id, session_uuid) \
-                     SELECT i.log_id, i.session_uuid \
-                     FROM insight_sessions s \
-                     JOIN interactions i ON i.session_uuid = s.session_uuid \
-                     WHERE {IS_ANSWER_ROW}"
-                ),
-                [],
-            ),
+            None => {
+                let (scope, scope_params) = interaction_scope_sql(args, "i", 1);
+                let refs: Vec<&dyn ToSql> = scope_params.iter().map(|b| b.as_ref()).collect();
+                conn.execute(
+                    &format!(
+                        "INSERT OR IGNORE INTO insight_matches (log_id, session_uuid) \
+                         SELECT i.log_id, i.session_uuid \
+                         FROM insight_sessions s \
+                         JOIN interactions i ON i.session_uuid = s.session_uuid \
+                         WHERE {IS_ANSWER_ROW}{scope}"
+                    ),
+                    refs.as_slice(),
+                )
+            }
         }
         .map_err(insight_err)?;
         matched_interactions = conn
@@ -8074,14 +8720,15 @@ fn conversation_insights_timed(
                     "WITH r AS MATERIALIZED ( \
                        SELECT COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
                                 json_extract(i.feedback_info, '$.originatingInteractionId') END, \
-                                i.interaction_uuid) AS oid, \
-                              MIN(CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END) AS pos \
+                                i.interaction_uuid) AS origin_uuid, \
+                              MAX(i.log_id) AS last_log, \
+                              CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END AS pos \
                        FROM insight_sessions s \
                        JOIN interactions i ON i.session_uuid = s.session_uuid \
                        WHERE {FEEDBACK_ROW} \
-                       GROUP BY oid) \
-                     SELECT COALESCE(SUM(i.interaction_uuid IN (SELECT oid FROM r)), 0), \
-                            COALESCE(SUM(i.interaction_uuid IN (SELECT oid FROM r WHERE pos = 1)), 0) \
+                       GROUP BY origin_uuid) \
+                     SELECT COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r)), 0), \
+                            COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r WHERE pos = 1)), 0) \
                      FROM {answer_from} \
                      WHERE {IS_ANSWER_ROW}"
                 ),
@@ -9618,11 +10265,45 @@ struct DayStats {
     count: i64,
 }
 
+/// Interactions in one UTC hour. The renderer folds these into days of the
+/// display timezone, which is what its calendars show — a local day spans
+/// parts of two UTC days, so UTC day totals cannot be regrouped into it.
+#[derive(Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct HourStats {
+    date: String,
+    hour: u32,
+    count: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DbDailyStats {
     total: i64,
+    /// Per UTC day, newest first — derived from `hours`, so the two agree.
     days: Vec<DayStats>,
+    hours: Vec<HourStats>,
+}
+
+/// Per-hour counts, oldest first. `substr` for the reason `get_db_daily_stats`
+/// gives: the stored shape is fixed, so the slice is exact.
+fn hour_stats(conn: &Connection) -> Result<Vec<HourStats>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT substr(timestamp_start, 1, 13) AS h, COUNT(*) \
+             FROM interactions GROUP BY h ORDER BY h",
+        )
+        .map_err(|e| format!("Prepare error: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        .map_err(|e| format!("Query error: {e}"))?
+        .filter_map(|r| r.ok())
+        .filter_map(|(h, count)| {
+            let hour = h.get(11..13)?.parse::<u32>().ok()?;
+            Some(HourStats { date: h.get(..10)?.to_string(), hour, count })
+        })
+        .collect();
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -9636,31 +10317,21 @@ async fn get_db_daily_stats(db_state: State<'_, SharedDbState>) -> Result<DbDail
             .query_row("SELECT COUNT(*) FROM interactions", [], |row| row.get(0))
             .unwrap_or(0);
 
-        // substr rather than DATE(): timestamp_start is always stored as
-        // "YYYY-MM-DDTHH:MM:SS", so this is exact and skips a function call per
-        // row. get_db_hour_coverage already slices it the same way.
-        let mut stmt = conn
-            .prepare(
-                "SELECT substr(timestamp_start, 1, 10) AS day, COUNT(*) AS cnt \
-                 FROM interactions \
-                 GROUP BY day \
-                 ORDER BY day DESC",
-            )
-            .map_err(|e| format!("Prepare error: {e}"))?;
-
-        let days = stmt
-            .query_map([], |row| {
-                Ok(DayStats {
-                    date: row.get::<_, String>(0).unwrap_or_default(),
-                    count: row.get::<_, i64>(1).unwrap_or(0),
-                })
-            })
-            .map_err(|e| format!("Query error: {e}"))?
-            .filter_map(|r| r.ok())
-            .filter(|d| !d.date.is_empty())
+        // One pass per hour rather than per day: the calendars show days of the
+        // display timezone, and those can only be built from hours. The UTC
+        // day totals are summed from the same rows, so the two cannot differ.
+        let hours = hour_stats(conn)?;
+        let mut by_day: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+        for h in &hours {
+            *by_day.entry(h.date.clone()).or_default() += h.count;
+        }
+        let days = by_day
+            .into_iter()
+            .rev()
+            .map(|(date, count)| DayStats { date, count })
             .collect();
 
-        Ok(DbDailyStats { total, days })
+        Ok(DbDailyStats { total, days, hours })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -9921,6 +10592,123 @@ async fn compact_database(db_state: State<'_, SharedDbState>) -> Result<CompactR
             "compacted database: {bytes_before} → {bytes_after} bytes in {duration_ms}ms"
         );
         Ok(CompactResult { bytes_before, bytes_after, duration_ms })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TimeRange {
+    from_utc: String,
+    to_utc: String,
+}
+
+#[derive(Deserialize)]
+struct DeleteBetweenArgs {
+    ranges: Vec<TimeRange>,
+}
+
+/// The UTC hours lying *wholly* inside `[from, to]`, as a mask per UTC day.
+///
+/// Only those are forgotten as fetched: an hour the range covers in part still
+/// holds rows outside it, and marking it unfetched would re-download them for
+/// nothing. A range built from display-timezone days is hour-aligned in every
+/// zone with a whole-hour offset, so in practice this is every hour it spans.
+fn hours_wholly_inside(conn: &Connection, from: &str, to: &str) -> Result<Vec<(String, i64)>, String> {
+    let mut stmt = conn
+        .prepare_cached(
+            "WITH RECURSIVE b(first, last) AS ( \
+               SELECT CASE WHEN substr(?1, 15) = '00:00' THEN substr(?1, 1, 13) || ':00:00' \
+                           ELSE strftime('%Y-%m-%dT%H:00:00', ?1, '+1 hour') END, \
+                      CASE WHEN substr(?2, 15) = '59:59' THEN substr(?2, 1, 13) || ':00:00' \
+                           ELSE strftime('%Y-%m-%dT%H:00:00', ?2, '-1 hour') END), \
+             h(t) AS ( \
+               SELECT first FROM b WHERE first <= (SELECT last FROM b) \
+               UNION ALL \
+               SELECT strftime('%Y-%m-%dT%H:00:00', t, '+1 hour') FROM h \
+               WHERE t < (SELECT last FROM b)) \
+             SELECT substr(t, 1, 10), CAST(substr(t, 12, 2) AS INTEGER) FROM h",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut masks: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    let rows = stmt
+        .query_map(params![from, to], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (day, hour) = row.map_err(|e| e.to_string())?;
+        *masks.entry(day).or_default() |= 1 << hour;
+    }
+    Ok(masks.into_iter().collect())
+}
+
+/// Delete everything stored in some instants, and forget those hours were
+/// fetched. The ranges are days of the display timezone, which is what the
+/// Stored data calendar shows; a UTC date could not express one.
+fn delete_between_rows(conn: &mut Connection, ranges: &[TimeRange]) -> Result<i64, String> {
+    for r in ranges {
+        if !is_naive_utc_stamp(&r.from_utc) || !is_naive_utc_stamp(&r.to_utc) {
+            return Err("A range must be YYYY-MM-DDTHH:MM:SS.".into());
+        }
+        if r.to_utc < r.from_utc {
+            return Err(format!("A range ends before it starts ({} → {})", r.from_utc, r.to_utc));
+        }
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut deleted = 0i64;
+    for r in ranges {
+        let p = params![r.from_utc, r.to_utc];
+        // The satellite rows first, set-based, while the interactions they
+        // point at still exist — the same order `delete_interactions_by_dates`
+        // has always used. `idx_timestamp` serves every one of these.
+        for table in ["interactions_fts WHERE rowid", "entity_index WHERE log_id", "gap_fixed WHERE log_id", "answer_index WHERE log_id"] {
+            let _ = tx.execute(
+                &format!(
+                    "DELETE FROM {table} IN (SELECT log_id FROM interactions \
+                     WHERE timestamp_start >= ?1 AND timestamp_start <= ?2)"
+                ),
+                p,
+            );
+        }
+        deleted += tx
+            .execute(
+                "DELETE FROM interactions WHERE timestamp_start >= ?1 AND timestamp_start <= ?2",
+                p,
+            )
+            .map_err(|e| format!("Delete error: {e}"))? as i64;
+        for (day, mask) in hours_wholly_inside(&tx, &r.from_utc, &r.to_utc)? {
+            let _ = tx.execute(
+                "UPDATE imported_windows SET hours = hours & ~?2 WHERE day = ?1",
+                params![day, mask],
+            );
+        }
+    }
+    let _ = tx.execute("DELETE FROM imported_windows WHERE hours = 0", []);
+    tx.commit().map_err(|e| format!("Commit error: {e}"))?;
+    if deleted > 0 {
+        cleanup_orphan_contexts(conn);
+        rebuild_session_summary(conn)?;
+    }
+    Ok(deleted)
+}
+
+#[tauri::command]
+async fn delete_interactions_between(
+    db_state: State<'_, SharedDbState>,
+    args: DeleteBetweenArgs,
+) -> Result<DeleteResult, String> {
+    if args.ranges.is_empty() {
+        return Ok(DeleteResult { deleted: 0 });
+    }
+    if args.ranges.len() > 5000 {
+        return Err("Too many ranges at once.".into());
+    }
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_mut().ok_or("No database open.")?;
+        let deleted = delete_between_rows(conn, &args.ranges)?;
+        Ok(DeleteResult { deleted })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -10864,6 +11652,8 @@ pub fn run() {
             save_export_bytes,
             save_export_xlsx,
             get_gap_interactions,
+            get_gap_feedback,
+            get_gap_genai,
             set_gap_fixed,
             pick_screen_color,
             export_settings_backup,
@@ -10894,6 +11684,7 @@ pub fn run() {
             get_db_hour_coverage,
             record_imported_window,
             delete_interactions_by_dates,
+            delete_interactions_between,
             get_analytics_config,
             save_analytics_config,
             test_analytics_connection,
@@ -12437,6 +13228,76 @@ mod tests {
         );
     }
 
+    /// Stored data deletes days of the display timezone: a range of instants,
+    /// not UTC dates. It must take exactly the rows inside, and forget only the
+    /// hours it emptied — the rest of each UTC day stays fetched.
+    #[test]
+    fn deleting_a_local_day_takes_its_rows_and_only_its_hours() {
+        let mut conn = test_conn();
+        // Amsterdam 25 Jul (UTC+2) is 24T22:00:00Z → 25T21:59:59Z.
+        insert_interaction(&conn, 1, "2026-07-24T21:59:59"); // the local day before
+        insert_interaction(&conn, 2, "2026-07-24T22:00:00"); // in
+        insert_interaction(&conn, 3, "2026-07-25T12:00:00"); // in
+        insert_interaction(&conn, 4, "2026-07-25T22:00:00"); // the local day after
+        record_window(&conn, "2026-07-24T00:00:00Z", "2026-07-24T23:59:59Z");
+        record_window(&conn, "2026-07-25T00:00:00Z", "2026-07-25T23:59:59Z");
+
+        let deleted = delete_between_rows(
+            &mut conn,
+            &[TimeRange { from_utc: "2026-07-24T22:00:00".into(), to_utc: "2026-07-25T21:59:59".into() }],
+        )
+        .expect("delete");
+        assert_eq!(deleted, 2);
+        let left: Vec<i64> = conn
+            .prepare("SELECT log_id FROM interactions ORDER BY log_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(left, vec![1, 4]);
+        // 24 Jul keeps 00–21 (hour 21 still holds row 1), 25 Jul keeps 22–23.
+        // Row presence still counts on its own, so check the request record.
+        let requested = |day: &str| -> i64 {
+            conn.query_row("SELECT hours FROM imported_windows WHERE day = ?1", params![day], |r| r.get(0))
+                .unwrap_or(0)
+        };
+        assert_eq!(requested("2026-07-24"), (1 << 22) - 1);
+        assert_eq!(requested("2026-07-25"), (1 << 22) | (1 << 23));
+        assert!(delete_between_rows(
+            &mut conn,
+            &[TimeRange { from_utc: "yesterday".into(), to_utc: "today".into() }],
+        )
+        .is_err());
+    }
+
+    /// A partial hour at either end is not forgotten: it still holds rows.
+    #[test]
+    fn only_whole_hours_inside_a_range_are_forgotten() {
+        let conn = test_conn();
+        let got = hours_wholly_inside(&conn, "2026-07-24T22:30:00", "2026-07-25T01:59:59").unwrap();
+        assert_eq!(
+            got,
+            vec![("2026-07-24".to_string(), 1 << 23), ("2026-07-25".to_string(), 0b11)]
+        );
+        assert!(hours_wholly_inside(&conn, "2026-07-24T22:10:00", "2026-07-24T22:50:00").unwrap().is_empty());
+    }
+
+    #[test]
+    fn hour_stats_split_a_day_by_hour() {
+        let conn = test_conn();
+        insert_interaction(&conn, 1, "2026-07-24T21:10:00");
+        insert_interaction(&conn, 2, "2026-07-24T21:50:00");
+        insert_interaction(&conn, 3, "2026-07-24T22:00:00");
+        assert_eq!(
+            hour_stats(&conn).unwrap(),
+            vec![
+                HourStats { date: "2026-07-24".into(), hour: 21, count: 2 },
+                HourStats { date: "2026-07-24".into(), hour: 22, count: 1 },
+            ]
+        );
+    }
+
     /// Hour coverage is what tells a partially imported day apart from a
     /// complete one, so the importer doesn't skip the rest of a day just
     /// because a local-time range already pulled in its tail.
@@ -13310,7 +14171,7 @@ mod perf {
         let mut rollup = u128::MAX;
         for _ in 0..3 {
             let t = Instant::now();
-            build_insight_segment_stats(&conn).expect("rollup");
+            build_insight_segment_stats(&conn, &GetSessionsArgs::default()).expect("rollup");
             rollup = rollup.min(t.elapsed().as_micros());
         }
         println!("rollup (one pass over the scope): {:.0}ms", rollup as f64 / 1000.0);
@@ -13328,11 +14189,11 @@ mod perf {
             let mut rows = 0usize;
             for _ in 0..3 {
                 let t = Instant::now();
-                let out = conversation_segments(&conn, want, true, true).expect("segments");
+                let out = conversation_segments(&conn, &GetSessionsArgs::default(), want, true, true).expect("segments");
                 with = with.min(t.elapsed().as_micros());
                 rows = out.groups.iter().map(|g| g.rows.len()).sum();
                 let t = Instant::now();
-                conversation_segments(&conn, want, true, false).expect("segments");
+                conversation_segments(&conn, &GetSessionsArgs::default(), want, true, false).expect("segments");
                 without = without.min(t.elapsed().as_micros());
             }
             println!(
@@ -14275,6 +15136,9 @@ mod insights {
         add(11, "a", "Feedback", r#"{"label": "yes", "score": 1, "originatingInteractionId": "u1"}"#);
         add(12, "a", "Feedback", r#"{"label": "no", "score": -1, "originatingInteractionId": "u2"}"#);
         add(13, "b", "Feedback", r#"{"score": 1, "originatingInteractionId": "#);
+        // u1 again, the other way: an answer is positive only when *every*
+        // rating it got was a thumbs up.
+        add(14, "a", "Feedback", r#"{"label": "no", "score": -1, "originatingInteractionId": "u1"}"#);
         conn.execute(
             r#"UPDATE interactions SET feedback_info = '{"score": 1}' WHERE log_id = 4"#,
             [],
@@ -14297,7 +15161,7 @@ mod insights {
                 assert_eq!(d.matched_interactions, 5, "an event is not a matching interaction");
             }
             assert_eq!(d.rated_answers, Some(3), "u1 and u2 by reference, u4 in place");
-            assert_eq!(d.positive_answers, Some(2), "u1 and u4");
+            assert_eq!(d.positive_answers, Some(1), "u4 — u1 was also rated down");
         }
 
         // The ratings are not read unless Quality is.
@@ -14656,6 +15520,42 @@ mod insights {
             )
             .expect("insert context");
         }
+        // Each interaction's own context, as an import stores it: a set per
+        // turn, interned. A key the conversation set twice is split across its
+        // turns — one interaction carries one value of a key — so the n-th turn
+        // carries the n-th value (wrapping).
+        let mut cache = HashMap::new();
+        let mut turn_no: HashMap<&str, usize> = HashMap::new();
+        for (n, t) in turns.iter().enumerate() {
+            let j = *turn_no.entry(t.session).and_modify(|k| *k += 1).or_insert(0);
+            let mut keys: Vec<&str> = Vec::new();
+            for (name, _, session) in tags {
+                if *session == t.session && !keys.contains(name) {
+                    keys.push(name);
+                }
+            }
+            if keys.is_empty() {
+                continue;
+            }
+            let pairs: Vec<serde_json::Value> = keys
+                .iter()
+                .map(|k| {
+                    let vals: Vec<&str> = tags
+                        .iter()
+                        .filter(|(name, _, session)| name == k && *session == t.session)
+                        .map(|(_, v, _)| *v)
+                        .collect();
+                    serde_json::json!({ "name": k, "value": vals[j % vals.len()] })
+                })
+                .collect();
+            let json = serde_json::Value::Array(pairs).to_string();
+            let id = intern_contexts(&conn, &mut cache, &json).expect("intern context");
+            conn.execute(
+                "UPDATE interactions SET contexts_id = ?1 WHERE log_id = ?2",
+                params![id, n as i64 + 1],
+            )
+            .expect("attach context");
+        }
         rebuild_session_summary(&conn).expect("summary");
         conn
     }
@@ -14675,7 +15575,7 @@ mod insights {
             &mut InsightScopeCache::default(),
         )
         .expect("scope");
-        conversation_segments(conn, &want, false, true).expect("segments")
+        conversation_segments(conn, &GetSessionsArgs::default(), &want, false, true).expect("segments")
     }
 
     fn seg_row<'a>(group: &'a InsightSegmentGroup, label: &str) -> &'a InsightSegmentRow {
@@ -14708,7 +15608,11 @@ mod insights {
             session,
             culture,
             feedback: "",
-            recog_type: if main_type == "Question" { "Article" } else { "" },
+            recog_type: match (main_type, quality > 0.0) {
+                ("QA", true) => "Entity Recognition",
+                ("QA", false) => "No Recognition",
+                _ => "",
+            },
             quality,
             main_type,
         };
@@ -14716,11 +15620,11 @@ mod insights {
             &[
                 // s1 starts in nl and switches to zh for one answer.
                 q("s1", "nl", "Event", 0.0),
-                q("s1", "nl", "Question", 90.0),
-                q("s1", "zh", "Question", 70.0),
+                q("s1", "nl", "QA", 90.0),
+                q("s1", "zh", "QA", 70.0),
                 q("s1", "nl", "LinkClick", 0.0),
                 // s2 is nl throughout; one rating row, which is not an answer.
-                q("s2", "nl", "Question", 0.0),
+                q("s2", "nl", "QA", 0.0),
                 Turn { session: "s2", culture: "nl", feedback: r#"{"score": 1}"#, recog_type: "", quality: 0.0, main_type: "Feedback" },
             ],
             &[("channel", "web", "s1"), ("channel", "web", "s2")],
@@ -14748,7 +15652,7 @@ mod insights {
         let web = seg_row(&out.groups[1], "web");
         assert_eq!((web.sessions, web.interactions), (2, 3));
         assert_eq!((web.recognized, web.unrecognized), (2, 1));
-        assert_eq!(web.quality_sum, 160.0, "the renderer divides by all three: 53.33%");
+        assert_eq!((web.quality_sum, web.quality_n), (160.0, 3), "53.33%, the unrecognised turn at 0");
     }
 
     #[test]
@@ -14757,16 +15661,16 @@ mod insights {
             &[
                 // s1 · nl · web — one recognised turn, one zero-recognition
                 // turn that got a thumbs up.
-                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s1", culture: "nl", feedback: r#"{"score": 1}"#, recog_type: "Article", quality: 0.0, main_type: "Question" },
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s1", culture: "nl", feedback: r#"{"score": 1}"#, recog_type: "No Recognition", quality: 0.0, main_type: "QA" },
                 // s2 · nl · web — recognised, thumbs down.
-                Turn { session: "s2", culture: "nl", feedback: r#"{"score": -1}"#, recog_type: "Article", quality: 80.0, main_type: "Question" },
+                Turn { session: "s2", culture: "nl", feedback: r#"{"score": -1}"#, recog_type: "Entity Recognition", quality: 80.0, main_type: "QA" },
                 // s3 · en · app — a GenAI answer, which the recognizer never
                 // scored: it is in neither half of the recognition rate.
                 Turn { session: "s3", culture: "en", feedback: "", recog_type: "", quality: 0.0, main_type: "GenerativeAI" },
-                Turn { session: "s3", culture: "en", feedback: "", recog_type: "Article", quality: 60.0, main_type: "Question" },
+                Turn { session: "s3", culture: "en", feedback: "", recog_type: "Entity Recognition", quality: 60.0, main_type: "QA" },
                 // s4 · en · no channel at all — a key is not a partition.
-                Turn { session: "s4", culture: "en", feedback: "", recog_type: "Article", quality: 0.0, main_type: "Question" },
+                Turn { session: "s4", culture: "en", feedback: "", recog_type: "No Recognition", quality: 0.0, main_type: "QA" },
             ],
             &[
                 ("channel", "web", "s1"),
@@ -14782,9 +15686,13 @@ mod insights {
         assert_eq!(
             (t.recognized, t.unrecognized),
             (3, 2),
-            "the GenAI turn is in neither half of the rate"
+            "QA only: the GenAI answer is in neither half of the rate"
         );
-        assert_eq!(t.quality_sum, 230.0, "90 + 80 + 60, over the scored turns only");
+        assert_eq!(
+            (t.quality_sum, t.quality_n),
+            (230.0, 5),
+            "90 + 80 + 60 over every entity-recognised and unrecognised QA, zeros included"
+        );
 
         // Culture partitions the result set, so its rows must add back up to it.
         let cultures = &out.groups[0];
@@ -14841,8 +15749,11 @@ mod insights {
     fn a_key_one_conversation_set_twice_is_reported_as_overlapping() {
         let conn = seed_segments(
             &[
-                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                // Two turns: one interaction carries one value of a key, so a
+                // conversation needs two to have been on both.
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
             ],
             &[
                 ("step", "start", "s1"),
@@ -14854,13 +15765,14 @@ mod insights {
         );
         let out = segments(&conn, &[("context", "step"), ("context", "park")]);
         let step = &out.groups[0];
-        assert!(step.overlapping, "s1 carries two values of `step`");
+        assert!(step.overlapping, "s1 is a conversation on both rows of `step`");
         assert_eq!(
             step.rows.iter().map(|r| r.interactions).sum::<i64>(),
-            3,
-            "s1 is counted under both of its values"
+            out.total.interactions,
+            "but each interaction is under the one value it carried"
         );
-        assert!(out.total.interactions < 3);
+        assert_eq!(seg_row(step, "start").sessions, 2);
+        assert_eq!(seg_row(step, "done").sessions, 1);
         let park = &out.groups[1];
         assert!(!park.overlapping, "one value per conversation is not an overlap");
         assert_eq!(park.rows.iter().map(|r| r.interactions).sum::<i64>(), out.total.interactions);
@@ -14873,11 +15785,11 @@ mod insights {
     fn a_value_spelled_in_two_cases_is_one_segment_row() {
         let conn = seed_segments(
             &[
-                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s3", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s4", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s5", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s3", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s4", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s5", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
             ],
             &[
                 ("verblijf", "true", "s5"),
@@ -14905,8 +15817,8 @@ mod insights {
     fn the_segment_rollup_is_reused_across_breakdowns_and_dropped_on_a_new_search() {
         let conn = seed_segments(
             &[
-                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Article", quality: 90.0, main_type: "Question" },
-                Turn { session: "s2", culture: "en", feedback: "", recog_type: "Article", quality: 0.0, main_type: "Question" },
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s2", culture: "en", feedback: "", recog_type: "No Recognition", quality: 0.0, main_type: "QA" },
             ],
             &[("channel", "web", "s1"), ("channel", "app", "s2")],
         );
@@ -14914,7 +15826,7 @@ mod insights {
         let args = GetSessionsArgs::default();
         resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache)
             .expect("scope");
-        let first = conversation_segments(&conn, &[], false, true).expect("segments");
+        let first = conversation_segments(&conn, &GetSessionsArgs::default(), &[], false, true).expect("segments");
         cache.segment_stats = true;
         // The rollup's own inserts move `total_changes()`, and the safety catch
         // reads exactly that counter — without the restamp the next resolve
@@ -14930,6 +15842,7 @@ mod insights {
         assert!(cache.segment_stats, "an unchanged search keeps its rollup");
         let again = conversation_segments(
             &conn,
+            &GetSessionsArgs::default(),
             &[InsightSegmentBreakdown { kind: "context".into(), name: "channel".into() }],
             cache.segment_stats,
             true,
@@ -14946,8 +15859,208 @@ mod insights {
         resolve_insight_scope(&conn, &narrowed, InsightUnit::Conversations, &mut cache)
             .expect("scope");
         assert!(!cache.segment_stats, "a different search drops the rollup");
-        let after = conversation_segments(&conn, &[], cache.segment_stats, true).expect("segments");
+        let after = conversation_segments(&conn, &GetSessionsArgs::default(), &[], cache.segment_stats, true).expect("segments");
         assert_eq!(after.total.interactions, 1, "only the zero-recognition conversation");
+    }
+
+    /// CM.com counts a session on the day it started and an interaction on the
+    /// day it happened. A conversation that began before the range brings its
+    /// in-range interactions, but it is not one of the range's active sessions.
+    #[test]
+    fn a_session_counts_on_the_day_it_started() {
+        let conn = seed_segments(
+            &[
+                Turn { session: "late", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "late", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "today", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+            ],
+            &[],
+        );
+        // "late" began just before midnight; its second turn is after it.
+        conn.execute_batch(
+            "UPDATE interactions SET timestamp_start = '2026-05-31T23:55:00' WHERE log_id = 1;",
+        )
+        .expect("backdate");
+        rebuild_session_summary(&conn).expect("summary");
+        let args = GetSessionsArgs {
+            date_from: Some("2026-06-01T00:00:00".into()),
+            date_to: Some("2026-06-01T23:59:59".into()),
+            ..Default::default()
+        };
+        resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut InsightScopeCache::default())
+            .expect("scope");
+        let out = conversation_segments(&conn, &args, &[], false, false).expect("segments");
+        assert_eq!(out.total.interactions, 2, "both turns inside the day");
+        assert_eq!(out.total.sessions, 1, "only the conversation that started that day");
+    }
+
+    /// "Total row only": the search's filters narrow the Total, and the
+    /// breakdown rows are the whole range — the report's shape, whose Total
+    /// carries `nochat = false` and whose rows do not.
+    #[test]
+    fn total_row_only_filters_the_total_and_not_the_rows() {
+        let conn = seed_segments(
+            &[
+                Turn { session: "s1", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 90.0, main_type: "QA" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "Entity Recognition", quality: 80.0, main_type: "QA" },
+                Turn { session: "s2", culture: "nl", feedback: "", recog_type: "No Recognition", quality: 0.0, main_type: "QA" },
+            ],
+            &[("channel", "web", "s1"), ("channel", "app", "s2")],
+        );
+        let args = GetSessionsArgs {
+            context_filters: Some(vec![ContextFilter { name: "channel".into(), value: "web".into() }]),
+            ..Default::default()
+        };
+        let want = [InsightSegmentBreakdown { kind: "context".into(), name: "channel".into() }];
+        let mut cache = InsightScopeCache::default();
+        resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut cache).expect("scope");
+        let (every, kept) = conversation_segments_scoped(&conn, &args, &want, false, true, false).expect("segments");
+        assert!(kept, "the rollup still describes the search");
+        assert_eq!(every.rows_scope, "search");
+        assert_eq!(every.total.interactions, 1);
+        assert_eq!(every.groups[0].rows.len(), 1, "every row filtered: only web");
+
+        let (split, kept) = conversation_segments_scoped(&conn, &args, &want, false, true, true).expect("segments");
+        assert!(!kept, "the rollup now holds the whole range, and must not be reused as the search's");
+        assert_eq!(split.rows_scope, "range");
+        assert_eq!(split.total.interactions, 1, "the Total is still the filtered search");
+        assert_eq!(split.groups[0].rows.len(), 2, "the rows are the whole range");
+        assert_eq!(seg_row(&split.groups[0], "app").interactions, 2);
+        assert!(
+            split.context_keys.iter().any(|k| k.name == "channel"),
+            "the picker's keys still describe the search"
+        );
+
+        // Nothing but a range to leave out: the two are the same set.
+        let plain = GetSessionsArgs::default();
+        resolve_insight_scope(&conn, &plain, InsightUnit::Conversations, &mut cache).expect("scope");
+        let (same, kept) = conversation_segments_scoped(&conn, &plain, &want, false, false, true).expect("segments");
+        assert!(kept);
+        assert_eq!(same.rows_scope, "search");
+    }
+
+    /// The CM.com report for 14–20 Sep 2026, against a copy of the database
+    /// that week was imported into (`CAI_TEST_DB`). Prints the table beside the
+    /// report; asserts the two figures that match exactly.
+    #[test]
+    #[ignore]
+    fn segments_match_the_cm_report_for_a_real_week() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            println!("set CAI_TEST_DB to a copy of the database holding 14–20 Sep 2026");
+            return;
+        };
+        let conn = open_db(&path).expect("open test database");
+        let args = GetSessionsArgs {
+            date_from: Some("2026-09-14T00:00:00".into()),
+            date_to: Some("2026-09-20T23:59:59".into()),
+            context_filters: Some(vec![ContextFilter { name: "nochat".into(), value: "false".into() }]),
+            ..Default::default()
+        };
+        resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut InsightScopeCache::default())
+            .expect("scope");
+        let want: Vec<InsightSegmentBreakdown> = ["Channel", "customerInPark", "verblijf", "activeDuringStay", "hasSubscription", "translation", "translation_language"]
+            .iter()
+            .map(|n| InsightSegmentBreakdown { kind: "context".into(), name: n.to_string() })
+            .collect();
+        let started = Instant::now();
+        let out = conversation_segments(&conn, &args, &want, false, false).expect("segments");
+        let pct = |a: i64, b: i64| if b == 0 { f64::NAN } else { 100.0 * a as f64 / b as f64 };
+        let line = |label: &str, r: &InsightSegmentRow| {
+            println!(
+                "{label:<28} fb {:>5}  pos {:>6.2}%  rr {:>6.2}%  rq {:>6.2}%  int {:>6}  conv {:>6}",
+                r.feedback,
+                pct(r.feedback_pos, r.feedback),
+                pct(r.recognized, r.recognized + r.unrecognized),
+                if r.quality_n == 0 { f64::NAN } else { r.quality_sum / r.quality_n as f64 },
+                r.interactions,
+                r.sessions
+            )
+        };
+        println!("report: Total  fb 2457  pos 58.49%  rr 92.82%  rq 79.06%  int 86333");
+        line("Total", &out.total);
+        for g in &out.groups {
+            for r in &g.rows {
+                line(&format!("{}: {}", g.name, r.label), r);
+            }
+        }
+        println!("({} ms, rollup included)", started.elapsed().as_millis());
+        let t = Instant::now();
+        conversation_segments(&conn, &args, &[], true, false).expect("total only");
+        println!("({} ms for the total alone, rollup reused)", t.elapsed().as_millis());
+        let t = Instant::now();
+        conversation_segments(&conn, &args, &want, true, false).expect("breakdowns");
+        println!("({} ms for {} breakdowns, rollup reused)", t.elapsed().as_millis(), want.len());
+        let t = Instant::now();
+        build_insight_segment_stats(&conn, &args).expect("rollup");
+        println!("({} ms for the rollup alone)", t.elapsed().as_millis());
+        assert_eq!(out.total.feedback, 2457);
+        assert_eq!(out.total.feedback_pos, 1437, "58.49% of 2457");
+
+        // The report's rows carry no filter: "Total row only". Every row's
+        // feedback matched the report exactly.
+        let (split, _) = conversation_segments_scoped(&conn, &args, &want, false, false, true).expect("split");
+        assert_eq!(split.total.feedback, 2457, "the Total keeps its filter");
+        let fb = |name: &str, value: &str| {
+            split.groups.iter().find(|g| g.name == name).and_then(|g| g.rows.iter().find(|r| r.label.eq_ignore_ascii_case(value)))
+                .map(|r| (r.feedback, r.feedback_pos)).unwrap_or((-1, -1))
+        };
+        assert_eq!(fb("Channel", "web").0, 1418);
+        assert_eq!(fb("Channel", "app").0, 1094);
+        assert_eq!(fb("customerInPark", "true").0, 196);
+        assert_eq!(fb("verblijf", "true").0, 708);
+        assert_eq!(fb("activeDuringStay", "true").0, 224);
+        assert_eq!(fb("hasSubscription", "true").0, 284);
+        assert_eq!(fb("translation", "true").0, 396);
+        assert_eq!(fb("translation", "false").0, 2116);
+        assert_eq!(fb("translation_language", "de").0, 161);
+        assert_eq!(fb("translation_language", "en").0, 156);
+        assert_eq!(fb("translation_language", "fr").0, 52);
+    }
+
+    /// Prints the Segments total for each slice CM.com's report was pulled for,
+    /// in UTC days and Amsterdam days, to settle which clock the dashboard uses.
+    #[test]
+    #[ignore]
+    fn segments_per_day_against_the_cm_report() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            println!("set CAI_TEST_DB");
+            return;
+        };
+        let conn = open_db(&path).expect("open test database");
+        let f = |name: &str, value: &str| ContextFilter { name: name.into(), value: value.into() };
+        let cases: Vec<(&str, &str, &str, Vec<ContextFilter>)> = vec![
+            ("19 UTC", "2026-09-19T00:00:00", "2026-09-19T23:59:59", vec![f("nochat", "false")]),
+            ("19 AMS", "2026-09-18T22:00:00", "2026-09-19T21:59:59", vec![f("nochat", "false")]),
+            ("15 UTC", "2026-09-15T00:00:00", "2026-09-15T23:59:59", vec![f("nochat", "false")]),
+            ("15 AMS", "2026-09-14T22:00:00", "2026-09-15T21:59:59", vec![f("nochat", "false")]),
+            ("wk UTC", "2026-09-14T00:00:00", "2026-09-20T23:59:59", vec![f("nochat", "false")]),
+            ("wk UTC tr=false", "2026-09-14T00:00:00", "2026-09-20T23:59:59", vec![f("nochat", "false"), f("translation", "false")]),
+            ("wk UTC no filter", "2026-09-14T00:00:00", "2026-09-20T23:59:59", vec![]),
+        ];
+        println!("CM 19:  active 2008  fb 324  pos 63.58  rr 92.65  rq 79.14  int 12480");
+        println!("CM 15:  active 2090  fb 377  pos 58.62  rr 93.26  rq 79.44  int 13477");
+        println!("CM wk:  active 12365 fb 2118 pos 57.98  rr 92.42  rq 79.03  int 74736   (first report: fb 2457 int 86333)");
+        for (label, from, to, filters) in cases {
+            let args = GetSessionsArgs {
+                date_from: Some(from.into()),
+                date_to: Some(to.into()),
+                context_filters: if filters.is_empty() { None } else { Some(filters) },
+                ..Default::default()
+            };
+            resolve_insight_scope(&conn, &args, InsightUnit::Conversations, &mut InsightScopeCache::default())
+                .expect("scope");
+            let out = conversation_segments(&conn, &args, &[], false, false).expect("segments");
+            let active = out.total.sessions;
+            let t = &out.total;
+            println!(
+                "{label:<17} active {active:>5}  fb {:>4}  pos {:>5.2}  rr {:>5.2}  rq {:>5.2}  int {:>5}",
+                t.feedback,
+                100.0 * t.feedback_pos as f64 / t.feedback.max(1) as f64,
+                100.0 * t.recognized as f64 / (t.recognized + t.unrecognized).max(1) as f64,
+                t.quality_sum / t.quality_n.max(1) as f64,
+                t.interactions
+            );
+        }
     }
 
     /// A value's share is of the sessions that carry the key at all. Against
@@ -15831,6 +16944,160 @@ mod conv_search {
         assert!(
             found(&conn, &feedback_args("openen")).is_empty(),
             "a feedback search must not match turns the feedback was not about"
+        );
+    }
+
+    /// The GAP feedback list is the rated **answers**, each once, with the
+    /// worst thumb it got — the rule the Insights feedback card uses.
+    #[test]
+    fn the_gap_feedback_list_is_the_rated_answers_once_each() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "s", user: "parkeren", bot: "acht euro", article_ids: r#"["qa-7"]"#, ..Default::default() });
+        add_feedback(&conn, 2, "s", 1, 1);
+        add_feedback(&conn, 3, "s", -1, 1);
+        add(&conn, Turn { log_id: 4, session: "s", user: "openingstijden", bot: "tien uur", article_ids: r#"["dn-9-2"]"#, ..Default::default() });
+        add_feedback(&conn, 5, "s", 1, 4);
+        // Never rated: not in the list.
+        add(&conn, Turn { log_id: 6, session: "s", user: "hallo", bot: "hoi", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let read = |from: &str, to: &str| {
+            gap_feedback_rows(
+                &conn,
+                &GapFeedbackArgs { from_utc: from.into(), to_utc: to.into() },
+            )
+            .expect("feedback rows")
+        };
+        let res = read("2026-06-01T00:00:00", "2026-06-01T23:59:59");
+        let got: Vec<(i64, i64, &str)> = res
+            .rows
+            .iter()
+            .map(|r| (r.log_id, r.score, r.article_ids.as_str()))
+            .collect();
+        assert_eq!(got, vec![(4, 1, r#"["dn-9-2"]"#), (1, -1, r#"["qa-7"]"#)]);
+        assert!(!res.truncated);
+        assert!(read("2026-06-02T00:00:00", "2026-06-02T23:59:59").rows.is_empty());
+        assert!(gap_feedback_rows(
+            &conn,
+            &GapFeedbackArgs { from_utc: "yesterday".into(), to_utc: "today".into() },
+        )
+        .is_err());
+    }
+
+    /// The GenAI list is the GenAI pill's rows, with the thumb each got.
+    #[test]
+    fn the_gap_genai_list_is_the_genai_answers_with_their_rating() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "s", user: "drukte morgen", bot: "rustig", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "s", user: "showtijden", bot: "om 19.15", ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "s", user: "parkeren", bot: "acht euro", ..Default::default() });
+        conn.execute_batch(
+            "UPDATE interactions SET main_interaction_type = 'GenerativeAI', \
+                    all_interaction_types = '[\"GenerativeAI\"]' WHERE log_id = 1; \
+             UPDATE interactions SET all_interaction_types = '[\"QA\",\"GenerativeAI\"]' \
+             WHERE log_id = 2;",
+        )
+        .expect("mark genai");
+        add_feedback(&conn, 4, "s", -1, 1);
+        rebuild_session_summary(&conn).expect("summary");
+
+        let res = gap_genai_rows(
+            &conn,
+            &GapFeedbackArgs { from_utc: "2026-06-01T00:00:00".into(), to_utc: "2026-06-01T23:59:59".into() },
+        )
+        .expect("genai rows");
+        let got: Vec<(i64, Option<i64>)> = res.rows.iter().map(|r| (r.log_id, r.score)).collect();
+        // Log 3 is plain QA; the feedback row is not a question at all.
+        assert_eq!(got, vec![(2, None), (1, Some(-1))]);
+    }
+
+    /// "Thumbs-down on Dialog X" is about what the Dialog *answered*. A row
+    /// that dropped out of a Dialog still carries its path, but the answer
+    /// on it — the one that was rated — is an Article; on a real database
+    /// that was 230 of 502 thumbs-down, all of them counted against a Dialog
+    /// the person had already left. Without the pill the path still counts:
+    /// "conversations that walked through X" is a question worth asking.
+    #[test]
+    fn a_feedback_search_on_a_dialog_matches_what_the_dialog_answered() {
+        let conn = search_conn();
+        // Left dialog 6022 by asking something an Article answered, and hated it.
+        add(&conn, Turn { log_id: 1, session: "dropped-out", user: "koffie", bot: "onbeperkt koffie", article_ids: r#"["qa-10829"]"#, dialog_paths: r#"{"DropOut" : "6022:11404"}"#, ..Default::default() });
+        add_feedback(&conn, 2, "dropped-out", -1, 1);
+        // Rated an answer the Dialog itself gave.
+        add(&conn, Turn { log_id: 3, session: "answered", user: "restant", bot: "betaal hier", article_ids: r#"["dn-6022-691"]"#, dialog_paths: r#"{"EndedOrInProgress" : "6022:688/691!"}"#, ..Default::default() });
+        add_feedback(&conn, 4, "answered", -1, 3);
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = |q: &str, filter: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            filter: Some(filter.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &args("dn-6022", "neg_feedback")), vec!["answered"]);
+        assert_eq!(found(&conn, &args("dn-6022-691", "neg_feedback")), vec!["answered"]);
+        // The Article is what "dropped-out" rated.
+        assert_eq!(found(&conn, &args("qa-10829", "neg_feedback")), vec!["dropped-out"]);
+        // Without a feedback filter, walking through still counts.
+        assert_eq!(found(&conn, &args("dn-6022", "all")), vec!["answered", "dropped-out"]);
+    }
+
+    /// Metadata belongs to one answer, so under a feedback filter a `meta:`
+    /// chip asks whether the *rated* answer carried it — not whether some
+    /// other answer in a conversation with a thumbs-down somewhere did.
+    #[test]
+    fn a_feedback_search_on_metadata_matches_the_rated_answer_only() {
+        let conn = search_conn();
+        let meta = |log_id: i64, session: &str, json: &str| {
+            conn.execute(
+                "UPDATE interactions SET output_metadata = ?2 WHERE log_id = ?1",
+                params![log_id, json],
+            )
+            .expect("set metadata");
+            for (name, value) in metadata_index_rows(json) {
+                conn.execute(
+                    "INSERT OR IGNORE INTO metadata_index(name, value, session_uuid) VALUES (?1, ?2, ?3)",
+                    params![name, value, session],
+                )
+                .expect("index metadata");
+            }
+        };
+        // The parking answer was rated down.
+        add(&conn, Turn { log_id: 1, session: "rated-parking", user: "parkeren", bot: "acht euro", ..Default::default() });
+        meta(1, "rated-parking", r#"[{"key":"topic","value":"Parking"}]"#);
+        add_feedback(&conn, 2, "rated-parking", -1, 1);
+        // Parking came up, but the answer rated down was about tickets.
+        add(&conn, Turn { log_id: 3, session: "rated-else", user: "parkeren", bot: "acht euro", ..Default::default() });
+        meta(3, "rated-else", r#"[{"key":"topic","value":"parking"}]"#);
+        add(&conn, Turn { log_id: 4, session: "rated-else", user: "tickets", bot: "online", ..Default::default() });
+        meta(4, "rated-else", r#"[{"key":"topic","value":"tickets"}]"#);
+        add_feedback(&conn, 5, "rated-else", -1, 4);
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = |q: &str, filter: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            filter: Some(filter.to_string()),
+            ..Default::default()
+        };
+        // Case-folded like every other tag comparison.
+        assert_eq!(found(&conn, &args(r#"meta:"topic"="parking""#, "neg_feedback")), vec!["rated-parking"]);
+        assert_eq!(found(&conn, &args(r#"meta:"topic"="tickets""#, "neg_feedback")), vec!["rated-else"]);
+        assert_eq!(found(&conn, &args(r#"meta:"topic""#, "neg_feedback")), vec!["rated-else", "rated-parking"]);
+        // Combined with text, both have to be about the rated answer.
+        assert_eq!(found(&conn, &args(r#"parkeren AND meta:"topic"="parking""#, "neg_feedback")), vec!["rated-parking"]);
+        // Without the pill it is still the conversation-level tag it always was.
+        assert_eq!(found(&conn, &args(r#"meta:"topic"="parking""#, "all")), vec!["rated-else", "rated-parking"]);
+
+        // And the matching turn is the rated answer, so Insights and the AI
+        // export point at it rather than at every turn.
+        let fq = build_session_filter_query(&conn, &args(r#"meta:"topic"="parking""#, "neg_feedback"))
+            .expect("build");
+        assert!(fq.match_rows.is_some(), "a row-level meta leaf singles out the rated turn");
+        // A context chip cannot, but the pill still does.
+        let fq = build_session_filter_query(&conn, &args(r#"ctx:"k"="v""#, "neg_feedback"))
+            .expect("build");
+        assert_eq!(
+            fq.match_rows.as_deref(),
+            Some("SELECT session_uuid, match_log_id FROM feedback_origins")
         );
     }
 

@@ -82,7 +82,7 @@ ok(
 )
 ok(
   "the Segments setup and its presets are exported",
-  ["cm-insights-segments", "cm-insights-segment-layout", "cm-insights-segment-presets"].every(
+  ["cm-insights-segments", "cm-insights-segment-layout", "cm-insights-segment-presets", "cm-insights-segment-total-only", "cm-insights-segment-utc-days"].every(
     (k) => KEYS.includes(k),
   ),
 )

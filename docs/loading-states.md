@@ -35,6 +35,38 @@ Where they are wired, and why each one mattered:
 - **`openDbAtPath`** — the longest call in the app and the one that said nothing: `set_db_path` applies schema migrations, repairs the FTS index if stale, and runs the one-time entity and metadata backfills.
 - **The data modal's Import and Stored data tabs** — both open on aggregate queries. The import calendar in particular would have rendered as "nothing imported", which is a *wrong* answer rather than a missing one.
 
+## The database is still opening
+
+The saved conversations database is opened in the background at launch, and
+on a large file — or the first launch after an update, which runs a minute of
+migrations — that is not instant. Nothing waited for it: until `set_db_path`
+returned the backend had no connection, so a read in the meantime failed with
+"No database open." (the GAP list said it could not read the range, Insights
+and the data modal errored), and entering Conversations started a *second*
+open of the same file alongside the first.
+
+- **One opener, `convDbOpen(path)`.** A second open of the same path joins the
+  one in flight; a different path waits for it to settle. `convDbOpenedPath` is
+  what the backend has open, so entering Conversations no longer re-opens a
+  database that is already open — it joins the launch's open, or opens only
+  when that one failed. `openDbAtPath` goes through it too.
+- **Every database command waits, in one place.** The bridge wraps the
+  conversations-database commands (`getSessions`, the Insights reads, GAP,
+  import, Stored data…) to await `convDbWhenReady()`. It resolves whether the
+  open worked or not; after a failure the read fails on its own, with the
+  backend's words. Forty call sites each remembering to wait was the
+  alternative.
+- **Wherever you are, it says so.** `#dbOpeningPill` in the header — gated like
+  every indicator, so a fast open shows nothing — and relabelled with the
+  migration phase when one runs (the `db-migrating` listener is global now; the
+  launch's open is the one that migrates after an update). Every pane spinner
+  is a read of this database, so `paneLoadingHtml` says "Opening the
+  database…" while it is, and keeps its own words in `data-label` for
+  `convDbOpeningChanged` to put back the moment it opens. A search queued
+  behind the open says so on the sessions overlay the same way.
+- `frontend/tests/db-open.test.js` pins joining, queueing, waiting and a failed
+  open against a scripted `set_db_path`.
+
 **`yieldToPaint()` is a race, and the timeout half is the point.** WebKit will not repaint between a class change and a Tauri `invoke` that occupies the IPC channel, so the loading state needs two frames before the call goes out. But `requestAnimationFrame` **does not fire in a window that isn't being composited** — minimised, occluded, or on another space — so awaiting it bare parks the caller forever behind a spinner that never resolves. On screen the frames win and the paint happens; off screen the timer wins after `PAINT_YIELD_MS` and the work proceeds without one, which is correct: nobody is watching. `loadSessions` awaited the bare frames before this, so a minimised window could hang it indefinitely.
 
 - **There is one such helper, and awaiting a bare frame anywhere is the bug.** `waitForNextPaint` was a second, unbounded copy — a plain double `requestAnimationFrame` — and it survived the `loadSessions` fix untouched, so the hang simply moved: `loadData` awaited it before `getData`, and a launch or refresh with the window minimised, occluded or on another space parked it with `dataLoadInFlight` left `true`. That flag is the early-return guard, so every later `loadData()` call silently did nothing and the refresh button was dead until restart. It is gone; its two call sites go through `yieldToPaint`.
@@ -65,6 +97,7 @@ Three keyframes carry all of it, alongside the existing `tab-panel-in`:
 | `pop-in` | the tag filter and Add to Collection popovers, and the message-metadata bubble — scale + rise, so a menu grows out of the control that opened it |
 | `pop-out` | the exit `pop-in` never had, a touch quicker: an arrival is worth watching, a dismissal is not |
 | `toast-out` | the exit that `toast-in` never had |
+| `hdr-btn-in` | the header buttons a view switch swaps in — Share Content · Collections on Content, Data elsewhere — staggered, with `headerSlide` sliding Refresh and Settings (FLIP, a transform only) across the width the group gained or lost. `view-anim` is added by a real switch only, so the first paint plays nothing. **Held for two frames** (`view-anim-hold` pauses it, the slides start paused): the Content view lays out thousands of cards on the frame it appears, and in the real app Share Content's animation — no delay — was over before that frame painted, so it seemed not to animate at all while Collections, 50 ms behind, still did. The hold rule must be as specific as the rules that start it and come after them, because their `animation` shorthand resets the play state. Its reduced-motion rule needs `!important` for the same reason |
 
 - **The big containers get opacity only, never a transform.** A `.panel` can hold thousands of nodes, and a transform would additionally make it the containing block for anything `position: fixed` inside it. `pop-in` is fine on a popover because both `.ctx-modal-box` call sites compute their position from the *button's* rect and write it inline **before** the box is shown, so the transform has nothing to disturb.
 - **The animations restart because the elements are `display: none` in between**, not because anything re-adds a class. That is what keeps a search, a sort or a pagination click from replaying the panel fade — `.active` never leaves. Verified by `getAnimations()`: no animation on the hidden element, a fresh `running` one at `currentTime: 0` the moment it is shown.

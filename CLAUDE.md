@@ -34,7 +34,7 @@ implementation was tried first and was wrong.
 | `docs/import.md` | the conversation data modal, the Analytics API client, import performance, day coverage, the shared calendar |
 | `docs/collections.md` | Collections, the export algorithm, smart filters, the Article/Dialog info modals |
 | `docs/chat-rendering.md` | `parseCmOutput`, chat turns, redacted values, per-message metadata |
-| `docs/loading-states.md` | spinners, `gateLoading`, `yieldToPaint`, modal resize, entrance motion |
+| `docs/loading-states.md` | spinners, `gateLoading`, `yieldToPaint`, modal resize, entrance motion, waiting for the database to open (`convDbOpen`) |
 | `docs/settings-and-updates.md` | the settings backup file, and the portable-exe self-update |
 | `docs/ai-export.md` | `export_conversations_for_ai` and its `.jsonl` schema |
 | `docs/gap.md` | the GAP analysis view, fixed marks, `save_export_xlsx` and `xlsx.rs` |
@@ -71,8 +71,8 @@ frontend/
     settings-backup.test.js, metadata-filter.test.js, context-filter.test.js,
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
-    db-migration-progress.test.js, search-bubbles.test.js,
-    share-content-order.test.js, gap-sort.test.js, gap-fix.test.js
+    db-migration-progress.test.js, db-open.test.js, search-bubbles.test.js,
+    share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -112,6 +112,8 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
 | `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
 | `get_gap_interactions` | `getGapInteractions({fromUtc, toUtc, threshold})` | The low- and zero-recognition interactions of a UTC range, newest first, each with its fixed mark — `{rows, truncated}`. See `docs/gap.md` |
+| `get_gap_feedback`    | `getGapFeedback({fromUtc, toUtc})` | The answers rated in a UTC range, each once with `score` -1 if any rating of it was down — `{rows, truncated}`. The GAP Feedback mode groups them. See `docs/gap.md` → "Feedback" |
+| `get_gap_genai`       | `getGapGenAi({fromUtc, toUtc})` | Every GenAI question and answer of a UTC range, newest first — the GenAI pill's predicate — with `faqsFound` and the answer's worst rating. See `docs/gap.md` → "GenAI" |
 | `set_gap_fixed`       | `setGapFixed(logIds, fixed, note?)` | Marks or unmarks interactions as fixed in `gap_fixed`; returns the stored timestamp |
 | `pick_screen_color`   | `pickScreenColor()`              | macOS only: opens AppKit's `NSColorSampler` and returns the picked colour as sRGB `#rrggbb`, or `null` on Esc; ends the system sampler helper if its overlay outstays the pick. `Err("unsupported")` elsewhere — Windows uses the webview's `EyeDropper`. See `docs/insights.md` → "Insights settings" |
 | `export_settings_backup` | `exportSettingsBackup(defaultName, payload)` | Merges the Analytics API credentials into the renderer's payload and writes the backup (`0600`). See `docs/settings-and-updates.md` → "Settings backup" |
@@ -122,6 +124,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `test_analytics_connection`| `testAnalyticsConnection()`       | Requests an OAuth2 token only, returns `{ ok, message, trace }` |
 | `fetch_analytics_window`   | `fetchAnalyticsWindow(startUtc, endUtc)` | Downloads one window to a temp CSV, returns `{ tempPath, delimiter, rowCount, bytes, durationMs, trace }`; rejects with `{ kind, message, retryable, trace }`. The `trace` is a step-by-step account carried on both outcomes — see `docs/import.md` → "Diagnosing a failed import" |
 | `cleanup_analytics_temp`   | `cleanupAnalyticsTemp(paths?)`    | Deletes the given temp CSVs, or sweeps the whole temp dir when called with no argument |
+| `delete_interactions_between` | `deleteInteractionsBetween(ranges)` | Deletes the rows inside `[{fromUtc, toUtc}]` (days of the display timezone, as instants) with their satellites, and forgets only the request-coverage hours wholly inside. Stored data's delete; `delete_interactions_by_dates` is kept but unused |
 | `get_db_hour_coverage`     | `getDbHourCoverage(sinceDate?)`   | Per UTC day, a bitmask of the 24 hours the day is **covered** for — the union of hours holding interactions and hours an API window explicitly requested. Distinguishes a partially imported day from a complete one. `sinceDate` bounds an otherwise full-table aggregate against `idx_timestamp`; the Import modal passes the retention floor, Manage Database omits it because its calendar browses everything stored |
 | `record_imported_window`   | `recordImportedWindow(startUtc, endUtc)` | Marks every UTC hour a successfully imported API window covered. Called once per downloaded window, *after* its rows are in. See `docs/import.md` → "Coverage: asked-for vs present" |
 | `begin_import_run`         | `beginImportRun()`                | Opens an import run: resets the touched-session set, sets the `pending_finalize` crash marker, raises `wal_autocheckpoint` |
@@ -131,7 +134,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `release_insight_scope` | `releaseInsightScope()`         | Frees the resolved result set the Insights temp tables hold. Called when the modal closes — see `docs/insights.md` → "The result set is resolved once, not once per read" |
 | `get_insight_tags`    | `getInsightTags(args, unit, keys)` | The Context and Metadata sections, read *after* the dashboard paints — see `docs/insights.md` → "Why it is two reads, not one". `keys` is `{context, metadata, contextOn, metadataOn}` — which key each section is charting, and whether it was asked for at all |
 | `get_insight_tag_values` | `getInsightTagValues(args, unit, kind, name)` | One tag key's values, for switching the Context or Metadata chart |
-| `get_insight_segments` | `getInsightSegments(args, unit, breakdowns, withKeys)` | The Segments table: a Total row plus one block per breakdown, each row carrying feedback volume, positive share, recognition rate, recognition quality and interaction count. `breakdowns` is a list of `{kind, name}` where `kind` is `"culture"` \| `"context"` \| `"metadata"`. Always counts **every interaction of the matched conversations**, in both readings — `unit` is passed only to keep the scope cache aligned. `withKeys` (default true) also returns the context/metadata keys this result set has, for the picker — they are the fixed cost of the call and describe the result set rather than the breakdowns, so the renderer reads them once per payload. See `docs/insights.md` → "The Segments table" |
+| `get_insight_segments` | `getInsightSegments(args, unit, breakdowns, withKeys, totalOnly)` | The Segments table: a Total row plus one block per breakdown, each row carrying feedback volume, positive share, recognition rate, recognition quality and interaction count. `breakdowns` is a list of `{kind, name}` where `kind` is `"culture"` \| `"context"` \| `"metadata"`. Counts as CM.com's dashboards do, in both readings — the interactions inside the date range, each under its own context, latest rating per answer, CM.com's recognition definitions; see `docs/insights.md` → "Counted as CM.com counts". `unit` is passed only to keep the scope cache aligned. `withKeys` (default true) also returns the context/metadata keys this result set has, for the picker — they are the fixed cost of the call and describe the result set rather than the breakdowns, so the renderer reads them once per payload. See `docs/insights.md` → "The Segments table" |
 | `cancel_db_query`     | `cancelDbQuery()`                | Interrupts whatever the conversations database is running — a session search or an Insights read. A no-op when nothing is running |
 
 `get_entity_options` returns every entity the imported conversations have triggered — `{name, entityId, count}` — feeding both the conversation search bar's type-ahead and the only entity ids this app has (the EntitiesExport CSV carries none). See `docs/search.md` → "An entity is a leaf, not a filter".
@@ -372,8 +375,11 @@ The orientation map for the whole window. It says what is on screen and where;
 
 ```
 <header>
-  brand | view switch: Content · Conversations · Flagged · GAP | file tags |
-  Export IDs button | Collections button | Settings button (gear)
+  brand | view switch: Content · Conversations · Flagged · Analysis (was GAP) |
+  "Opening database…" pill while the conversations database opens | file tags |
+  Refresh | Settings (gear) | then, on Content only: Share Content · Collections;
+  on every other view the same slot holds Data (opens #convDataModal). The
+  swap plays an entrance and slides Refresh/Settings (`headerSlide`)
 
 <div.global-search-bar>
   chip field (#contentTokens + input, #contentSuggest type-ahead) |
@@ -405,10 +411,10 @@ The orientation map for the whole window. It says what is on screen and where;
   entity list (words · Used by Articles/Dialogs · 💬 Conversations) | pagination
 
 <div.conv-toolbar>
-  Data (opens #convDataModal) | Insights (opens #insightsModal) | Export for AI
+  Insights (opens #insightsModal) | Export for AI
 
-<div#view-gap>   (header GAP button — see docs/gap.md)
-  toolbar: range button → the shared two-month day calendar (display
+<div#view-gap>   (header Analysis button — see docs/gap.md)
+  toolbar: Recognition | Feedback | GenAI switch · range button → the shared two-month day calendar (display
            timezone) with Last 7 / Last 30 / This month / Last month ·
            threshold (from Settings) · All/Low/Zero · Any/Open/Fixed ·
            text filter · count · Export .xlsx
@@ -423,6 +429,17 @@ The orientation map for the whole window. It says what is on screen and where;
            (Edit entity) · answered by (Edit Article/Dialog) · Articles using
            these entities · what they asked next — every line with Edit ↗ and
            copy-link; typing in its search box finds entities instead
+  Feedback mode (same range): Per answer / Per Article · Dialog · at least N
+           ratings · filter · count · Export .xlsx
+  left:    Article / Dialog · rated · thumbs down · positive share (bar),
+           lowest first, sortable
+  right:   the item (Edit ↗ · Thumbs down in Conversations) · its rated
+           questions, thumbs down first · the conversation, rated answer marked
+  GenAI mode (same range): filter · count · Export .xlsx
+  left:    Question · GenAI answer · When (windowed)
+  right:   header (language · when · interaction type as logged · Open in
+           Halo Studio · Copy question · Open in Conversations) ·
+           the answer formatted + source Articles · the conversation, turn marked
 
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
@@ -449,14 +466,17 @@ The orientation map for the whole window. It says what is on screen and where;
                Articles · Dialogs · Dialog nodes · cultures
     Segments — one full-width table, not a chart: a chip per breakdown and a
                searchable multi-select picker over Culture · context keys ·
-               metadata keys, then Total + one block of rows per breakdown,
+               metadata keys, "Filters apply to: every row · Total row only",
+               "Days: <zone> time · UTC, as CM.com",
+               then Total + one block of rows per breakdown,
                columns feedback interactions · positive feedback ·
                recognition rate · recognition quality · interactions ·
-               conversations. Always counts every interaction of the matched
-               conversations, in both readings
+               conversations. Counted as CM.com counts (interactions in the
+               range, each under its own context), in both readings
                a presets row (chip per saved setup · Save setup… · Update)
                Edit layout — every line draggable by its handle, renameable in
-               place and removable; + Heading · + Blank line · Restore removed ·
+               place and removable; + Heading · + Subtotal (sums the rows above
+               it, back to the last heading) · + Blank line · Restore removed ·
                Reset arrangement. A row the range has no data for is kept and
                dashed; a value new since the arrangement was saved is appended
                and marked
@@ -509,7 +529,8 @@ The orientation map for the whole window. It says what is on screen and where;
     — the last two are disabled while an import is running
   Import:  Source tabs (Analytics API / CSV file)
     Setup:   From + To date fields (click to choose which end you're picking) and
-             time inputs | Now shortcut — all UTC, as the legend states
+             time inputs | Now shortcut — in the display timezone, as the legend
+             states; requests go out in UTC, one or two windows per day
              always-visible two-month calendar — green outline = fully imported,
              orange outline = partly imported
              summary (N days · M fully imported · K to download, UTC request window)
@@ -615,7 +636,7 @@ Always use these terms in the UI:
 | `cm-conv-db-path`          | Last selected conversations database (`CONV_DB_STORAGE_KEY`) |
 | `conv-low-recog-threshold` | Low recognition threshold |
 | `cm-metadata-hidden`       | JSON array of rule strings — metadata keys (`key`) or values (`key = value`, `*` wildcard) left out of every metadata picker. Display only; see `docs/search.md` → "Hidden metadata" |
-| `cm-display-timezone`      | IANA zone the chat, session list, date filter and Insights charts are read in. `""` or absent means follow the system. Import and Stored data stay UTC — see `docs/insights.md` → "Reading this in your own timezone" |
+| `cm-display-timezone`      | IANA zone every date in the app is read in — chat, session list, date filter, Insights, Analysis, and the Import and Stored data calendars. `""` or absent means follow the system. Storage and API requests stay UTC — see `docs/import.md` → "Calendars are in your timezone; storage and requests are UTC" |
 | `conv-data-retention-days` | CSV import retention window |
 | `chat-copy-format`         | Chat copy format preference |
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
@@ -627,8 +648,10 @@ Always use these terms in the UI:
 | `cm-insights-export-options` | JSON — label options (`dateFmt`, `hourFmt`, `valueLabels`, `weekdayTicks`, `weekend`) and caption parts (`capTitle`, `capNote`, `capSearch`, `capUnit`, `capZone`). Label options apply on screen too |
 | `cm-insights-chart-types`  | JSON `{cardId: kind}` — the chart type chosen per Insights card, limited to what `INS_CHART_KINDS` allows for that card |
 | `cm-insights-sections`     | JSON `{volume, quality, context, metadata, content, segments}` — which sections the Insights chooser opens pre-selected. Read key by key, so an older or hand-edited file cannot introduce one; all-false falls back to the default |
-| `cm-insights-segment-layout` | JSON `{entries, dropped}` — the Segments table as an ordered list of lines (`{t:"total"\|"row"\|"head"\|"gap", id?, gid?, label?}`) plus the row ids removed by hand. Absent means "follow the breakdowns", which is a real state and not an empty object. Read entry by entry |
+| `cm-insights-segment-layout` | JSON `{entries, dropped}` — the Segments table as an ordered list of lines (`{t:"total"\|"row"\|"head"\|"gap"\|"sum", id?, gid?, label?}`) plus the row ids removed by hand. Absent means "follow the breakdowns", which is a real state and not an empty object. Read entry by entry |
 | `cm-insights-segment-presets` | JSON array of `{id, name, breakdowns, layout}` — saved Segments setups. Holds the breakdowns and the arrangement, never a date range: a preset is applied to whatever the current search covers. See `docs/insights.md` → "A preset is the setup, never the dates" |
+| `cm-insights-segment-total-only` | `"1"` to apply the search's filters to the Segments **Total** row only, the breakdown rows counting every conversation in the date range; anything else, including absent, filters every row. See `docs/insights.md` → "Filters on the Total row only" |
+| `cm-insights-segment-utc-days` | `"1"` to read the Segments table's date range as UTC days, as CM.com's dashboards do, while the rest of the app stays in the display timezone; anything else, including absent, uses the display timezone. See `docs/insights.md` → "UTC days" |
 | `cm-insights-segments`     | JSON array of `{kind, name}` (`kind`: `"culture"` \| `"context"` \| `"metadata"`) — which slices the Insights Segments table compares. Read entry by entry, so a hand-edited file cannot introduce an unknown kind or a duplicate row. An empty array is a legitimate state: the Total row alone is still an answer |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
 

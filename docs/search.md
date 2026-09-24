@@ -60,6 +60,32 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - `a_feedback_search_never_re_derives_its_origins_per_row` pins the plan rather than a duration — a timing threshold in a test is a flake waiting to happen. `a_feedback_search_only_matches_the_answer_the_feedback_was_about` pins the semantics the fix had to preserve, since an `IN` that admitted too much would silently widen the search instead of hanging.
 - `sessions_page_sql` is split out of `get_sessions` so the harness times the query the app really runs. Timing `SELECT COUNT(*) FROM filtered_sessions` instead is misleading by a wide margin — the count never sorts, and it touches `filtered_sessions` once where the real query touches it twice.
 
+**Under a feedback pill every leaf is about the rated answer — Dialogs and
+metadata included.** Text and entity leaves always were; two leaves were not,
+and both let "thumbs-down anywhere in the conversation" through where the
+question was "thumbs-down on *this*".
+
+- **A Dialog or node leaf matches what answered, not what was walked through**
+  (`SearchCtx::rated_answers` → `leaf_id` passes `''` for `dialog_paths`). A
+  row that dropped out of a Dialog carries that Dialog's path while the answer
+  on it — the one rated — is an Article: **230 of 502** thumbs-down on a real
+  database, every one of them counted against a Dialog the person had already
+  left. Without the pill the path still counts, because "conversations that
+  walked through X" is a real question.
+  `a_feedback_search_on_a_dialog_matches_what_the_dialog_answered`.
+- **A `meta:` leaf is tested on the rated answer's own `output_metadata`**
+  (`cai_meta_hit`, reading pairs exactly as `metadata_index_rows` indexes them,
+  values ASCII case-folded like every tag). Metadata belongs to one answer —
+  422 of those 502 rated answers carried some — and the index is per
+  conversation only because a filter needed nothing finer. Only the origin
+  rows are parsed, through the materialized `IN`. Such a leaf is a positive one
+  (`has_positive_leaf_in`), so it names its turn.
+  `a_feedback_search_on_metadata_matches_the_rated_answer_only`.
+- **`ctx:` stays conversation-level**: there is no per-turn context to test.
+- **A search with no positive leaf keeps the pill's matching turns**: `ctx:` or a
+  negation plus a pill used to leave `match_rows` `None`, so Insights and the AI
+  export counted every turn; it is now `feedback_origins`, as with the pill alone.
+
 **The other pills never had this, and the reason is structural.** GenAI and both recognition filters express themselves as an inline `AND` on the row the search already fetched (`search_row_filter`), so there is nothing for the planner to re-derive per row — their plans are flat, every step a `SEARCH` on an index. Feedback is the only filter that routes the search *through* a relation, because the answer a thumb was about has to be resolved before it can be searched. Verified rather than assumed: `perf::conv_filter_cost` covers all five pills alone, with text, and with entities, and nothing exceeds ~70 ms on the 120k-row database.
 
 - The recognition pills do have a CTE of their own (`recognition_matches`), but only on the *no query* path, where it is referenced once and materialized once — `total` and `page_rows` both probe it through an automatic index. Combined with a search the CTE is not built at all.
