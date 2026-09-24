@@ -91,37 +91,43 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### GAP: fix it right from the list
-            Selecting a question now shows **Fix this** — what to change in
-            CM.com so it is recognised next time, each with an **Edit ↗** button:
+            ### GAP is now Analysis, with Feedback and GenAI
+            - **Feedback**: every rated answer in the dates you pick, lowest
+              share of positive ratings first — per answer, or per Article and
+              Dialog — with the conversation behind each rating.
+            - **GenAI**: every GenAI question and answer in the dates you pick,
+              with its sources and a link to the conversation in Halo Studio.
+            - **Open in CM.com** works for entities again, and the calendar
+              shows which days hold data.
 
-            - **Unknown words** the bot did not know, with **Add to entity…**:
-              it suggests the closest entities, copies the word and opens the
-              entity ready to paste.
-            - The **entities** it did recognise, the **Article or Dialog** that
-              answered, the **Articles** that use the same entities, and what
-              the person **asked next** — usually a rephrase that did get an
-              answer.
+            ### Insights Segments that match CM.com's dashboard
+            - Counted the way CM.com counts: each interaction under its own
+              context, the latest rating per answer, and **Active sessions** on
+              the day they started. A real week now matches CM.com's report
+              on feedback for every row.
+            - **Days: UTC, as CM.com** — CM.com's days run midnight to midnight
+              UTC; switch the table to that without changing the rest of the
+              app.
+            - **Filters apply to the Total row only**, for a filtered Total
+              above unfiltered rows, as CM.com reports are built.
+            - **+ Subtotal** lines, and the export preview is readable again.
 
-            Also in GAP: a **language badge** on the conversation, the list
-            keeps its place when you switch tabs and come back, the sort is
-            remembered, and the loading spinners are fixed.
+            ### Conversations
+            - The **feedback** filter finds the answer that was rated, not
+              every conversation with a thumbs down somewhere in it.
+            - Searched context and metadata values no longer show as
+              "undefined" in the chat.
+            - **Opening database…** is shown wherever the app is still waiting
+              for the database.
 
-            ### Insights numbers that match your reports
-            - **Interactions are answers** everywhere: the bot's own events,
-              rating rows and link clicks are no longer counted. Your database
-              is recounted once when the app opens.
-            - **Feedback** is shown as the **% of rated answers that were
-              positive**, next to the **% of answers that were rated**.
-            - **Segments**: recognition quality now includes zero scores, and
-              each answer is counted under its own language.
-            - **GenAI**: the tile and *How the answer was found* now show the
-              same share — GenAI follow-up questions are counted too.
+            ### Import and time zones
+            - The import calendar is in your time zone, so a day you import is
+              the whole day as you know it.
+            - Clearer time zone labels, such as "Amsterdam time (UTC+2)".
 
-            ### Smaller things
-            - **Pick a colour from anywhere on screen** in Insights settings.
-            - Insights settings and Export scroll when they do not fit.
-            - **Share Content** lists every view by Article/Dialog number.
+            ### Header
+            - **Share Content** and **Collections** show on Content only;
+              **Data** takes their place everywhere else.
 
             ---
 
