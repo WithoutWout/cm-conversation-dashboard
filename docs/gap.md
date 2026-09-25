@@ -242,3 +242,22 @@ dropped (Excel refuses a whole file over one), cells cut at Excel's 32,767
 characters, sheet names cleaned to Excel's rules, and a number kept a number.
 `save_export_xlsx` takes rows rather than a query, so the next table that wants
 an Excel export can use it as is.
+
+## Fixed marks in Feedback
+
+Feedback takes the same fixed marks as Recognition — the `gap_fixed` row keyed by the **answer's** log id, which `get_gap_feedback` returns as `fixedAt`. One mark per answer, so an answer on both lists is fixed on both (`gapToggleFixed` and `gapFbToggleFixed` update each other's rows).
+
+- **An Article or Dialog is fixed once every thumbs down on it is** (`gapFbItems` → `fixed`, `negFixed`, `fixedAt` = the latest fix). A thumbs down that arrives after the fix is not marked, so the item reopens by itself — which is the point: the fix did not hold.
+- **Nothing rated down is nothing to fix**: an item with only thumbs up has no ✓ and is never "fixed".
+- The list's ✓ column (and **F**) marks every thumbs down on the item, or reopens them all when it is fixed; a partly fixed item shows an outlined ✓. In the side panel, the header has **Mark fixed** / **Mark the rest fixed** / **✓ Fixed**, and each thumbs-down answer its own ✓.
+- **Any / Open / Fixed** filters Feedback as it filters Recognition. Under Open an item that has just been fixed leaves the list but stays in the side panel (`gapFbItemByKey` falls back to the unfiltered items).
+- **The export** adds *Fixed* (`Yes`, or `1 of 3` for a partly fixed item) and *Fixed at*, and fills fixed items green — as the Recognition export does its fixed rows. GenAI has no fixed marks: it is a reading list, not a work list.
+
+## Selecting, copying and flagging turns
+
+Every Analysis conversation — Recognition, Feedback and GenAI — takes the same turn selection as the Conversations view, through the selection bubble: **Select turns** at the bottom of the thread (or a triple-click on a turn), then Copy and Flag. Flag sends the conversation to the Flagged view with those turns marked. See `docs/chat-rendering.md` → "Selecting turns: the selection bubble".
+
+## Export names
+
+An export is named for its analysis and its date range — `Recognition analysis 14–20 Sep 2026.xlsx` — and the sheet likewise when Excel's 31 characters allow (`Recognition 14–20 Sep 2026`), otherwise just the analysis. `gapRangeLabel` writes only as much of the month and year as the two ends do not share: `19 Sep 2026`, `28 Aug – 3 Sep 2026`, `28 Dec 2025 – 3 Jan 2026`. It used to be today's date plus the month names, which said when the file was made rather than what it covers.
+

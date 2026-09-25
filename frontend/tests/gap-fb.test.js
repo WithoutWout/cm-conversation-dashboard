@@ -10,12 +10,12 @@ const ctx = vm.createContext({})
 vm.runInContext(
   `
   const insTzFormatters = new Map()
-  ${["parseJsonSafe", "gapFbItems", "insOffsetAt", "insUtcDayKey", "insZoneStampToUtc", "insZoneDayBounds", "zoneDayCoverage"].map(extract).join("\n")}
-  globalThis.api = { gapFbItems, zoneDayCoverage }
+  ${["parseJsonSafe", "gapFbItems", "insOffsetAt", "insUtcDayKey", "insZoneStampToUtc", "insZoneDayBounds", "zoneDayCoverage", "gapRangeLabel", "gapExportTitle"].map(extract).join("\n")}
+  globalThis.api = { gapFbItems, zoneDayCoverage, gapRangeLabel, gapExportTitle }
   `,
   ctx,
 )
-const { gapFbItems, zoneDayCoverage } = ctx.api
+const { gapFbItems, zoneDayCoverage, gapRangeLabel, gapExportTitle } = ctx.api
 
 let failed = 0
 const test = (name, fn) => {
@@ -27,6 +27,50 @@ const test = (name, fn) => {
     console.log("  FAIL " + name + "\n       " + e.message)
   }
 }
+
+test("an item is fixed once every thumbs down on it is", () => {
+  const rows = [
+    { logId: 1, score: -1, articleIds: '["qa-7"]', fixedAt: "2026-09-20T10:00:00" },
+    { logId: 2, score: -1, articleIds: '["qa-7"]', fixedAt: null },
+    { logId: 3, score: 1, articleIds: '["qa-7"]', fixedAt: null },
+    { logId: 4, score: -1, articleIds: '["qa-8"]', fixedAt: "2026-09-21T09:00:00" },
+    { logId: 5, score: 1, articleIds: '["qa-9"]', fixedAt: null },
+  ]
+  const by = (items) => Object.fromEntries(items.map((it) => [it.key, it]))
+  let items = by(gapFbItems(rows, "answer"))
+  // One of two thumbs down fixed: partly, not fixed.
+  assert.strictEqual(items["qa-7"].negFixed, 1)
+  assert.strictEqual(items["qa-7"].fixed, false)
+  assert.strictEqual(items["qa-7"].fixedAt, null)
+  assert.strictEqual(items["qa-8"].fixed, true)
+  assert.strictEqual(items["qa-8"].fixedAt, "2026-09-21T09:00:00")
+  // Nothing rated down is nothing to fix.
+  assert.strictEqual(items["qa-9"].fixed, false)
+  rows[1].fixedAt = "2026-09-22T08:00:00"
+  items = by(gapFbItems(rows, "answer"))
+  assert.strictEqual(items["qa-7"].fixed, true)
+  assert.strictEqual(items["qa-7"].fixedAt, "2026-09-22T08:00:00", "the latest fix")
+  // A new thumbs down after the fix reopens it.
+  rows.push({ logId: 6, score: -1, articleIds: '["qa-7"]', fixedAt: null })
+  assert.strictEqual(by(gapFbItems(rows, "answer"))["qa-7"].fixed, false)
+})
+
+test("an export is named for its analysis and its date range", () => {
+  const r = (from, to) => ({ from, to })
+  assert.strictEqual(gapRangeLabel(r("2026-09-19", "2026-09-19")), "19 Sep 2026")
+  assert.strictEqual(gapRangeLabel(r("2026-09-14", "2026-09-20")), "14–20 Sep 2026")
+  assert.strictEqual(gapRangeLabel(r("2026-08-28", "2026-09-03")), "28 Aug – 3 Sep 2026")
+  assert.strictEqual(gapRangeLabel(r("2025-12-28", "2026-01-03")), "28 Dec 2025 – 3 Jan 2026")
+  assert.strictEqual(gapRangeLabel(null), "")
+  const t = gapExportTitle("Recognition", r("2026-09-14", "2026-09-20"))
+  assert.strictEqual(t.file, "Recognition analysis 14–20 Sep 2026.xlsx")
+  assert.strictEqual(t.sheet, "Recognition 14–20 Sep 2026")
+  // Excel allows 31 characters in a sheet name; past that the sheet is the type.
+  const long = gapExportTitle("Recognition", r("2025-12-28", "2026-01-03"))
+  assert.strictEqual(long.file, "Recognition analysis 28 Dec 2025 – 3 Jan 2026.xlsx")
+  assert.strictEqual(long.sheet, "Recognition")
+  assert.strictEqual(gapExportTitle("GenAI", null).file, "GenAI analysis.xlsx")
+})
 
 const ROWS = [
   { logId: 1, score: -1, articleIds: '["qa-7"]' },

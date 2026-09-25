@@ -1834,6 +1834,10 @@
       #view-gap:not([data-mode="genai"]) .gap-ai-only {
         display: none !important;
       }
+      /* Fixed marks belong to the two work lists, not to GenAI. */
+      #view-gap[data-mode="genai"] .gap-fix-only {
+        display: none !important;
+      }
       .gap-ai-grid,
       .gap-ai-row {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 124px;
@@ -1893,7 +1897,7 @@
         padding: 3px 6px;
       }
       .gap-fb-grid {
-        grid-template-columns: minmax(0, 1fr) 64px 92px 150px;
+        grid-template-columns: minmax(0, 1fr) 64px 92px 150px 28px;
       }
       .gap-head .gap-num,
       .gap-fb-row .gap-num {
@@ -1901,7 +1905,7 @@
       }
       .gap-fb-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 64px 92px 150px;
+        grid-template-columns: minmax(0, 1fr) 64px 92px 150px 28px;
         align-items: center;
         gap: 10px;
         padding: 0 12px;
@@ -1986,7 +1990,7 @@
       }
       .gap-fb-answer {
         display: grid;
-        grid-template-columns: 18px minmax(0, 1fr) auto;
+        grid-template-columns: 18px minmax(0, 1fr) auto 22px;
         align-items: center;
         gap: 8px;
         padding: 6px 14px;
@@ -2222,10 +2226,25 @@
         border-color: var(--green);
         color: var(--green);
       }
-      .gap-row.fixed .gap-fix {
+      .gap-row.fixed .gap-fix,
+      .gap-fb-row.fixed .gap-fix,
+      .gap-fb-answer.fixed .gap-fix {
         background: var(--green);
         border-color: var(--green);
         color: #0b1220;
+      }
+      /* Some of an item's thumbs down are fixed, not all. */
+      .gap-fb-row.partial .gap-fix {
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .gap-fb-row.fixed .gap-fb-what {
+        opacity: 0.6;
+        text-decoration: line-through;
+        text-decoration-color: color-mix(in srgb, var(--green) 70%, transparent);
+      }
+      .gap-fb-answer.fixed .gap-fb-q {
+        opacity: 0.6;
       }
       .gap-copy {
         visibility: hidden;
@@ -6529,6 +6548,85 @@
         opacity: 0.6;
         cursor: default;
       }
+      /* The selection's actions float in a bubble over the bottom of the
+         conversation rather than in its header: the header is one 46px row
+         already full of the conversation's own details, and the Analysis
+         headers more so. Positioned from the thread's rect (`selBubblePlace`);
+         `translate` rather than `transform` centres it, so the entrance
+         animation's transform does not undo the centring. */
+      .sel-bubble {
+        position: fixed;
+        z-index: 150;
+        translate: -50% 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 6px 5px 14px;
+        border-radius: 999px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+        font-size: 0.72rem;
+        color: var(--text);
+        white-space: nowrap;
+        animation: pop-in 0.18s ease-out both;
+      }
+      .sel-bubble[hidden] {
+        display: none;
+      }
+      .sel-bubble.idle {
+        padding: 0;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+      }
+      .sel-bubble-count {
+        font-weight: 600;
+        min-width: 0;
+      }
+      .sel-bubble-count.hint {
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .sel-bubble-sep {
+        width: 1px;
+        align-self: stretch;
+        margin: 3px 2px;
+        background: var(--border);
+      }
+      .sel-bubble-idle {
+        background: none;
+        border: none;
+        border-radius: 999px;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.72rem;
+        padding: 6px 14px;
+      }
+      .sel-bubble-idle:hover {
+        color: var(--text);
+      }
+      .sel-bubble-close {
+        background: none;
+        border: none;
+        border-radius: 50%;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.8rem;
+        width: 24px;
+        height: 24px;
+      }
+      .sel-bubble-close:hover {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .sel-bubble .btn-chat-copy-sel,
+      .sel-bubble .btn-chat-flag-sel {
+        border-radius: 999px;
+      }
+      /* Room under the last turn, so the bubble never sits on it. */
+      .chat-selecting .chat-thread,
+      .gap-thread {
+        padding-bottom: 64px;
+      }
       .btn-chat-sel-action {
         background: none;
         border: none;
@@ -8006,6 +8104,7 @@
         .msg-meta-overlay.open .msg-meta-pop,
         .msg-meta-overlay.closing .msg-meta-pop,
         .ins-keypop,
+        .sel-bubble,
         .conv-suggest,
         .conv-token,
         .pane-loading,
@@ -8522,19 +8621,25 @@
           min-width: 220px;
           max-width: none;
         }
+        /* One row still: the text gives way (ellipsis) and the buttons keep
+           their size. Wrapping put Select alone on a second line, and in
+           select mode split the selection toolbar in two. */
         .chat-header {
-          height: auto;
-          min-height: 46px;
-          flex-wrap: wrap;
-          align-content: center;
           padding: 8px 12px;
         }
         .chat-session-info {
           max-width: 180px;
         }
-        .halo-studio-link,
-        .chat-meta {
+        .chat-header > .halo-studio-link,
+        .chat-header > .chat-meta {
           min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .chat-header > button,
+        .chat-header > .btn-chat-sel-actions {
+          flex-shrink: 0;
         }
       }
 
@@ -11416,7 +11521,7 @@
           <button class="conv-pill" data-gap-kind="low">Low</button>
           <button class="conv-pill" data-gap-kind="zero">Zero</button>
         </div>
-        <div class="gap-pills gap-recog-only" id="gapStatusPills">
+        <div class="gap-pills gap-fix-only" id="gapStatusPills">
           <button class="conv-pill active" data-gap-status="all">Any</button>
           <button class="conv-pill" data-gap-status="open">Open</button>
           <button class="conv-pill" data-gap-status="fixed">Fixed</button>
@@ -11484,6 +11589,7 @@
             <button class="gap-num" data-gap-fb-sort="rated">Rated</button>
             <button class="gap-num" data-gap-fb-sort="neg">Thumbs down</button>
             <button class="gap-num" data-gap-fb-sort="share">Positive</button>
+            <span class="gap-col-f" title="Fixed — every thumbs down dealt with">✓</span>
           </div>
           <div class="gap-list gap-fb-list" id="gapFbList" tabindex="0"></div>
         </div>
@@ -12540,6 +12646,8 @@
           </div>
         </div>
       </div>
+
+    <div class="sel-bubble" id="selBubble" hidden></div>
 
     <div class="modal-overlay" id="convDataModal">
       <div class="modal-box conv-data-modal-box">
@@ -22820,13 +22928,6 @@
               <span class="chat-meta" style="color:var(--orange)"><svg class=ui-icon><use href=#i-flag /></svg> ${
                 session.flaggedCount
               } flagged</span>
-              <button class="btn-chat-copy-sel" id="flaggedCopySelBtn" style="display:none" onclick="copyFlaggedSelectedTurns(this)"><svg class=ui-icon><use href=#i-copy /></svg> Copy 0</button>
-              <span class="chat-meta" id="flaggedSelCount" style="min-width:6ch;text-align:right"></span>
-              <span class="btn-chat-sel-actions" id="flaggedSelAllBtn" style="display:none">
-                <button class="btn-chat-sel-action" onclick="selectAllFlaggedTurns()">All</button>
-                <span style="opacity:0.4">/</span>
-                <button class="btn-chat-sel-action" onclick="deselectAllFlaggedTurns()">None</button>
-              </span>
               <button class="btn-chat-select" id="flaggedSelectModeBtn" onclick="toggleFlaggedSelectMode()">Select</button>
               <button class="btn-chat-select" style="color:var(--red);border-color:var(--red)" onclick="removeFlaggedConversation(${
                 session.flagId
@@ -22889,7 +22990,7 @@
           copyBtn.style.display = count > 0 ? "" : "none"
           copyBtn.innerHTML = `<svg class=ui-icon><use href=#i-copy /></svg> Copy ${count}`
         }
-        if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
+        selBubbleCount(countEl, count)
       }
 
       function enterFlaggedSelectMode() {
@@ -22905,8 +23006,8 @@
         }
         const copyBtn = document.getElementById("flaggedCopySelBtn")
         if (copyBtn) copyBtn.style.display = "none"
-        const selAllBtn = document.getElementById("flaggedSelAllBtn")
-        if (selAllBtn) selAllBtn.style.display = ""
+        selBubbleSync()
+        _updateFlaggedSelectHeader()
       }
 
       function exitFlaggedSelectMode() {
@@ -22926,10 +23027,7 @@
         }
         const copyBtn = document.getElementById("flaggedCopySelBtn")
         if (copyBtn) copyBtn.style.display = "none"
-        const countEl = document.getElementById("flaggedSelCount")
-        if (countEl) countEl.textContent = ""
-        const selAllBtn = document.getElementById("flaggedSelAllBtn")
-        if (selAllBtn) selAllBtn.style.display = "none"
+        selBubbleSync()
       }
 
       function toggleFlaggedSelectMode() {
@@ -23138,6 +23236,15 @@
             active.isContentEditable)
         if (inInput) return
 
+        // Esc leaves select mode — unless a dialog is open, whose own Esc
+        // this would otherwise also fire.
+        if (e.key === "Escape" && !document.querySelector(".modal-overlay.open, #confirmOverlay.open")) {
+          if (chatSelectMode) exitChatSelectMode()
+          if (flaggedSelectMode) exitFlaggedSelectMode()
+          exitGapSelectMode()
+          return
+        }
+
         // F / Cmd/Ctrl+F — flag or unflag selected interactions
         const _isBareF =
           (e.key === "f" || e.key === "F") &&
@@ -23149,6 +23256,12 @@
           if (chatSelectMode && selectedTurnIds.size > 0) {
             e.preventDefault()
             const btn = document.getElementById("chatFlagSelBtn")
+            if (btn) btn.click()
+            return
+          }
+          if (currentView === "gap" && gapSelectMode && gapSelectedTurnIds.size > 0) {
+            e.preventDefault()
+            const btn = document.getElementById("gapFlagSelBtn")
             if (btn) btn.click()
             return
           }
@@ -23173,6 +23286,10 @@
           e.preventDefault()
           const btn = document.getElementById("flaggedCopySelBtn")
           if (btn) copyFlaggedSelectedTurns(btn)
+        } else if (currentView === "gap" && gapSelectMode && gapSelectedTurnIds.size > 0) {
+          e.preventDefault()
+          const btn = document.getElementById("gapCopySelBtn")
+          if (btn) gapCopySelected(btn)
         }
       })
 
@@ -23229,7 +23346,8 @@
       /// A conversation as a read-only thread. Shared by Flagged and GAP
       /// analysis: `opts.markIds` names the turns to mark (by the log id of the
       /// turn's first row) and `opts.markClass` how; with `opts.readOnly` the
-      /// turns carry no flag-selection handlers.
+      /// turns carry no selection handlers, and `opts.turnClick` names the
+      /// handler they carry otherwise (Flagged's, by default).
       function renderFlaggedThread(interactions, opts) {
         const o = opts || {}
         if (!interactions || interactions.length === 0) {
@@ -23384,7 +23502,8 @@
             if (o.readOnly) {
               return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}">${inner}</div>`
             }
-            return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,onFlaggedTurnClick)" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="onFlaggedTurnClick(this,event)">${inner}</div>`
+            const click = o.turnClick || "onFlaggedTurnClick"
+            return `<div class="chat-turn${flaggedCls}" data-turn-id="${turnId}" onmousedown="onTurnMousedown(this,event,${click})" onmouseup="onTurnMouseup()" onmouseleave="onTurnMouseup()" onclick="${click}(this,event)">${inner}</div>`
           })
           .join("")
 
@@ -23724,6 +23843,146 @@
         return gapRows.find((r) => r.logId === id) || null
       }
 
+      // ── Selecting turns in an Analysis conversation ──
+      //
+      // The same select → Copy / Flag the Conversations view has, through the
+      // selection bubble (see `SEL_BUBBLE`). One state for the three modes:
+      // only one conversation is on screen at a time, and anything that
+      // replaces it — another row, another mode, another view — leaves select
+      // mode first.
+      let gapSelectMode = false
+      const gapSelectedTurnIds = new Set()
+      const gapShownSession = { recog: null, feedback: null, genai: null }
+
+      function gapThreadEl() {
+        const id = { recog: "gapChatThread", feedback: "gapFbThread", genai: "gapAiThread" }[gapMode]
+        return document.getElementById(id)
+      }
+
+      /// Draw one conversation into an Analysis thread, `logId`'s turn marked.
+      function gapShowThread(thread, rows, logId, sessionUuid) {
+        exitGapSelectMode()
+        thread.innerHTML = renderFlaggedThread(rows, {
+          markIds: new Set([String(logId)]),
+          markClass: "gap-mark",
+          turnClick: "onGapTurnClick",
+        })
+        gapShownSession[gapMode] = sessionUuid
+        selBubbleSync()
+      }
+
+      function onGapTurnClick(turnEl, event) {
+        if (_longPressActivated) {
+          _longPressActivated = false
+          return
+        }
+        if (!gapSelectMode) {
+          if (event && event.detail >= 3) {
+            enterGapSelectMode()
+            gapSelectedTurnIds.add(turnEl.dataset.turnId)
+            turnEl.classList.add("selected")
+            gapUpdateSelect()
+          }
+          return
+        }
+        const id = turnEl.dataset.turnId
+        if (gapSelectedTurnIds.has(id)) {
+          gapSelectedTurnIds.delete(id)
+          turnEl.classList.remove("selected")
+        } else {
+          gapSelectedTurnIds.add(id)
+          turnEl.classList.add("selected")
+        }
+        gapUpdateSelect()
+      }
+
+      function gapUpdateSelect() {
+        const count = gapSelectedTurnIds.size
+        const copyBtn = document.getElementById("gapCopySelBtn")
+        const flagBtn = document.getElementById("gapFlagSelBtn")
+        if (copyBtn) {
+          copyBtn.style.display = count > 0 ? "" : "none"
+          copyBtn.innerHTML = `<svg class=ui-icon><use href=#i-copy /></svg> Copy ${count}`
+        }
+        if (flagBtn && !flagBtn.disabled) {
+          flagBtn.style.display = count > 0 ? "" : "none"
+          flagBtn.innerHTML = `<svg class=ui-icon><use href=#i-flag /></svg> Flag`
+        }
+        selBubbleCount(document.getElementById("gapSelCount"), count)
+      }
+
+      function enterGapSelectMode() {
+        const t = gapThreadEl()
+        if (!t || !t.querySelector(".chat-turn")) return
+        gapSelectMode = true
+        const side = t.closest(".gap-side")
+        if (side) side.classList.add("chat-selecting")
+        selBubbleSync()
+        gapUpdateSelect()
+      }
+
+      function exitGapSelectMode() {
+        if (!gapSelectMode) return
+        gapSelectMode = false
+        gapSelectedTurnIds.clear()
+        document.querySelectorAll("#view-gap .chat-selecting").forEach((el) => el.classList.remove("chat-selecting"))
+        document.querySelectorAll("#view-gap .chat-turn.selected").forEach((el) => el.classList.remove("selected"))
+        selBubbleSync()
+      }
+
+      function gapSelectAll() {
+        const t = gapThreadEl()
+        if (!t) return
+        t.querySelectorAll(".chat-turn").forEach((el) => {
+          gapSelectedTurnIds.add(el.dataset.turnId)
+          el.classList.add("selected")
+        })
+        gapUpdateSelect()
+      }
+
+      function gapSelectNone() {
+        const t = gapThreadEl()
+        if (t) t.querySelectorAll(".chat-turn.selected").forEach((el) => el.classList.remove("selected"))
+        gapSelectedTurnIds.clear()
+        gapUpdateSelect()
+      }
+
+      function gapCopySelected(btn) {
+        const t = gapThreadEl()
+        if (!t || !gapSelectedTurnIds.size) return
+        const turns = [...t.querySelectorAll(".chat-turn")].filter((el) => gapSelectedTurnIds.has(el.dataset.turnId))
+        _doCopyTurns(turns, btn)
+      }
+
+      /// Flag the selected turns of the conversation on screen — the same
+      /// `flag_session` the Conversations view calls, so it lands in Flagged
+      /// exactly as if it had been flagged there.
+      async function gapFlagSelected(btn) {
+        const uuid = gapShownSession[gapMode]
+        const logIds = [...gapSelectedTurnIds].map((id) => parseInt(id, 10)).filter((n) => !isNaN(n))
+        if (!uuid || !logIds.length || !btn || btn.disabled) return
+        btn.disabled = true
+        btn.innerHTML = "Flagging…"
+        try {
+          const flagId = await window.backend.flagSession(uuid, logIds, convDbPath || "")
+          if (flagId == null) throw new Error("not saved")
+          btn.innerHTML = "&#x2713; Flagged"
+          showImportToast(
+            "success",
+            "Flagged " + logIds.length + (logIds.length === 1 ? " turn" : " turns") + " — find it in the Flagged view.",
+          )
+          if (typeof onFlaggedSessionAdded === "function") onFlaggedSessionAdded()
+          setTimeout(() => {
+            btn.disabled = false
+            gapUpdateSelect()
+          }, 1800)
+        } catch (e) {
+          btn.disabled = false
+          gapUpdateSelect()
+          showImportToast("error", "Could not flag this conversation. " + String(e))
+        }
+      }
+
       async function gapSelect(logId) {
         gapActiveId = logId
         gapPaintRows()
@@ -23745,11 +24004,7 @@
           gapSessionCache.set(row.sessionUuid, rows)
           if (gapActiveId !== logId) return
         }
-        thread.innerHTML = renderFlaggedThread(rows, {
-          markIds: new Set([String(logId)]),
-          markClass: "gap-mark",
-          readOnly: true,
-        })
+        gapShowThread(thread, rows, logId, row.sessionUuid)
         // The "Fix this" panel reads this turn's recognition details and the
         // turns after it, which is why it waits for the conversation.
         gapFixFor = { row, chatRows: rows }
@@ -23891,6 +24146,12 @@
         const before = rows.map((r) => r.fixedAt)
         const stamp = new Date().toISOString().slice(0, 19)
         rows.forEach((r) => (r.fixedAt = fixed ? r.fixedAt || stamp : null))
+        // The same answer can be on the Feedback list too; its mark is shared.
+        const idSet = new Set(ids)
+        gapFbRows.forEach((r) => {
+          if (idSet.has(r.logId)) r.fixedAt = fixed ? r.fixedAt || stamp : null
+        })
+        gapFbFixStamp++
         gapInvalidate()
         gapRenderList(false)
         const active = gapRowById(gapActiveId)
@@ -24271,20 +24532,30 @@
 
       /// `Analysis recognition 2026-09-23 September.xlsx` — which list, the day
       /// it was made, and the month (or months) the range covers.
-      function gapExportName(what) {
-        const monthOf = (day) => {
-          try {
-            return new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, 1)).toLocaleString("en-GB", {
-              month: "long",
-              timeZone: "UTC",
-            })
-          } catch (e) {
-            return day.slice(0, 7)
-          }
-        }
-        const a = monthOf(gapRange.from)
-        const b = monthOf(gapRange.to)
-        return "Analysis " + what + " " + gapToday() + " " + (a === b ? a : a + "-" + b) + ".xlsx"
+      /// A range of local days as people write it: "19 Sep 2026",
+      /// "14–20 Sep 2026", "28 Aug – 3 Sep 2026", "28 Dec 2025 – 3 Jan 2026" —
+      /// only as much of the month and year as the two ends do not share.
+      function gapRangeLabel(range) {
+        const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        const part = (day) => ({ d: +day.slice(8, 10), m: M[+day.slice(5, 7) - 1], y: day.slice(0, 4) })
+        if (!range || !/^\d{4}-\d{2}-\d{2}$/.test(range.from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(range.to || ""))
+          return ""
+        const a = part(range.from)
+        const b = part(range.to)
+        if (range.from === range.to) return `${a.d} ${a.m} ${a.y}`
+        if (a.y !== b.y) return `${a.d} ${a.m} ${a.y} – ${b.d} ${b.m} ${b.y}`
+        if (a.m !== b.m) return `${a.d} ${a.m} – ${b.d} ${b.m} ${b.y}`
+        return `${a.d}–${b.d} ${a.m} ${a.y}`
+      }
+
+      /// What an Analysis export is called — "Recognition analysis 14–20 Sep
+      /// 2026" — as the file name, and as the sheet name when Excel's 31
+      /// characters allow the range; otherwise the sheet is just the type.
+      function gapExportTitle(what, range) {
+        const when = gapRangeLabel(range)
+        const title = what + " analysis" + (when ? " " + when : "")
+        const sheet = when && (what + " " + when).length <= 31 ? what + " " + when : what
+        return { file: title + ".xlsx", sheet }
       }
 
       async function gapExport() {
@@ -24303,7 +24574,7 @@
           return Array.isArray(a) ? a.join(", ") : ""
         }
         const sheet = {
-          name: "Recognition",
+          name: gapExportTitle("Recognition", gapRange).sheet,
           headers: [
             "Date / time",
             "Question",
@@ -24334,7 +24605,7 @@
           })),
         }
         try {
-          const res = await window.backend.saveExportXlsx(gapExportName("recognition"), sheet)
+          const res = await window.backend.saveExportXlsx(gapExportTitle("Recognition", gapRange).file, sheet)
           if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
           else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
         } catch (e) {
@@ -24388,13 +24659,26 @@
           if (!keys.size) keys.add("")
           for (const key of keys) {
             let it = items.get(key)
-            if (!it) items.set(key, (it = { key, rated: 0, neg: 0, rows: [] }))
+            if (!it) items.set(key, (it = { key, rated: 0, neg: 0, negFixed: 0, fixedAt: null, rows: [] }))
             it.rated++
-            if (r.score < 0) it.neg++
+            if (r.score < 0) {
+              it.neg++
+              if (r.fixedAt) {
+                it.negFixed++
+                if (!it.fixedAt || r.fixedAt > it.fixedAt) it.fixedAt = r.fixedAt
+              }
+            }
             it.rows.push(r)
           }
         }
-        return [...items.values()].map((it) => ({ ...it, share: (it.rated - it.neg) / it.rated }))
+        // Fixed once every thumbs down is dealt with. Nothing rated down is
+        // nothing to fix; a thumbs down that arrives after the fix reopens it.
+        return [...items.values()].map((it) => ({
+          ...it,
+          share: (it.rated - it.neg) / it.rated,
+          fixed: it.neg > 0 && it.negFixed === it.neg,
+          fixedAt: it.neg > 0 && it.negFixed === it.neg ? it.fixedAt : null,
+        }))
       }
 
       /// What an item is called: its id, and the title the content export gives
@@ -24406,11 +24690,15 @@
 
       let _gapFbView = null
       let _gapFbViewKey = ""
+      // Bumped by every fixed mark, so the memoized view is rebuilt.
+      let gapFbFixStamp = 0
       function gapFbView() {
-        const vkey = JSON.stringify([gapFbLoadedKey, gapFbGroup, gapFbMin, gapFbQuery, gapFbSort])
+        const vkey = JSON.stringify([gapFbLoadedKey, gapFbGroup, gapFbMin, gapFbQuery, gapFbSort, gapStatus, gapFbFixStamp])
         if (_gapFbView && _gapFbViewKey === vkey) return _gapFbView
         const q = gapFbQuery.trim().toLowerCase()
         let list = gapFbItems(gapFbRows, gapFbGroup).filter((it) => it.rated >= gapFbMin)
+        if (gapStatus === "open") list = list.filter((it) => it.neg > it.negFixed)
+        if (gapStatus === "fixed") list = list.filter((it) => it.fixed)
         for (const it of list) it.ref = gapFbRef(it.key)
         if (q) {
           list = list.filter((it) =>
@@ -24448,8 +24736,10 @@
       async function gapSetMode(mode) {
         if (mode === gapMode) return
         gapRememberScroll()
+        exitGapSelectMode()
         gapMode = mode === "feedback" || mode === "genai" ? mode : "recog"
         gapApplyMode()
+        selBubbleSync()
         if (gapMode === "feedback") {
           await gapFbEnter()
           return
@@ -24554,9 +24844,17 @@
             const r = it.ref
             const none = it.key === ""
             const pct = Math.round(it.share * 100)
+            const fixTitle = !it.neg
+              ? "Nothing rated down — nothing to fix"
+              : it.fixed
+              ? "Fixed " + fmtTs(it.fixedAt) + " — click to reopen"
+              : it.negFixed
+              ? it.negFixed + " of " + it.neg + " thumbs down fixed — click to mark the rest"
+              : "Mark its " + (it.neg === 1 ? "thumbs down" : it.neg + " thumbs down") + " fixed"
             return (
               '<div class="gap-fb-row' +
               (it.key === gapFbActive ? " active" : "") +
+              (it.fixed ? " fixed" : it.negFixed ? " partial" : "") +
               '" data-key="' +
               esc(it.key) +
               '" onclick="gapFbSelect(this.dataset.key)"><span class="gap-fb-what" title="' +
@@ -24579,15 +24877,78 @@
               gapFbShareTone(it.share) +
               '">' +
               pct +
-              "%</span></span></div>"
+              '%</span></span><span class="gap-col-f">' +
+              (it.neg
+                ? '<button class="gap-fix" title="' +
+                  esc(fixTitle) +
+                  '" data-key="' +
+                  esc(it.key) +
+                  '" onclick="event.stopPropagation();gapFbToggleItem(this.dataset.key)">✓</button>'
+                : "") +
+              "</span></div>"
             )
           })
           .join("")
         if (resetScroll) list.scrollTop = 0
       }
 
+      /// Mark answers fixed or reopen them — the same `gap_fixed` rows the
+      /// Recognition list writes, so an answer on both lists changes on both.
+      /// Optimistic, like `gapToggleFixed`: drawn at once, put back on failure.
+      async function gapFbToggleFixed(ids, fixed) {
+        const set = new Set(ids)
+        const rows = gapFbRows.filter((r) => set.has(r.logId))
+        const twins = gapRows.filter((r) => set.has(r.logId))
+        const before = rows.map((r) => r.fixedAt)
+        const twinBefore = twins.map((r) => r.fixedAt)
+        const stamp = new Date().toISOString().slice(0, 19)
+        const apply = (r) => (r.fixedAt = fixed ? r.fixedAt || stamp : null)
+        rows.forEach(apply)
+        twins.forEach(apply)
+        gapFbRepaint()
+        try {
+          const at = await window.backend.setGapFixed(ids, fixed, null)
+          if (fixed && at) [...rows, ...twins].forEach((r) => (r.fixedAt = r.fixedAt === stamp ? at : r.fixedAt))
+          gapFbRepaint()
+        } catch (e) {
+          rows.forEach((r, i) => (r.fixedAt = before[i]))
+          twins.forEach((r, i) => (r.fixedAt = twinBefore[i]))
+          gapFbRepaint()
+          showImportToast("error", "Could not save: " + String(e))
+        }
+        if (twins.length) gapInvalidate()
+      }
+
+      /// The item's own ✓: every thumbs down on it fixed, or — when it already
+      /// is — every one of them reopened.
+      function gapFbToggleItem(key) {
+        const it = gapFbItemByKey(key) || gapFbItems(gapFbRows, gapFbGroup).find((x) => x.key === key)
+        if (!it || !it.neg) return
+        const negs = it.rows.filter((r) => r.score < 0).map((r) => r.logId)
+        gapFbToggleFixed(negs, !it.fixed)
+      }
+
+      /// Redraw what a fixed mark changes: the list, and the open item's side.
+      function gapFbRepaint() {
+        gapFbFixStamp++
+        gapFbRenderList(false)
+        if (gapFbActive != null) {
+          const answer = gapFbActiveAnswer
+          const scroll = document.getElementById("gapFbAnswers").scrollTop
+          gapFbRenderSideKeep()
+          document.getElementById("gapFbAnswers").scrollTop = scroll
+          gapFbActiveAnswer = answer
+        }
+      }
+
+      /// The item as listed — or, when the Open filter has just dropped it for
+      /// being fixed, as it stands, so the side panel keeps showing it.
       function gapFbItemByKey(key) {
-        return gapFbView().find((it) => it.key === key) || null
+        const listed = gapFbView().find((it) => it.key === key)
+        if (listed) return listed
+        const it = gapFbItems(gapFbRows, gapFbGroup).find((x) => x.key === key)
+        if (it) it.ref = gapFbRef(it.key)
+        return it || null
       }
 
       function gapFbSelect(key) {
@@ -24610,7 +24971,11 @@
           .sort((a, b) => a.score - b.score || (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0))
       }
 
-      function gapFbRenderSide() {
+      function gapFbRenderSide(keepThread) {
+        if (!keepThread) {
+          exitGapSelectMode()
+          gapShownSession.feedback = null
+        }
         const header = document.getElementById("gapFbHeader")
         const answers = document.getElementById("gapFbAnswers")
         const thread = document.getElementById("gapFbThread")
@@ -24621,6 +24986,7 @@
           answers.hidden = true
           answers.innerHTML = ""
           thread.innerHTML = ""
+          selBubbleSync()
           return
         }
         const r = it.ref
@@ -24637,6 +25003,17 @@
           " thumbs down · " +
           gapFbPct(it.share) +
           " positive</span>" +
+          (it.neg
+            ? '<button class="btn-secondary gap-fixed-btn' +
+              (it.fixed ? " on" : "") +
+              '" data-key="' +
+              esc(it.key) +
+              '" onclick="gapFbToggleItem(this.dataset.key)" title="' +
+              (it.fixed ? "Reopen every thumbs down on this" : "Mark every thumbs down on this as fixed") +
+              '">' +
+              (it.fixed ? "✓ Fixed" : it.negFixed ? "Mark the rest fixed" : "Mark fixed") +
+              "</button>"
+            : "") +
           (r.url ? gapEditHtml(r.url, editLabel) : "") +
           (it.key
             ? '<button class="btn-secondary" data-key="' +
@@ -24649,6 +25026,7 @@
             (a) =>
               '<div class="gap-fb-answer' +
               (a.logId === gapFbActiveAnswer ? " active" : "") +
+              (a.score < 0 && a.fixedAt ? " fixed" : "") +
               '" data-log-id="' +
               a.logId +
               '" title="' +
@@ -24663,11 +25041,29 @@
               esc(a.question || "(no question)") +
               '</span><span class="gap-fb-when">' +
               esc(fmtTs(a.timestamp)) +
-              "</span></div>",
+              "</span>" +
+              (a.score < 0
+                ? '<button class="gap-fix" title="' +
+                  (a.fixedAt ? "Fixed " + esc(fmtTs(a.fixedAt)) + " — click to reopen" : "Mark this thumbs down fixed") +
+                  '" onclick="event.stopPropagation();gapFbToggleFixed([' +
+                  a.logId +
+                  "], " +
+                  !a.fixedAt +
+                  ')">✓</button>'
+                : "<span></span>") +
+              "</div>",
           )
           .join("")
         answers.scrollTop = 0
+        if (keepThread) return
         thread.innerHTML = ""
+        selBubbleSync()
+      }
+
+      /// Re-draw the open item's header and answers after a fixed mark, leaving
+      /// its conversation — and any selection in it — where it is.
+      function gapFbRenderSideKeep() {
+        gapFbRenderSide(true)
       }
 
       /// The conversation a rated answer came from, with that answer marked —
@@ -24693,11 +25089,7 @@
           gapSessionCache.set(row.sessionUuid, rows)
           if (gapFbActiveAnswer !== logId) return
         }
-        thread.innerHTML = renderFlaggedThread(rows, {
-          markIds: new Set([String(logId)]),
-          markClass: "gap-mark",
-          readOnly: true,
-        })
+        gapShowThread(thread, rows, logId, row.sessionUuid)
         requestAnimationFrame(() => {
           const el = thread.querySelector('.chat-turn[data-turn-id="' + logId + '"]')
           if (el) el.scrollIntoView({ block: "center" })
@@ -24727,11 +25119,11 @@
           return
         }
         const sheet = {
-          name: "Feedback",
-          headers: ["Id", "Kind", "Title", "Rated", "Thumbs down", "Thumbs up", "Positive %"],
-          widths: [16, 10, 60, 9, 13, 11, 12],
+          name: gapExportTitle("Feedback", gapRange).sheet,
+          headers: ["Id", "Kind", "Title", "Rated", "Thumbs down", "Thumbs up", "Positive %", "Fixed", "Fixed at"],
+          widths: [16, 10, 60, 9, 13, 11, 12, 12, 18],
           rows: view.map((it) => ({
-            highlight: false,
+            highlight: it.fixed,
             cells: [
               it.key || "",
               it.key ? { article: "Article", node: "Dialog node", dialog: "Dialog" }[it.ref.kind] || "" : "None",
@@ -24740,11 +25132,13 @@
               it.neg,
               it.rated - it.neg,
               Math.round(it.share * 1000) / 10,
+              it.fixed ? "Yes" : it.negFixed ? it.negFixed + " of " + it.neg : "",
+              it.fixed ? fmtTs(it.fixedAt) : "",
             ],
           })),
         }
         try {
-          const res = await window.backend.saveExportXlsx(gapExportName("feedback"), sheet)
+          const res = await window.backend.saveExportXlsx(gapExportTitle("Feedback", gapRange).file, sheet)
           if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
           else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
         } catch (e) {
@@ -24910,7 +25304,10 @@
             '<div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">Select a question to read the GenAI answer and the conversation around it.</div>'
           answer.hidden = true
           answer.innerHTML = ""
+          exitGapSelectMode()
+          gapShownSession.genai = null
           document.getElementById("gapAiThread").innerHTML = ""
+          selBubbleSync()
           return
         }
         const sources = gapAiSources(row)
@@ -24966,11 +25363,7 @@
           gapSessionCache.set(row.sessionUuid, rows)
           if (gapAiActive !== logId) return
         }
-        thread.innerHTML = renderFlaggedThread(rows, {
-          markIds: new Set([String(logId)]),
-          markClass: "gap-mark",
-          readOnly: true,
-        })
+        gapShowThread(thread, rows, logId, row.sessionUuid)
         requestAnimationFrame(() => {
           const el = thread.querySelector('.chat-turn[data-turn-id="' + logId + '"]')
           if (el) el.scrollIntoView({ block: "center" })
@@ -24989,7 +25382,7 @@
           return
         }
         const sheet = {
-          name: "GenAI",
+          name: gapExportTitle("GenAI", gapRange).sheet,
           headers: ["Date / time", "Question", "GenAI answer", "Interaction type", "Source Articles", "Culture", "Conversation"],
           widths: [18, 50, 80, 22, 18, 8, 38],
           rows: view.map((r) => ({
@@ -25006,7 +25399,7 @@
           })),
         }
         try {
-          const res = await window.backend.saveExportXlsx(gapExportName("GenAI"), sheet)
+          const res = await window.backend.saveExportXlsx(gapExportTitle("GenAI", gapRange).file, sheet)
           if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
           else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
         } catch (e) {
@@ -25347,6 +25740,7 @@
           document.querySelectorAll("[data-gap-status]").forEach((x) => x.classList.toggle("active", x === b))
           gapInvalidate()
           gapRenderList(true)
+          gapFbRenderList(true)
         }),
       )
       let _gapFilterTimer = null
@@ -25443,6 +25837,13 @@
         }),
       )
       document.getElementById("gapFbList").addEventListener("keydown", (e) => {
+        if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          if (gapFbActive != null) {
+            e.preventDefault()
+            gapFbToggleItem(gapFbActive)
+          }
+          return
+        }
         if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return
         const view = gapFbView()
         if (!view.length) return
@@ -25499,6 +25900,10 @@
 
       function switchView(name) {
         if (currentView === "gap" && name !== "gap") gapRememberScroll()
+        // A selection belongs to the conversation it was made in.
+        if (name !== "conversations" && chatSelectMode) exitChatSelectMode()
+        if (name !== "flagged" && flaggedSelectMode) exitFlaggedSelectMode()
+        if (name !== "gap") exitGapSelectMode()
         const crossesContent = (currentView === "content") !== (name === "content")
         currentView = name
         localStorage.setItem("cm-view", name)
@@ -25545,6 +25950,7 @@
         if (name === "gap") {
           onEnterGapView()
         }
+        selBubbleSync()
       }
 
       // Apply initial view on load
@@ -36998,6 +37404,127 @@
       const chatFlaggedTurnMap = new Map()
       let chatCopyFormat = localStorage.getItem("chat-copy-format") || "table"
 
+      // ── The selection bubble ─────────────────────────────────────────
+      //
+      // One floating bar for the three places a conversation can be read —
+      // Conversations, Flagged and Analysis — carrying what a selection of
+      // turns can do: how many, All / None, Copy, Flag (not in Flagged, whose
+      // conversations are flagged already) and ✕. It lives over the bottom of
+      // the thread rather than in the header, which has no room left for it.
+      // The buttons keep the ids the per-view code already updates
+      // (`chatCopySelBtn`, `flaggedSelCount`, …), so that code is unchanged:
+      // it finds them here instead of in the header.
+      //
+      // In Analysis, whose headers are fuller still, the bubble is also the way
+      // in: while a conversation is shown it waits as a small "Select turns".
+      const SEL_BUBBLE = {
+        conv: {
+          p: "chat",
+          thread: () => document.getElementById("chatThread"),
+          all: "selectAllTurns()",
+          none: "deselectAllTurns()",
+          copy: "copySelectedTurns(this)",
+          flag: "flagCurrentSession(this)",
+          exit: "exitChatSelectMode()",
+        },
+        flagged: {
+          p: "flagged",
+          thread: () => document.getElementById("flaggedChatThread"),
+          all: "selectAllFlaggedTurns()",
+          none: "deselectAllFlaggedTurns()",
+          copy: "copyFlaggedSelectedTurns(this)",
+          flag: null,
+          exit: "exitFlaggedSelectMode()",
+        },
+        gap: {
+          p: "gap",
+          thread: () => gapThreadEl(),
+          all: "gapSelectAll()",
+          none: "gapSelectNone()",
+          copy: "gapCopySelected(this)",
+          flag: "gapFlagSelected(this)",
+          exit: "exitGapSelectMode()",
+        },
+      }
+
+      function selBubbleHtml(kind) {
+        if (kind === "gap-idle")
+          return `<button class="sel-bubble-idle" onclick="enterGapSelectMode()" title="Pick turns of this conversation to copy or flag (or triple-click a turn)">Select turns</button>`
+        const v = SEL_BUBBLE[kind]
+        return (
+          `<span class="sel-bubble-count hint" id="${v.p}SelCount">Click turns to select</span>` +
+          `<span class="btn-chat-sel-actions" id="${v.p}SelAllBtn">` +
+          `<button class="btn-chat-sel-action" onclick="${v.all}">All</button>` +
+          `<span style="opacity:0.4">/</span>` +
+          `<button class="btn-chat-sel-action" onclick="${v.none}">None</button></span>` +
+          `<button class="btn-chat-copy-sel" id="${v.p}CopySelBtn" style="display:none" onclick="${v.copy}"><svg class=ui-icon><use href=#i-copy /></svg> Copy 0</button>` +
+          (v.flag
+            ? `<button class="btn-chat-flag-sel" id="${v.p}FlagSelBtn" style="display:none" onclick="${v.flag}" title="Save flagged conversation to Flagged view"><svg class=ui-icon><use href=#i-flag /></svg> Flag</button>`
+            : "") +
+          `<span class="sel-bubble-sep"></span>` +
+          `<button class="sel-bubble-close" onclick="${v.exit}" title="Leave select mode (Esc)">&#x2715;</button>`
+        )
+      }
+
+      /// Which bubble the screen should show now, if any.
+      function selBubbleKind() {
+        if (currentView === "conversations" && chatSelectMode) return "conv"
+        if (currentView === "flagged" && flaggedSelectMode) return "flagged"
+        if (currentView === "gap") {
+          if (gapSelectMode) return "gap"
+          const t = gapThreadEl()
+          if (t && t.querySelector(".chat-turn")) return "gap-idle"
+        }
+        return null
+      }
+
+      /// Show, swap or hide the bubble to match the state. Re-renders only
+      /// when the kind changes, so a "✓ Copied!" on a button survives a
+      /// re-placement.
+      function selBubbleSync() {
+        const el = document.getElementById("selBubble")
+        if (!el) return
+        const kind = selBubbleKind()
+        if (!kind) {
+          el.hidden = true
+          el.dataset.kind = ""
+          return
+        }
+        if (el.dataset.kind !== kind) {
+          el.innerHTML = selBubbleHtml(kind)
+          el.dataset.kind = kind
+          el.classList.toggle("idle", kind === "gap-idle")
+        }
+        el.hidden = false
+        selBubblePlace()
+      }
+
+      /// Centre the bubble over the bottom of the thread it belongs to. Fixed
+      /// rather than inside the thread, so a scroll never carries it away and
+      /// no pane's overflow can clip it.
+      function selBubblePlace() {
+        const el = document.getElementById("selBubble")
+        if (!el || el.hidden) return
+        const kind = el.dataset.kind === "gap-idle" ? "gap" : el.dataset.kind
+        const t = SEL_BUBBLE[kind] && SEL_BUBBLE[kind].thread()
+        if (!t || !t.offsetParent) {
+          el.hidden = true
+          el.dataset.kind = ""
+          return
+        }
+        const r = t.getBoundingClientRect()
+        el.style.left = Math.round(r.left + r.width / 2) + "px"
+        el.style.bottom = Math.round(window.innerHeight - r.bottom + 14) + "px"
+      }
+      window.addEventListener("resize", selBubblePlace)
+
+      /// The count line: "3 selected", or the hint while nothing is.
+      function selBubbleCount(el, count) {
+        if (!el) return
+        el.textContent = count > 0 ? count + " selected" : "Click turns to select"
+        el.classList.toggle("hint", count === 0)
+      }
+
       function onTurnClick(turnEl, event) {
         if (_longPressActivated) {
           _longPressActivated = false
@@ -37043,7 +37570,7 @@
             ? "Remove from Flagged view"
             : "Save flagged conversation to Flagged view"
         }
-        if (countEl) countEl.textContent = count > 0 ? count + " selected" : ""
+        selBubbleCount(countEl, count)
       }
 
       function enterChatSelectMode() {
@@ -37062,8 +37589,8 @@
         if (copyBtn) copyBtn.style.display = "none"
         const flagBtn = document.getElementById("chatFlagSelBtn")
         if (flagBtn) flagBtn.style.display = "none"
-        const selAllBtn = document.getElementById("chatSelAllBtn")
-        if (selAllBtn) selAllBtn.style.display = ""
+        selBubbleSync()
+        _updateChatSelectHeader()
       }
 
       function exitChatSelectMode() {
@@ -37083,10 +37610,9 @@
         }
         const copyBtn = document.getElementById("chatCopySelBtn")
         if (copyBtn) copyBtn.style.display = "none"
-        const countEl = document.getElementById("chatSelCount")
-        if (countEl) countEl.textContent = ""
-        const selAllBtn = document.getElementById("chatSelAllBtn")
-        if (selAllBtn) selAllBtn.style.display = "none"
+        const flagBtn = document.getElementById("chatFlagSelBtn")
+        if (flagBtn) flagBtn.style.display = "none"
+        selBubbleSync()
       }
 
       function toggleChatSelectMode() {
@@ -39930,14 +40456,6 @@
               <span class="chat-meta">${
                 session.interactionCount
               } interactions &nbsp;·&nbsp; ${esc(session.culture || "")}</span>
-              <button class="btn-chat-copy-sel" id="chatCopySelBtn" style="display:none" onclick="copySelectedTurns(this)"><svg class=ui-icon><use href=#i-copy /></svg> Copy 0</button>
-              <button class="btn-chat-flag-sel" id="chatFlagSelBtn" style="display:none" onclick="flagCurrentSession(this)" title="Save flagged conversation to Flagged view"><svg class=ui-icon><use href=#i-flag /></svg> Flag</button>
-              <span class="chat-meta" id="chatSelCount" style="min-width:6ch;text-align:right"></span>
-              <span class="btn-chat-sel-actions" id="chatSelAllBtn" style="display:none;font-size:0.72rem;color:var(--muted);display:none">
-                <button class="btn-chat-sel-action" onclick="selectAllTurns()">All</button>
-                <span style="opacity:0.4">/</span>
-                <button class="btn-chat-sel-action" onclick="deselectAllTurns()">None</button>
-              </span>
               <button class="btn-chat-select" id="chatSelectModeBtn" onclick="toggleChatSelectMode()">Select</button>
             `
           }

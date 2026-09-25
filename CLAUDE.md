@@ -112,7 +112,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
 | `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
 | `get_gap_interactions` | `getGapInteractions({fromUtc, toUtc, threshold})` | The low- and zero-recognition interactions of a UTC range, newest first, each with its fixed mark — `{rows, truncated}`. See `docs/gap.md` |
-| `get_gap_feedback`    | `getGapFeedback({fromUtc, toUtc})` | The answers rated in a UTC range, each once with `score` -1 if any rating of it was down — `{rows, truncated}`. The GAP Feedback mode groups them. See `docs/gap.md` → "Feedback" |
+| `get_gap_feedback`    | `getGapFeedback({fromUtc, toUtc})` | The answers rated in a UTC range, each once with its latest rating as `score` and its `fixedAt` mark — `{rows, truncated}`. The GAP Feedback mode groups them. See `docs/gap.md` → "Feedback" and "Fixed marks in Feedback" |
 | `get_gap_genai`       | `getGapGenAi({fromUtc, toUtc})` | Every GenAI question and answer of a UTC range, newest first — the GenAI pill's predicate — with `faqsFound` and the answer's worst rating. See `docs/gap.md` → "GenAI" |
 | `set_gap_fixed`       | `setGapFixed(logIds, fixed, note?)` | Marks or unmarks interactions as fixed in `gap_fixed`; returns the stored timestamp |
 | `pick_screen_color`   | `pickScreenColor()`              | macOS only: opens AppKit's `NSColorSampler` and returns the picked colour as sRGB `#rrggbb`, or `null` on Esc; ends the system sampler helper if its overlay outstays the pick. `Err("unsupported")` elsewhere — Windows uses the webview's `EyeDropper`. See `docs/insights.md` → "Insights settings" |
@@ -429,17 +429,22 @@ The orientation map for the whole window. It says what is on screen and where;
            (Edit entity) · answered by (Edit Article/Dialog) · Articles using
            these entities · what they asked next — every line with Edit ↗ and
            copy-link; typing in its search box finds entities instead
-  Feedback mode (same range): Per answer / Per Article · Dialog · at least N
-           ratings · filter · count · Export .xlsx
-  left:    Article / Dialog · rated · thumbs down · positive share (bar),
-           lowest first, sortable
-  right:   the item (Edit ↗ · Thumbs down in Conversations) · its rated
-           questions, thumbs down first · the conversation, rated answer marked
+  Feedback mode (same range): Any/Open/Fixed · Per answer / Per Article ·
+           Dialog · at least N ratings · filter · count · Export .xlsx
+  left:    Article / Dialog · rated · thumbs down · positive share (bar) ·
+           ✓ fixed (every thumbs down fixed; F toggles), lowest first, sortable
+  right:   the item (Mark fixed · Edit ↗ · Thumbs down in Conversations) ·
+           its rated questions, thumbs down first, each thumbs down with its
+           own ✓ · the conversation, rated answer marked
   GenAI mode (same range): filter · count · Export .xlsx
   left:    Question · GenAI answer · When (windowed)
   right:   header (language · when · interaction type as logged · Open in
            Halo Studio · Copy question · Open in Conversations) ·
            the answer formatted + source Articles · the conversation, turn marked
+  every Analysis conversation: a floating "Select turns" → the selection
+           bubble (N selected · All / None · Copy · Flag · ✕) — the same bubble
+           Conversations and Flagged use; Export .xlsx is named
+           "<Analysis> analysis <date range>"
 
 <div#insightsModal>
   header row 1: hero count + what it counts | Conversations / Interactions
