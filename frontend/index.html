@@ -22891,6 +22891,9 @@
         try {
           const interactions =
             await window.backend.getFlaggedSessionInteractions(flagId)
+          // Another card was clicked (or this one unflagged) while this read
+          // was in flight: that selection owns the pane now.
+          if (activeFlagId !== flagId) return
 
           // Collect unique contexts across all interactions
           const seenCtxKey = new Set()
@@ -22949,6 +22952,7 @@
           _initFlaggedNoteArea(session)
         } catch (e) {
           console.error("getFlaggedSessionInteractions error:", e)
+          if (activeFlagId !== flagId) return
           header.innerHTML = `<span style="font-size:0.72rem;color:var(--red)">Error loading flagged conversation</span>`
           thread.innerHTML = `<div class="chat-empty">Failed to load interactions.</div>`
           const area = document.getElementById("flaggedNoteArea")
@@ -23573,6 +23577,33 @@
       let gapRange = null // {from, to} as local YYYY-MM-DD
       let _gapView = null // cached filtered + sorted list
       const gapSessionCache = new Map()
+      /// The database `gapSessionCache` was filled from. Rows are only ever
+      /// answered from the database they were read from.
+      let gapSessionCacheDb = null
+      /// Conversations kept for Analysis. Stepping through a month of rows
+      /// opens hundreds, and each one held its every turn for the rest of the
+      /// session; the oldest-read ones go first once this many are kept.
+      const GAP_SESSION_CACHE_MAX = 150
+
+      /// A conversation Analysis has already read, or undefined.
+      function gapCachedSession(uuid) {
+        if (gapSessionCacheDb !== convDbPath) return undefined
+        return gapSessionCache.get(uuid)
+      }
+
+      /// Keep a conversation that was read successfully. Never called for a
+      /// failed read: caching one as `[]` showed that conversation as empty
+      /// for the rest of the session, however transient the failure was.
+      function gapCacheSession(uuid, rows) {
+        if (gapSessionCacheDb !== convDbPath) {
+          gapSessionCache.clear()
+          gapSessionCacheDb = convDbPath
+        }
+        gapSessionCache.delete(uuid)
+        gapSessionCache.set(uuid, rows)
+        if (gapSessionCache.size > GAP_SESSION_CACHE_MAX)
+          gapSessionCache.delete(gapSessionCache.keys().next().value)
+      }
 
       /// Today in the display timezone, as `YYYY-MM-DD`.
       function gapToday() {
@@ -23994,17 +24025,17 @@
         gapRenderHeader(row)
         gapRenderWords(row)
         const thread = document.getElementById("gapChatThread")
-        let rows = gapSessionCache.get(row.sessionUuid)
+        let rows = gapCachedSession(row.sessionUuid)
         if (!rows) {
           setPaneLoading("gapChatThread", "Loading conversation…")
           try {
             rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
+            gapCacheSession(row.sessionUuid, rows)
           } catch (e) {
             rows = []
           } finally {
             clearPaneLoading("gapChatThread")
           }
-          gapSessionCache.set(row.sessionUuid, rows)
           if (gapActiveId !== logId) return
         }
         gapShowThread(thread, rows, logId, row.sessionUuid)
@@ -25092,17 +25123,17 @@
         if (!row) return
         gapFbHaloFill()
         const thread = document.getElementById("gapFbThread")
-        let rows = gapSessionCache.get(row.sessionUuid)
+        let rows = gapCachedSession(row.sessionUuid)
         if (!rows) {
           setPaneLoading("gapFbThread", "Loading conversation…")
           try {
             rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
+            gapCacheSession(row.sessionUuid, rows)
           } catch (e) {
             rows = []
           } finally {
             clearPaneLoading("gapFbThread")
           }
-          gapSessionCache.set(row.sessionUuid, rows)
           if (gapFbActiveAnswer !== logId) return
         }
         gapShowThread(thread, rows, logId, row.sessionUuid)
@@ -25366,17 +25397,17 @@
         if (!row) return
         gapAiRenderSide(row)
         const thread = document.getElementById("gapAiThread")
-        let rows = gapSessionCache.get(row.sessionUuid)
+        let rows = gapCachedSession(row.sessionUuid)
         if (!rows) {
           setPaneLoading("gapAiThread", "Loading conversation…")
           try {
             rows = (await window.backend.getSessionInteractions(row.sessionUuid)) || []
+            gapCacheSession(row.sessionUuid, rows)
           } catch (e) {
             rows = []
           } finally {
             clearPaneLoading("gapAiThread")
           }
-          gapSessionCache.set(row.sessionUuid, rows)
           if (gapAiActive !== logId) return
         }
         gapShowThread(thread, rows, logId, row.sessionUuid)
@@ -40470,12 +40501,14 @@
         setPaneLoading("chatThread", "Loading conversation…")
         setBusy(chatControls, true)
         try {
-          activeInteractions = await window.backend.getSessionInteractions(
-            uuid,
-          )
+          const rows = await window.backend.getSessionInteractions(uuid)
           // A second click while the first was in flight: the later selection
-          // wins, and this one must not paint over it.
+          // wins, and this one must not paint over it — nor replace the rows
+          // behind it. Assigning before this check let a slow first read land
+          // after the second had rendered, leaving chat search, copy and flag
+          // acting on the other conversation's turns under this one's header.
           if (activeSessionUuid !== uuid) return
+          activeInteractions = rows
           resetChatRenderCaches()
           renderChatThread()
           // Update header. A conversation opened from outside the search
