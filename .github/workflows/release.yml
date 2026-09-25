@@ -91,27 +91,12 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Select, copy and flag — now in Analysis too
-            - Picking turns of a conversation to **Copy** or **Flag** now works
-              the same in Conversations, Flagged and Analysis, from a small bar
-              that floats over the bottom of the conversation.
-            - In Analysis, **Select turns** at the bottom of a conversation
-              lets you flag it straight into the Flagged view.
-            - The conversation header no longer wraps or hides its buttons
-              when the window is narrow.
-
-            ### Fixed marks in Feedback
-            - Mark a thumbs down as **fixed**, or a whole Article or Dialog at
-              once. It counts as fixed when every thumbs down on it is; a new
-              thumbs down reopens it.
-            - **Any / Open / Fixed** works for Feedback as it does for
-              Recognition.
-            - Fixed items are **green in the Excel export**, with Fixed and
-              Fixed at columns.
-
-            ### Export names
-            - Analysis exports are named after what they hold, such as
-              *Recognition analysis 14–20 Sep 2026.xlsx*.
+            ### Small fixes
+            - **Open in Conversations** from Analysis now shows the full
+              conversation header: the Halo Studio link, date, number of
+              interactions and contexts.
+            - **Open in Halo Studio** is now in the Recognition and Feedback
+              analysis too, for the conversation you are looking at.
 
             ---
 
