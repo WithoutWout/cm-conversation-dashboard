@@ -243,6 +243,11 @@ characters, sheet names cleaned to Excel's rules, and a number kept a number.
 `save_export_xlsx` takes rows rather than a query, so the next table that wants
 an Excel export can use it as is.
 
+## Halo Studio and Open in Conversations
+
+- **Every mode links the conversation shown to Halo Studio** (`haloConversationLink`, hidden while no Halo Studio URL is set). Recognition and GenAI put it in the row's header. Feedback's header is about an Article or Dialog that spans many conversations, so its link (`#gapFbHalo`, `gapFbHaloFill`) follows the rated answer whose conversation is open.
+- **Open in Conversations lands on a full header.** `selectSession` used to draw the chat header only for a conversation in the current search results (`convSessions`) — one opened from Analysis usually is not, and arrived with no Halo Studio link, date, counts or contexts. It now falls back to `sessionFromRows`, the same summary built from the conversation's own rows (answers counted as `session_summary` counts them, contexts from the latest row that has any), kept as `convOpenedSession` so the contexts button finds it too.
+
 ## Fixed marks in Feedback
 
 Feedback takes the same fixed marks as Recognition — the `gap_fixed` row keyed by the **answer's** log id, which `get_gap_feedback` returns as `fixedAt`. One mark per answer, so an answer on both lists is fixed on both (`gapToggleFixed` and `gapFbToggleFixed` update each other's rows).
