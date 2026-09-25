@@ -91,12 +91,16 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Small fixes
-            - **Open in Conversations** from Analysis now shows the full
-              conversation header: the Halo Studio link, date, number of
-              interactions and contexts.
-            - **Open in Halo Studio** is now in the Recognition and Feedback
-              analysis too, for the conversation you are looking at.
+            ### Faster and more reliable
+            - Loading your export files no longer freezes the window for a
+              moment; the loading spinner keeps turning.
+            - Clicking quickly from one conversation to the next can no longer
+              leave you looking at one conversation while search, copy and flag
+              work on the previous one — in Conversations and in Flagged.
+            - In Analysis, a conversation that failed to load once is tried
+              again next time, instead of showing as empty until a restart.
+            - Reopening the database that is already open no longer runs into
+              "database is locked".
 
             ---
 
