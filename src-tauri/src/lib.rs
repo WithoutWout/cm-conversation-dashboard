@@ -3090,6 +3090,10 @@ struct GapFeedbackRow {
     /// The answer's latest rating: 1 up, -1 down. CM.com reports "one
     /// feedback item per interaction – the latest one", and so does Insights.
     score: i64,
+    /// When the answer was marked fixed — the same `gap_fixed` mark the
+    /// Recognition list sets, keyed by the answer's log id, so an answer that
+    /// is on both lists is fixed on both.
+    fixed_at: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -3132,9 +3136,11 @@ fn gap_feedback_rows(conn: &Connection, args: &GapFeedbackArgs) -> Result<GapFee
                 COALESCE((SELECT c.value FROM context_index c \
                           WHERE c.name = 'translation_language' \
                             AND c.session_uuid = o.session_uuid \
-                          ORDER BY c.value LIMIT 1), '') \
+                          ORDER BY c.value LIMIT 1), ''), \
+                f.fixed_at \
          FROM r JOIN interactions o \
            ON o.session_uuid = r.session_uuid AND o.interaction_uuid = r.origin_uuid \
+         LEFT JOIN gap_fixed f ON f.log_id = o.log_id \
          WHERE {answer} \
          ORDER BY o.timestamp_start DESC, o.log_id DESC \
          LIMIT ?3",
@@ -3155,6 +3161,7 @@ fn gap_feedback_rows(conn: &Connection, args: &GapFeedbackArgs) -> Result<GapFee
                 culture: r.get(6)?,
                 score: r.get(7)?,
                 translation_language: r.get(8)?,
+                fixed_at: r.get(9)?,
             })
         })
         .map_err(|e| format!("Query error: {e}"))?
@@ -16976,6 +16983,12 @@ mod conv_search {
             .collect();
         assert_eq!(got, vec![(4, 1, r#"["dn-9-2"]"#), (1, -1, r#"["qa-7"]"#)]);
         assert!(!res.truncated);
+        assert!(res.rows.iter().all(|r| r.fixed_at.is_none()));
+        // A fixed mark is the answer's, and reads back on this list.
+        set_gap_fixed_rows(&conn, &[1], true, None).expect("fixed");
+        let res = read("2026-06-01T00:00:00", "2026-06-01T23:59:59");
+        let fixed: Vec<(i64, bool)> = res.rows.iter().map(|r| (r.log_id, r.fixed_at.is_some())).collect();
+        assert_eq!(fixed, vec![(4, false), (1, true)]);
         assert!(read("2026-06-02T00:00:00", "2026-06-02T23:59:59").rows.is_empty());
         assert!(gap_feedback_rows(
             &conn,
