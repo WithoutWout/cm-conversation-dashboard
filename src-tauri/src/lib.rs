@@ -768,7 +768,7 @@ fn path_uses_selected_folder(path: &Path, selected_folder: Option<&Path>) -> boo
 
 fn configure_folder_watch(
     app: &AppHandle,
-    watch_state: &State<SharedWatchState>,
+    watch_state: &SharedWatchState,
     selected_folder: Option<PathBuf>,
 ) {
     let mut state = watch_state.lock().expect("watch state lock poisoned");
@@ -784,7 +784,7 @@ fn configure_folder_watch(
     };
 
     let app_handle = app.clone();
-    let state_handle = Arc::clone(&*watch_state);
+    let state_handle = Arc::clone(watch_state);
     let watch_folder = folder.clone();
     let event_folder = folder.clone();
 
@@ -862,10 +862,29 @@ fn configure_folder_watch(
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
+/// Load the content exports from the selected folder.
+///
+/// **Off the main thread.** A synchronous command runs on the main thread,
+/// which on macOS is also the thread WebKit paints on — so for as long as the
+/// ~20 MB of export JSON took to parse and serialise, the window could not be
+/// moved or resized and the "Loading…" spinner stood still. Measured on the
+/// real Efteling export: 130–165 ms in a release build and ~1.2 s under
+/// `tauri dev`, on every load and on every reload a folder change triggers.
 #[tauri::command]
-fn get_data(
+async fn get_data(
     app: AppHandle,
-    watch_state: State<SharedWatchState>,
+    watch_state: State<'_, SharedWatchState>,
+    args: Option<GetDataArgs>,
+) -> Result<AppData, String> {
+    let watch_state = watch_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || load_app_data(&app, &watch_state, args))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn load_app_data(
+    app: &AppHandle,
+    watch_state: &SharedWatchState,
     args: Option<GetDataArgs>,
 ) -> AppData {
     let selected_folder = args.and_then(|value| value.selected_folder);
@@ -932,7 +951,7 @@ fn get_data(
         .as_ref()
         .map(|path| path.to_string_lossy().into_owned());
 
-    configure_folder_watch(&app, &watch_state, selected_folder_path.clone());
+    configure_folder_watch(app, watch_state, selected_folder_path.clone());
 
     let watched_folder = watch_state
         .lock()
@@ -2711,15 +2730,9 @@ async fn set_db_path(
         // `DB_MIGRATION_EVENT`. Emitting from inside `spawn_blocking` is fine:
         // the work is on this thread, but the event goes out through the app
         // handle rather than through the blocked runtime.
-        let conn = open_db_reporting(&path, &|phase| {
+        let interrupt_handle = open_into_state(&db, &path, &|phase| {
             let _ = app.emit(DB_MIGRATION_EVENT, phase.payload());
         })?;
-        let interrupt_handle = Arc::new(conn.get_interrupt_handle());
-        let mut state = db.lock().map_err(|e| e.to_string())?;
-        state.conn = Some(conn);
-        state.path = Some(path);
-        // The Insights temp tables lived on the connection that just went away.
-        state.insight_scope = InsightScopeCache::default();
         let mut ih = interrupt_state.lock().map_err(|e| e.to_string())?;
         *ih = Some(interrupt_handle);
         Ok(())
@@ -2728,9 +2741,61 @@ async fn set_db_path(
     .map_err(|e| e.to_string())?
 }
 
+/// Open `path` and make it the conversations database.
+///
+/// **Reopening the file that is already open closes the old connection
+/// first, and holds the lock until the new one is in.** Otherwise the new
+/// connection ran its migrations — writes, some of them a minute long — while
+/// the old one was still live and serving commands against the same file. Two
+/// connections to one file is exactly how SQLite says "database is locked":
+/// the log carries a run of migrations that failed that way and retried on the
+/// next open. The renderer now joins a second open of the same path rather
+/// than starting one (`convDbOpen`); this is the backend keeping the same
+/// promise, whoever calls it. A command arriving meanwhile waits for the lock
+/// instead of meeting the old connection.
+///
+/// A *different* file is opened beside the current one, which stays usable
+/// until the swap: two files cannot lock each other, and a failed open of a
+/// new file should leave the one that works in place.
+fn open_into_state(
+    db: &SharedDbState,
+    path: &str,
+    report: MigrationReporter,
+) -> Result<Arc<rusqlite::InterruptHandle>, String> {
+    let mut reopening = {
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        if state.path.as_deref() == Some(path) {
+            state.conn = None;
+            state.path = None;
+            state.insight_scope = InsightScopeCache::default();
+            Some(state)
+        } else {
+            None
+        }
+    };
+    let conn = open_db_reporting(path, report)?;
+    let interrupt_handle = Arc::new(conn.get_interrupt_handle());
+    let mut state = match reopening.take() {
+        Some(state) => state,
+        None => db.lock().map_err(|e| e.to_string())?,
+    };
+    state.conn = Some(conn);
+    state.path = Some(path.to_string());
+    // The Insights temp tables lived on the connection that just went away.
+    state.insight_scope = InsightScopeCache::default();
+    Ok(interrupt_handle)
+}
+
+/// Off the main thread for the same reason as every other command that takes
+/// the database lock: a long query — an Insights read, an import, a VACUUM —
+/// holds it for seconds, and a synchronous command waiting on it would freeze
+/// the window (and queue the very `cancel_db_query` that could free it).
 #[tauri::command]
-fn get_db_path(db_state: State<SharedDbState>) -> Option<String> {
-    db_state.lock().ok().and_then(|s| s.path.clone())
+async fn get_db_path(db_state: State<'_, SharedDbState>) -> Result<Option<String>, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || db.lock().ok().and_then(|s| s.path.clone()))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Interrupt whatever the conversations database is running.
@@ -12141,6 +12206,74 @@ mod tests {
         );
         // s2 and s3 were untouched and must be byte-identical to before.
         assert!(before[1..].iter().all(|r| scoped.contains(r)));
+    }
+
+    /// Reopening the open file must not run beside the old connection.
+    ///
+    /// The old connection is left holding a write lock, as it would be in the
+    /// middle of any write command. Through `open_into_state` it is closed
+    /// first (rolling its transaction back) and the reopen goes through.
+    #[test]
+    fn reopening_the_open_database_does_not_lock_against_itself() {
+        let dir = std::env::temp_dir().join(format!("cai-reopen-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let db_path = dir.join("t.db");
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = fs::remove_file(format!("{}{suffix}", db_path.display()));
+        }
+        let path = db_path.to_str().unwrap().to_string();
+        let db: SharedDbState = Arc::new(Mutex::new(DbState::default()));
+        open_into_state(&db, &path, NO_MIGRATION_PROGRESS).expect("first open");
+
+        let hold_write_lock = |db: &SharedDbState| {
+            let state = db.lock().unwrap();
+            let conn = state.conn.as_ref().unwrap();
+            conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+            conn.execute("INSERT INTO imported_windows(day, hours) VALUES ('2026-01-01', 1)", [])
+                .unwrap();
+        };
+
+        // Control: a second connection beside the first — which is what
+        // `set_db_path` used to open — cannot write. It is opened raw with no
+        // busy wait, because through `open_db_reporting` the same collision
+        // costs the 5 s busy timeout per write the open attempts: it "opens",
+        // having skipped the migrations that met the lock, and then fails on
+        // the first write. Those skipped migrations are the "will retry on
+        // next open: database is locked" warnings in the app log.
+        hold_write_lock(&db);
+        let beside = Connection::open(&path).unwrap();
+        beside.busy_timeout(Duration::ZERO).unwrap();
+        let w = beside
+            .execute("INSERT INTO imported_windows(day, hours) VALUES ('2026-01-02', 1)", [])
+            .map_err(|e| e.to_string());
+        assert!(
+            w.as_ref().is_err_and(|e| e.contains("locked")),
+            "the control must lock, or this test proves nothing: {w:?}"
+        );
+        drop(beside);
+
+        // The fix: the same reopen through `open_into_state`.
+        // Beside the old connection this reopen would still end up working —
+        // the old one is dropped at the swap — but only after sitting out the
+        // busy timeout on every write the open attempts. Time is what tells.
+        let started = Instant::now();
+        open_into_state(&db, &path, NO_MIGRATION_PROGRESS).expect("reopen does not lock");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the reopen waited on the old connection's lock ({:?})",
+            started.elapsed()
+        );
+        let state = db.lock().unwrap();
+        assert_eq!(state.path.as_deref(), Some(path.as_str()));
+        let conn = state.conn.as_ref().unwrap();
+        conn.execute("INSERT INTO imported_windows(day, hours) VALUES ('2026-01-03', 1)", [])
+            .expect("the reopened database takes writes");
+        let held: i64 = conn
+            .query_row("SELECT COUNT(*) FROM imported_windows WHERE day = '2026-01-01'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(held, 0, "the old connection's open transaction was rolled back, not left behind");
+        drop(state);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// End-to-end: run a real portal CSV through the real import and confirm the

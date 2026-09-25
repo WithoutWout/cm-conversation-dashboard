@@ -119,7 +119,12 @@ the row shows the database's time, not the renderer's.
 
 - **The conversation** is `renderFlaggedThread` with `readOnly` and the row's
   turn marked (`gap-mark`) and centred. It is cached per session, so moving
-  through several rows of one conversation does not refetch it. The bubble
+  through several rows of one conversation does not refetch it
+  (`gapCachedSession` / `gapCacheSession`, shared by all three modes). Only a
+  successful read is cached — a failed one used to be stored as `[]`, showing
+  that conversation as empty for the rest of the session — and the cache
+  belongs to one database and holds `GAP_SESSION_CACHE_MAX` conversations,
+  oldest read dropped first; `gap-session-cache.test.js` pins all three. The bubble
   details work as in the chat — `toggleBubbleDetail` looks in the visible view
   first, because the same conversation can be open in two views at once.
 - **The question's words** are chips. A click copies the word *and* looks it up

@@ -50,6 +50,14 @@ open of the same file alongside the first.
   what the backend has open, so entering Conversations no longer re-opens a
   database that is already open — it joins the launch's open, or opens only
   when that one failed. `openDbAtPath` goes through it too.
+- **The backend keeps the same promise on its own** (`open_into_state`).
+  Reopening the file that is already open closes the old connection first and
+  holds the database lock until the new one is in. Two connections to one file
+  is the only way this app can hit SQLite's "database is locked": the new one's
+  migrations sat out the 5 s busy timeout, were skipped with "will retry on
+  next open", and the app log has a run of exactly that from before
+  `convDbOpen`. A different file still opens beside the current one, which
+  stays usable if the new open fails.
 - **Every database command waits, in one place.** The bridge wraps the
   conversations-database commands (`getSessions`, the Insights reads, GAP,
   import, Stored data…) to await `convDbWhenReady()`. It resolves whether the

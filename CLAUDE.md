@@ -72,7 +72,8 @@ frontend/
     msg-meta-place.test.js, loading-gate.test.js,
     insights.test.js, entity-search.test.js,
     db-migration-progress.test.js, db-open.test.js, search-bubbles.test.js,
-    share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js
+    share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js,
+    gap-session-cache.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
