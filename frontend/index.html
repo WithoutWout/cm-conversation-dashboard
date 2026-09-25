@@ -1988,6 +1988,9 @@
       .gap-fb-answers[hidden] {
         display: none;
       }
+      .gap-fb-halo:empty {
+        display: none;
+      }
       .gap-fb-answer {
         display: grid;
         grid-template-columns: 18px minmax(0, 1fr) auto 22px;
@@ -24064,6 +24067,7 @@
               openSame.length +
               " fixed</button>"
             : "") +
+          haloConversationLink(row.sessionUuid) +
           '<button class="btn-secondary" onclick="gapCopy(' +
           row.logId +
           ')">Copy question</button>' +
@@ -25015,6 +25019,7 @@
               "</button>"
             : "") +
           (r.url ? gapEditHtml(r.url, editLabel) : "") +
+          '<span class="gap-fb-halo" id="gapFbHalo"></span>' +
           (it.key
             ? '<button class="btn-secondary" data-key="' +
               esc(it.key) +
@@ -25055,9 +25060,19 @@
           )
           .join("")
         answers.scrollTop = 0
+        gapFbHaloFill()
         if (keepThread) return
         thread.innerHTML = ""
         selBubbleSync()
+      }
+
+      /// The Halo Studio link in the Feedback header follows the conversation
+      /// shown — the open answer's — not the item, which spans many.
+      function gapFbHaloFill() {
+        const el = document.getElementById("gapFbHalo")
+        if (!el) return
+        const row = gapFbActiveAnswer == null ? null : gapFbRows.find((r) => r.logId === gapFbActiveAnswer)
+        el.innerHTML = row ? haloConversationLink(row.sessionUuid) : ""
       }
 
       /// Re-draw the open item's header and answers after a fixed mark, leaving
@@ -25075,6 +25090,7 @@
         )
         const row = gapFbRows.find((r) => r.logId === logId)
         if (!row) return
+        gapFbHaloFill()
         const thread = document.getElementById("gapFbThread")
         let rows = gapSessionCache.get(row.sessionUuid)
         if (!rows) {
@@ -37357,8 +37373,36 @@
       })
 
       // ── Session context detail modal ────────────────────────────────
+      /// A conversation's list summary, from its own rows — the shape
+      /// `get_sessions` returns, for one that is not in the search results.
+      /// Interactions are answers (no rating rows, events or link clicks), and
+      /// the contexts are the latest row's that has any, as `session_summary`
+      /// keeps them.
+      function sessionFromRows(uuid, rows) {
+        const list = (rows || []).slice().sort((a, b) =>
+          a.timestampStart < b.timestampStart ? -1 : a.timestampStart > b.timestampStart ? 1 : a.logId - b.logId,
+        )
+        const answers = list.filter((r) => !["Feedback", "Event", "LinkClick"].includes(r.mainInteractionType || ""))
+        const withCtx = list
+          .slice()
+          .reverse()
+          .find((r) => r.contexts && r.contexts !== "[]" && r.contexts !== "null")
+        return {
+          sessionUuid: uuid,
+          firstTs: list.length ? list[0].timestampStart : "",
+          lastTs: list.length ? list[list.length - 1].timestampStart : "",
+          interactionCount: answers.length,
+          culture: (list.find((r) => r.culture) || {}).culture || "",
+          contexts: withCtx ? withCtx.contexts : "",
+        }
+      }
+      /// The summary `sessionFromRows` made for the conversation on screen.
+      let convOpenedSession = null
+
       function openSessionContextModal(uuid) {
-        const s = convSessions.find((x) => x.sessionUuid === uuid)
+        const s =
+          convSessions.find((x) => x.sessionUuid === uuid) ||
+          (convOpenedSession && convOpenedSession.sessionUuid === uuid ? convOpenedSession : null)
         if (!s) return
         let contexts = []
         try {
@@ -40434,8 +40478,12 @@
           if (activeSessionUuid !== uuid) return
           resetChatRenderCaches()
           renderChatThread()
-          // Update header
-          const session = convSessions.find((s) => s.sessionUuid === uuid)
+          // Update header. A conversation opened from outside the search
+          // results — Analysis → Open in Conversations — is not in
+          // `convSessions`, and used to get no header at all: no Halo Studio
+          // link, no date, no counts, no contexts. Its own rows say the same.
+          let session = convSessions.find((s) => s.sessionUuid === uuid)
+          if (!session) session = convOpenedSession = sessionFromRows(uuid, activeInteractions)
           const chatHeader = document.getElementById("chatHeader")
           if (session) {
             const haloLink = haloConversationLink(uuid)
