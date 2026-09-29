@@ -127,8 +127,12 @@ const plain = search("parkeren")
 eq("one run of text is exactly the old search", search("parkeren", "parkeren"), plain)
 // The dialog's name says "Parkeer", not "parkeren"; the two articles do.
 eq("…which is the two parking articles", plain, ["a1", "a3"])
-eq("AND is item-level: both words, possibly in different answers", search("", "campers AND nacht"), ["a3"])
-eq("…where one leaf still wants both in the same answer", search("campers nacht"), [])
+// Text chips joined by AND meet in one part, as the words of one chip do:
+// "campers" and "nacht" sit in different answers of a3, so neither matches.
+eq("AND between text chips wants both in the same part", search("", "campers AND nacht"), [])
+eq("…as one chip with both words does", search("campers nacht"), [])
+eq("…while OR between them still unions", search("", "campers OR nacht").includes("a3"), true)
+eq("…and a tag beside words is still a condition on the item", search("", 'campers AND ctx:"Channel"="web"'), ["a3"])
 eq("OR unions", search("", "openingstijden OR campers"), ["a2", "a3"])
 eq("AND NOT removes", search("", "parkeren AND NOT campers"), plain.filter((k) => k !== "a3"))
 eq("an id is the item itself", search("", "qa-2 OR dn-50"), ["a2", "d50"])

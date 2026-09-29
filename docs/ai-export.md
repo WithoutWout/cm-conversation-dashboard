@@ -1,6 +1,6 @@
 # Export for AI
 
-The `.jsonl` export of a whole conversation search result set, and why its schema is shaped the way it is.
+The `.jsonl` export of a whole conversation search result set, and why its schema is shaped the way it is — and, at the end, the Content tab's export of Articles and Dialogs.
 
 _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 
@@ -38,3 +38,34 @@ The one option is `matchedTurnsOnly`, and it changes the per-session query from 
 - **The header states which of the two it is** (`interaction_scope`), with a legend entry. The same search produces two very different files, and a model reading one has no way to tell which without being told — including that under `matched_turns` a `chat_trace` is a *subset* of the conversation, so the turns around a match are simply not there.
 - **It changes what is in a conversation, never which conversations there are.** `a_narrowed_export_keeps_every_conversation_and_drops_the_unmatched_turns` pins both halves: a scope that dropped conversations would be a different search wearing an export option's label.
 - **`planned_turns` is counted from the match table when narrowed**, rather than summed from `interaction_count` — otherwise the size warning would describe a file several times larger than the one about to be written.
+
+## Content: Share Content → Export for AI
+
+The Content side has its own export, built entirely in the renderer
+(`buildContentAiExport`): the content export is already in memory, so there is
+no query to run and nothing for Rust to do beyond the save dialog
+(`save_export_text`, which gained `jsonl`).
+
+- **It exports `getExportItemsForCurrentView()`** — the Share Content list, so
+  the tab's search and filters, minus the modal's filter box and the rows
+  removed by hand. It is a button in that modal's footer for that reason: the
+  modal is where the set is shown and refined, and an export that took a
+  different set than the one on screen would be the drift Share Content was
+  rebuilt to prevent.
+- **Two formats, chosen in a small modal before the dialog opens** (the dialog
+  has one filter per call): Markdown for pasting into a chat, JSON Lines for a
+  script. Both carry the same header — `schema_version`, counts,
+  `search_context` (query, pill, toggles incl. `include_referenced_articles`,
+  context/metadata filters, the Share filter and the removed count) and a
+  `legend` — once, as the conversation export does.
+- **Every item is written whole**: an Article's questions, resolved entities
+  (`getEntityForChip`, the card's rule), every Response with `default`, its
+  `context`, `unreachable` and metadata, and its routes; a Dialog's nodes with
+  their Responses, routes and `next` steps (`user_says`, `fallback`, `jump`,
+  `always`, `condition`). Response text goes through `stripDisplay`, so links
+  read `[label](url)` and variables `[name]`.
+- **A reference node says `shows_article: "qa-N — title"` and is not
+  inlined** — the same rule as the search: the Article is not the Dialog's
+  content, and it is its own record when it is in the set.
+- `_aiPrune` drops empty values, so an absent key means "no value" and the
+  legend says so.

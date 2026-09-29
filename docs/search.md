@@ -14,6 +14,7 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - Invalid regex mode returns an explicit `invalid_regex` result from the worker; the renderer must show that as an error state, not as a valid zero-result search.
 - When content context filters and a text query are both active, the same answer output must satisfy both the context filter and the text query.
 - **A context condition belongs to an output, and every output type has one** — an Answer, and equally a `DialogStart`, `TDialogStart` or `HaloAgentStart`. See "Context is on routes too" below.
+- **A Dialog matches on its own content, not on the Articles it references.** See "References are not a Dialog's content" below; the **Ref** toggle turns them back on.
 - `¬T` means **Responses only**. When enabled, search excludes IDs, titles/names, descriptions, node names, and entity enrichment.
 - `ND` means **Exclude non-default responses from search**. It only affects matching when a text query is active and must not hide items for an empty query.
 - A response is user-facing unreachable only when it is not the default response and it has no context condition. Non-default responses with context are reachable for users in that context and should not be labeled "non-default" or "unreachable" in result cards.
@@ -40,17 +41,19 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - **The prefix is mandatory.** There used to be a bare spelling whose meaning came from a "Search by:" pill row, which is how `1418` could mean an Article. In one field holding text and ids at once a bare number can only be text — the suggestion list offers `qa-1418` and `dn-1418` for it instead, which is a question rather than a guess.
 - A Dialog matches an interaction that answered from one of its nodes (`article_ids`, `dn-<dialog>-<node>`) **or** merely walked through it (`dialog_paths`, `<dialog>:<node>/<node>/…`). `path_has_node` checks the dialog and the node together, so a second path in the same cell cannot contribute the dialog while another contributes the node.
 
-**Entities are a search field, not a subset of the text.** The recognizer stores the entity it matched, not the wording that triggered it, so "mag ik een fles rood meenemen" is found by searching the entity `WIJN`. The **E** toggle sits with **U**/**B** and is independent of them; turning both message toggles off sends `queryScope: "none"`, which means entity-only. Nothing at all selected falls back to searching the text — an empty result set would read as "no matches" rather than "you switched it off".
+**Entities are a search field, not a subset of the text.** The recognizer stores the entity it matched, not the wording that triggered it, so "mag ik een fles rood meenemen" is found by searching the entity `WIJN` — as an `entity:` chip. See "U and B are about text; entities have their own chip" below for why that is the only way in now.
 
-- **The default is U + E** — what someone asked for, and what the bot understood it as. Both the markup (`class="conv-scope-btn active"`) and the initial state say so, and they must agree: `_syncConvScopeFromButtons` reads the buttons, so a disagreement at startup silently wins for whichever the first click resolves to. `setConvSearchScope(user, bot, entity)` is the only programmatic way in, and it goes through the same read-back.
-- **The Entities tab has a 💬 Conversations button** (`entityConvButton` → `searchConvsForEntity`) on every entity card and in the entity modal, which is the only way to answer "which conversations actually fired this entity?". It switches to entity-only deliberately: the entity's *name* is a label the recognizer assigned, so searching the message text for it returns a different — usually much smaller — set.
-- **The opened chat filters to the turns that matched.** `chatMatchEntities` mirrors the E toggle when a session is opened (the way `chatSearchRegex` already mirrors `.*`), and `turnMatches` then also tests `rowEntityFields(row)` — display name, internal name, matched text, entity id, cached on the row because `recognition_details` is a sizeable blob and a long chat re-renders on every filter change. Without it an entity-only search opens every result on "no messages match".
+- **The default is U** — what someone asked for. Both the markup (`class="conv-scope-btn active"`) and the initial state say so, and they must agree: `_syncConvScopeFromButtons` reads the buttons, so a disagreement at startup silently wins for whichever the first click resolves to. `setConvSearchScope(user, bot)` is the only programmatic way in, and it goes through the same read-back.
+- **The Entities tab has a 💬 Conversations button** (`entityConvButton` → `searchConvsForEntity`) on every entity card and in the entity modal, which is the only way to answer "which conversations actually fired this entity?". It sets one `entity:` chip — the exact label. It used to be a text chip searched with E alone, a substring over entity names; with E gone the chip is the honest spelling of the question. The export's name is matched to `entity_index`'s lower-cased display name case-insensitively, the same bridge `convEntityIndex` uses.
+- **The opened chat filters to the turns that matched.** `chatMatchEntities` is on when the search holds an `entity:` chip, and `turnMatches` then also tests `rowEntityFields(row)` — display name, internal name, matched text, entity id, cached on the row because `recognition_details` is a sizeable blob and a long chat re-renders on every filter change. Without it an entity search opens every result on "no messages match".
 - **The entity chip that caused the match is marked** (`.is-hit`, accent-coloured like `<mark>`). And a GenAI row — which normally hides its recognition data because that data explains something other than the answer, see `docs/chat-rendering.md` — shows the entity anyway *when it is the hit*. Suppressing it there would leave the turn in the results with no visible reason at all.
 
 - `entity_index` (`log_id`, `session_uuid`, `entity_id`, `name`, `matched`) lifts `recognition_details.entityMatches` out of the JSON at import time; searching it is a scan of a small narrow table instead of a JSON parse of every interaction. `name` is the `displayName` (falling back to the internal `name`), lowercased on the way in so the search side never has to. A bare number also matches `entity_id`.
 - **It carries no secondary index on purpose.** The search is a substring `LIKE`, which no index can serve, and every extra b-tree is a per-row tax on import; `WITHOUT ROWID` keeps it to one write per entity match. On a real database it holds ~103k rows for 110k interactions and an entity-only search costs ~8 ms.
 - **Deletion must remove entity rows too** — `purge_old` and `delete_interactions_by_dates` both do, alongside the FTS cleanup.
 - The one-time backfill in `open_db` is gated on `META_ENTITY_INDEX_BUILT`, not on "is the table empty?": a database whose interactions genuinely triggered no entities would otherwise re-run the whole-table `json_each` scan on every launch. `the_entity_backfill_matches_what_an_import_would_have_indexed` asserts the SQL backfill and `entity_index_rows` agree, so an older database searches the same as a freshly imported one.
+
+**There are three feedback pills, joined as one control: Feedback · 👍 · 👎.** `any_feedback` is every rated conversation — the union of the other two (`s.has_neg_feedback = 1 OR s.has_pos_feedback = 1`, and either score in `feedback_origins`), never more; `any_feedback_is_either_thumb_and_still_the_rated_answer` pins that and that it still narrows a search to the rated answer. The renderer asks `convFeedbackWants(score)` everywhere it used to test `neg_feedback` / `pos_feedback` by name — the chat's highlight, its scroll-to-match and its match list — so the three cannot drift. The thumbs-up pill replaces the old double-click on the thumbs-down one, which nobody could discover.
 
 **A feedback filter narrows the search to the answer the thumb was about**, so "thumbs-down on answers mentioning X" is one query rather than two. `feedback_origins` resolves each feedback row to the interaction it rated — via `originatingInteractionId`, falling back to the previous bot output — and the search then only looks at those rows. That restriction is cheap to express and was, twice over, ruinous to execute.
 
@@ -205,10 +208,27 @@ with its own port of the grammar (`parseContentExpr`), under the same rules.
 - **A plain run of text is the old search, byte for byte.** `contentNeedsExpr`
   sends `expr` only when there is more than one condition or a non-text one, and
   the worker treats a lone text leaf as `query`. `content-expr.test.js` pins it.
-- **AND / OR / NOT combine at the item level** — an Article is in or out. Inside
-  one text leaf the old rule holds: all its words in the *same* answer. So
-  `campers nacht` (one chip) and `campers AND nacht` (two) are different
-  questions, and the difference is visible in the chips.
+- **Text is matched within one part of an item, and so is AND between text
+  chips.** A part is an Article's questions (with its id) or one of its
+  Responses; a Dialog's name and description, one node's name, one phrasing, or
+  one Response (`itemTextParts`). All the words of one chip must sit in one
+  part, and text chips joined by AND must meet in one part too
+  (`evalContentExpr` → `isTextTree` / `evalOnPart`) — `campers nacht` and
+  `campers AND nacht` are now the same question. AND used to be item-level:
+  `kinderen AND korting` returned 10 Dialogs of which 2 said both in one place,
+  and `oud AND nieuw` 42 items with the two words in different parts, which
+  read as "matches content with only one of them". A Dialog's non-Response
+  fields used to be one bucket for a single chip as well, so `hotel annuleren`
+  could match "hotel" in a phrasing and "annuleren" in the description.
+  - **Only text meets in a part.** Ids, entities and ctx/meta tags are
+    conditions on the item, and so is a NOT: `parkeren AND NOT kosten` still
+    removes every item that mentions kosten anywhere.
+  - OR is unchanged — any part, any leaf.
+  - **A card's snippet shows the part holding the most searched words**
+    (`dialogNodeMatchSnippet` scores `nodeMatchReasons`), and the contextual
+    response snippets only show a Response holding all of them unless the
+    search has an OR chip or a `|` (`_snippetHasAllTerms`). A snippet showing
+    one of two words is exactly what made a correct result look wrong.
 - **Leaves:** text → the old matcher; `qa-N` / `dn-N` → the item itself;
   `dn-D-N` → Dialog D, if it has node N; `entity:` → items whose questions
   resolve to that entity (the same `phraseEntityUpper` map the card chip uses);
@@ -280,35 +300,41 @@ conjunct**, and **NOT is the complement within `base_sessions`**.
 
 ### An entity is a leaf, not a filter
 
-`query_entities` (the **E** toggle) is a boolean saying "also match this text
-against entity name, matched text and id" — a substring search over *typed
-words*. `entity:camper` is the exact label the recognizer assigned. Picking an
-entity by name is not the same question as searching for a word that might
-appear in one, and `an_entity_leaf_is_exact_where_the_e_toggle_is_a_substring`
-pins the difference.
+`entity:camper` is the exact label the recognizer assigned to the **user's**
+turn. It is the only way the bar searches entities.
 
-**E is not redundant now that `entity:` exists, and it is not always on in
-effect.** On a real 150k-interaction database it widens a text search by 8–35%
-— `parkeren` goes 335 → 452 user-scoped, `openingstijden` 149 → 191 — and
-turning it off is the only way to ask what people actually *typed*. It is also
-what `searchConvsForEntity` uses, with `query_scope: "none"`, to answer "which
-conversations fired this entity?" from an entity card.
-`the_entity_toggle_still_changes_what_a_text_leaf_matches` pins both halves.
+### U and B are about text; entities have their own chip
 
-- **The suggestions are deliberately *not* gated on it.** An `entity:` condition
-  works whatever E says, so gating the type-ahead on E left the field unable to
-  offer a chip that would have worked perfectly well once placed — E off meant
-  no entity could be *found*, while one already there kept filtering. The
-  toggle governs what a typed word matches, and nothing else.
-- **U / B / E are a property of the search, not of one condition**, so every
-  text leaf reads them. `the_scope_toggles_still_govern_every_text_leaf` asks
-  that of the compiled tree, which is the path that could have dropped it; the
-  single-leaf path is spliced inline and covered by
+There used to be a third toggle, **E** (`query_entities`): "also match this
+text against entity name, matched text and id", ORed onto every text leaf. It
+was removed because it made U / B lie. Entities are recognized on what the user
+typed — the bot's answers carry none — so with **B** alone and E on (E was on by
+default) a word still matched through the user's entity, and the list returned
+conversations where the bot never said it. Nothing on screen said why.
+
+- **U / B now say which side a *text* chip reads, and nothing else.** An
+  `entity:` chip matches the same turns whichever is on: it is a fact about the
+  user's turn, and the row holding that turn also holds the bot's answer, so
+  `entity:camper AND prijs` under **B** reads "the recognizer heard CAMPER, and
+  the bot talked about the price" — which is the question worth asking. Both
+  buttons' tooltips say so.
+- **One side is always searched.** Switching off the only active one flips to
+  the other, which makes U → B one click. Like everything else in the bar, it
+  waits for Enter — see "Only Enter searches" below.
+- **The chat follows the scope.** `chatSearchScope` is set from U / B when a
+  result is opened (as `chatSearchRegex` mirrors `.*`): `turnMatches` reads
+  only that side and the `<mark>`s go only on that side's bubbles. A small
+  **U** / **B** badge by the chat search says it is narrowed; a click widens it,
+  and clearing the chat search does too. Before, a user-scoped search opened
+  with the bot's repetition of the word marked as the match.
+- **The backend still accepts `query_entities` and `query_scope: "none"`**, and
+  their tests still pass. The renderer never sends them; they are kept so an
+  Insights chip or AI export header from an older search still reads, and
+  because removing them is a Rust change with no behavioural gain.
+- **U / B are a property of the search, not of one condition**, so every text
+  leaf reads them. `the_scope_toggles_still_govern_every_text_leaf` asks that of
+  the compiled tree; the single-leaf path is covered by
   `a_user_scoped_search_never_matches_the_bot_side`.
-- **They still do not re-run the search on their own**, unlike `.*` and the
-  operator chips. That is deliberate and predates the expression: setting a
-  scope is usually two clicks (U off, B on), and firing a search on each would
-  run an intermediate query nobody asked for.
 
 Entities used to be `entity_filters`, an `IN` in `base_where` written from a
 funnel tab. As a leaf they can be ORed, ANDed, grouped and excluded like anything
@@ -335,6 +361,28 @@ do any of that and the bar's type-ahead already outranks it.
   context and metadata options already are. The same scan carries `entityId`,
   which is the only place in the app an entity id exists — the EntitiesExport CSV
   has no id column at all. See `docs/collections.md` and `cmLink("entity", …)`.
+
+### Only Enter searches
+
+A conversations search can take seconds, so **editing the bar never runs one**:
+adding, picking, editing or removing a chip, cycling an operator, opening a
+bracket, U / B, `.*` and the filter pills all wait. **Enter** (with no
+suggestion row selected) and the **search button** run it, as do the "search
+this in Conversations" jumps from a Content card, an entity card or Analysis —
+those are a request to search by definition.
+
+- It used to search on every chip added ("adding a chip *is* asking the
+  question") and, once a search had run, on every chip removed or operator
+  cycled — so building `a AND (b OR c)` ran three or four searches nobody asked
+  for, each one a wait.
+- **The search button lights up while the bar and the list disagree**
+  (`syncConvSearchStale`, `.conv-search-submit.stale`). It compares the args a
+  search would send with `lastConvSearchArgs`, page aside, so every control that
+  feeds `buildConvSessionArgs` counts without each having to know about it; the
+  controls that change them call it. Without that, a list sitting under chips it
+  no longer matches would read as broken — the reason the auto-search existed.
+- The Content bar is different on purpose: its search is in-memory and takes
+  milliseconds, and it stays live.
 
 ### The field
 
@@ -468,7 +516,7 @@ that satisfied any one of them answers it, where an AND would open a chat with
 nothing marked at all. An excluded condition is no reason a conversation is here,
 so it is left out.
 
-- `chatMatchEntities` turns on for the **E** toggle *or* an `entity:` chip.
+- `chatMatchEntities` turns on for an `entity:` chip.
   Without it, naming an entity opened a forty-turn chat with nothing marked,
   which reads as the chat being broken.
 - Id chips lose their `qa-`/`dn-` prefix on the way in, because the chat tests
@@ -479,10 +527,8 @@ so it is left out.
 - **The session-list preview highlight is given the text conditions only**
   (`convTextTerms`), never the expression: `hl()` would otherwise mark `AND` and
   `entity:` in every preview.
-- **`searchConvsForEntity` is deliberately untouched.** The 💬 Conversations
-  button on an entity card still runs an entity-only *text* search, whose
-  substring matching over entity names is a genuinely different — usually much
-  wider — question from the exact label. It sets a single text chip.
+- **`searchConvsForEntity` sets a single `entity:` chip** — see "U and B are
+  about text" above.
 - **`searchConvsForId` appends rather than replaces**, and the same-kind default
   makes a second jump from a Content card OR with the first, which is what
   appending has always meant here.
@@ -570,6 +616,105 @@ The Content Context tab used to read **Answers only**: the worker's `_ctxSets`, 
   - Combining them was a deliberate choice over splitting the tag onto the Metadata tab: one chip per group answers "what content is tied to this group?", which is the question people ask. The cost is that a chip mixes "belongs to" and "fires when"; the pills in the info modals still show which one an output carries.
   - This is filtering only. For Collections reachability the tag is still never a condition — see `docs/collections.md`.
 - `CAI_EXPORT_DIR=~/Downloads node frontend/tests/context-filter.test.js` runs the real-export half when the export is not checked out beside the app. On the old worker it fails 9 checks.
+
+## What a Dialog is searched by
+
+Four misses, each measured on the 2026-08-15 export with the real worker, and
+each pinned by `frontend/tests/dialog-search.test.js`.
+
+- **What the user says to move between nodes is searched.** A Recognition
+  link's phrasings (quick replies included, fallbacks not) are the Dialog's own
+  recognition, as an Article's questions are its own — but they were only ever
+  read to resolve entities. **1500 of 2532** distinct phrasings did not find the
+  Dialog they belong to; now 0 do. They sit in the Dialog's non-Response fields
+  (`_nc`, with id, name, description and node names), so `¬T` leaves them out
+  exactly as it leaves out an Article's questions. A reference node's phrasings
+  count too: the phrasing is the Dialog's even when the answer is not.
+- **Placeholders are markup, not words.** `%{DialogOptions()}`, `%{Link(1)}`,
+  `%{Image(2)}` were in the searched text, so "option" matched **489** Dialogs,
+  487 of them through the placeholder alone, and "dialog" 498 of 501. The worker
+  drops them (`dropPlaceholders`) from the raw and expanded Response text; the
+  renderer drops both spellings (`%{…()}` and the `[…()]` that `stripDisplay`
+  makes of them) inside `_anyTermMatches`, which every modal and card check
+  goes through. Variable names carry no parentheses and stay searchable.
+- **Accents are ignored in a case-insensitive search**, as the Conversations
+  search does: `oke` 27 → 159, `krumel` 0 → 12, both now equal to the accented
+  spelling. The worker compares folded strings (`fold`, and the pre-lowered
+  `sl`/`rl`/`el`/`_ncFold` are folded now); a whole-word search is a regex, so
+  it gets a character class per letter (`accentPattern`). The renderer's three
+  regex builders get the same classes (`_accentPattern`), which is what keeps
+  highlighting and "Matches only" in step. Case-sensitive and `.*` stay exact.
+  The flip side is deliberate: `én` now also finds `en`.
+- **A phrase matches however its words are joined** (`termPattern` in the
+  worker, `_termPattern` in the renderer — the second decides what is marked,
+  so the two must agree). The export spells one event "oud en nieuw" (406×),
+  "Oud & Nieuw" (199×), "oud-en-nieuw" (113×) and "oud nieuw", and the exact
+  phrase `"oud en nieuw"` found 37 Articles and **0 Dialogs** — not even the one
+  *named* "Oud & Nieuw". Any term with a separator in it (a quoted phrase, or
+  `oud-en-nieuw` typed bare) is a regex: between two words any run of spaces,
+  hyphens, dashes, underscores or slashes is one join, and a connective (en,
+  and, und, &, +) may stand in it or not. `"oud en nieuw"` now finds 39 Articles
+  and 4 Dialogs, the same set a bare search with `\b` on returns. The words
+  must still be adjacent: "het oude jaar en het nieuwe" is not the phrase.
+- **A phrasing counts even when it routes to a reference; a GoTo named after
+  one does not.** The phrasing that lands on a reference node is usually the
+  Article's own title (181 Dialogs matched their referenced Article's title
+  through one), and leaving it out was tried: `zwembad` fell 17 → 9 Dialogs,
+  `tickets` 204 → 193, and it read as "too few results". It is written in the
+  Dialog and a user who types it there takes that route, so it is the Dialog's
+  own — and the card says where the route ends (**User says** "zwembad" →
+  Article qa-8672 (title)), which is what keeps it from reading as a match on
+  the Article. A GoTo's name ("GoTo - D-3A3BLC") is only a label for its
+  target, so a GoTo that lands on a reference (`leadsToRef` / `_nodeLeadsToRef`,
+  following jumps) is part of the reference and counts only under Ref, like
+  the reference node's own name and the Article's text.
+- **Short words start a word.** A term whose first word has up to 5 letters
+  (`SHORT_TERM_MAX` / `_SHORT_TERM_MAX`) only matches at the start of a word;
+  longer terms match anywhere. Measured on the export, items matched anywhere
+  against at a word start: `oud` 657 → 210 (the rest h-oud-en, onderh-oud,
+  abonnementh-oud-er), `eten` 1370 → 360 (weten, genieten, vergeten), `pas`
+  488 → 258 — while for long words "anywhere" is where Dutch compounds are
+  found: `korting` 376 vs 361 (verjaardagskorting), `tickets` 537 vs 484
+  (entreetickets), which is why the rule is by length rather than for all
+  words. `oud AND nieuw` went 79 Articles / 29 Dialogs → 52 / 11. `\b` still
+  makes a term exact at both ends, and `.*` is untouched. The renderer builds
+  every highlight and "Matches only" regex through `_termRegexSource`, the
+  mirror of the worker's `buildTermRegex`, so what is marked is what matched.
+- **A Dialog card says where it matched** (`dialogNodeMatchSnippet`), after the
+  contextual-response and route snippets and only when the title does not
+  already show the hit: the node and a window of its Response around the match,
+  else the phrasing and the node it leads to, else the node's name, else the
+  description. `nodeMatchReason` is the one reading of "why does this node
+  match", shared with the modal's "Matches only".
+- Cost: plain searches are unchanged (7–14 ms on the real export); the worst
+  case measured, a whole-word search for one letter, went 13 → ~70 ms.
+- Not done, on purpose, yet: letting the words of one text chip spread across a
+  Dialog's nodes, a "Best match" sort, and the texts inside CaptureInput nodes.
+
+## References are not a Dialog's content
+
+A Dialog node can show an Article instead of a Response of its own:
+`output.kbaIdReference` set, `output.items` empty. On the 2026-08-15 export
+2639 nodes do. Such a node is usually named after the Article ("Telefoonnummer"
+on a node pointing at `qa-1764`), and that name was in the Dialog's searchable
+fields — so a search for an Article's subject returned every Dialog that
+referenced it. `telefoonnummer` returned Dialog 642, which says nothing about a
+phone number; it only points at the Article that does.
+
+- **By default neither the reference node's name nor the Article's text makes
+  the Dialog match** (`isRef` / `nodeNameCounts` / `nodeAnswerItems` in the
+  worker). A node with a Response of its own is never a reference, whatever its
+  name. On the real export `telefoonnummer` goes 155 → 152 Dialogs.
+- **The Ref toggle (`searchIncludeRefs`) turns both back on**, the Article's
+  Responses included — the Dialog then matches on everything its card shows.
+  `telefoonnummer` → 234. Not persisted, like the other toggles.
+- **The card, the info modal and "Matches only" follow the same rule.**
+  `nodeIsRefHidden` makes `nodeMatchesQuery` skip the node and `renderNodeHtml`
+  draw it unmarked, so a Dialog on screen for its own content does not show a
+  highlighted reference as if that were the reason.
+- `frontend/tests/content-refs.test.js` drives the real worker: the reference
+  does not match, the Dialog's own node still does by name, Ref restores both,
+  and `¬T` never reads a reference's name.
 
 ## The card and the search agree about entities
 

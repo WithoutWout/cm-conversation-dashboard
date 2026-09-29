@@ -2895,6 +2895,7 @@ fn export_format(format: &str) -> Option<(&'static str, &'static str)> {
         "tsv" => ("Tab-separated", "tsv"),
         "html" => ("HTML", "html"),
         "md" => ("Markdown", "md"),
+        "jsonl" => ("JSON Lines", "jsonl"),
         "txt" => ("Text", "txt"),
         "xlsx" => ("Excel workbook", "xlsx"),
         _ => return None,
@@ -4575,7 +4576,7 @@ struct GetSessionsArgs {
     page: Option<i64>,
     date_from: Option<String>,
     date_to: Option<String>,
-    filter: Option<String>, // "all" | "genai" | "neg_feedback" | "low_recog" | "zero_recog"
+    filter: Option<String>, // "all" | "genai" | "neg_feedback" | "pos_feedback" | "any_feedback" | "low_recog" | "zero_recog"
     /// The search expression — see [`parse_search_expr`]. A bare sentence is a
     /// one-leaf expression and means exactly what it always did.
     query: Option<String>,
@@ -5871,7 +5872,7 @@ fn build_session_filter_query(
         *idx += 1;
         format!("?{}", *idx)
     };
-    let is_feedback_filter = matches!(filter, "neg_feedback" | "pos_feedback");
+    let is_feedback_filter = matches!(filter, "neg_feedback" | "pos_feedback" | "any_feedback");
     if is_feedback_filter {
         conn.create_scalar_function(
             "feedback_origin",
@@ -5900,6 +5901,10 @@ fn build_session_filter_query(
         "genai" => base_conditions.push("s.has_gen_ai = 1".to_string()),
         "neg_feedback" => base_conditions.push("s.has_neg_feedback = 1".to_string()),
         "pos_feedback" => base_conditions.push("s.has_pos_feedback = 1".to_string()),
+        // Any rating at all: every conversation but the ones nobody rated.
+        // Parenthesised for the same reason as `low_recog` below.
+        "any_feedback" => base_conditions
+            .push("(s.has_neg_feedback = 1 OR s.has_pos_feedback = 1)".to_string()),
         "low_recog" => {
             // Parenthesised: `base_conditions` is joined with AND today, but a
             // bare `A AND B` is a precedence bug waiting for the first caller
@@ -6030,6 +6035,12 @@ fn build_session_filter_query(
             "AND (fb.feedback_info LIKE '%\"score\": 1%' OR fb.feedback_info LIKE '%\"score\":1%') \
              AND fb.feedback_info NOT LIKE '%\"score\": -1%' \
              AND fb.feedback_info NOT LIKE '%\"score\":-1%'"
+        }
+        // Either thumb — the union of the two above, so a rating that counts
+        // as one of them is never missing from "any".
+        "any_feedback" => {
+            "AND (fb.feedback_info LIKE '%\"score\": -1%' OR fb.feedback_info LIKE '%\"score\":-1%' \
+              OR fb.feedback_info LIKE '%\"score\": 1%' OR fb.feedback_info LIKE '%\"score\":1%')"
         }
         _ => "",
     };
@@ -11851,7 +11862,7 @@ mod tests {
     /// a shared extension means the dialog filter and the file disagree.
     #[test]
     fn every_export_format_forces_its_own_extension() {
-        let formats = ["json", "png", "svg", "csv", "tsv", "html", "md", "txt", "xlsx"];
+        let formats = ["json", "jsonl", "png", "svg", "csv", "tsv", "html", "md", "txt", "xlsx"];
         let mut seen = std::collections::HashSet::new();
         for f in formats {
             let (label, ext) = export_format(f).expect(f);
@@ -17085,6 +17096,35 @@ mod conv_search {
             found(&conn, &feedback_args("openen")).is_empty(),
             "a feedback search must not match turns the feedback was not about"
         );
+    }
+
+    /// "Any feedback" is every rated conversation — thumbs up or down — and
+    /// still narrows a search to the rated answer, exactly as either thumb does.
+    #[test]
+    fn any_feedback_is_either_thumb_and_still_the_rated_answer() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "down", user: "en parkeren", bot: "parkeren kost acht euro", ..Default::default() });
+        add_feedback(&conn, 2, "down", -1, 1);
+        add(&conn, Turn { log_id: 3, session: "up", user: "en parkeren", bot: "parkeren is gratis", ..Default::default() });
+        add_feedback(&conn, 4, "up", 1, 3);
+        add(&conn, Turn { log_id: 5, session: "up", user: "hoe laat open", bot: "om tien uur", ..Default::default() });
+        add(&conn, Turn { log_id: 6, session: "unrated", user: "en parkeren", bot: "parkeren kost acht euro", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = |q: Option<&str>, filter: &str| GetSessionsArgs {
+            query: q.map(str::to_string),
+            filter: Some(filter.to_string()),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &args(None, "any_feedback")), vec!["down", "up"]);
+        assert_eq!(found(&conn, &args(Some("parkeren"), "any_feedback")), vec!["down", "up"]);
+        // The unrated turn of a rated conversation is not what was rated.
+        assert!(found(&conn, &args(Some("open"), "any_feedback")).is_empty());
+        // The union of the two thumbs, never more.
+        let mut union = found(&conn, &args(None, "neg_feedback"));
+        union.extend(found(&conn, &args(None, "pos_feedback")));
+        union.sort();
+        assert_eq!(found(&conn, &args(None, "any_feedback")), union);
     }
 
     /// The GAP feedback list is the rated **answers**, each once, with the
