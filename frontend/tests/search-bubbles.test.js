@@ -63,7 +63,6 @@ vm.runInContext(
   let _convEntityIndex = null
   let _convEntityIndexSrc = null
   let convExpr = []
-  let convSearchEntities = true
   let convSearchRegex = false
   let allArticles = []
   let allDialogsCombined = []
@@ -111,7 +110,6 @@ vm.runInContext(
     contextOptionsLoaded = !!o.context
     metadataOptions = o.metadata || []
     metadataOptionsLoaded = !!o.metadata
-    convSearchEntities = o.entitiesOn !== false
     convSearchRegex = !!o.regex
     _convContentIndex = null
     _convEntityIndex = null
@@ -369,13 +367,11 @@ eq(
   ["dn-6391", "qa-1419"],
 )
 
-// E governs whether a *typed word* also matches the entity fields. An
-// `entity:` condition is exact and does not depend on it, so the suggestions
-// must not either — gating them left the field unable to offer a chip that
-// would have worked perfectly well once placed.
-ctx.setUp({ entities: ENTITIES, entitiesOn: false })
+// Entities are always offered: an `entity:` chip is the only way to search
+// them now that the E toggle is gone, whatever U / B say.
+ctx.setUp({ entities: ENTITIES })
 eq(
-  "an entity is still offered with E off, because the chip does not need E",
+  "an entity is offered whatever the scope, because the chip is the only way in",
   ctx.labelsFor("park"),
   ["parkeren", "parkeerplaats_hotel", "zonnepark"],
 )

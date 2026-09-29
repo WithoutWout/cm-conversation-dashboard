@@ -5418,6 +5418,17 @@
         background: var(--surface);
         color: var(--accent);
       }
+      /* The field no longer says what the list shows: Enter or a click updates it. */
+      .conv-search-submit.stale {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .conv-search-submit.stale:hover {
+        background: var(--accent);
+        color: #fff;
+        filter: brightness(1.1);
+      }
       .conv-search-submit:active {
         opacity: 0.75;
       }
@@ -5644,6 +5655,33 @@
         background: rgba(124, 106, 247, 0.15);
         border-color: var(--accent);
         color: var(--accent);
+      }
+      /* Feedback · thumbs up · thumbs down, joined into one control: three
+         readings of one filter. Shared borders overlap by a pixel, and the
+         hovered or active segment is lifted so its accent border shows whole. */
+      .conv-pill-group {
+        display: inline-flex;
+        flex-shrink: 0;
+      }
+      .conv-pill-group .conv-pill {
+        border-radius: 0;
+        margin-left: -1px;
+        position: relative;
+      }
+      .conv-pill-group .conv-pill:first-child {
+        border-radius: 12px 0 0 12px;
+        margin-left: 0;
+      }
+      .conv-pill-group .conv-pill:last-child {
+        border-radius: 0 12px 12px 0;
+        padding: 2px 8px;
+      }
+      .conv-pill-group .conv-pill:not(:first-child) {
+        padding: 2px 8px;
+      }
+      .conv-pill-group .conv-pill:hover,
+      .conv-pill-group .conv-pill.active {
+        z-index: 1;
       }
       .sessions-list {
         flex: 1;
@@ -10707,6 +10745,14 @@
             >
               ND
             </button>
+            <button
+              class="sopt"
+              id="opt-refs"
+              title="Include referenced Articles"
+              data-tooltip="Let a Dialog match on the Articles its nodes reference (off: only the Dialog's own content)"
+            >
+              Ref
+            </button>
             <div class="sopt-sep"></div>
             <button
               class="conv-ctx-btn"
@@ -11198,23 +11244,16 @@
                 <button
                   class="conv-scope-btn active"
                   data-conv-scope="user"
-                  title="Search user messages"
+                  title="Text chips search what the user typed. Entity chips always match the user's turn — the bot's answers carry no entities."
                 >
                   U
                 </button>
                 <button
                   class="conv-scope-btn"
                   data-conv-scope="bot"
-                  title="Search bot messages"
+                  title="Text chips search the bot's answers. Entity chips always match the user's turn — the bot's answers carry no entities."
                 >
                   B
-                </button>
-                <button
-                  class="conv-scope-btn active"
-                  data-conv-scope="entity"
-                  title="Also match typed words against the Entities a turn triggered (name, matched text or Entity ID). An entity: condition is exact and does not need this."
-                >
-                  E
                 </button>
               </div>
             </div>
@@ -11281,13 +11320,35 @@
             </div>
             <div class="conv-filter-pills">
               <button class="conv-pill" data-conv-filter="genai">GenAI</button>
-              <button
-                class="conv-pill"
-                data-conv-filter="neg_feedback"
-                id="feedbackFilterPill"
-              >
-                <svg class=ui-icon><use href=#i-thumb-down /></svg> feedback
-              </button>
+              <!-- One filter, three readings: any rating, or one thumb. The
+                   pills stay mutually exclusive with the others, so the group
+                   is only a visual join. -->
+              <div class="conv-pill-group" role="group" aria-label="Feedback">
+                <button
+                  class="conv-pill"
+                  data-conv-filter="any_feedback"
+                  title="Any feedback — conversations rated thumbs up or thumbs down"
+                >
+                  Feedback
+                </button>
+                <button
+                  class="conv-pill"
+                  data-conv-filter="pos_feedback"
+                  title="Thumbs up only"
+                  aria-label="Thumbs up only"
+                >
+                  <svg class=ui-icon><use href=#i-thumb-up /></svg>
+                </button>
+                <button
+                  class="conv-pill"
+                  data-conv-filter="neg_feedback"
+                  id="feedbackFilterPill"
+                  title="Thumbs down only"
+                  aria-label="Thumbs down only"
+                >
+                  <svg class=ui-icon><use href=#i-thumb-down /></svg>
+                </button>
+              </div>
               <button class="conv-pill" data-conv-filter="low_recog">
                 Low %
               </button>
@@ -11355,6 +11416,15 @@
               />
               <button class="clear-btn" id="chatClearSearch">&#x2715;</button>
             </div>
+            <!-- The U / B scope the conversation search ran with, carried into
+                 the chat so it marks the same side the list matched on. Hidden
+                 when both sides are searched; a click widens to both. -->
+            <button
+              class="chat-sopt on"
+              id="chatOptScope"
+              hidden
+              onclick="setChatSearchScope('both')"
+            ></button>
             <button
               class="chat-sopt"
               id="chatOptRegex"
@@ -12835,6 +12905,22 @@
       </div>
     </div>
 
+    <!-- Share Content → Export for AI: the format, before the save dialog.
+         After #exportModal in the document so it stacks above it. -->
+    <div class="modal-overlay" id="contentAiModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Export content for AI</h3>
+          <button class="close-btn" onclick="closeContentAiModal()">&#x2715;</button>
+        </div>
+        <div class="modal-body" id="contentAiBody"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeContentAiModal()">Cancel</button>
+          <button class="btn-primary" onclick="exportContentForAi()">Choose file…</button>
+        </div>
+      </div>
+    </div>
+
     <!-- COLLECTIONS MODAL -->
     <div class="modal-overlay" id="collectionsModal">
       <div class="modal-box collections-modal-box">
@@ -13701,6 +13787,9 @@
       let searchRegex = false
       let searchContent = false
       let searchExcludeNonDefault = false
+      // Off by default: a Dialog matches on its own content, not on the
+      // Articles its nodes merely reference — see `nodeIsRefHidden`.
+      let searchIncludeRefs = false
       let allFilterPill = "all"
       let aFilter = "all"
       let dFilter = "all"
@@ -13830,16 +13919,26 @@
       let appVersion = ""
       let convSessions = []
       let convSessionFilter = "all"
+      /// The three feedback pills: any rating, thumbs up, thumbs down.
+      const CONV_FEEDBACK_FILTERS = ["any_feedback", "pos_feedback", "neg_feedback"]
+      /// Does the active pill accept a rating of `score` (-1 or 1)? "Any
+      /// feedback" is either thumb; with no feedback pill on, nothing is.
+      function convFeedbackWants(score) {
+        if (convSessionFilter === "any_feedback") return score === -1 || score === 1
+        if (convSessionFilter === "neg_feedback") return score === -1
+        if (convSessionFilter === "pos_feedback") return score === 1
+        return false
+      }
       /// The *text* conditions of the search expression, `|`-joined — what the
       /// session-list preview highlights. Derived, never typed into: the field
       /// itself is `convExpr`.
       let convQuery = ""
       let convSearchRegex = false
-      // Defaults are U + E: what someone asked for, and what the bot understood
-      // it as. Both markup and state say so — `_syncConvScopeFromButtons` reads
-      // the buttons, so the two must start in agreement.
-      let convSearchScope = "user" // "both" | "user" | "bot" | "none"
-      let convSearchEntities = true // E toggle — also search the entities a turn triggered
+      // The default is U: what someone asked for. Both markup and state say so
+      // — `_syncConvScopeFromButtons` reads the buttons, so the two must start
+      // in agreement. U / B govern text chips only; an `entity:` chip is the
+      // label the recognizer gave the user's turn, whatever side is searched.
+      let convSearchScope = "user" // "both" | "user" | "bot"
       let convDateFrom = ""
       let convDateTo = ""
       let convDateMin = "" // YYYY-MM-DD — earliest date in DB
@@ -13864,7 +13963,11 @@
       let chatMatchIdx = 0
       let _chatDimObserver = null
       let chatSearchRegex = false // when true, treat chatQuery as a regex
-      let chatMatchEntities = false // mirrors the E toggle for the opened chat
+      let chatMatchEntities = false // on when the search holds an `entity:` chip
+      /// Which side of a turn the chat search reads — "both" | "user" | "bot".
+      /// Mirrored from the U / B toggles when a result is opened, so the chat
+      /// marks the side the list matched on; see `setChatSearchScope`.
+      let chatSearchScope = "both"
       let convImporting = false
       let convAiExporting = false
       let convSearchSeq = 0 // incremented on each search; used to discard stale results
@@ -14030,13 +14133,77 @@
           .replace(/>/g, "&gt;")
           .replace(/"/g, "&quot;")
       }
+      /// Base letter → a character class of it and its accented forms. The
+      /// renderer's half of the worker's accent folding (`ACCENT_CLASS` there):
+      /// a case-insensitive search ignores accents, so the highlight and the
+      /// modal's "Matches only" have to as well, or `oke` would return a card
+      /// with nothing marked on it.
+      const _ACCENT_CLASS = (() => {
+        const groups = {}
+        for (let c = 0xc0; c <= 0x24f; c++) {
+          const ch = String.fromCharCode(c).toLowerCase()
+          const base = ch.normalize("NFD")[0]
+          if (base < "a" || base > "z" || ch === base) continue
+          if (!groups[base]) groups[base] = []
+          if (!groups[base].includes(ch)) groups[base].push(ch)
+        }
+        const out = {}
+        for (const b in groups) out[b] = "[" + b + groups[b].join("") + "]"
+        return out
+      })()
+
+      /// An escaped pattern with every letter widened to its accented forms —
+      /// only for a plain, case-insensitive search, as in the worker.
+      function _accentPattern(pat) {
+        if (searchRegex || searchCase) return pat
+        let out = ""
+        for (const ch of pat) {
+          const base = ch.toLowerCase().normalize("NFD")[0]
+          out += _ACCENT_CLASS[base] || ch
+        }
+        return out
+      }
+
+      /// The regex source for one term — `termPattern` in search-worker.js, which
+      /// decides what matches; this copy decides what is marked, so the two
+      /// must agree. Exact under `.*`; otherwise escaped, widened for accents,
+      /// and a phrase of several words matches however they are joined:
+      /// spaces, hyphens, slashes, and an optional en / and / und / & / + —
+      /// "oud en nieuw" finds "Oud & Nieuw" and "oud-en-nieuw".
+      const _PHRASE_SEP = "[\\s\\-\u2013\u2014_/]*"
+      const _PHRASE_JOIN =
+        _PHRASE_SEP + "(?:(?:en|and|und|&amp;|&|\\+)" + _PHRASE_SEP + ")?"
+      const _PHRASE_CONNECTIVES = ["en", "and", "und", "&", "+"]
+      function _termPattern(term) {
+        if (searchRegex) return term
+        const escWord = (w) =>
+          _accentPattern(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        if (!/[\s\-\u2013\u2014_/&+]/.test(term.trim())) return escWord(term)
+        const words = term
+          .replace(/[&+]/g, " & ")
+          .split(/[\s\-\u2013\u2014_/]+/)
+          .filter((w) => w && !_PHRASE_CONNECTIVES.includes(w.toLowerCase()))
+        return words.length ? words.map(escWord).join(_PHRASE_JOIN) : escWord(term)
+      }
+
+      /// `_termPattern` with its word edges: both under \b, the start only for
+      /// a short word — mirrors `buildTermRegex` / `isShortTerm` in the worker,
+      /// so what is marked is what matched. See docs/search.md → "Short words
+      /// start a word".
+      const _SHORT_TERM_MAX = 5
+      function _termRegexSource(term) {
+        const pat = _termPattern(term)
+        const edge = "(?<![\\w\\u00C0-\\u024F])"
+        if (searchWord) return edge + pat + "(?![\\w\\u00C0-\\u024F])"
+        if (searchRegex) return pat
+        const first = term.trim().split(/[\s\-\u2013\u2014_/&+]+/)[0] || ""
+        return first.length > 0 && first.length <= _SHORT_TERM_MAX ? edge + pat : pat
+      }
+
       function buildSearchRegex(q) {
         if (!q) return null
         try {
-          let pat = searchRegex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-          if (searchWord)
-            pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
-          return new RegExp(pat, searchCase ? "" : "i")
+          return new RegExp(_termRegexSource(q), searchCase ? "" : "i")
         } catch (e) {
           return null
         }
@@ -14064,12 +14231,7 @@
       // Build a global-flag regex for a single escaped term.
       function _buildTermHlRegex(term) {
         try {
-          let pat = searchRegex
-            ? term
-            : term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-          if (searchWord)
-            pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
-          return new RegExp(pat, (searchCase ? "" : "i") + "g")
+          return new RegExp(_termRegexSource(term), (searchCase ? "" : "i") + "g")
         } catch (e) {
           return null
         }
@@ -15777,6 +15939,9 @@
 
       // ── Dialog node ─────────────────────────────────────────────────
       function renderNodeHtml(node, dialog, q, autoOpenCtx) {
+        // A reference node is drawn as always, but not marked: its name and
+        // its Article's text are not why this Dialog is in the results.
+        if (nodeIsRefHidden(node, dialog)) q = ""
         const isRec = node.type === "Recognition"
         const items = (node.output && node.output.items) || []
         // Use the isDefault answer as the primary; fall back to first Answer
@@ -16015,7 +16180,8 @@
         const hasDetail = !!desc
         const snippetHtml = cardSnippetHtml(
           nonDefaultDialogMatchSnippet(item, q) ||
-            contextRouteMatchSnippet(item, q),
+            contextRouteMatchSnippet(item, q) ||
+            dialogNodeMatchSnippet(item, q),
           q,
         )
         const relationHtml = relationRowHtml(
@@ -16093,13 +16259,7 @@
         return terms
           .map((t) => {
             try {
-              let pat = searchRegex
-                ? t
-                : t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-              if (searchWord)
-                pat =
-                  "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
-              return new RegExp(pat, searchCase ? "" : "i")
+              return new RegExp(_termRegexSource(t), searchCase ? "" : "i")
             } catch (e) {
               return null
             }
@@ -16108,12 +16268,22 @@
       }
 
       // Test text against any of the term regexes (OR logic).
+      //
+      // Placeholders are markup, not words — raw `%{DialogOptions()}` and the
+      // `[DialogOptions()]` that `expandVarNames` / `stripDisplay` turn it
+      // into — and are left out, as the worker's `dropPlaceholders` does.
+      // Variable names (`[naam]`) carry no parentheses and stay searchable.
       function _anyTermMatches(termRes, str) {
         if (!str) return false
+        const text = _dropPlaceholders(str)
         return termRes.some((re) => {
           re.lastIndex = 0
-          return re.test(str)
+          return re.test(text)
         })
+      }
+
+      function _dropPlaceholders(t) {
+        return String(t).replace(/%\{[A-Za-z]+\([^}]*\)\}|\[[A-Za-z]+\([^\]]*\)\]/g, " ")
       }
 
       // Which Answer is the default one — the response given when no condition
@@ -16173,6 +16343,23 @@
         )
       }
 
+      /// Does `text` hold every searched word? A snippet is the reason a card is
+      /// on screen, and the search wants all words in one part — so a snippet
+      /// showing one of two words reads as the search being wrong. With `|` in
+      /// the query any one group would do, and any match is accepted.
+      function _snippetHasAllTerms(termRes, displayText, rawText) {
+        // `gQuery` joins the chips with " | " for highlighting, so whether the
+        // words are alternatives is read from the chips themselves.
+        const alternatives =
+          contentExpr.some((it) => it.t === "op" && it.op === "or") ||
+          contentExpr.some((it) => it.t === "text" && String(it.value).includes("|")) ||
+          contentPendingText().includes("|")
+        if (alternatives) return true
+        return termRes.every(
+          (re) => _anyTermMatches([re], displayText) || _anyTermMatches([re], expandVarNames(rawText || "")),
+        )
+      }
+
       function nonDefaultArticleMatchSnippet(art, q) {
         if (!q || searchExcludeNonDefault) return null
         const termRes = _buildModalTermRegexes()
@@ -16183,6 +16370,7 @@
           const displayText = stripDisplay(o.Text || "", o.Links || [])
           if (!answerTextMatchesTermRes(termRes, displayText, o.Text || ""))
             continue
+          if (!_snippetHasAllTerms(termRes, displayText, o.Text || "")) continue
           if (
             contentContextFilters.length &&
             !answerPassesContextFilters(
@@ -16194,6 +16382,94 @@
             continue
           return { label: "Contextual response", text: displayText }
         }
+        return null
+      }
+
+      /// A window of `text` around the first match, placeholders removed — the
+      /// snippet is one line, so the match has to be near its start to show.
+      function _snippetAround(text, termRes) {
+        const t = _dropPlaceholders(text).replace(/\s+/g, " ").trim()
+        let at = -1
+        for (const re of termRes) {
+          const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g")
+          const m = g.exec(t)
+          if (m && (at < 0 || m.index < at)) at = m.index
+        }
+        if (at < 0) return t
+        const start = Math.max(0, at - 40)
+        return (start > 0 ? "…" : "") + t.slice(start)
+      }
+
+      /// Why a Dialog is in the results, when its title does not say so: the
+      /// node that matched and what in it did. A Dialog is dozens of nodes, and
+      /// without this a card turned up for "tickets" with nothing on it saying
+      /// where. Response text first, then what the user says, then a node's
+      /// name, then the description — the same fields the worker searched.
+      function dialogNodeMatchSnippet(item, q) {
+        if (!q || item._kind === "tdialog") return null
+        const termRes = _buildModalTermRegexes()
+        if (!termRes.length || _anyTermMatches(termRes, item.name || "")) return null
+        const nodes = item.nodes || []
+        // The part holding the most of the searched words wins — the search
+        // wants them all in one part, so that part is the reason this Dialog
+        // is here. Ties go to a Response, then a phrasing, then a name.
+        const ORDER = ["response", "phrase", "name"]
+        const score = (t) =>
+          termRes.filter((re) => {
+            re.lastIndex = 0
+            return re.test(_dropPlaceholders(t || ""))
+          }).length
+        let best = null
+        for (const n of nodes) {
+          for (const r of nodeMatchReasons(n, termRes, item)) {
+            const sc = score(r.text)
+            if (
+              !best ||
+              sc > best.sc ||
+              (sc === best.sc && ORDER.indexOf(r.kind) < ORDER.indexOf(best.r.kind))
+            )
+              best = { n, r, sc }
+          }
+        }
+        for (const kind of best ? [best.r.kind] : []) {
+          const { n, r } = best
+          const where = n.name || "node " + n.id
+          if (kind === "response")
+            return {
+              label: "Node",
+              text:
+                where +
+                (r.articleId ? " (Article qa-" + r.articleId + ")" : "") +
+                " — " +
+                _snippetAround(r.text, termRes),
+            }
+          if (kind === "phrase") {
+            // A route that ends in an Article says so, by id and title: the
+            // Dialog is here for what the user says in it, not for the
+            // Article's content.
+            if (r.articleId != null) {
+              const art = articleMap.get(r.articleId)
+              return {
+                label: "User says",
+                text:
+                  "“" + r.text + "” → Article qa-" + r.articleId +
+                  (art ? " (" + (aFaqQ(art) || "") + ")" : ""),
+              }
+            }
+            const child = nodes.find((x) => x.id === r.childNodeId)
+            return {
+              label: "User says",
+              text: "“" + r.text + "”" + (child && child.name ? " → " + child.name : ""),
+            }
+          }
+          return { label: "Node", text: r.text }
+        }
+        if (
+          !searchContent &&
+          !contentContextFilters.length &&
+          _anyTermMatches(termRes, item.description || "")
+        )
+          return { label: "Description", text: _snippetAround(item.description, termRes) }
         return null
       }
 
@@ -16214,6 +16490,7 @@
             )
             if (!answerTextMatchesTermRes(termRes, displayText, rawText))
               continue
+            if (!_snippetHasAllTerms(termRes, displayText, rawText)) continue
             if (
               contentContextFilters.length &&
               !answerPassesContextFilters(
@@ -16310,59 +16587,147 @@
         }
       }
 
-      function nodeMatchesQuery(n, termRes) {
-        const hasCtxFilter = contentContextFilters.length > 0
-        if (
-          !searchContent &&
-          !hasCtxFilter &&
-          _anyTermMatches(termRes, n.name || "")
+      /// Does this node only show an Article (`output.kbaIdReference`), with no
+      /// Response of its own? Mirrors `isRef` in search-worker.js.
+      function nodeIsRef(n) {
+        const out = n && n.output
+        return (
+          !!out &&
+          out.kbaIdReference != null &&
+          !(out.items || []).some((i) => i.type === "Answer")
         )
-          return true
-        // All answer items (default + contextual)
-        const ansItems = ((n.output && n.output.items) || []).filter(
-          (i) => i.type === "Answer",
-        )
-        const defaultAnsItem = defaultDialogAnswerItem(ansItems)
-        if (
-          ansItems.some((i) => {
-            if (searchExcludeNonDefault && i !== defaultAnsItem) return false
+      }
+
+      const _dialogNodesById = new WeakMap()
+
+      /// The node `id` lands on once GoTo jumps are followed.
+      function _nodeLandsOn(dialog, id) {
+        if (!dialog) return null
+        let byId = _dialogNodesById.get(dialog)
+        if (!byId) {
+          byId = new Map((dialog.nodes || []).map((x) => [x.id, x]))
+          _dialogNodesById.set(dialog, byId)
+        }
+        const seen = new Set()
+        let n = byId.get(id)
+        while (n && n.type === "GoTo" && !seen.has(n.id)) {
+          seen.add(n.id)
+          const l = (n.links || [])[0]
+          n = l ? byId.get(l.childNodeId) : null
+        }
+        return n || null
+      }
+
+      /// Does node `id` lead to a reference node once GoTo jumps are followed?
+      /// Mirrors `leadsToRef` in search-worker.js: a GoTo named after a
+      /// reference ("GoTo - D-3A3BLC") is part of the reference.
+      function _nodeLeadsToRef(dialog, id) {
+        const n = _nodeLandsOn(dialog, id)
+        return !!n && nodeIsRef(n)
+      }
+
+      /// A reference node's name and its Article's text are not the Dialog's
+      /// content, so they count as a match only under the Ref toggle — the
+      /// worker's rule, which the card, the modal and "Matches only" follow. A
+      /// GoTo that jumps to one is part of the reference as well.
+      function nodeIsRefHidden(n, dialog) {
+        if (searchIncludeRefs) return false
+        return nodeIsRef(n) || (n.type === "GoTo" && _nodeLeadsToRef(dialog, n.id))
+      }
+
+      function nodeMatchesQuery(n, termRes, dialog) {
+        return !!nodeMatchReason(n, termRes, dialog)
+      }
+
+      /// Why a node matches the query, or null: `{kind, text, …}` where kind is
+      /// "response" | "phrase" | "name", most telling first. One reading for
+      /// the modal's "Matches only" and the card's snippet, mirroring the
+      /// worker's fields: a node's Responses (or, under Ref, its Article's), what
+      /// the user says to move on from it, and its name — the last two off
+      /// under ¬T and with a context filter on.
+      function nodeMatchReason(n, termRes, dialog) {
+        return nodeMatchReasons(n, termRes, dialog, true)[0] || null
+      }
+
+      /// Every reason a node matches, in order of worth — or only the first
+      /// when `firstOnly`. The card snippet wants all of them, to show the part
+      /// holding the most of the searched words.
+      function nodeMatchReasons(n, termRes, dialog, firstOnly) {
+        const out = []
+        const add = (r) => {
+          out.push(r)
+          return firstOnly
+        }
+        const namesCount = !searchContent && !contentContextFilters.length
+        const refHidden = nodeIsRefHidden(n, dialog)
+        if (!refHidden && nodeIsRef(n)) {
+          const art = articleMap.get(n.output.kbaIdReference)
+          for (const o of (art && art.Outputs) || []) {
+            if (o.Type !== "Answer") continue
+            const t = stripDisplay(o.Text || "", o.Links || [])
+            if (
+              answerTextMatchesTermRes(termRes, t, o.Text || "") &&
+              answerPassesContextFilters(
+                o.ContextVariables || [],
+                (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
+                true,
+              )
+            )
+              if (add({ kind: "response", text: t, articleId: art.Id })) return out
+          }
+        } else if (!refHidden) {
+          const ansItems = ((n.output && n.output.items) || []).filter(
+            (i) => i.type === "Answer",
+          )
+          const defaultAnsItem = defaultDialogAnswerItem(ansItems)
+          for (const i of ansItems) {
+            if (searchExcludeNonDefault && i !== defaultAnsItem) continue
             const t = stripDisplay(
               (i.data && i.data.text) || "",
               (i.data && i.data.hyperlinks) || [],
             )
-            return (
-              answerTextMatchesTermRes(
-                termRes,
-                t,
-                (i.data && i.data.text) || "",
-              ) &&
+            if (
+              answerTextMatchesTermRes(termRes, t, (i.data && i.data.text) || "") &&
               answerPassesContextFilters(
                 i.contextVariables || [],
                 (i.metadata && i.metadata.escalationGroup) || null,
                 false,
               )
             )
-          })
-        )
-          return true
-        // Recognition links + entity enrichment
-        if (
-          !searchContent &&
-          !hasCtxFilter &&
-          (n.links || []).some((link) => {
-            const cd = (link.condition && link.condition.data) || {}
-            if (cd.isFallback) return false
-            return (cd.questions || []).some(
-              (qo) =>
-                qo.text &&
-                (_anyTermMatches(termRes, qo.text) ||
-                  (matchingEntityNames.size > 0 &&
-                    matchingEntityNames.has(qo.text.toUpperCase()))),
+              if (add({ kind: "response", text: t, contextual: i !== defaultAnsItem })) return out
+          }
+        }
+        if (!namesCount) return out
+        // Recognition links (+ entity enrichment) — including one that lands
+        // on a reference: the phrasing is written in this Dialog. The reason
+        // carries the Article, so the card can say the route ends there.
+        for (const link of n.links || []) {
+          const cd = (link.condition && link.condition.data) || {}
+          if (cd.isFallback) continue
+          for (const qo of cd.questions || []) {
+            if (
+              qo.text &&
+              (_anyTermMatches(termRes, qo.text) ||
+                (matchingEntityNames.size > 0 &&
+                  matchingEntityNames.has(qo.text.toUpperCase())))
             )
-          })
-        )
-          return true
-        return false
+              if (
+                add({
+                  kind: "phrase",
+                  text: qo.text,
+                  childNodeId: link.childNodeId,
+                  articleId: (() => {
+                    const to = _nodeLandsOn(dialog, link.childNodeId)
+                    return to && nodeIsRef(to) ? to.output.kbaIdReference : null
+                  })(),
+                })
+              )
+                return out
+          }
+        }
+        if (!refHidden && _anyTermMatches(termRes, n.name || ""))
+          add({ kind: "name", text: n.name })
+        return out
       }
 
       function _syncModalFilterBtn() {
@@ -17953,9 +18318,9 @@
       }
 
       // Entities tab → Conversations, showing every conversation the recognizer
-      // fired this entity in. Entity-only on purpose: the entity's *name* is a
-      // label the recognizer assigned, and searching the message text for it
-      // would return a different — usually much smaller — set.
+      // fired this entity in — as an `entity:` chip, the exact label. The
+      // entity's *name* is a label the recognizer assigned, and searching the
+      // message text for it would return a different, usually much smaller set.
       function searchConvsForEntity(name) {
         // Called from the entity card *and* from the entity modal; closing
         // unconditionally saves the caller from knowing which.
@@ -17966,13 +18331,19 @@
         if (input) input.value = ""
         const clearBtn = document.getElementById("convClearSearch")
         if (clearBtn) clearBtn.classList.remove("visible")
-        // A text chip, not an `entity:` one: the substring match over entity
-        // names is a genuinely different — usually wider — question from the
-        // exact label, and this button has always asked the first one.
-        convExpr = [{ t: "text", value: String(name) }]
+        // It used to be a text chip searched with the E toggle alone — a
+        // substring over entity names. E is gone (U / B leave entities to
+        // their own chip), and "which conversations fired this entity?" is
+        // the exact label anyway. `entity_index` holds the display name
+        // lower-cased, which is the export's name in another case.
+        const v = String(name).toLowerCase()
+        const opt = (entityOptions || []).find(
+          (o) => String(o.value || "").toLowerCase() === v,
+        )
+        const label = opt ? String(opt.value) : String(name)
+        convExpr = [{ t: "entity", value: label.toLowerCase(), label }]
         convSearchRegex = false
         document.getElementById("convOptRegex").classList.remove("on")
-        setConvSearchScope(false, false, true)
         convPage = 1
         convHasSearched = true
         _afterConvExprChange(true)
@@ -18474,7 +18845,7 @@
         const nodes = item.nodes || []
         if (nodes.length > 0) {
           const visibleNodes = filterActive
-            ? nodes.filter((n) => nodeMatchesQuery(n, termRes))
+            ? nodes.filter((n) => nodeMatchesQuery(n, termRes, item))
             : nodes
           if (visibleNodes.length) {
             html +=
@@ -18561,6 +18932,7 @@
           searchRegex,
           searchContent,
           searchExcludeNonDefault,
+          searchIncludeRefs,
           allFilterPill,
           aFilter,
           dFilter,
@@ -19205,6 +19577,13 @@
             .classList.toggle("on", searchExcludeNonDefault)
           triggerSearch()
         })
+      document.getElementById("opt-refs").addEventListener("click", () => {
+        searchIncludeRefs = !searchIncludeRefs
+        document
+          .getElementById("opt-refs")
+          .classList.toggle("on", searchIncludeRefs)
+        triggerSearch()
+      })
 
       // ── Tabs ────────────────────────────────────────────────────────
       document.querySelectorAll(".tab").forEach((btn) => {
@@ -19790,7 +20169,9 @@
         const actions = document.getElementById("exportFooterActions")
         const n = getExportItemsForCurrentView().length
         const dis = n ? "" : " disabled"
-        const plain = `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}><svg class=ui-icon><use href=#i-clipboard /></svg> Copy as plain text</button>`
+        const plain =
+          `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}><svg class=ui-icon><use href=#i-clipboard /></svg> Copy as plain text</button>` +
+          `<button class="btn-secondary" onclick="openContentAiModal()"${dis} title="Save these items in full — questions, Responses, routes and Dialog nodes — as Markdown or JSON Lines">Export for AI…</button>`
         if (_exportView === "table") {
           actions.innerHTML =
             `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}><svg class=ui-icon><use href=#i-table /></svg> Copy table (${n} row${
@@ -19801,6 +20182,410 @@
             `<button class="btn-primary" onclick="_copyExportLinks(this)"${dis}><svg class=ui-icon><use href=#i-link /></svg> Copy ${n} link${
               n !== 1 ? "s" : ""
             }</button>` + plain
+        }
+      }
+
+      // ── Share Content: Export for AI ────────────────────────────────
+      //
+      // The same set every copy action reads (`getExportItemsForCurrentView`:
+      // the tab's search, minus removals, minus the modal's filter), written
+      // out whole — every question, Response, route and node — so a model can
+      // read what the bot says without a CM.com login. Markdown to paste into
+      // a chat, or JSON Lines for a script; see docs/ai-export.md → "Content".
+      const CONTENT_AI_SCHEMA_VERSION = 1
+      let contentAiFormat = "md" // "md" | "jsonl"
+
+      /// Drops what says nothing — null, "", [], {} — so the file carries
+      /// content rather than schema. `false` is kept: it always means something
+      /// here, or it is not written at all.
+      function _aiPrune(v) {
+        if (Array.isArray(v)) {
+          const out = v.map(_aiPrune).filter((x) => x !== undefined)
+          return out.length ? out : undefined
+        }
+        if (v && typeof v === "object") {
+          const out = {}
+          for (const [k, x] of Object.entries(v)) {
+            const p = _aiPrune(x)
+            if (p !== undefined) out[k] = p
+          }
+          return Object.keys(out).length ? out : undefined
+        }
+        if (v === null || v === undefined || v === "") return undefined
+        return v
+      }
+
+      /// One output's context conditions, `{name: [values]}` — every variable,
+      /// escalationGroup included, since here it is a fact to read rather than
+      /// a chip to filter on. `any` is no condition and is left out.
+      function _aiCtx(cvs, isArticle) {
+        const set = {}
+        for (const cv of cvs || []) {
+          const name = ctxVarMap.get(isArticle ? cv.Id : cv.id)
+          if (!name) continue
+          const raw = isArticle ? cv.Values || [] : cv.value ? [cv.value] : []
+          const vals = []
+          for (const s of raw)
+            for (const v of String(s).split(",")) {
+              const t = v.trim()
+              if (t && t !== "any" && !vals.includes(t)) vals.push(t)
+            }
+          if (vals.length) set[name] = vals
+        }
+        return set
+      }
+
+      /// A route into a Dialog or a Transactional Dialog (or a Halo agent).
+      function _aiRoute(type, dialogId, tDialogId, extra) {
+        if (type === "DialogStart" && dialogId != null) {
+          const d = dialogMap.get(dialogId)
+          return { to: "dn-" + dialogId, kind: "dialog", name: d ? d.name : "", ...extra }
+        }
+        if (type === "TDialogStart" && tDialogId != null) {
+          const t = tDialogMap.get(tDialogId)
+          return { to: "dn-" + tDialogId, kind: "transactional_dialog", name: t ? t.name : "", ...extra }
+        }
+        return { kind: type, ...extra }
+      }
+
+      function _aiArticleRecord(a) {
+        const questions = (a.Questions || []).map((q) => q.Text).filter(Boolean)
+        const faq = (a.Questions || []).find((q) => q.IsFaq)
+        const entities = []
+        for (const q of questions) {
+          const e = getEntityForChip(q)
+          if (e && !entities.includes(e.name)) entities.push(e.name)
+        }
+        const responses = []
+        const routes = []
+        for (const o of a.Outputs || []) {
+          const context = _aiCtx(o.ContextVariables, true)
+          const isDefault = !!o.IsDefault
+          if (o.Type === "Answer") {
+            responses.push({
+              text: stripDisplay(o.Text || "", o.Links || []),
+              default: isDefault || undefined,
+              context,
+              // Never shown: not the default, and no context to reach it by.
+              unreachable: (!isDefault && !Object.keys(context).length) || undefined,
+              metadata: o.OutputMetaData,
+            })
+          } else {
+            routes.push(
+              _aiRoute(o.Type, o.DialogId, o.TDialogId || o.DialogId, {
+                default: isDefault || undefined,
+                context,
+              }),
+            )
+          }
+        }
+        return _aiPrune({
+          type: "article",
+          id: "qa-" + a.Id,
+          title: faq ? faq.Text : questions[0] || "",
+          culture: a.Culture,
+          url: buildItemUrl("article", a.Id),
+          questions,
+          entities,
+          responses,
+          routes,
+        })
+      }
+
+      /// How a node hands over to the next one.
+      function _aiNextStep(dialogId, link) {
+        const c = link.condition || {}
+        const d = c.data || {}
+        const step = { to: "dn-" + dialogId + "-" + link.childNodeId }
+        if (c.type === "Recognition") {
+          if (d.isFallback) step.fallback = true
+          else step.user_says = (d.questions || []).map((q) => q.text).filter(Boolean)
+        } else if (c.type === "GoTo") step.jump = true
+        else if (c.type === "Logical") step.condition = d.isFallback ? "otherwise" : "variable check"
+        else step.always = true
+        return step
+      }
+
+      function _aiDialogRecord(d) {
+        const nodes = (d.nodes || []).map((n) => {
+          const items = (n.output && n.output.items) || []
+          const def = defaultDialogAnswerItem(items)
+          const ref = n.output && n.output.kbaIdReference
+          const responses = []
+          const routes = []
+          for (const i of items) {
+            const context = _aiCtx(i.contextVariables, false)
+            const data = i.data || {}
+            if (i.type === "Answer") {
+              responses.push({
+                text: stripDisplay(data.text || "", data.hyperlinks || []),
+                default: i === def || undefined,
+                context,
+                unreachable: (i !== def && !Object.keys(context).length) || undefined,
+                metadata: i.metadata,
+              })
+            } else {
+              routes.push(
+                _aiRoute(i.type, data.dialogId, data.tDialogId, {
+                  default: !!i.isDefault || undefined,
+                  context,
+                }),
+              )
+            }
+          }
+          const art = ref != null ? articleMap.get(ref) : null
+          return {
+            id: "dn-" + d.id + "-" + n.id,
+            type: n.type,
+            name: n.name,
+            // The node shows this Article rather than a Response of its own.
+            // Referenced, not copied: the Article is its own record when it
+            // is in the export, and its text is not this Dialog's.
+            shows_article: ref != null ? "qa-" + ref + (art ? " — " + (aFaqQ(art) || "") : "") : undefined,
+            responses,
+            routes,
+            next: (n.links || []).map((l) => _aiNextStep(d.id, l)),
+          }
+        })
+        return _aiPrune({
+          type: "dialog",
+          id: "dn-" + d.id,
+          title: d.name,
+          description: d.description,
+          url: buildItemUrl("dialog", d.id),
+          linked_from_articles: _articlesLinkingTo("dialog", d.id).map((r) => "qa-" + r.id),
+          nodes,
+        })
+      }
+
+      function _aiTDialogRecord(t) {
+        return _aiPrune({
+          type: "transactional_dialog",
+          id: "dn-" + t.id,
+          title: t.name,
+          url: buildItemUrl("tdialog", t.id),
+          linked_from_articles: _articlesLinkingTo("tdialog", t.id).map((r) => "qa-" + r.id),
+        })
+      }
+
+      function contentAiRecord(item) {
+        const raw = item._raw
+        if (item.kind === "article") return _aiArticleRecord(raw)
+        if (item.kind === "tdialog") return _aiTDialogRecord(raw)
+        return _aiDialogRecord(raw)
+      }
+
+      /// What produced this set, stated once — the reader cannot see the app.
+      function contentAiSearchContext() {
+        const tab = document.querySelector(".tab.active")
+        const tabKey = tab ? tab.dataset.tab : "all"
+        const pill = tabKey === "articles" ? aFilter : tabKey === "dialogs" ? dFilter : allFilterPill
+        return _aiPrune({
+          tab: tabKey,
+          query: contentQueryString(),
+          filter: pill !== "all" ? pill : undefined,
+          options: {
+            case_sensitive: searchCase || undefined,
+            whole_word: searchWord || undefined,
+            regex: searchRegex || undefined,
+            responses_only: searchContent || undefined,
+            exclude_non_default: searchExcludeNonDefault || undefined,
+            include_referenced_articles: searchIncludeRefs || undefined,
+          },
+          context_filters: contentContextFilters,
+          metadata_filters: contentMetadataFilters,
+          share_filter: _exportFilter.trim(),
+          removed_by_hand: _exportDropped.size || undefined,
+        })
+      }
+
+      const CONTENT_AI_LEGEND = {
+        source: "A CM.com Conversational AI Cloud content export: the Articles, Dialogs and Transactional Dialogs a chatbot answers from.",
+        ids: "qa-<n> is an Article, dn-<n> a Dialog or Transactional Dialog, dn-<dialog>-<node> one node of a Dialog.",
+        questions: "The phrasings an Article is recognised by. entities: the recognizer entities those phrasings resolve to.",
+        responses: "What the bot says. default: shown when no context condition applies. context: {variable: [values]} the Response is limited to. unreachable: not the default and no context — users never see it. metadata: tags on the Response. Text is plain, links written as [label](url), variables as [name].",
+        routes: "Outputs that hand the conversation to a Dialog or Transactional Dialog instead of answering, under the same default/context rules.",
+        nodes: "A Dialog's steps. type: Recognition (waits for the user), Output (answers), GoTo (jumps), Conditional, CaptureInput, ApiCallout. shows_article: the node answers with that Article. next: where it goes — user_says (any of these phrasings), fallback (anything else), jump, always, or a variable check.",
+        linked_from_articles: "Articles whose route leads into this Dialog.",
+        missing_keys: "A key that is absent had no value.",
+      }
+
+      /// The whole file for `items`, in `format` ("md" | "jsonl").
+      function buildContentAiExport(items, format) {
+        const records = items.map(contentAiRecord)
+        const counts = { articles: 0, dialogs: 0, transactional_dialogs: 0 }
+        for (const r of records) {
+          if (r.type === "article") counts.articles++
+          else if (r.type === "dialog") counts.dialogs++
+          else counts.transactional_dialogs++
+        }
+        const header = _aiPrune({
+          record_type: "export_header",
+          schema_version: CONTENT_AI_SCHEMA_VERSION,
+          exported_at: new Date().toISOString(),
+          item_count: records.length,
+          counts,
+          search_context: contentAiSearchContext(),
+          legend: CONTENT_AI_LEGEND,
+        })
+        if (format === "jsonl")
+          return [header, ...records.map((r, i) => ({ record_type: "item", item_index: i, ...r }))]
+            .map((r) => JSON.stringify(r))
+            .join("\n") + "\n"
+        return _contentAiMarkdown(header, records)
+      }
+
+      function _aiMdCtx(r) {
+        const bits = []
+        if (r.default) bits.push("default")
+        for (const [k, v] of Object.entries(r.context || {})) bits.push(k + " = " + v.join(" / "))
+        if (r.unreachable) bits.push("unreachable")
+        for (const [k, v] of Object.entries(r.metadata || {}))
+          bits.push("meta " + k + " = " + (typeof v === "string" ? v : JSON.stringify(v)))
+        return bits.length ? "_(" + bits.join(" · ") + ")_ " : ""
+      }
+
+      function _aiMdRoute(r) {
+        return (
+          _aiMdCtx(r) +
+          "→ " +
+          (r.to ? "`" + r.to + "` " : "") +
+          (r.kind === "transactional_dialog" ? "Transactional Dialog " : r.kind === "dialog" ? "Dialog " : r.kind + " ") +
+          (r.name ? "“" + r.name + "”" : "")
+        ).trim()
+      }
+
+      /// A Response as a Markdown list item: its first line on the bullet, the
+      /// rest indented under it so a multi-paragraph answer stays one item.
+      function _aiMdText(prefix, text) {
+        const lines = String(text || "").split(/\n/)
+        return prefix + lines.join("\n    ")
+      }
+
+      function _contentAiMarkdown(header, records) {
+        const c = header.counts || {}
+        const sc = header.search_context || {}
+        const out = []
+        out.push("# Content export for AI", "")
+        out.push(
+          "Exported " + header.exported_at + " · " + header.item_count + " items (" +
+            (c.articles || 0) + " Articles, " + (c.dialogs || 0) + " Dialogs, " +
+            (c.transactional_dialogs || 0) + " Transactional Dialogs)",
+        )
+        out.push("", "**Selection:** " + (sc.query ? "search `" + sc.query + "`" : "no search") +
+          (sc.filter ? " · filter " + sc.filter : "") +
+          (sc.options ? " · " + Object.keys(sc.options).join(", ").replace(/_/g, " ") : "") +
+          (sc.context_filters ? " · context " + sc.context_filters.map((f) => f.name + "=" + f.value).join(", ") : "") +
+          (sc.metadata_filters ? " · metadata " + sc.metadata_filters.map((f) => f.name + "=" + f.value).join(", ") : "") +
+          (sc.share_filter ? " · narrowed to “" + sc.share_filter + "”" : "") +
+          (sc.removed_by_hand ? " · " + sc.removed_by_hand + " removed by hand" : ""))
+        out.push("", "## How to read this", "")
+        for (const [k, v] of Object.entries(CONTENT_AI_LEGEND)) out.push("- **" + k.replace(/_/g, " ") + "** — " + v)
+        let section = ""
+        for (const r of records) {
+          const sec = r.type === "article" ? "Articles" : r.type === "dialog" ? "Dialogs" : "Transactional Dialogs"
+          if (sec !== section) {
+            out.push("", "---", "", "## " + sec)
+            section = sec
+          }
+          out.push("", "### " + r.id + " — " + (r.title || "(untitled)"), "")
+          const meta = []
+          if (r.culture) meta.push("Culture: " + r.culture)
+          if (r.url) meta.push(r.url)
+          if (r.linked_from_articles) meta.push("Linked from: " + r.linked_from_articles.join(", "))
+          if (meta.length) out.push(meta.join(" · "), "")
+          if (r.description) out.push(r.description, "")
+          if (r.questions) out.push("**Questions:** " + r.questions.map((q) => "“" + q + "”").join(", "), "")
+          if (r.entities) out.push("**Entities:** " + r.entities.join(", "), "")
+          if (r.responses) {
+            out.push("**Responses**", "")
+            for (const x of r.responses) out.push(_aiMdText("- " + _aiMdCtx(x), x.text))
+            out.push("")
+          }
+          if (r.routes) {
+            out.push("**Routes**", "")
+            for (const x of r.routes) out.push("- " + _aiMdRoute(x))
+            out.push("")
+          }
+          for (const n of r.nodes || []) {
+            out.push("#### " + n.id + " · " + n.type + (n.name ? " · " + n.name : ""), "")
+            if (n.shows_article) out.push("- Shows Article " + n.shows_article)
+            for (const x of n.responses || []) out.push(_aiMdText("- Says: " + _aiMdCtx(x), x.text))
+            for (const x of n.routes || []) out.push("- " + _aiMdRoute(x))
+            for (const s of n.next || []) {
+              const when = s.user_says
+                ? "when the user says " + s.user_says.map((q) => "“" + q + "”").join(", ")
+                : s.fallback ? "otherwise" : s.jump ? "jump" : s.condition ? "on a " + s.condition : "always"
+              out.push("- → `" + s.to + "` " + when)
+            }
+            out.push("")
+          }
+        }
+        return out.join("\n").replace(/\n{3,}/g, "\n\n") + "\n"
+      }
+
+      function openContentAiModal() {
+        const items = getExportItemsForCurrentView()
+        if (!items.length) return
+        const n = { article: 0, dialog: 0, tdialog: 0 }
+        for (const it of items) n[it.kind] = (n[it.kind] || 0) + 1
+        const parts = []
+        if (n.article) parts.push(n.article + " Article" + (n.article !== 1 ? "s" : ""))
+        if (n.dialog) parts.push(n.dialog + " Dialog" + (n.dialog !== 1 ? "s" : ""))
+        if (n.tdialog) parts.push(n.tdialog + " Transactional Dialog" + (n.tdialog !== 1 ? "s" : ""))
+        const q = contentQueryString()
+        document.getElementById("contentAiBody").innerHTML = `<p class="hint" style="margin-bottom:14px">
+            ${esc(parts.join(", "))} — the list in Share Content${
+              q ? ", from the search <strong>" + esc(q) + "</strong>" : ""
+            }. Every question, Response, route and Dialog node is written out in
+            full, with a short legend at the top.
+          </p>
+          <label>Format</label>
+          <div class="radio-group ai-export-choice" style="margin-top:6px">
+            <label class="radio-option">
+              <input type="radio" name="content-ai-format" value="md" ${contentAiFormat === "md" ? "checked" : ""}>
+              Markdown (.md) &mdash; one readable document, to paste into an AI chat
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="content-ai-format" value="jsonl" ${contentAiFormat === "jsonl" ? "checked" : ""}>
+              JSON Lines (.jsonl) &mdash; a header line, then one item per line, for scripts
+            </label>
+          </div>`
+        document.getElementById("contentAiModal").classList.add("open")
+      }
+
+      function closeContentAiModal() {
+        document.getElementById("contentAiModal").classList.remove("open")
+      }
+
+      async function exportContentForAi() {
+        const picked = document.querySelector('input[name="content-ai-format"]:checked')
+        contentAiFormat = picked && picked.value === "jsonl" ? "jsonl" : "md"
+        const items = getExportItemsForCurrentView()
+        if (!items.length) return
+        const text = buildContentAiExport(items, contentAiFormat)
+        const slug = (contentTextTerms() || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 40)
+        closeContentAiModal()
+        const what = contentAiFormat === "jsonl" ? "JSON Lines export" : "Markdown export"
+        try {
+          const res = await window.backend.saveExportText(
+            "content-for-ai" + (slug ? "-" + slug : "") + "." + contentAiFormat,
+            contentAiFormat,
+            text,
+          )
+          if (res && res.ok)
+            showImportToast(
+              "success",
+              items.length + " item" + (items.length !== 1 ? "s" : "") + " saved · about " +
+                Math.max(1, Math.round(text.length / 4 / 1000)) + "k tokens",
+            )
+          else if (res && !res.canceled) showImportToast("error", "Could not save the " + what + ".")
+        } catch (e) {
+          showImportToast("error", "Could not save the " + what + ". " + String(e))
         }
       }
 
@@ -20055,6 +20840,10 @@
       document.getElementById("exportModal").addEventListener("click", (e) => {
         if (e.target === document.getElementById("exportModal"))
           closeExportModal()
+      })
+      document.getElementById("contentAiModal").addEventListener("click", (e) => {
+        if (e.target === document.getElementById("contentAiModal"))
+          closeContentAiModal()
       })
 
       // ── Collections modal ────────────────────────────────────────────
@@ -25150,11 +25939,9 @@
         const m = /^(qa|dn)-(.+)$/.exec(String(key || ""))
         if (!m) return
         convSessionFilter = "neg_feedback"
-        const pill = document.getElementById("feedbackFilterPill")
-        document.querySelectorAll("[data-conv-filter]").forEach((b) => b.classList.remove("active"))
-        pill.dataset.convFilter = "neg_feedback"
-        pill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-down /></svg> feedback"
-        pill.classList.add("active")
+        document.querySelectorAll("[data-conv-filter]").forEach((b) =>
+          b.classList.toggle("active", b.dataset.convFilter === "neg_feedback"),
+        )
         convExpr = []
         searchConvsForId(m[2], m[1] === "qa" ? "article" : "dialog")
       }
@@ -27161,6 +27948,8 @@
           Filter: "Filter",
           "GenAI answers only": "Nur GenAI-Antworten",
           "Thumbs down only": "Nur Daumen runter",
+          "Thumbs up only": "Nur Daumen hoch",
+          "Any feedback": "Jedes Feedback",
           "Low recognition only": "Nur niedrige Erkennung",
           "Zero recognition only": "Nur ohne Erkennung",
           Dates: "Zeitraum",
@@ -27320,6 +28109,8 @@
           Filter: "Filter",
           "GenAI answers only": "Alleen GenAI-antwoorden",
           "Thumbs down only": "Alleen duim omlaag",
+          "Thumbs up only": "Alleen duim omhoog",
+          "Any feedback": "Alle feedback",
           "Low recognition only": "Alleen lage herkenning",
           "Zero recognition only": "Alleen geen herkenning",
           Dates: "Periode",
@@ -29609,6 +30400,8 @@
             [
               a.queryScope === "user" || a.queryScope === "both" ? insT("user") : null,
               a.queryScope === "bot" || a.queryScope === "both" ? insT("bot") : null,
+              // Only an older search (or a pasted fingerprint) still carries
+              // the retired E toggle; say what it did rather than drop it.
               a.queryEntities ? insT("entities") : null,
             ]
               .filter(Boolean)
@@ -29621,6 +30414,8 @@
         const FILTERS = {
           genai: "GenAI answers only",
           neg_feedback: "Thumbs down only",
+          pos_feedback: "Thumbs up only",
+          any_feedback: "Any feedback",
           low_recog: "Low recognition only",
           zero_recog: "Zero recognition only",
         }
@@ -36226,7 +37021,6 @@
           query: convExprToQuery() || null,
           queryRegex: convSearchRegex,
           queryScope: convSearchScope,
-          queryEntities: convSearchEntities,
           dateFrom: convDateFrom || null,
           dateTo: convDateTo || null,
           contextFilters:
@@ -36280,6 +37074,7 @@
           convTotalSessions = res.total || 0
           lastConvSearchArgs = { ...args }
           _submitBtn.classList.remove("loading")
+          syncConvSearchStale()
           setConvDbBusy(false)
           setConvOverlay(false)
           renderSessionList()
@@ -36307,7 +37102,7 @@
       function _aiExportIsNarrowed(args) {
         const a = args || {}
         if (a.query && String(a.query).trim()) return true
-        return ["neg_feedback", "low_recog", "zero_recog"].includes(a.filter)
+        return [...CONV_FEEDBACK_FILTERS, "low_recog", "zero_recog"].includes(a.filter)
       }
 
       let aiExportMatchedOnly = false
@@ -38021,16 +38816,12 @@
       }
 
       // Conv filter pills — only update state; search fires on Enter / submit button
-      const feedbackPill = document.getElementById("feedbackFilterPill")
       document.querySelectorAll("[data-conv-filter]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const wasActive = btn.classList.contains("active")
           document
             .querySelectorAll("[data-conv-filter]")
             .forEach((b) => b.classList.remove("active"))
-          // Reset feedback pill label/filter to negative
-          feedbackPill.dataset.convFilter = "neg_feedback"
-          feedbackPill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-down /></svg> feedback"
           if (!wasActive) {
             btn.classList.add("active")
             convSessionFilter = btn.dataset.convFilter
@@ -38038,29 +38829,8 @@
             convSessionFilter = "all"
           }
           convPage = 1
+          syncConvSearchStale()
         })
-      })
-
-      // Double-click feedback pill to toggle between neg and pos feedback
-      feedbackPill.addEventListener("dblclick", (e) => {
-        e.stopPropagation()
-        document
-          .querySelectorAll("[data-conv-filter]")
-          .forEach((b) => b.classList.remove("active"))
-        if (convSessionFilter === "pos_feedback") {
-          // Switch back to neg feedback
-          feedbackPill.dataset.convFilter = "neg_feedback"
-          feedbackPill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-down /></svg> feedback"
-          feedbackPill.classList.add("active")
-          convSessionFilter = "neg_feedback"
-        } else {
-          // Switch to pos feedback
-          feedbackPill.dataset.convFilter = "pos_feedback"
-          feedbackPill.innerHTML = "<svg class=ui-icon><use href=#i-thumb-up /></svg> feedback"
-          feedbackPill.classList.add("active")
-          convSessionFilter = "pos_feedback"
-        }
-        convPage = 1
       })
 
       // ── The search expression ───────────────────────────────────────
@@ -38919,8 +39689,7 @@
         // identical chips ORing with themselves. First one wins.
         _convDedupeOperands()
         closeConvSuggest()
-        convHasSearched = true
-        _afterConvExprChange(true)
+        _afterConvExprChange(false)
       }
 
       /// Drop a second chip naming the same thing, keeping the first.
@@ -38977,10 +39746,9 @@
         _convAppendOperand(item)
         normalizeConvExpr()
         closeConvSuggest()
-        // Adding a chip *is* asking the question — a chip sitting there over a
-        // stale list would read as broken.
-        convHasSearched = true
-        _afterConvExprChange(true)
+        // Not a search: the question may not be finished. The search button
+        // lights up to say the list no longer matches the field.
+        _afterConvExprChange(false)
       }
 
       function removeConvToken(i) {
@@ -39349,12 +40117,39 @@
           .join(" | ")
       }
 
-      function _afterConvExprChange(force) {
+      /// Redraw after the field changed, and search only when asked to.
+      ///
+      /// A conversations search can take seconds, so editing the field — a
+      /// chip added, picked, edited or removed, an operator cycled, a bracket
+      /// opened — never runs one. Enter and the search button do (`run`), as
+      /// do the "search this in Conversations" jumps from elsewhere. Until
+      /// then the search button says the list is out of date.
+      function _afterConvExprChange(run) {
         convQuery = convTextTerms()
         renderConvTokens()
         syncConvGroupBtn()
         convPage = 1
-        if (force || convHasSearched) loadSessions()
+        if (run) loadSessions()
+        else syncConvSearchStale()
+      }
+
+      /// Light the search button while what the bar says differs from what the
+      /// list shows. Compared as the args a search would send, page aside, so
+      /// every control that feeds them counts.
+      function syncConvSearchStale() {
+        const btn = document.getElementById("convSearchSubmit")
+        if (!btn) return
+        const strip = (a) => {
+          const o = { ...(a || {}) }
+          delete o.page
+          return JSON.stringify(o)
+        }
+        const stale =
+          convHasSearched && !!lastConvSearchArgs
+            ? strip(buildConvSessionArgs(1)) !== strip(lastConvSearchArgs)
+            : false
+        btn.classList.toggle("stale", stale)
+        btn.title = stale ? "Search changed — press Enter or click to update the list" : "Search (Enter)"
       }
 
       function syncConvGroupBtn() {
@@ -39667,10 +40462,7 @@
           : {
               list: () => convExpr,
               host: "#convTokens",
-              changed: () => {
-                convHasSearched = true
-                _afterConvExprChange(true)
-              },
+              changed: () => _afterConvExprChange(false),
               tagOptions: (kind) => CTX_KINDS[kind].options(),
               unit: "conversations",
             }
@@ -40092,7 +40884,7 @@
           syncConvGroupBtn()
         }
         convPage = 1
-        if (convHasSearched) loadSessions()
+        syncConvSearchStale()
       })
 
       document
@@ -40110,40 +40902,58 @@
       function _syncConvScopeFromButtons() {
         const uActive = _convScopeOn("user")
         const bActive = _convScopeOn("bot")
-        convSearchEntities = _convScopeOn("entity")
-        if (uActive && !bActive) convSearchScope = "user"
-        else if (bActive && !uActive) convSearchScope = "bot"
-        else if (uActive && bActive) convSearchScope = "both"
-        // Both message toggles off is only meaningful next to E; with nothing
-        // selected the backend falls back to searching the text.
-        else convSearchScope = convSearchEntities ? "none" : "both"
+        convSearchScope = uActive && bActive ? "both" : bActive ? "bot" : "user"
       }
 
-      function setConvSearchScope(user, bot, entity) {
+      function setConvSearchScope(user, bot) {
         const set = (scope, val) => {
           const el = document.querySelector(`[data-conv-scope='${scope}']`)
           if (el) el.classList.toggle("active", val)
         }
         set("user", user)
         set("bot", bot)
-        set("entity", entity)
         _syncConvScopeFromButtons()
       }
 
-      // Conv search scope — U, B and E are independent toggles governing what a
-      // *text* chip is matched against. E searches the entities the recognizer
-      // matched in a turn, which is a different field from the message text,
-      // not a subset of it: an entity fires on wording that need not contain
-      // the entity's own name. An `entity:` chip is a different thing again —
-      // the exact label, not a substring of it — and does not depend on this.
+      // Conv search scope — U and B say which side of a turn a *text* chip is
+      // matched against. An `entity:` chip is not text: it is the label the
+      // recognizer gave the user's turn, and the bot's answers carry no
+      // entities, so it matches the same turns whichever side is searched.
+      //
+      // One side is always searched. Switching off the only one flips to the
+      // other, which is also what makes U → B a single click. Like every other
+      // change to the bar it waits for Enter or the search button.
       document.querySelectorAll("[data-conv-scope]").forEach((btn) => {
         btn.addEventListener("click", () => {
+          const other = document.querySelector(
+            `[data-conv-scope='${btn.dataset.convScope === "user" ? "bot" : "user"}']`,
+          )
+          const turningOff = btn.classList.contains("active")
+          if (turningOff && other && !other.classList.contains("active"))
+            other.classList.add("active")
           btn.classList.toggle("active")
           _syncConvScopeFromButtons()
           convPage = 1
-          _convWarmSuggestSources()
+          syncConvSearchStale()
         })
       })
+
+      /// Which side the chat search reads. `quiet` skips the re-render, for
+      /// `selectSession`, which renders the thread itself right after.
+      function setChatSearchScope(scope, quiet) {
+        chatSearchScope = scope === "user" || scope === "bot" ? scope : "both"
+        const btn = document.getElementById("chatOptScope")
+        if (btn) {
+          btn.hidden = chatSearchScope === "both"
+          btn.textContent = chatSearchScope === "bot" ? "B" : "U"
+          btn.title =
+            (chatSearchScope === "bot"
+              ? "Searching the bot's answers only"
+              : "Searching the user's messages only") +
+            ", as the conversation search did. Click to search both."
+        }
+        if (!quiet) renderChatThread()
+      }
 
       // ── Date range picker ───────────────────────────────────────────
       let _calHoverSetup = false
@@ -40465,12 +41275,14 @@
         }
         // Sync regex mode from session-list search into chat search
         chatSearchRegex = !!convSearchRegex
-        // …and the entity scope with it, so the turns the chat shows as matched
-        // are the same turns that put this conversation in the result list. An
-        // `entity:` chip counts too: naming an entity and then opening a
-        // forty-turn chat with nothing marked reads as the chat being broken.
-        chatMatchEntities =
-          !!convSearchEntities || convExpr.some((it) => it.t === "entity")
+        // …and the U / B scope, so a user-only search does not open on the
+        // bot's answer marked — the side the list never looked at.
+        setChatSearchScope(_chatMirror ? convSearchScope : "both", true)
+        // …and the entities, so the turns the chat shows as matched are the
+        // same turns that put this conversation in the result list: naming an
+        // entity and then opening a forty-turn chat with nothing marked reads
+        // as the chat being broken.
+        chatMatchEntities = convExpr.some((it) => it.t === "entity")
         // …and the metadata filters, for the same reason: a tag filter is a
         // reason this conversation is in the list, so the chat has to be able
         // to say which message carries it.
@@ -41781,6 +42593,11 @@
         const renderSeq = ++chatRenderSeq
         const thread = document.getElementById("chatThread")
         const searchPlan = createChatSearchPlan(chatQuery)
+        // Marks go only on the side the search reads: under U, a word the bot
+        // happened to repeat is not why this turn matched.
+        const noPlan = createChatSearchPlan("")
+        const userPlan = chatSearchScope === "bot" ? noPlan : searchPlan
+        const botPlan = chatSearchScope === "user" ? noPlan : searchPlan
         const cachedTurnData = getCachedChatTurnData(
           activeInteractions,
           chatFilter,
@@ -41800,7 +42617,9 @@
             ? [turn.system]
             : [turn.userRow, ...turn.botRows].filter(Boolean)
           return rows.some((r) => {
-            const fields = [r.interactionValue || "", r.outputText || ""]
+            const fields = []
+            if (chatSearchScope !== "bot") fields.push(r.interactionValue || "")
+            if (chatSearchScope !== "user") fields.push(r.outputText || "")
             // An id chip's evidence is in these two columns and nowhere else,
             // so they are in scope exactly when the search named one.
             if (convExpr.some((it) => it.t === "id")) {
@@ -41858,8 +42677,6 @@
           }
           const zeroRecogActive = convSessionFilter === "zero_recog"
           const lowRecogActive = convSessionFilter === "low_recog"
-          const negFeedbackActive = convSessionFilter === "neg_feedback"
-          const posFeedbackActive = convSessionFilter === "pos_feedback"
           const turnId = String(
             (turn.userRow || turn.botRows[0])?.logId ?? "",
           )
@@ -41870,14 +42687,7 @@
               : feedbackOriginScore === 1
               ? " feedback-origin-pos"
               : ""
-          const turnMatchesActiveFeedback =
-            (negFeedbackActive && feedbackOriginScore === -1) ||
-            (posFeedbackActive && feedbackOriginScore === 1)
-          const hasFeedbackScore = (rows, score) =>
-            rows.some((br) => {
-              const f = parseChatFeedbackInfo(br)
-              return f?.score === score
-            })
+          const turnMatchesActiveFeedback = convFeedbackWants(feedbackOriginScore)
           const turnHasZeroRecog = turn.botRows.some(
             (br) =>
               br.recognitionQuality === 0 &&
@@ -41892,30 +42702,26 @@
               br.recognitionType !== "GenerativeAI" &&
               !chatRowIsGenAi(br),
           )
-          const turnHasNegFeedback =
-            hasFeedbackScore(
-              [...(turn.userRow ? [turn.userRow] : []), ...turn.botRows],
-              -1,
+          // A rating the active feedback pill accepts, on this turn's rows —
+          // or a bare yes/no Feedback row that carries no score at all.
+          const turnHasActiveFeedback =
+            [...(turn.userRow ? [turn.userRow] : []), ...turn.botRows].some(
+              (r) => convFeedbackWants(parseChatFeedbackInfo(r)?.score),
             ) ||
-            (negFeedbackActive &&
-              turn.userRow?.mainInteractionType === "Feedback" &&
-              turn.userRow?.interactionValue === "no")
-          const turnHasPosFeedback =
-            hasFeedbackScore(
-              [...(turn.userRow ? [turn.userRow] : []), ...turn.botRows],
-              1,
-            ) ||
-            (posFeedbackActive &&
-              turn.userRow?.mainInteractionType === "Feedback" &&
-              turn.userRow?.interactionValue === "yes")
+            (turn.userRow?.mainInteractionType === "Feedback" &&
+              convFeedbackWants(
+                turn.userRow?.interactionValue === "no"
+                  ? -1
+                  : turn.userRow?.interactionValue === "yes"
+                  ? 1
+                  : 0,
+              ))
           const userHighlightClass =
             zeroRecogActive && turnHasZeroRecog
               ? " zero-recog-highlight"
               : lowRecogActive && turnHasLowRecog
               ? " low-recog-highlight"
-              : (negFeedbackActive && turnHasNegFeedback) ||
-                (posFeedbackActive && turnHasPosFeedback) ||
-                turnMatchesActiveFeedback
+              : turnHasActiveFeedback || turnMatchesActiveFeedback
               ? " feedback-highlight"
               : ""
 
@@ -41924,7 +42730,7 @@
               <span class="user-label">User</span>
               <div class="bubble user${userHighlightClass}${feedbackOriginClass}">${userBubbleBody(
               turn.userRow.interactionValue,
-              searchPlan,
+              userPlan,
             )}</div>
               <span class="bubble-ts">${esc(
                 fmtChatTime(turn.userRow.timestampStart),
@@ -41948,7 +42754,7 @@
               const { body, options, ctas, asks } = chatHl(
                 br.outputText,
                 true,
-                searchPlan,
+                botPlan,
               )
               const optionsHtml = options.length
                 ? `<div class="dialog-options">${options
@@ -42006,14 +42812,9 @@
                   ? " low-recog-highlight"
                   : turnMatchesActiveFeedback
                   ? " feedback-highlight"
-                  : (() => {
-                      const f = parseChatFeedbackInfo(br)
-                      if (negFeedbackActive && f?.score === -1)
-                        return " feedback-highlight"
-                      if (posFeedbackActive && f?.score === 1)
-                        return " feedback-highlight"
-                      return ""
-                    })()
+                  : convFeedbackWants(parseChatFeedbackInfo(br)?.score)
+                  ? " feedback-highlight"
+                  : ""
               const detailOpenClass =
                 (zeroRecogActive && isBrZeroRecog) ||
                 (lowRecogActive && isBrLowRecog)
@@ -42042,11 +42843,11 @@
         const matchedIds = new Set()
 
         function scrollToFilterMatch() {
+          const isFeedbackFilter = CONV_FEEDBACK_FILTERS.includes(convSessionFilter)
           const isFilterScroll =
             convSessionFilter === "zero_recog" ||
             convSessionFilter === "low_recog" ||
-            convSessionFilter === "neg_feedback" ||
-            convSessionFilter === "pos_feedback"
+            isFeedbackFilter
           // A tag filter is a filter too, and its match can be anywhere in a
           // long conversation. Handled before the pill filters and independently
           // of them, since the two can be on at once.
@@ -42060,36 +42861,34 @@
             return
           }
           if (!isFilterScroll) return
-          const isFeedbackFilter =
-            convSessionFilter === "neg_feedback" ||
-            convSessionFilter === "pos_feedback"
           requestAnimationFrame(() => {
             if (renderSeq !== chatRenderSeq) return
             if (isFeedbackFilter) {
-              const negActive = convSessionFilter === "neg_feedback"
               const feedbackTurn =
                 allTurns.find((t) => {
                   const rows = [t.userRow, ...t.botRows].filter(Boolean)
-                  return rows.some((row) => {
-                    const fi = parseChatFeedbackInfo(row)
-                    return negActive ? fi?.score === -1 : fi?.score === 1
-                  })
+                  return rows.some((row) =>
+                    convFeedbackWants(parseChatFeedbackInfo(row)?.score),
+                  )
                 }) ||
-                allTurns.find((t) =>
-                  negActive
-                    ? t.userRow?.mainInteractionType === "Feedback" &&
+                allTurns.find(
+                  (t) =>
+                    t.userRow?.mainInteractionType === "Feedback" &&
+                    convFeedbackWants(
                       t.userRow?.interactionValue === "no"
-                    : t.userRow?.mainInteractionType === "Feedback" &&
-                      t.userRow?.interactionValue === "yes",
+                        ? -1
+                        : t.userRow?.interactionValue === "yes"
+                        ? 1
+                        : 0,
+                    ),
                 )
               if (!feedbackTurn) return
               let targetEl = null
               const feedbackRow = [feedbackTurn.userRow, ...feedbackTurn.botRows]
                 .filter(Boolean)
-                .find((row) => {
-                  const fi = parseChatFeedbackInfo(row)
-                  return negActive ? fi?.score === -1 : fi?.score === 1
-                })
+                .find((row) =>
+                  convFeedbackWants(parseChatFeedbackInfo(row)?.score),
+                )
               const fi = parseChatFeedbackInfo(feedbackRow)
               const originatingId = fi?.originatingInteractionId
               if (originatingId) {
@@ -42179,15 +42978,9 @@
           // ones carrying that thumb. The others stay dimmed, one scroll away.
           // Only when that leaves something — the chat search is text-only and
           // can miss the reason a chip or tag matched in the backend.
-          const want =
-            convSessionFilter === "neg_feedback"
-              ? -1
-              : convSessionFilter === "pos_feedback"
-              ? 1
-              : 0
-          if (want) {
-            const rated = [...matchedIds].filter(
-              (id) => feedbackOriginTurnScores.get(id) === want,
+          if (CONV_FEEDBACK_FILTERS.includes(convSessionFilter)) {
+            const rated = [...matchedIds].filter((id) =>
+              convFeedbackWants(feedbackOriginTurnScores.get(id)),
             )
             if (rated.length) {
               matchedIds.clear()
@@ -42346,7 +43139,8 @@
           document.getElementById("chatSearch").value = ""
           document.getElementById("chatClearSearch").classList.remove("visible")
           chatQuery = ""
-          renderChatThread()
+          // The mirrored search is gone, so is the side it was limited to.
+          setChatSearchScope("both")
         })
 
       // ── Init DB on load if path is stored ───────────────────────────

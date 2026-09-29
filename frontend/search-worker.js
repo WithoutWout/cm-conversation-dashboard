@@ -13,7 +13,7 @@ let allItems = [] // pre-built articles + dialogs combined
 // ── Pre-computed search indexes (built on "init") ────────────────────────────
 // Maps item → pre-stripped searchable text so strip() isn't called per search.
 // Article: _searchId (string), _searchQuestionsUpper, _answerItems
-// Dialog: _searchId (string), _searchName, _searchDesc, _searchNodes [{name, _answerItems}]
+// Dialog: _searchId (string), _searchName, _searchDesc, _searchNodes [{name, isRef, refId, _answerItems}]
 // Entity: _searchName, _searchWords [lowercased texts]
 
 // Pre-computed entity cross-reference sets (built on init)
@@ -34,6 +34,13 @@ let searchWord = false
 let searchRegex = false
 let searchContent = true
 let searchExcludeNonDefault = false
+// A Dialog node can show an Article instead of a Response of its own
+// (`output.kbaIdReference`). That Article is not the Dialog's content, so by
+// default neither the node's name — a label for the reference — nor the
+// Article's text makes the Dialog match. The Ref toggle turns both back on.
+let searchIncludeRefs = false
+// Article id → Article, for a reference node's text under the Ref toggle.
+let articleById = new Map()
 let contentContextFilters = [] // [{name, value}] — active content context filters
 // The OutputMetaData tags an Answer carries (escalationGroup, entryType,
 // nochat, transaction, attractionIdentifier…). Filtered exactly like context,
@@ -109,6 +116,87 @@ function tokenizeSegment(str) {
   return tokens
 }
 
+// ── Accents ──────────────────────────────────────────────────────────────────
+//
+// A case-insensitive search ignores accents, as the Conversations search does:
+// `oke` finds `oké` (376 of them in the Dialogs export, against 27 spelled
+// without), `krumel` finds `krümel`. A plain search compares folded strings; a
+// whole-word search, which is a regex, gets a character class per letter
+// instead. Case-sensitive and `.*` searches are exact, as they ask to be.
+
+/// Lower-cased, accents removed. Not length-preserving — nothing here maps an
+/// index back into the original.
+function fold(s) {
+  const l = String(s).toLowerCase()
+  return /[^\x00-\x7f]/.test(l) ? l.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : l
+}
+
+/// Base letter → a character class of it and its accented forms.
+const ACCENT_CLASS = (() => {
+  const groups = {}
+  for (let c = 0xc0; c <= 0x24f; c++) {
+    const ch = String.fromCharCode(c).toLowerCase()
+    const base = ch.normalize("NFD")[0]
+    if (base < "a" || base > "z" || ch === base) continue
+    if (!groups[base]) groups[base] = []
+    if (!groups[base].includes(ch)) groups[base].push(ch)
+  }
+  const out = {}
+  for (const b in groups) out[b] = "[" + b + groups[b].join("") + "]"
+  return out
+})()
+
+/// An escaped (non-regex) pattern with every letter widened to its accented
+/// forms. Escaping only ever precedes punctuation, so no letter here is part
+/// of an escape sequence.
+function accentPattern(escaped) {
+  let out = ""
+  for (const ch of escaped) out += ACCENT_CLASS[fold(ch)] || ch
+  return out
+}
+
+/// `%{DialogOptions()}`, `%{Link(1)}`, `%{Image(2)}` — markup, not words. On
+/// the real export "option" matched 489 Dialogs, 487 of them only through
+/// `%{DialogOptions()}`. Variable references are expanded to their names
+/// before this runs (`expandVarNames`) and carry no parentheses, so they stay.
+function dropPlaceholders(t) {
+  return (t || "").replace(/%\{[A-Za-z]+\([^}]*\)\}/g, " ")
+}
+
+// ── Phrases ──────────────────────────────────────────────────────────────────
+//
+// A term of several words matches however the words are joined. The export
+// spells one event "oud en nieuw" (406×), "Oud & Nieuw" (199×), "oud-en-nieuw"
+// (113×, mostly URLs) and "oud nieuw" — and an exact phrase found 0 Dialogs,
+// the one *named* "Oud & Nieuw" included. Between two words any run of spaces,
+// hyphens, underscores or slashes is one join, and a connective — en, and,
+// und, & or + — may stand in it or not.
+
+const PHRASE_SEP = "[\\s\\-\u2013\u2014_/]*"
+const PHRASE_CONNECTIVES = ["en", "and", "und", "&", "+"]
+const PHRASE_JOIN = PHRASE_SEP + "(?:(?:en|and|und|&amp;|&|\\+)" + PHRASE_SEP + ")?"
+
+/// Is this term more than one word? Only then is it matched as a phrase.
+function isPhraseTerm(term) {
+  return /[\s\-\u2013\u2014_/&+]/.test(term.trim())
+}
+
+/// The regex source for a term: exact for `.*`; otherwise escaped, widened
+/// for accents when case-insensitive, and joined tolerantly when a phrase.
+function termPattern(term) {
+  if (searchRegex) return term
+  const esc = (w) => {
+    const e = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return searchCase ? e : accentPattern(e)
+  }
+  if (!isPhraseTerm(term)) return esc(term)
+  const words = term
+    .replace(/[&+]/g, " & ")
+    .split(/[\s\-\u2013\u2014_/]+/)
+    .filter((w) => w && !PHRASE_CONNECTIVES.includes(w.toLowerCase()))
+  return words.length ? words.map(esc).join(PHRASE_JOIN) : esc(term)
+}
+
 function parseOrGroups(q) {
   if (!q) return []
   if (searchRegex) return [[q]]
@@ -119,13 +207,31 @@ function parseOrGroups(q) {
 }
 
 // Build a regex for a single escaped term (respects searchCase and searchWord).
+// ── Short words start a word ────────────────────────────────────────────────
+//
+// A word of up to SHORT_TERM_MAX letters only matches at the start of a word;
+// a longer one anywhere. Short words are where "anywhere" is mostly noise —
+// "oud" matched 657 items against 210 at a word start, most of the rest
+// h-oud-en, onderh-oud, abonnementh-oud-er; "eten" 1370 against 360, through
+// weten, genieten, vergeten. Long words are where it finds real compounds, and
+// Dutch is full of them: "korting" in verjaardagskorting, "tickets" in
+// entreetickets. A phrase is judged by its first word. `\b` still makes a
+// term exact at both ends, and `.*` is left alone.
+const SHORT_TERM_MAX = 5
+const WORD_EDGE_BEFORE = "(?<![\\w\\u00C0-\\u024F])"
+const WORD_EDGE_AFTER = "(?![\\w\\u00C0-\\u024F])"
+
+function isShortTerm(term) {
+  if (searchRegex) return false
+  const first = term.trim().split(/[\s\-\u2013\u2014_/&+]+/)[0] || ""
+  return first.length > 0 && first.length <= SHORT_TERM_MAX
+}
+
 function buildTermRegex(term) {
   try {
-    let pat = searchRegex
-      ? term
-      : term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    if (searchWord)
-      pat = "(?<![\\w\\u00C0-\\u024F])" + pat + "(?![\\w\\u00C0-\\u024F])"
+    let pat = termPattern(term)
+    if (searchWord) pat = WORD_EDGE_BEFORE + pat + WORD_EDGE_AFTER
+    else if (isShortTerm(term)) pat = WORD_EDGE_BEFORE + pat
     return new RegExp(pat, searchCase ? "" : "i")
   } catch (e) {
     return null
@@ -148,11 +254,16 @@ let _entityCacheKey = ""
 function buildOrRegexGroups(orGroups) {
   return orGroups.map((andTerms) =>
     andTerms.map((term) => ({
-      re: !canUsePlainMatch() ? buildTermRegex(term) : null,
-      needle: canUsePlainMatch()
+      // A phrase, or a short word, is a regex: joins and word starts cannot
+      // be an indexOf.
+      re:
+        !canUsePlainMatch() || (!searchRegex && (isPhraseTerm(term) || isShortTerm(term)))
+          ? buildTermRegex(term)
+          : null,
+      needle: canUsePlainMatch() && !isPhraseTerm(term) && !isShortTerm(term)
         ? searchCase
           ? term
-          : term.toLowerCase()
+          : fold(term)
         : null,
     })),
   )
@@ -168,7 +279,7 @@ function testTerm(compiled, str, strLower) {
   }
   if (compiled.needle !== null) {
     if (searchCase) return str.indexOf(compiled.needle) !== -1
-    return (strLower !== undefined ? strLower : str.toLowerCase()).indexOf(compiled.needle) !== -1
+    return (strLower !== undefined ? strLower : fold(str)).indexOf(compiled.needle) !== -1
   }
   return false
 }
@@ -431,6 +542,10 @@ function precomputeArticle(a) {
 
   a._searchId = String(a.Id)
   a._searchQuestionsUpper = a.Questions.map((qs) => qs.Text.toUpperCase())
+  // The part outside the Responses: the id and the questions, searched
+  // together (off under ¬T). `ph` is what entity enrichment resolves.
+  const _ncF = [a._searchId, ...a.Questions.map((qs) => qs.Text)]
+  a._ncParts = [{ f: _ncF, l: _ncF.map(fold), ph: a._searchQuestionsUpper }]
 
   // One context set per output of every type, in output order. A route into a
   // Dialog is conditioned on context exactly like an Answer is, and on the real
@@ -495,15 +610,17 @@ function precomputeArticle(a) {
     if (_aEscGroups.length) _aCtx.escalationGroup = _aEscGroups
     else delete _aCtx.escalationGroup
     const _as = strip(_aExp)
-    const _ar = _arT
-    const _ae = expandVarNames(_aExp)
+    const _ar = dropPlaceholders(_arT)
+    const _ae = dropPlaceholders(expandVarNames(_aExp))
     a._answerItems.push({
       s: _as,
       r: _ar,
       e: _ae,
-      sl: _as.toLowerCase(),
-      rl: _ar.toLowerCase(),
-      el: _ae.toLowerCase(),
+      sl: fold(_as),
+      rl: fold(_ar),
+      el: fold(_ae),
+      f: [_as, _ar, _ae],
+      l: [fold(_as), fold(_ar), fold(_ae)],
       ctxSet: _aCtx,
       isNonDefault: _ao !== o && !_ao.IsDefault,
     })
@@ -517,6 +634,26 @@ function precomputeDialog(item) {
 
   // Pre-compute per-node search data
   const nodes = item.nodes || []
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const isRefNode = (n) =>
+    !!n &&
+    !!n.output &&
+    n.output.kbaIdReference != null &&
+    !(n.output.items || []).some((i) => i.type === "Answer")
+  // Where a node leads once GoTo jumps are followed. A GoTo named after a
+  // reference node ("GoTo - D-3A3BLC") is part of the reference: 31 Dialogs
+  // matched their referenced Article's title through one. A *phrasing* that
+  // routes to a reference is not — see `_phrases` below.
+  const leadsToRef = (id) => {
+    const seen = new Set()
+    let n = byId.get(id)
+    while (n && n.type === "GoTo" && !seen.has(n.id)) {
+      seen.add(n.id)
+      const l = (n.links || [])[0]
+      n = l ? byId.get(l.childNodeId) : null
+    }
+    return isRefNode(n)
+  }
   item._searchNodes = nodes.map((n) => {
     const nodeAnsItems = ((n.output && n.output.items) || []).filter(
       (i) => i.type === "Answer",
@@ -550,24 +687,66 @@ function precomputeDialog(item) {
       if (_nEscGroups.length) _nCtx.escalationGroup = _nEscGroups
       else delete _nCtx.escalationGroup
       const _ns = strip(_nExp)
-      const _nr = _nrT
-      const _ne = expandVarNames(_nExp)
+      const _nr = dropPlaceholders(_nrT)
+      const _ne = dropPlaceholders(expandVarNames(_nExp))
       _nodeAnsItems.push({
         s: _ns,
         r: _nr,
         e: _ne,
-        sl: _ns.toLowerCase(),
-        rl: _nr.toLowerCase(),
-        el: _ne.toLowerCase(),
+        sl: fold(_ns),
+        rl: fold(_nr),
+        el: fold(_ne),
+        f: [_ns, _nr, _ne],
+        l: [fold(_ns), fold(_nr), fold(_ne)],
         ctxSet: _nCtx,
         isNonDefault: _nai !== ans && !_nai.isDefault,
       })
     }
+    const refId = n.output ? n.output.kbaIdReference : null
     return {
       name: n.name || "",
+      // A node that shows an Article rather than a Response of its own, or a
+      // GoTo that jumps to one.
+      isRef: (refId != null && !nodeAnsItems.length) || (n.type === "GoTo" && leadsToRef(n.id)),
+      refId: refId != null ? refId : null,
       _answerItems: _nodeAnsItems,
     }
   })
+
+  // The fields outside the Responses, searched together (off under ¬T): the
+  // id, name, description, node names — and what the user says to move
+  // between nodes. Those phrasings are the Dialog's own recognition, as an
+  // Article's questions are its own; they used to be read only to look up
+  // entities, so 1500 of 2532 distinct phrasings on the real export did not
+  // find the Dialog they belong to. A reference node's name is kept apart:
+  // it counts only under the Ref toggle.
+  const _phrases = []
+  const _refNames = []
+  for (const n of nodes) {
+    for (const link of n.links || []) {
+      const c = link.condition || {}
+      if (c.type !== "Recognition" || !c.data || c.data.isFallback) continue
+      // Counted even when the link lands on a reference node. The phrasing
+      // is written in this Dialog, and a user who types it here takes this
+      // route — "which Dialogs handle zwembad?" has this one as an answer
+      // (9 → 16 Dialogs when it was left out). The card says the route ends
+      // in an Article, which is what keeps it from reading as a match on
+      // the Article's content.
+      for (const qo of c.data.questions || [])
+        if (qo.text && !_phrases.includes(qo.text)) _phrases.push(qo.text)
+    }
+  }
+  // Parts, not one bucket: every word of a condition has to be found in the
+  // same one — the Dialog's name and description, one node's name, one
+  // phrasing — or "hotel annuleren" matched "hotel" in a phrasing and
+  // "annuleren" in the description, which is not something the Dialog says.
+  const part = (fields, ph) => ({ f: fields, l: fields.map(fold), ph })
+  item._ncParts = [part([item._searchId, item._searchName, item._searchDesc])]
+  item._refParts = []
+  for (const sn of item._searchNodes)
+    (sn.isRef ? item._refParts : item._ncParts).push(part([sn.name]))
+  for (const t of _phrases) item._ncParts.push(part([t], [t.toUpperCase()]))
+  for (const t of _refNames) item._refParts.push(part([t]))
 
   // Pre-compute entity question texts for entity-word enrichment
   item._entityQuestionTexts = []
@@ -780,92 +959,71 @@ function matchArticleCombined(a) {
   return answerItemsMatchOrGroups(a._answerItems, _orRegexGroups)
 }
 
+/// The Response items a node answers with, for matching. A reference node has
+/// none of its own; under the Ref toggle it lends the Article's.
+function nodeAnswerItems(sn) {
+  if (!sn.isRef) return sn._answerItems
+  if (!searchIncludeRefs) return []
+  const art = articleById.get(sn.refId)
+  return art ? art._answerItems : []
+}
+
 function matchDialogCombined(item) {
   return (item._searchNodes || []).some((sn) =>
-    answerItemsMatchOrGroups(sn._answerItems, _orRegexGroups),
+    answerItemsMatchOrGroups(nodeAnswerItems(sn), _orRegexGroups),
   )
+}
+
+// ── Parts ───────────────────────────────────────────────────────────────────
+//
+// Text is matched within one *part* of an item at a time, never across two:
+// an Article's questions, or one of its Responses; a Dialog's name and
+// description, one node's name, one phrasing, or one Response. Every word of a
+// chip must sit in the same part, and so must text chips joined by AND
+// (`evalContentExpr`) — "kinderen AND korting" matched 10 Dialogs where only 2
+// said both in one place. Ids, entities and tags stay conditions on the item.
+
+/// The parts of an item a text condition can be found in, under the current
+/// toggles: ¬T drops everything but Responses, ND the non-default ones, and a
+/// reference node counts only under Ref.
+function itemTextParts(item) {
+  const out = []
+  if (!searchContent) {
+    out.push(...item._ncParts)
+    if (searchIncludeRefs && item._refParts) out.push(...item._refParts)
+  }
+  const answers =
+    item._kind === "article"
+      ? item._answerItems || []
+      : (item._searchNodes || []).flatMap((sn) => nodeAnswerItems(sn) || [])
+  for (const ai of answers) if (!(searchExcludeNonDefault && ai.isNonDefault)) out.push(ai)
+  return out
+}
+
+/// One term in one part — its text, or an entity its phrasings resolve to.
+function partHasTerm(p, compiled) {
+  if (termFoundInFields(compiled, p.f, p.l)) return true
+  if (!p.ph || !matchingEntityNames.size) return false
+  const names = entityNamesForPhrases(p.ph)
+  return names.length > 0 && termMatchesEntityByNames(compiled, names)
+}
+
+function partMatchesGroup(p, andGroup) {
+  return andGroup.every((compiled) => partHasTerm(p, compiled))
+}
+
+/// Does any OR group of `groups` have all its terms in one part?
+function matchText(item, groups) {
+  const parts = itemTextParts(item)
+  return groups.some((g) => parts.some((p) => partMatchesGroup(p, g)))
 }
 
 function matchArticle(a) {
-  const articleEntityNames =
-    !searchContent && matchingEntityNames.size > 0
-      ? entityNamesForPhrases(a._searchQuestionsUpper)
-      : []
-
-  // Non-content fields (id, question texts) form a single per-item bucket.
-  // Evaluated only when !searchContent; all AND terms must be in this bucket alone.
-  if (!searchContent) {
-    const nonContentFields = [a._searchId]
-    for (const qs of a.Questions) nonContentFields.push(qs.Text)
-    if (
-      _orRegexGroups.some((andGroup) =>
-        andGroup.every(
-          (compiled) =>
-            termFoundInFields(compiled, nonContentFields) ||
-            (articleEntityNames.length > 0 &&
-              termMatchesEntityByNames(compiled, articleEntityNames)),
-        ),
-      )
-    )
-      return true
-  }
-
-  // Content matching: ALL AND terms of an OR-group must be found within the
-  // SAME answer item (default or contextual). Terms may not straddle different answers.
-  return _orRegexGroups.some((andGroup) =>
-    (a._answerItems || []).some((ai) => {
-      if (searchExcludeNonDefault && ai.isNonDefault) return false
-      const fields = [ai.s, ai.r, ai.e]
-      const fieldsLower = [ai.sl, ai.rl, ai.el]
-      return andGroup.every(
-        (compiled) => termFoundInFields(compiled, fields, fieldsLower),
-      )
-    }),
-  )
+  return matchText(a, _orRegexGroups)
 }
 
 function matchDialog(item) {
-  const dialogEntityNames =
-    !searchContent && matchingEntityNames.size > 0
-      ? entityNamesForPhrases(item._entityQuestionTexts)
-      : []
-
-  // Non-content fields (id, name, description, node names) form a single per-item bucket.
-  // Evaluated only when !searchContent; all AND terms must be in this bucket alone.
-  if (!searchContent) {
-    const nonContentFields = [
-      item._searchId,
-      item._searchName,
-      item._searchDesc,
-    ]
-    for (const sn of item._searchNodes || []) nonContentFields.push(sn.name)
-    if (
-      _orRegexGroups.some((andGroup) =>
-        andGroup.every(
-          (compiled) =>
-            termFoundInFields(compiled, nonContentFields) ||
-            (dialogEntityNames.length > 0 &&
-              termMatchesEntityByNames(compiled, dialogEntityNames)),
-        ),
-      )
-    )
-      return true
-  }
-
-  // Content matching: ALL AND terms of an OR-group must be found within the
-  // SAME answer item in the SAME node. Terms may not straddle different nodes or answers.
-  return _orRegexGroups.some((andGroup) =>
-    (item._searchNodes || []).some((sn) =>
-      (sn._answerItems || []).some((ai) => {
-        if (searchExcludeNonDefault && ai.isNonDefault) return false
-        const fields = [ai.s, ai.r, ai.e]
-        const fieldsLower = [ai.sl, ai.rl, ai.el]
-        return andGroup.every(
-          (compiled) => termFoundInFields(compiled, fields, fieldsLower),
-        )
-      }),
-    ),
-  )
+  return matchText(item, _orRegexGroups)
 }
 
 function matchEntity(entity) {
@@ -1122,10 +1280,7 @@ function tagSetHas(set, name, values) {
 }
 
 function exprLeafMatches(n, item) {
-  if (n.k === "text") {
-    _orRegexGroups = n.groups
-    return item._kind === "article" ? matchArticle(item) : matchDialog(item)
-  }
+  if (n.k === "text") return matchText(item, n.groups)
   if (n.k === "id") {
     if (n.kind === "article") return item._kind === "article" && item.Id === n.id
     if (item._kind === "article" || item.id !== n.id) return false
@@ -1144,8 +1299,28 @@ function exprLeafMatches(n, item) {
   return false
 }
 
+/// A subtree of text leaves joined by AND / OR — the kind that has to hold
+/// within one part. NOT is not: an exclusion removes the whole item.
+function isTextTree(n) {
+  return n.k === "text" || ((n.k === "and" || n.k === "or") && n.kids.every(isTextTree))
+}
+
+function evalOnPart(n, p) {
+  if (n.k === "text") return n.groups.some((g) => partMatchesGroup(p, g))
+  if (n.k === "and") return n.kids.every((k) => evalOnPart(k, p))
+  return n.kids.some((k) => evalOnPart(k, p))
+}
+
 function evalContentExpr(n, item) {
-  if (n.k === "and") return n.kids.every((k) => evalContentExpr(k, item))
+  if (n.k === "and") {
+    // Text conditions ANDed together must meet in one part; everything else
+    // (ids, entities, tags, exclusions) is a condition on the item.
+    const text = n.kids.filter(isTextTree)
+    for (const k of n.kids) if (!isTextTree(k) && !evalContentExpr(k, item)) return false
+    if (text.length < 2) return text.every((k) => evalContentExpr(k, item))
+    const parts = itemTextParts(item)
+    return parts.some((p) => text.every((k) => evalOnPart(k, p)))
+  }
   if (n.k === "or") return n.kids.some((k) => evalContentExpr(k, item))
   if (n.k === "not") return !evalContentExpr(n.kid, item)
   return exprLeafMatches(n, item)
@@ -1175,6 +1350,8 @@ self.onmessage = function (e) {
 
     // Pre-compute searchable fields once on data load
     for (const a of workerArticles) precomputeArticle(a)
+    articleById = new Map()
+    for (const a of workerArticles) articleById.set(a.Id, a)
     for (const d of workerDialogs) precomputeDialog(d)
     for (const ent of workerEntities) precomputeEntity(ent)
 
@@ -1218,6 +1395,7 @@ self.onmessage = function (e) {
     searchRegex = msg.searchRegex
     searchContent = msg.searchContent
     searchExcludeNonDefault = msg.searchExcludeNonDefault
+    searchIncludeRefs = !!msg.searchIncludeRefs
     contentContextFilters = msg.contentContextFilters || []
     contentMetadataFilters = msg.contentMetadataFilters || []
 
@@ -1290,10 +1468,10 @@ self.onmessage = function (e) {
           const wordMatches = entity._triggerWords.some((w) => {
             if (isPlain) {
               return allTerms.some((term) => {
-                const n = searchCase ? term : term.toLowerCase()
+                const n = searchCase ? term : fold(term)
                 return searchCase
                   ? w.indexOf(n) !== -1
-                  : w.toLowerCase().indexOf(n) !== -1
+                  : fold(w).indexOf(n) !== -1
               })
             }
             return allTermRegexes.some((termRe) => {

@@ -73,7 +73,7 @@ frontend/
     insights.test.js, entity-search.test.js,
     db-migration-progress.test.js, db-open.test.js, search-bubbles.test.js,
     share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js,
-    gap-session-cache.test.js
+    gap-session-cache.test.js, content-refs.test.js, dialog-search.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -109,7 +109,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `install_update`      | `installUpdate()`                | Downloads the verified artifact, installs it, restarts. Portable Windows copies swap their own `.exe`; everything else uses the plugin's installer |
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }`. A wrapper over `save_with_dialog` |
-| `save_export_text`    | `saveExportText(defaultName, format, content)` | The same, for any format in `export_format` (`svg` `csv` `tsv` `html` `md` `txt` `json`). An unknown format is an `Err` *before* the dialog opens |
+| `save_export_text`    | `saveExportText(defaultName, format, content)` | The same, for any format in `export_format` (`svg` `csv` `tsv` `html` `md` `txt` `json` `jsonl`). An unknown format is an `Err` *before* the dialog opens |
 | `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
 | `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
 | `get_gap_interactions` | `getGapInteractions({fromUtc, toUtc, threshold})` | The low- and zero-recognition interactions of a UTC range, newest first, each with its fixed mark — `{rows, truncated}`. See `docs/gap.md` |
@@ -384,7 +384,10 @@ The orientation map for the whole window. It says what is on screen and where;
 
 <div.global-search-bar>
   chip field (#contentTokens + input, #contentSuggest type-ahead) |
-  [( )] [Aa] [\b] [.*] [¬T] [ND] | tag filter button (Context · Metadata)
+  [( )] [Aa] [\b] [.*] [¬T] [ND] [Ref] | tag filter button (Context · Metadata)
+    Ref off (default): a Dialog matches on its own content, never on the
+    Articles its nodes reference — docs/search.md → "References are not a
+    Dialog's content"
 
 <div.tab-bar>
   All Results (sub-stats: art · dlg · t.dlg)
@@ -499,7 +502,9 @@ The orientation map for the whole window. It says what is on screen and where;
   sample:   two charts drawn exactly as an export would be
 
 <div.conv-sidebar-header>
-  [( )] | expression field | search submit | [.*] | [U] [B] [E]
+  [( )] | expression field | search submit | [.*] | [U] [B]
+    U / B: which side a text chip reads (one is always on; entity: chips
+    match the user's turn whatever they say). The opened chat follows them
     the field is one boolean expression, read strictly left to right:
     chips for text, entities, Articles, Dialogs, nodes and context /
     metadata values (ctx:"k"="v" · meta:"k"="v"), an operator chip
@@ -513,7 +518,7 @@ The orientation map for the whole window. It says what is on screen and where;
     row is selected, Esc closes, Backspace on an empty field eats the last chip
     [( )] opens a group, or closes the one that is open (disabled under .*)
   date range button | tag filter button (Context · Metadata)
-  filter pills (GenAI / feedback / Low % / Zero %)
+  filter pills (GenAI / Feedback · thumbs up · thumbs down / Low % / Zero %)
 
 <div#settingsModal>
   header: Settings | Backup… (opens #settingsBackupModal) | ✕
@@ -561,7 +566,9 @@ The orientation map for the whole window. It says what is on screen and where;
   toolbar: filter input | "N of M" | Restore N removed items
   rows: id · type badge · title · matched responses (or dialog → article chips)
         · Copy link · remove (✕ on hover)
-  footer: Copy N links / Copy table (N rows) | Copy as plain text | feedback
+  footer: Copy N links / Copy table (N rows) | Copy as plain text |
+          Export for AI… (#contentAiModal: Markdown or JSON Lines, the same
+          set — docs/ai-export.md → "Content") | feedback
 
 <div#collectionsModal>
   sidebar: + New collection | one row per collection (name · N items · N rows)
