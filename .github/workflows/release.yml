@@ -91,16 +91,29 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Faster and more reliable
-            - Loading your export files no longer freezes the window for a
-              moment; the loading spinner keeps turning.
-            - Clicking quickly from one conversation to the next can no longer
-              leave you looking at one conversation while search, copy and flag
-              work on the previous one — in Conversations and in Flagged.
-            - In Analysis, a conversation that failed to load once is tried
-              again next time, instead of showing as empty until a restart.
-            - Reopening the database that is already open no longer runs into
-              "database is locked".
+            ### Content search finds what you mean
+            - Dialogs now match on what users say inside them, and each Dialog
+              card shows where it matched — the node, or the phrasing and where
+              it leads.
+            - A Dialog no longer matches just because one of its nodes points to
+              an Article. Turn on the new **Ref** button to include those.
+            - "oud en nieuw" also finds "Oud & Nieuw" and "oud-en-nieuw", and
+              accents no longer need to match ("oke" finds "oké").
+            - Words joined with AND must appear together in the same Response,
+              phrasing or node — not scattered across a Dialog.
+            - Short words only match at the start of a word, so "oud" no longer
+              finds "houden".
+            - Share Content has a new **Export for AI…**: save the list as
+              Markdown or JSON Lines.
+
+            ### Conversations
+            - New **Feedback** filter for every rated conversation, next to the
+              thumbs up and thumbs down filters.
+            - U and B now reliably search the user's or the bot's messages, and
+              the opened chat highlights only that side. Entities have their own
+              chips, so the E button is gone.
+            - Changing the search no longer runs it straight away — press Enter
+              or the search button, which lights up when the list is out of date.
 
             ---
 
