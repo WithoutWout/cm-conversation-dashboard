@@ -91,29 +91,32 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Content search finds what you mean
-            - Dialogs now match on what users say inside them, and each Dialog
-              card shows where it matched — the node, or the phrasing and where
-              it leads.
-            - A Dialog no longer matches just because one of its nodes points to
-              an Article. Turn on the new **Ref** button to include those.
-            - "oud en nieuw" also finds "Oud & Nieuw" and "oud-en-nieuw", and
-              accents no longer need to match ("oke" finds "oké").
-            - Words joined with AND must appear together in the same Response,
-              phrasing or node — not scattered across a Dialog.
-            - Short words only match at the start of a word, so "oud" no longer
-              finds "houden".
-            - Share Content has a new **Export for AI…**: save the list as
-              Markdown or JSON Lines.
+            ### Search results say where they matched
+            - Every result shows how much of it matched: "3 of 40 nodes match",
+              "2 of 5 responses match · 1 contextual", "4 of 20 entities match" —
+              and the result count adds them up. Click the count to open the item
+              with just those parts showing.
+            - Article cards now say which entities or Response matched.
+            - Searching on a context or metadata value counts and shows the nodes
+              and Responses that carry it.
+            - Fixed: Dialogs with a context condition on several values (such as
+              DeviceType) were missing from context searches.
 
-            ### Conversations
-            - New **Feedback** filter for every rated conversation, next to the
-              thumbs up and thumbs down filters.
-            - U and B now reliably search the user's or the bot's messages, and
-              the opened chat highlights only that side. Entities have their own
-              chips, so the E button is gone.
-            - Changing the search no longer runs it straight away — press Enter
-              or the search button, which lights up when the list is out of date.
+            ### Share Content
+            - A shared Dialog lists the nodes that matched, each with its own link
+              straight to that node in CM.com — and its own ✕ to leave it out.
+            - Article rows show the Responses that actually matched.
+
+            ### Clearer Dialogs and Articles
+            - The Dialog window opens with the whole flow as a tree: what leads
+              where, with branches you can fold. Click a name to jump to its step.
+            - Every Response and route shows its context and metadata underneath.
+
+            ### Easier to edit the search bar
+            - Select chips with Shift-click or the arrow keys, then press ( ) to
+              put brackets around them, Backspace to remove them, or Alt+← / →
+              to move them into or out of a group.
+            - With a chip selected, what you type next is added right after it.
 
             ---
 
