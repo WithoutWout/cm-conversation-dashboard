@@ -73,7 +73,9 @@ frontend/
     insights.test.js, entity-search.test.js,
     db-migration-progress.test.js, db-open.test.js, search-bubbles.test.js,
     share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js,
-    gap-session-cache.test.js, content-refs.test.js, dialog-search.test.js
+    gap-session-cache.test.js, content-refs.test.js, dialog-search.test.js,
+    search-match-count.test.js, share-content-nodes.test.js, modal-tags.test.js,
+    dialog-flow.test.js, expr-group.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -516,7 +518,12 @@ The orientation map for the whole window. It says what is on screen and where;
     typing opens #convSuggest under it — badge · name (typed run marked) ·
     id or conversation count; ↑↓ select, Tab adds, Enter searches until a
     row is selected, Esc closes, Backspace on an empty field eats the last chip
-    [( )] opens a group, or closes the one that is open (disabled under .*)
+    [( )] opens a group, or closes the one that is open (disabled under .*);
+    with chips selected (Shift-click, or ←/→ to walk the chips from an empty
+    input and Shift+←/→ to stretch) it reads (…) and wraps them; what is typed
+    next is added after the selection (inside a group, if that is where it is);
+    Alt+←/→ moves the selection, into and out of groups — clicking a bracket
+    removes its group, keeping the chips
   date range button | tag filter button (Context · Metadata)
   filter pills (GenAI / Feedback · thumbs up · thumbs down / Low % / Zero %)
 
@@ -608,7 +615,9 @@ Mirrors the active tab's current result set, then lets you refine *what gets sha
 - **A type badge sits on every row** because `dn-` prefixes both Dialogs and Transactional Dialogs: in the flat List view the ID alone could not tell them apart. In the Table view the badge rides inside the ID cell rather than taking a fourth column, so `_copyExportTable`'s clipboard output keeps its original three columns.
 - **An unset `cmBaseUrl` is stated, not implied.** Without it every "link" copy silently degrades to plain IDs; the header shows an amber chip that opens Settings.
 - `_exportRowHtml` is shared by List and Grouped. They were near-identical copies before, which is how Grouped's relation column drifted out of List.
-- The copy formats themselves are untouched: rich-HTML links (with grouped `<strong>` section headers), TSV plain text (with `dn-9 -> qa-101, qa-102` relation text in grouped view), and the HTML+TSV table.
+- **A Dialog carries the nodes the search matched, each with its own link** (`item.nodes`, from `_exportMatchedNodes`): `dn-D-N` → `…/dialogs/D?currentNode=N` (`buildNodeUrl`). A shared Dialog is dozens of nodes; the person it is sent to needs the one to open. On screen they are lines under the row; in Copy links an indented `↳` line each; in plain text a line each with every column kept; in the table a row each, so it keeps three columns. The footer counts them (`Copy 36 links + 72 nodes`, `Copy table (221 rows)`). **A node has its own ✕** (`_exportDroppedNodes`, by `dn-D-N` token, per open like `_exportDropped`), applied in `getExportItemsForCurrentView` by `_exportWithoutDroppedNodes` — a copy, since the node list is shared with `_exportNodesCache`. A Dialog whose every matched node is removed stays a result ("all 2 matched nodes removed"); Restore brings back items and nodes together. Only the nodes the worker counted — by words, `ctx:` / `meta:` chips or the panel; a node found by a tag says which value it carries — see `docs/search.md` → "A card says how much of it matched".
+- **An Article's "matched responses" are the ones the search counted**, contextual ones marked `(contextual)`, else the entities it matched on. `_getMatchedResponses` used to read `_answerItems` / `_searchNodes`, which exist only inside the worker, so it had always shown the default Response plus "(matched on: entity)".
+- The copy formats themselves are otherwise untouched: rich-HTML links (with grouped `<strong>` section headers), TSV plain text (with `dn-9 -> qa-101, qa-102` relation text in grouped view), and the HTML+TSV table.
 
 ---
 

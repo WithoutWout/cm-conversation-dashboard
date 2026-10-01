@@ -859,6 +859,21 @@
         font-size: 0.69rem;
         color: var(--muted);
       }
+      /* How much of a result the search found — the colour of a search hit. */
+      .match-pill {
+        font-size: 0.66rem;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(124, 106, 247, 0.16);
+        border: 1px solid rgba(124, 106, 247, 0.3);
+        color: #cfc8ff;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .match-pill:hover {
+        border-color: var(--accent);
+        color: var(--text);
+      }
       .card-actions {
         display: flex;
         gap: 4px;
@@ -1215,6 +1230,310 @@
       .node-kba-ref:hover {
         text-decoration: underline;
       }
+      /* ── Dialog flow tree (see dialogFlowTreeHtml) ── */
+      .flow-tree {
+        font-size: 0.74rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 8px;
+        max-height: 46vh;
+        overflow: auto;
+      }
+      .flow-tree details > summary {
+        list-style: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 0;
+        white-space: nowrap;
+      }
+      .flow-tree details > summary::-webkit-details-marker {
+        display: none;
+      }
+      .flow-tree details > summary::before {
+        content: "▸";
+        color: var(--muted);
+        width: 10px;
+        flex-shrink: 0;
+        transition: transform 0.12s;
+      }
+      .flow-tree details[open] > summary::before {
+        transform: rotate(90deg);
+      }
+      .ft-leaf {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 0 2px 15px;
+        white-space: nowrap;
+      }
+      .ft-kids {
+        margin-left: 4px;
+        padding-left: 10px;
+        border-left: 1px solid var(--border);
+      }
+      .ft-line {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+      }
+      .ft-line.marked .ft-name {
+        background: rgba(124, 106, 247, 0.22);
+        border-radius: 3px;
+        padding: 0 4px;
+      }
+      .ft-kind {
+        font-size: 0.56rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      .ft-kind.recognition { color: #a89ff5; }
+      .ft-kind.output { color: var(--orange); }
+      .ft-name {
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        font-weight: 600;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .ft-name:hover {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+      .ft-name.ref {
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .ft-name.route {
+        font-weight: 400;
+        color: var(--accent);
+      }
+      .ft-name.route.tlink {
+        color: var(--teal);
+      }
+      .ft-snippet {
+        color: var(--muted);
+        font-size: 0.68rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 420px;
+      }
+      .ft-edge {
+        color: #a89ff5;
+        font-size: 0.7rem;
+      }
+      .ft-edge.fallback { color: var(--orange); }
+      .ft-edge.cond { color: var(--teal); }
+      .ft-edge.plain {
+        color: var(--muted);
+        font-style: italic;
+      }
+      .ft-more {
+        color: var(--muted);
+      }
+      .ft-arrow {
+        color: var(--muted);
+      }
+      .ft-group {
+        margin: 8px 0 2px;
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+      }
+      .ft-tools {
+        margin-left: auto;
+        display: inline-flex;
+        gap: 4px;
+        float: right;
+      }
+      .ft-tools button {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        color: var(--muted);
+        font-size: 0.62rem;
+        padding: 1px 6px;
+        cursor: pointer;
+        text-transform: none;
+        letter-spacing: 0;
+      }
+      .ft-tools button:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      /* ── Dialog flow (see dialogFlow) ── */
+      .flow-legend {
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--muted);
+        font-size: 0.66rem;
+        margin-left: 8px;
+      }
+      .flow-step-badge {
+        min-width: 20px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-size: 0.64rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .flow-start-badge {
+        font-size: 0.6rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--green);
+        background: rgba(74, 222, 128, 0.12);
+        border: 1px solid rgba(74, 222, 128, 0.25);
+        border-radius: 4px;
+        padding: 1px 6px;
+      }
+      .flow-from {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        margin: 0 0 4px;
+      }
+      .flow-when {
+        font-size: 0.64rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .flow-when.fallback {
+        color: var(--orange);
+      }
+      .flow-cond {
+        font-size: 0.72rem;
+        color: var(--text);
+      }
+      .flow-action {
+        font-size: 0.7rem;
+        color: var(--teal);
+        margin: 2px 0 4px;
+        word-break: break-all;
+      }
+      .flow-then {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px dashed var(--border);
+      }
+      .flow-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .flow-row.route {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+      }
+      .flow-cond-cell {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+      .flow-route-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .flow-arrow {
+        color: var(--muted);
+      }
+      .flow-step-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.7rem;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 7px 1px 2px;
+        color: var(--text);
+        cursor: pointer;
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .flow-step-chip:hover {
+        border-color: var(--accent);
+      }
+      .flow-step-chip.missing {
+        color: var(--muted);
+        cursor: default;
+        padding-left: 7px;
+      }
+      .flow-step-num {
+        background: var(--bg);
+        border-radius: 4px;
+        padding: 0 5px;
+        font-weight: 700;
+        font-size: 0.64rem;
+        color: var(--muted);
+      }
+      .flow-route {
+        font-size: 0.72rem;
+        color: var(--accent);
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .flow-route.tlink {
+        color: var(--teal);
+      }
+      .flow-more,
+      .flow-end {
+        font-size: 0.68rem;
+        color: var(--muted);
+        font-style: italic;
+      }
+      @keyframes flow-flash {
+        0% { box-shadow: 0 0 0 2px var(--accent); }
+        100% { box-shadow: 0 0 0 0 transparent; }
+      }
+      .dialog-node.flow-flash {
+        animation: flow-flash 1.6s ease-out;
+        border-color: var(--accent);
+      }
+      .ctx-answer-meta.below {
+        margin: 4px 0 0;
+      }
+      .output-tags.below {
+        margin: 5px 0 0;
+      }
+      .route-ref .output-tags.below {
+        display: flex;
+        flex-basis: 100%;
+        margin: 1px 0 0 14px;
+      }
       .node-options {
         display: flex;
         flex-wrap: wrap;
@@ -1383,6 +1702,25 @@
           box-shadow: 0 0 7px 1px rgba(168, 159, 245, 0.35),
             0 0 0 1px rgba(124, 106, 247, 0.45);
         }
+      }
+      /* Metadata is a tag on a Response, not a condition on reaching it — a
+         colour of its own so the two never read as one list. */
+      .ctx-var-pill.meta-pill {
+        background: rgba(45, 212, 191, 0.08);
+        border-color: rgba(45, 212, 191, 0.22);
+        color: #7fd9cb;
+      }
+      .ctx-var-pill.meta-pill.ctx-var-pill-match {
+        background: rgba(45, 212, 191, 0.18);
+        border-color: rgba(45, 212, 191, 0.7);
+        color: #b5f0e6;
+        animation: none;
+      }
+      .output-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin: 2px 0 5px;
       }
       .ctx-var-pill.ctx-var-pill-match {
         background: rgba(124, 106, 247, 0.18);
@@ -3319,6 +3657,53 @@
         white-space: nowrap;
         font-style: italic;
       }
+      /* A Dialog's matched nodes, one line each, under its row. */
+      .export-row-nodes {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: -2px;
+        padding-left: 14px;
+      }
+      .export-node-line {
+        display: grid;
+        /* Fixed id and name widths, so the reasons line up across Dialogs. */
+        grid-template-columns: auto 11em 15em minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .export-node-arrow {
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .export-node-name {
+        color: var(--text);
+        font-size: 0.74rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .export-node-text {
+        color: var(--muted);
+        font-size: 0.71rem;
+        font-style: italic;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+      .export-table tr.export-node-tr td {
+        font-size: 0.73rem;
+        padding-top: 3px;
+        padding-bottom: 3px;
+      }
+      .export-table td.td-node {
+        padding-left: 22px;
+        white-space: nowrap;
+      }
       .export-row-relations {
         display: flex;
         align-items: center;
@@ -5011,6 +5396,19 @@
       }
       .conv-paren:hover {
         color: var(--red);
+      }
+      /* Selected for grouping (Shift-click, Shift+←): one tint across the
+         chips, operators and brackets of the run. */
+      .conv-token.is-selected {
+        background: rgba(124, 106, 247, 0.45);
+        border-color: var(--accent);
+        color: #fff;
+        box-shadow: 0 0 0 2px rgba(124, 106, 247, 0.75);
+      }
+      .conv-op.is-selected,
+      .conv-paren.is-selected {
+        background: rgba(124, 106, 247, 0.22);
+        border-radius: 4px;
       }
       /* A matched pair is drawn as one band rather than two lone brackets:
          which conditions are inside the group is the whole question it answers.
@@ -13814,6 +14212,11 @@
       let entityMap = new Map() // UPPERCASE_NAME → entity object
       let entityWordMap = new Map() // lowercase word text → entity object
       let matchingEntityNames = new Set() // entity names matched by current search query
+      // Where each result matched, from the worker (`explainMatch`): by card key
+      // ("article:<Id>" / "dialog:<id>") → {q, r} for an Article (question and
+      // Answer indexes), {n, h} for a Dialog (node indexes, name/description).
+      // Feeds the cards' match counts and the modals' "Matches only".
+      let contentMatchInfo = new Map()
       let eFilter = "all"
       let eSort = "name-asc"
       let ePage = 1
@@ -14419,10 +14822,14 @@
           "</a>"
         )
       }
+      /// A Dialog node's own page in CM.com, or "" without a Context URL.
+      function buildNodeUrl(dialogId, nodeId) {
+        if (!cmBaseUrl) return ""
+        return cmBaseUrl + "/dialogs/" + dialogId + "?currentNode=" + nodeId
+      }
       function cmNodeLink(dialogId, nodeId) {
         if (!cmBaseUrl) return ""
-        const path =
-          cmBaseUrl + "/dialogs/" + dialogId + "?currentNode=" + nodeId
+        const path = buildNodeUrl(dialogId, nodeId)
         return (
           '<a class="action-link" href="' +
           esc(path) +
@@ -14864,7 +15271,7 @@
                 if (t && t !== "any") vals.push(t)
               }
             }
-            if (vals.length) ctxSet[name] = vals
+            _ctxAdd(ctxSet, name, vals)
           }
         } else {
           for (const cv of contextVars) {
@@ -14874,87 +15281,61 @@
               .split(",")
               .map((v) => v.trim())
               .filter(Boolean)
-            if (vals.length) ctxSet[name] = vals
+            _ctxAdd(ctxSet, name, vals)
           }
         }
         return contentContextFilters.every((f) => _tagFilterMatches(ctxSet, f))
       }
-      // Build context-variable pills for display.
-      // isArticle=true → {Id, Values[]}, false → {id, value}
-      // escGroup: optional escalation group string to render as an extra pill
-      function renderCtxVarPills(contextVars, isArticle, escGroup) {
+      /// One output's context conditions and metadata tags, as pills: context
+      /// grouped per variable ("DeviceType: Tablet, Mobile" — a Dialog stores
+      /// one entry per value), the escalation groups it is tied to by tag or by
+      /// condition, then its metadata as "key = value", JSON values flattened
+      /// as the Metadata filter reads them. A pill the search asks for — a
+      /// ctx: / meta: chip or a panel filter — is marked. Metadata the user
+      /// hid in Settings (`metaHidden`) stays hidden here too; `any` is no
+      /// condition and is left out.
+      function renderOutputTagsHtml(cvs, meta, isArticle) {
+        const conds = _activeTagConds()
         const pills = []
-        if (isArticle) {
-          for (const cv of contextVars) {
-            if (!cv.Values.includes("any")) {
-              const name = ctxVarMap.get(cv.Id) || "Var #" + cv.Id
-              const vals = cv.Values.join(", ")
-              const isMatch =
-                contentContextFilters.length > 0 &&
-                contentContextFilters.some(
-                  (f) =>
-                    f.name === name &&
-                    (f.value === "__any__" ||
-                      cv.Values.some((v) =>
-                      v
-                        .split(",")
-                        .map((x) => x.trim())
-                        .includes(f.value),
-                      )),
-                )
-              pills.push(
-                '<span class="ctx-var-pill' +
-                  (isMatch ? " ctx-var-pill-match" : "") +
-                  '">' +
-                  esc(name) +
-                  ": " +
-                  esc(vals) +
-                  "</span>",
-              )
+        const pill = (cls, label, title, match) =>
+          '<span class="' + cls + (match ? " ctx-var-pill-match" : "") + '" title="' +
+          esc(title) + '">' + esc(label.length > 70 ? label.slice(0, 70) + "…" : label) + "</span>"
+        const ctx = {}
+        for (const cv of cvs || []) {
+          const name = ctxVarMap.get(isArticle ? cv.Id : cv.id) || "Var #" + (isArticle ? cv.Id : cv.id)
+          if (name === "escalationGroup") continue
+          const raw = isArticle ? cv.Values || [] : cv.value ? [cv.value] : []
+          const vals = []
+          for (const r of raw)
+            for (const v of String(r).split(",")) {
+              const t = v.trim()
+              if (t && t !== "any") vals.push(t)
             }
-          }
-        } else {
-          for (const cv of contextVars) {
-            const name = ctxVarMap.get(cv.id) || "Var #" + cv.id
-            const val = cv.value || ""
-            const isMatch =
-              contentContextFilters.length > 0 &&
-              contentContextFilters.some(
-                (f) =>
-                  f.name === name &&
-                  (f.value === "__any__" ||
-                    val
-                      .split(",")
-                      .map((x) => x.trim())
-                      .includes(f.value)),
-              )
-            pills.push(
-              '<span class="ctx-var-pill' +
-                (isMatch ? " ctx-var-pill-match" : "") +
-                '">' +
-                esc(name) +
-                ": " +
-                esc(val) +
-                "</span>",
-            )
-          }
+          _ctxAdd(ctx, name, vals)
         }
-        if (escGroup) {
-          const isMatch =
-            contentContextFilters.length > 0 &&
-            contentContextFilters.some(
-              (f) => f.name === "escalationGroup" && f.value === escGroup,
-            )
+        const groups = _outputEscGroups(meta, cvs, isArticle)
+        if (groups.length) ctx.escalationGroup = groups
+        for (const [name, vals] of Object.entries(ctx)) {
+          const label = name + ": " + vals.join(", ")
           pills.push(
-            '<span class="ctx-var-pill' +
-              (isMatch ? " ctx-var-pill-match" : "") +
-              '">escalationGroup: ' +
-              esc(escGroup) +
-              "</span>",
+            pill("ctx-var-pill", label, "Context — " + label,
+              vals.some((v) => _tagIsSearched(conds, "context", name, v))),
           )
+        }
+        for (const key of Object.keys(meta || {})) {
+          if (key === "escalationGroup") continue
+          for (const [name, value] of _flattenMetaEntry(key, meta[key], [], 0)) {
+            if (metaHidden(name) || metaHidden(name, value)) continue
+            const label = name + " = " + value
+            pills.push(
+              pill("ctx-var-pill meta-pill", label, "Metadata — " + label,
+                _tagIsSearched(conds, "metadata", name, value)),
+            )
+          }
         }
         return pills.join("")
       }
+
       // Render a collapsible section of contextual answers.
       // answersData: [{displayText, isUnreachable, contextVars, isArticle}]
       // autoOpen: when true, section starts expanded (e.g. when a filter is active)
@@ -15001,18 +15382,16 @@
             (ans.isUnreachable ? " unreachable" : "") +
             (ans.isContextMatch ? " ctx-filter-match" : "") +
             '">'
-          const pills = renderCtxVarPills(
-            ans.contextVars,
-            ans.isArticle,
-            ans.escGroup,
-          )
+          // The Response first, then what it is conditioned on and tagged
+          // with, below it.
+          const pills = renderOutputTagsHtml(ans.contextVars, ans.meta, ans.isArticle)
+          html += hlVar(hl(ans.displayText, q))
           if (ans.isUnreachable || pills) {
-            html += '<div class="ctx-answer-meta">'
+            html += '<div class="ctx-answer-meta below">'
             if (ans.isUnreachable)
               html += '<span class="ctx-unreachable-badge">Unreachable</span>'
             html += pills + "</div>"
           }
-          html += hlVar(hl(ans.displayText, q))
           html += "</div>"
         }
         html += "</div>"
@@ -15054,7 +15433,7 @@
                 if (t && t !== "any") vals.push(t)
               }
             }
-            if (vals.length) ctxSet[name] = vals
+            _ctxAdd(ctxSet, name, vals)
           }
         } else {
           for (const cv of contextVars) {
@@ -15064,7 +15443,7 @@
               .split(",")
               .map((v) => v.trim())
               .filter(Boolean)
-            if (vals.length) ctxSet[name] = vals
+            _ctxAdd(ctxSet, name, vals)
           }
         }
         return varFilters.every((f) => _tagFilterMatches(ctxSet, f))
@@ -15207,6 +15586,7 @@
           pq = aFaqQ(art),
           qCnt = art.Questions.length
         const linkedDialogs = articleLinkedDialogs(art)
+        const matchInfo = contentMatchFor(art)
         const kindBadge =
           kind === "answer"
             ? '<span class="badge b-response">Response</span>'
@@ -15302,7 +15682,8 @@
         // triggers and how many responses the item actually contributes.
         const snippetHtml = cardSnippetHtml(
           nonDefaultArticleMatchSnippet(art, q) ||
-            contextRouteMatchSnippet(art, q),
+            contextRouteMatchSnippet(art, q) ||
+            articleMatchSnippet(art, q, matchInfo),
           q,
         )
         const _selKey = "article:" + art.Id
@@ -15333,11 +15714,14 @@
           '<span class="badge b-article">Article</span>' +
           kindBadge +
           (faq ? '<span class="badge b-faq">FAQ</span>' : "") +
-          '<span class="meta-dim">' +
-          qCnt +
-          " entit" +
-          (qCnt !== 1 ? "ies" : "y") +
-          "</span>" +
+          (matchInfo && matchInfo.q.length
+            ? ""
+            : '<span class="meta-dim">' +
+              qCnt +
+              " entit" +
+              (qCnt !== 1 ? "ies" : "y") +
+              "</span>") +
+          (matchInfo ? articleMatchPills(art, matchInfo) : "") +
           "</div>" +
           snippetHtml +
           "</div>" +
@@ -15937,11 +16321,316 @@
         document.getElementById("flowModal").classList.remove("open")
       }
 
+      // ── Dialog flow ─────────────────────────────────────────────────
+      //
+      // The Dialog modal reads as a walk through the conversation: nodes in
+      // the order a user meets them from the entry points, each numbered, each
+      // saying where it is reached from and — one row per way out — what
+      // leads where ("User says “Tickets” → 3 · Tickets"). The export is a list
+      // of nodes in creation order with links between them; read in that order
+      // the flow had to be reconstructed by hand.
+
+      const _dialogFlowCache = new WeakMap()
+
+      /// Ways out of a node, in the order CM.com evaluates them: by
+      /// `evaluationPriority`, fallbacks last.
+      function _flowLinks(node) {
+        const prio = (l) => {
+          const d = (l.condition && l.condition.data) || {}
+          return d.isFallback ? Infinity : d.evaluationPriority ?? Infinity - 1
+        }
+        return [...(node.links || [])].sort((a, b) => prio(a) - prio(b))
+      }
+
+      /// The flow of a Dialog as a tree. Each node is placed under the parent
+      /// *closest to the start* — breadth-first from the entry points, each
+      /// node's ways out in evaluation order — and the tree is then read
+      /// depth-first, a branch to its end before the next. Depth-first
+      /// placement buried a hub's options: on Dialog 6270 "In het park" lists
+      /// every restaurant, and the first restaurant links to all the others,
+      /// so they all landed under it, collapsed out of sight, and the hub was
+      /// left holding references. Nodes nothing reaches are roots of their own,
+      /// last, in export order.
+      ///
+      /// - `order` / `step`: the nodes in that reading order, numbered 1…
+      /// - `tree`: per node id, its ways out as `{link, id, ref}` — `ref` when
+      ///   the target is placed elsewhere (a loop, a second way in), so the
+      ///   tree shows every node once and stays finite.
+      /// - `roots`: `{id, ref, start}` per entry point, then per unreached node.
+      /// - `parents`: per node id, the nodes that lead to it.
+      function dialogFlow(dialog) {
+        let flow = _dialogFlowCache.get(dialog)
+        if (flow) return flow
+        const nodes = dialog.nodes || []
+        const byId = new Map(nodes.map((n) => [n.id, n]))
+        const entries = (dialog.entryPoints || []).map((ep) => ep.nodeId).filter((id) => byId.has(id))
+        if (!entries.length && nodes.length) entries.push(nodes[0].id)
+        const placedBy = new Map() // child id → the link that places it
+        const placed = new Set()
+        const place = (rootId) => {
+          const queue = [rootId]
+          placed.add(rootId)
+          while (queue.length) {
+            const id = queue.shift()
+            for (const link of _flowLinks(byId.get(id))) {
+              const to = link.childNodeId
+              if (!byId.has(to) || placed.has(to)) continue
+              placed.add(to)
+              placedBy.set(to, link)
+              queue.push(to)
+            }
+          }
+        }
+        const roots = []
+        for (const id of entries) {
+          roots.push({ id, ref: placed.has(id), start: true })
+          if (!placed.has(id)) place(id)
+        }
+        for (const n of nodes)
+          if (!placed.has(n.id)) {
+            roots.push({ id: n.id, ref: false, start: false })
+            place(n.id)
+          }
+        const tree = new Map()
+        for (const n of nodes)
+          tree.set(
+            n.id,
+            _flowLinks(n).map((link) => ({
+              link,
+              id: link.childNodeId,
+              ref: placedBy.get(link.childNodeId) !== link,
+            })),
+          )
+        const order = []
+        const walk = (id) => {
+          order.push(byId.get(id))
+          for (const k of tree.get(id)) if (!k.ref) walk(k.id)
+        }
+        for (const r of roots) if (!r.ref) walk(r.id)
+        const step = new Map(order.map((n, i) => [n.id, i + 1]))
+        const parents = new Map()
+        for (const n of nodes)
+          for (const l of n.links || []) {
+            if (!parents.has(l.childNodeId)) parents.set(l.childNodeId, [])
+            const list = parents.get(l.childNodeId)
+            if (!list.includes(n)) list.push(n)
+          }
+        flow = { order, step, parents, entries: new Set(entries), byId, tree, roots }
+        _dialogFlowCache.set(dialog, flow)
+        return flow
+      }
+
+      /// A step chip: "3 · Tickets", jumping to that node in the modal.
+      function _flowStepChip(dialog, id) {
+        const flow = dialogFlow(dialog)
+        const n = flow.byId.get(id)
+        if (!n) return '<span class="flow-step-chip missing">node #' + esc(id) + "</span>"
+        const name = (n.name || "").trim() || n.type + " node"
+        return (
+          '<button class="flow-step-chip" onclick="flowJumpToNode(' + dialog.id + "," + id +
+          ');event.stopPropagation()" title="' + esc(n.type + " node — go to step " + flow.step.get(id)) +
+          '"><span class="flow-step-num">' + flow.step.get(id) + "</span>" + esc(name) + "</button>"
+        )
+      }
+
+      const _FLOW_OPS = {
+        Equal: "is", EqualCaseInsensitive: "is", NotEqual: "is not",
+        Contains: "contains", ContainsCaseInsensitive: "contains",
+        Greater: "is more than", Less: "is less than",
+        Empty: "is empty", NotEmpty: "is not empty",
+      }
+
+      /// One Logical condition as words: "antwoordReactie is “Nee”". Groups
+      /// are alternatives; the expressions inside one group all have to hold.
+      function _flowLogicalText(data, dialog) {
+        const varName = (op) => {
+          if (!op) return "?"
+          if (op.type === "DialogVariable") {
+            const v = (dialog.variables || []).find((x) => x.id === op.id)
+            return v ? v.name : "dialog variable #" + op.id
+          }
+          if (op.type === "ConversationVariable") return convVarMap.get(op.id) || "conversation variable #" + op.id
+          if (op.type === "ContextVariable") return ctxVarMap.get(op.id) || "context variable #" + op.id
+          return op.data != null ? "“" + op.data + "”" : op.type
+        }
+        const one = (e) => {
+          const op = _FLOW_OPS[e.operator] || e.operator
+          const right = e.rightOperand && e.rightOperand.data != null ? " “" + e.rightOperand.data + "”" : ""
+          return varName(e.leftOperand) + " " + op + (e.operator === "Empty" || e.operator === "NotEmpty" ? "" : right)
+        }
+        return (data.expressions || []).map((g) => g.map(one).join(" and ")).join(" or ")
+      }
+
+      /// The "when" half of a way out, as HTML.
+      function _flowConditionHtml(link, dialog, q) {
+        const c = link.condition || {}
+        const d = c.data || {}
+        if (c.type === "Recognition") {
+          if (d.isFallback) return '<span class="flow-when fallback">Anything else</span>'
+          const says = (d.questions || [])
+            .map((qo) => '<span class="node-option">' + hl(qo.text, q) + "</span>")
+            .join("")
+          return '<span class="flow-when">User says</span>' + says
+        }
+        if (c.type === "Logical")
+          return d.isFallback
+            ? '<span class="flow-when fallback">Otherwise</span>'
+            : '<span class="flow-when">If</span><span class="flow-cond">' + esc(_flowLogicalText(d, dialog)) + "</span>"
+        if (c.type === "GoTo") return '<span class="flow-when">Jumps to</span>'
+        return '<span class="flow-when">Then</span>'
+      }
+
+      /// What a node does besides answering, when it does something.
+      function _flowActionHtml(node, dialog) {
+        const a = node.action || {}
+        const d = a.data || {}
+        let text = ""
+        if (a.type === "CaptureInput") {
+          const to = d.captureTo || {}
+          const v = to.type === "DialogVariable" ? (dialog.variables || []).find((x) => x.id === to.id) : null
+          text = "Waits for the user’s answer" + (v ? " → saved in " + v.name : "")
+        } else if (a.type === "HttpCall") text = "Calls " + (d.method || "").toUpperCase() + " " + (d.url || "")
+        else if (a.type === "HaloToolCall") text = "Runs Halo tool #" + (d.toolId != null ? d.toolId : "?")
+        return text ? '<div class="flow-action">' + esc(text) + "</div>" : ""
+      }
+
+      /// Scroll the Dialog modal to one node and mark it. A node "Matches
+      /// only" hides is a node the user just asked to see, so the filter goes
+      /// off first.
+      function flowJumpToNode(dialogId, nodeId) {
+        const domId = "flow-node-" + dialogId + "-" + nodeId
+        let el = document.getElementById(domId)
+        if (!el && modalMatchFilter && _navCurrentModal && _navCurrentModal.type === "dialog") {
+          modalMatchFilter = false
+          _syncModalFilterBtn()
+          const item = allDialogsCombined.find((d) => d.id === dialogId)
+          if (item) _renderDialogModalBody(item, dialogId, false)
+          el = document.getElementById(domId)
+        }
+        if (!el) return
+        el.scrollIntoView({ block: "center", behavior: "smooth" })
+        el.classList.remove("flow-flash")
+        void el.offsetWidth
+        el.classList.add("flow-flash")
+      }
+
+      /// The short form of a way out, for the tree: the first phrasings, the
+      /// condition, or what kind of step it is.
+      function _flowEdgeLabel(link, dialog) {
+        const c = link.condition || {}
+        const d = c.data || {}
+        const clip = (t, n) => (t.length > n ? t.slice(0, n) + "…" : t)
+        if (c.type === "Recognition") {
+          if (d.isFallback) return '<span class="ft-edge fallback">Anything else</span>'
+          const qs = (d.questions || []).map((qo) => qo.text).filter(Boolean)
+          const shown = qs.slice(0, 2).map((t) => "“" + clip(t, 28) + "”").join(" ")
+          return (
+            '<span class="ft-edge" title="' + esc("User says: " + qs.join(" · ")) + '">' +
+            esc(shown) + (qs.length > 2 ? '<span class="ft-more"> +' + (qs.length - 2) + "</span>" : "") +
+            "</span>"
+          )
+        }
+        if (c.type === "Logical") {
+          if (d.isFallback) return '<span class="ft-edge fallback">Otherwise</span>'
+          const t = "if " + _flowLogicalText(d, dialog)
+          return '<span class="ft-edge cond" title="' + esc(t) + '">' + esc(clip(t, 48)) + "</span>"
+        }
+        if (c.type === "GoTo") return '<span class="ft-edge plain">jumps to</span>'
+        return '<span class="ft-edge plain">then</span>'
+      }
+
+      /// One node as a tree line: step, kind, name, the start of its answer.
+      /// The name goes to the node's card below.
+      function _flowTreeLine(dialog, id, marked) {
+        const flow = dialogFlow(dialog)
+        const n = flow.byId.get(id)
+        const kind = (n.type || "").toLowerCase()
+        const items = (n.output && n.output.items) || []
+        const ans = defaultDialogAnswerItem(items)
+        let snippet = ans ? stripDisplay((ans.data && ans.data.text) || "", (ans.data && ans.data.hyperlinks) || []) : ""
+        if (!snippet && n.output && n.output.kbaIdReference != null)
+          snippet = "shows Article qa-" + n.output.kbaIdReference
+        snippet = _dropPlaceholders(snippet).replace(/\s+/g, " ").trim()
+        return (
+          '<span class="ft-line' + (marked && marked.has(id) ? " marked" : "") + '">' +
+          '<span class="flow-step-num">' + flow.step.get(id) + "</span>" +
+          '<span class="ft-kind ' + esc(kind) + '">' + esc(n.type) + "</span>" +
+          (flow.entries.has(id) ? '<span class="flow-start-badge">Start</span>' : "") +
+          '<button class="ft-name" onclick="event.preventDefault();event.stopPropagation();flowJumpToNode(' +
+          dialog.id + "," + id + ')" title="Go to this node\'s details">' +
+          esc((n.name || "").trim() || n.type + " node") + "</button>" +
+          (snippet ? '<span class="ft-snippet">' + esc(snippet.length > 70 ? snippet.slice(0, 70) + "…" : snippet) + "</span>" : "") +
+          "</span>"
+        )
+      }
+
+      /// A Dialog as a tree you can take in at a glance: one line per node,
+      /// each way out leading to the next, branches collapsible. Every node
+      /// appears once; a way back to one already shown — a loop, a second way
+      /// in — is a "↩" line. `marked` holds the node ids the search found.
+      /// Large Dialogs open two levels deep.
+      function dialogFlowTreeHtml(dialog, marked) {
+        const flow = dialogFlow(dialog)
+        const deep = flow.order.length <= 30
+        const ref = (id, label) => {
+          const n = flow.byId.get(id)
+          return (
+            '<div class="ft-leaf ft-ref">' + (label || "") +
+            '<span class="ft-arrow">&#8594;</span>' +
+            (n
+              ? '<button class="ft-name ref" onclick="flowJumpToNode(' + dialog.id + "," + id +
+                ')" title="Shown above — go to it">&#8617; ' + flow.step.get(id) + " · " +
+                esc((n.name || "").trim() || n.type + " node") + "</button>"
+              : '<span class="ft-snippet">node #' + esc(id) + " (not in this Dialog)</span>") +
+            "</div>"
+          )
+        }
+        const branch = (id, depth, label) => {
+          const node = flow.byId.get(id)
+          const lines = (flow.tree.get(id) || []).map((k) =>
+            k.ref ? ref(k.id, _flowEdgeLabel(k.link, dialog)) : branch(k.id, depth + 1, _flowEdgeLabel(k.link, dialog)),
+          )
+          for (const it of (node.output && node.output.items) || []) {
+            if (it.type !== "DialogStart" && it.type !== "TDialogStart") continue
+            const t = it.type === "TDialogStart"
+            const did = t ? it.data && it.data.tDialogId : it.data && it.data.dialogId
+            const d = t ? tDialogMap.get(did) : dialogMap.get(did)
+            lines.push(
+              '<div class="ft-leaf"><span class="ft-edge plain">starts ' + (t ? "Transactional Dialog" : "Dialog") +
+                '</span><span class="ft-arrow">&#8594;</span><button class="ft-name route' + (t ? " tlink" : "") +
+                '" onclick="jumpToDialog(' + did + "," + t + ')">' + (d ? esc(d.name) : "#" + esc(did)) + "</button></div>",
+            )
+          }
+          const head = (label ? label + '<span class="ft-arrow">&#8594;</span>' : "") + _flowTreeLine(dialog, id, marked)
+          if (!lines.length) return '<div class="ft-leaf">' + head + "</div>"
+          return (
+            '<details class="ft-node"' + (deep || depth < 2 ? " open" : "") + "><summary>" + head +
+            '</summary><div class="ft-kids">' + lines.join("") + "</div></details>"
+          )
+        }
+        const out = []
+        let unreachedLabel = false
+        for (const r of flow.roots) {
+          if (!r.start && !unreachedLabel) {
+            unreachedLabel = true
+            out.push('<div class="ft-group">Not reached from a start</div>')
+          }
+          out.push(r.ref ? ref(r.id, '<span class="ft-edge plain">start</span>') : branch(r.id, 0, ""))
+        }
+        return '<div class="flow-tree">' + out.join("") + "</div>"
+      }
+
+      function flowTreeOpenAll(btn, open) {
+        const tree = btn.closest(".detail-section").querySelector(".flow-tree")
+        if (tree) tree.querySelectorAll("details").forEach((d) => (d.open = open))
+      }
+
       // ── Dialog node ─────────────────────────────────────────────────
       function renderNodeHtml(node, dialog, q, autoOpenCtx) {
         // A reference node is drawn as always, but not marked: its name and
         // its Article's text are not why this Dialog is in the results.
         if (nodeIsRefHidden(node, dialog)) q = ""
+        const flow = dialogFlow(dialog)
         const isRec = node.type === "Recognition"
         const items = (node.output && node.output.items) || []
         // Use the isDefault answer as the primary; fall back to first Answer
@@ -15955,7 +16644,7 @@
           kbaArt &&
           kbaArt.Outputs &&
           kbaArt.Outputs.find((o) => o.Type === "Answer")
-        const ansRawText = stripDisplay(
+        const ansRaw = stripDisplay(
           (defaultAnsItem && defaultAnsItem.data && defaultAnsItem.data.text) ||
             (kbaAnsText && kbaAnsText.Text) ||
             "",
@@ -15965,7 +16654,6 @@
             (kbaAnsText && kbaAnsText.Links) ||
             [],
         )
-        const ansRaw = ansRawText // used as plain text for hl(); hlVar applied at render
         const kbaRefLink = kbaArt
           ? '<a class="node-kba-ref" onclick="closeDialogInfoModal();goToArticle(' +
             kbaRef +
@@ -15975,7 +16663,7 @@
             kbaRef +
             "</a> "
           : ""
-        // Build contextual answers section for this node
+        // Contextual answers, as the "Matches only" filter leaves them.
         const _nodeHasCtxFilter = contentContextFilters.length > 0
         const _nodeTermRes = autoOpenCtx ? _buildModalTermRegexes() : []
         const contextualAnsData = contextualAnsItems.map((item) => {
@@ -15988,6 +16676,7 @@
             rawText: _rawText,
             isUnreachable: !dialogAnswerHasContext(item),
             contextVars: item.contextVariables || [],
+            meta: item.metadata || null,
             escGroup: (item.metadata && item.metadata.escalationGroup) || null,
             isArticle: false,
             isContextMatch: ctxVarsMatchFilters(
@@ -16020,98 +16709,71 @@
           "node-" + node.id,
           autoOpenCtx || _nodeHasCtxFilter,
         )
-        const nodeMap = new Map((dialog.nodes || []).map((n) => [n.id, n]))
-        const optHtml = [...(node.links || [])]
-          .sort((a, b) => {
-            const pa =
-              (a.condition &&
-                a.condition.data &&
-                a.condition.data.evaluationPriority) ??
-              Infinity
-            const pb =
-              (b.condition &&
-                b.condition.data &&
-                b.condition.data.evaluationPriority) ??
-              Infinity
-            return pa - pb
-          })
-          .flatMap((link) => {
-            const isFB =
-              link.condition &&
-              link.condition.data &&
-              link.condition.data.isFallback
-            const childN = nodeMap.get(link.childNodeId)
-            return (
-              (link.condition &&
-                link.condition.data &&
-                link.condition.data.questions) ||
-              []
-            ).map((qo) => {
-              const dest = childN
-                ? ' <span style="color:var(--muted);font-size:0.62rem">&#8594; ' +
-                  esc(childN.name) +
-                  "</span>"
-                : ""
-              return (
-                '<span class="node-option' +
-                (isFB ? " fallback" : "") +
-                '">' +
-                hl(qo.text, q) +
-                dest +
-                "</span>"
-              )
-            })
-          })
-          .join("")
-        const routeHtml = items
-          .filter((i) => i.type !== "Answer")
-          .map((item) => {
-            // The context a route fires under, as on a contextual response.
-            const pills = renderCtxVarPills(
-              item.contextVariables || [],
-              false,
-              null,
-            )
-            if (item.type === "DialogStart") {
-              const did = item.data && item.data.dialogId
-              const d = dialogMap.get(did),
-                name = d ? esc(d.name) : "#" + (did || "")
-              return (
-                '<span class="node-route">&#8594; Dialog: <strong onclick="jumpToDialog(' +
-                did +
-                ',false)">' +
-                name +
-                "</strong>" +
-                pills +
-                "</span>"
-              )
-            }
-            if (item.type === "TDialogStart") {
-              const tid = item.data && item.data.tDialogId
-              const d = tDialogMap.get(tid),
-                name = d ? esc(d.name) : "#" + (tid || "")
-              return (
-                '<span class="node-route tlink">&#8594; Transactional Dialog: <strong style="color:var(--teal)" onclick="jumpToDialog(' +
-                tid +
-                ',true)">' +
-                name +
-                "</strong>" +
-                pills +
-                "</span>"
-              )
-            }
-            return ""
-          })
-          .filter(Boolean)
-          .join("")
+        const defaultTags = defaultAnsItem
+          ? renderOutputTagsHtml(defaultAnsItem.contextVariables, defaultAnsItem.metadata, false)
+          : ""
+
+        // Reached from: the steps that lead here.
+        const from = (flow.parents.get(node.id) || []).filter((p) => p !== node)
+        const fromHtml = from.length
+          ? '<div class="flow-from"><span class="flow-when">From</span>' +
+            from.slice(0, 6).map((p) => _flowStepChip(dialog, p.id)).join("") +
+            (from.length > 6 ? '<span class="flow-more">+' + (from.length - 6) + " more</span>" : "") +
+            "</div>"
+          : ""
+
+        // Then: one row per way out, in evaluation order, then the routes
+        // into other Dialogs, each with its context and metadata below it.
+        const rows = _flowLinks(node).map(
+          (link) =>
+            '<div class="flow-row' +
+            (link.condition && link.condition.data && link.condition.data.isFallback ? " fallback" : "") +
+            '"><div class="flow-cond-cell">' +
+            _flowConditionHtml(link, dialog, q) +
+            '</div><span class="flow-arrow">&#8594;</span>' +
+            _flowStepChip(dialog, link.childNodeId) +
+            "</div>",
+        )
+        for (const item of items) {
+          if (item.type === "Answer") continue
+          let target = ""
+          if (item.type === "DialogStart") {
+            const did = item.data && item.data.dialogId
+            const d = dialogMap.get(did)
+            target =
+              '<span class="flow-when">Starts Dialog</span><span class="flow-arrow">&#8594;</span>' +
+              '<span class="flow-route" onclick="jumpToDialog(' + did + ',false)">' +
+              (d ? esc(d.name) : "#" + esc(did || "")) + "</span>"
+          } else if (item.type === "TDialogStart") {
+            const tid = item.data && item.data.tDialogId
+            const d = tDialogMap.get(tid)
+            target =
+              '<span class="flow-when">Starts Transactional Dialog</span><span class="flow-arrow">&#8594;</span>' +
+              '<span class="flow-route tlink" onclick="jumpToDialog(' + tid + ',true)">' +
+              (d ? esc(d.name) : "#" + esc(tid || "")) + "</span>"
+          } else continue
+          const tags = renderOutputTagsHtml(item.contextVariables, item.metadata, false)
+          rows.push(
+            '<div class="flow-row route"><div class="flow-route-line">' + target + "</div>" +
+              (tags ? '<div class="output-tags">' + tags + "</div>" : "") + "</div>",
+          )
+        }
+        const thenHtml =
+          '<div class="flow-then">' +
+          (rows.length ? rows.join("") : '<div class="flow-end">End of this path — no next step</div>') +
+          "</div>"
+
         return (
-          '<div class="dialog-node">' +
+          '<div class="dialog-node" id="flow-node-' + dialog.id + "-" + node.id + '">' +
           '<div class="node-header">' +
+          '<span class="flow-step-badge" title="Step ' + flow.step.get(node.id) + ' in flow order">' +
+          flow.step.get(node.id) + "</span>" +
           '<span class="badge ' +
           (isRec ? "b-recog" : "b-outnode") +
           '">' +
           esc(node.type) +
           "</span>" +
+          (flow.entries.has(node.id) ? '<span class="flow-start-badge">Start</span>' : "") +
           '<span class="node-name">' +
           hl(node.name, q) +
           "</span>" +
@@ -16126,19 +16788,19 @@
           node.id +
           ' in conversations"><svg class=ui-icon><use href=#i-chat /></svg></button>' +
           "</div>" +
+          fromHtml +
+          _flowActionHtml(node, dialog) +
           (ansRaw
             ? '<div class="node-answer">' +
               kbaRefLink +
               hlVar(hl(ansRaw, q)) +
               "</div>"
             : "") +
+          (defaultTags ? '<div class="output-tags">' + defaultTags + "</div>" : "") +
           (contextualAnsHtml
             ? '<div style="margin:2px 0">' + contextualAnsHtml + "</div>"
             : "") +
-          (optHtml ? '<div class="node-options">' + optHtml + "</div>" : "") +
-          (routeHtml
-            ? '<div class="node-routes">' + routeHtml + "</div>"
-            : "") +
+          thenHtml +
           "</div>"
         )
       }
@@ -16178,6 +16840,7 @@
         ).length
         const desc = item.description || ""
         const hasDetail = !!desc
+        const matchInfo = contentMatchFor(item)
         const snippetHtml = cardSnippetHtml(
           nonDefaultDialogMatchSnippet(item, q) ||
             contextRouteMatchSnippet(item, q) ||
@@ -16215,11 +16878,16 @@
           '<span class="badge b-recog">' +
           recCnt +
           " Recognition</span>" +
-          '<span class="meta-dim">' +
-          nodeCnt +
-          " node" +
-          (nodeCnt !== 1 ? "s" : "") +
-          "</span>" +
+          (matchInfo && matchInfo.n.length
+            ? matchCountPill(
+                _matchCountText(matchInfo.n.length, nodeCnt, "Node", "nodes"),
+                "Nodes that hold the search — open to see them",
+              )
+            : '<span class="meta-dim">' +
+              nodeCnt +
+              " node" +
+              (nodeCnt !== 1 ? "s" : "") +
+              "</span>") +
           "</div>" +
           relationHtml +
           snippetHtml +
@@ -16332,6 +17000,191 @@
         )
       }
 
+      /// The key `contentMatchInfo` is stored under — the Collections key, with
+      /// Transactional Dialogs kept apart since their ids overlap Dialogs'.
+      function _matchKey(it) {
+        if (it.Outputs) return "article:" + it.Id
+        return (it._kind === "tdialog" ? "tdialog:" : "dialog:") + it.id
+      }
+
+      /// Where the search found this item, from the worker, or null when
+      /// nothing in it was counted — no search, or one by ids / entities only.
+      /// Words, ctx: / meta: chips and the Context · Metadata panel all count.
+      function contentMatchFor(it) {
+        const mi = contentMatchInfo.get(_matchKey(it))
+        if (!mi) return null
+        return (mi.n ? mi.n.length || mi.h : mi.q.length || mi.r.length) ? mi : null
+      }
+
+      /// " · 14 nodes · 9 responses (3 contextual)" — how much of a tab's
+      /// results the search found, summed from the same counts the cards show.
+      /// Nodes are Dialogs', Responses Articles'; "" when nothing was counted.
+      function _matchTotalsText(idx, resolve) {
+        if (!contentMatchInfo.size) return ""
+        let nodes = 0,
+          responses = 0,
+          contextual = 0
+        for (const i of idx) {
+          const it = resolve(i)
+          const mi = it && contentMatchInfo.get(_matchKey(it))
+          if (!mi) continue
+          if (mi.n) {
+            nodes += mi.n.length
+            continue
+          }
+          if (!mi.r.length) continue
+          responses += mi.r.length
+          const answers = it.Outputs.filter((o) => o.Type === "Answer")
+          const def = defaultArticleAnswer(it)
+          contextual += mi.r.filter((k) => answers[k] !== def).length
+        }
+        const parts = []
+        if (nodes) parts.push(nodes + " node" + (nodes !== 1 ? "s" : ""))
+        if (responses)
+          parts.push(
+            responses +
+              " response" +
+              (responses !== 1 ? "s" : "") +
+              (contextual ? " (" + contextual + " contextual)" : ""),
+          )
+        return parts.length ? " · " + parts.join(" · ") : ""
+      }
+
+      /// Is a search running that "Matches only" can narrow to? Words, or
+      /// anything the worker counted — a ctx: / meta: chip or the panel.
+      function _contentMatchActive() {
+        return !!gQuery || contentMatchInfo.size > 0
+      }
+
+      /// The searched tags some outputs carry, as "nochat = true · DeviceType =
+      /// Mobile": the ctx: / meta: chips that are not negated, and the panel's
+      /// filters. Says *why* a node or Response counted when no word did.
+      /// `outs` are `{cvs, meta, isAnswer}`; `isArticle` picks the context shape.
+      /// The tags the search asks for: the ctx: / meta: chips that are not
+      /// negated, and the panel's filters, as `{kind, name, values}` — empty
+      /// `values` meaning any value. "not set" asks for absence and names none.
+      function _activeTagConds() {
+        const conds = []
+        contentExpr.forEach((it, i) => {
+          if (it.t !== "tag") return
+          const prev = contentExpr[i - 1]
+          if (prev && prev.t === "op" && prev.op === "not") return
+          conds.push({ kind: it.kind, name: it.name, values: it.values || [] })
+        })
+        const fromPanel = (kind) => (f) => {
+          if (f.value !== "__not_set__")
+            conds.push({ kind, name: f.name, values: f.value === "__any__" ? [] : [f.value] })
+        }
+        contentContextFilters.forEach(fromPanel("context"))
+        contentMetadataFilters.forEach(fromPanel("metadata"))
+        return conds
+      }
+
+      /// Does an active chip or filter ask for this tag value?
+      function _tagIsSearched(conds, kind, name, value) {
+        const v = String(value).trim().toLowerCase()
+        return conds.some(
+          (c) =>
+            c.kind === kind &&
+            c.name.toLowerCase() === String(name).toLowerCase() &&
+            (!c.values.length || c.values.some((w) => String(w).trim().toLowerCase() === v)),
+        )
+      }
+
+      function _outputsTagText(outs, isArticle) {
+        const conds = _activeTagConds()
+        const parts = []
+        const seen = new Set()
+        for (const c of conds) {
+          const have = []
+          for (const o of outs) {
+            let vals = []
+            if (c.kind === "context")
+              vals =
+                c.name === "escalationGroup"
+                  ? _outputEscGroups(o.meta, o.cvs, isArticle)
+                  : _outputCtxSet(o.cvs, isArticle)[c.name] || []
+            else if (o.isAnswer && o.meta && o.meta[c.name] != null)
+              vals = [
+                typeof o.meta[c.name] === "string"
+                  ? o.meta[c.name].trim()
+                  : JSON.stringify(o.meta[c.name]),
+              ]
+            for (const v of vals)
+              if (
+                !have.includes(v) &&
+                (!c.values.length ||
+                  c.values.some((w) => String(w).trim().toLowerCase() === String(v).toLowerCase()))
+              )
+                have.push(v)
+          }
+          const line = have.length ? c.name + " = " + have.join(", ") : ""
+          if (line && !seen.has(line)) {
+            seen.add(line)
+            parts.push(line.length > 80 ? line.slice(0, 80) + "…" : line)
+          }
+        }
+        return parts.join(" · ")
+      }
+      function _nodeTagText(n) {
+        return _outputsTagText(
+          ((n.output && n.output.items) || []).map((oi) => ({
+            cvs: oi.contextVariables,
+            meta: oi.metadata,
+            isAnswer: oi.type === "Answer",
+          })),
+          false,
+        )
+      }
+      function _articleOutputTagText(o) {
+        return _outputsTagText([{ cvs: o.ContextVariables, meta: o.OutputMetaData, isAnswer: true }], true)
+      }
+
+      /// "3 of 40 nodes match", "Response matches", "all 5 entities match".
+      function _matchCountText(k, n, one, many) {
+        if (n === 1) return one + " matches"
+        return (k === n ? "all " + n : k + " of " + n) + " " + many + " match"
+      }
+
+      /// A card's match count. It sits in the card header, so a click opens
+      /// the item — with "Matches only" on, which lists exactly what it counts.
+      function matchCountPill(text, title) {
+        return (
+          '<span class="match-pill" title="' +
+          esc(title) +
+          '" onclick="modalMatchFilter=true">' +
+          esc(text) +
+          "</span>"
+        )
+      }
+
+      /// The Article card's counts: Responses (with how many are contextual)
+      /// and entities. Either is left out when the search did not find it there.
+      function articleMatchPills(art, mi) {
+        let html = ""
+        const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
+        if (mi.r.length && answers.length) {
+          const def = defaultArticleAnswer(art)
+          const ctx = mi.r.filter((i) => answers[i] !== def).length
+          html += matchCountPill(
+            _matchCountText(
+              mi.r.length,
+              answers.length,
+              ctx ? "Contextual response" : "Response",
+              "responses",
+            ) + (ctx && answers.length > 1 ? " · " + ctx + " contextual" : ""),
+            "Responses that hold the search — open to see them",
+          )
+        }
+        const qCnt = art.Questions.length
+        if (mi.q.length)
+          html += matchCountPill(
+            _matchCountText(mi.q.length, qCnt, "Entity", "entities"),
+            "Entities that hold the search — open to see them",
+          )
+        return html
+      }
+
       function cardSnippetHtml(match, q) {
         if (!match) return ""
         return (
@@ -16385,6 +17238,45 @@
         return null
       }
 
+      /// Why an Article is in the results when its title does not say so: its
+      /// Response, else the entities that matched. A card shows neither, so
+      /// "1 of 15 entities match" under a title like "Orange België" left the
+      /// reason a click away. Reads the worker's counted indexes, as the pills
+      /// do; a contextual Response has its own snippet, which comes first.
+      function articleMatchSnippet(art, q, mi) {
+        if (!mi) return null
+        if (!q) {
+          // Found by a ctx: / meta: chip or the panel: the Response that
+          // carries it, with the value it carries.
+          if (!mi.r.length) return null
+          const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
+          const o = answers[mi.r[0]]
+          const tags = _articleOutputTagText(o)
+          return {
+            label: o === defaultArticleAnswer(art) ? "Response" : "Contextual response",
+            text: (tags ? tags + " — " : "") + stripDisplay(o.Text || "", o.Links || []),
+          }
+        }
+        const termRes = _buildModalTermRegexes()
+        const title = aFaqQ(art) || ""
+        if (!termRes.length || _anyTermMatches(termRes, title)) return null
+        const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
+        const def = defaultArticleAnswer(art)
+        if (def && mi.r.includes(answers.indexOf(def)))
+          return {
+            label: "Response",
+            text: _snippetAround(stripDisplay(def.Text || "", def.Links || []), termRes),
+          }
+        const qs = mi.q.map((i) => art.Questions[i].Text).filter((t) => t !== title)
+        if (!qs.length) return null
+        return {
+          label: qs.length > 1 ? "Entities" : "Entity",
+          text:
+            qs.slice(0, 4).join(" · ") +
+            (qs.length > 4 ? " · +" + (qs.length - 4) + " more" : ""),
+        }
+      }
+
       /// A window of `text` around the first match, placeholders removed — the
       /// snippet is one line, so the match has to be near its start to show.
       function _snippetAround(text, termRes) {
@@ -16406,30 +17298,34 @@
       /// where. Response text first, then what the user says, then a node's
       /// name, then the description — the same fields the worker searched.
       function dialogNodeMatchSnippet(item, q) {
-        if (!q || item._kind === "tdialog") return null
+        if (item._kind === "tdialog") return null
+        if (!q) {
+          // Found by a ctx: / meta: chip or the panel: the first node that
+          // carries it, and the value it carries.
+          const mi = contentMatchFor(item)
+          if (!mi || !mi.n.length) return null
+          const n = item.nodes[mi.n[0]]
+          const tags = _nodeTagText(n)
+          return {
+            label: "Node",
+            text:
+              ((n.name || "").trim() || "node " + n.id) +
+              (tags ? " — " + tags : "") +
+              (mi.n.length > 1 ? " (+" + (mi.n.length - 1) + " more)" : ""),
+          }
+        }
         const termRes = _buildModalTermRegexes()
         if (!termRes.length || _anyTermMatches(termRes, item.name || "")) return null
         const nodes = item.nodes || []
-        // The part holding the most of the searched words wins — the search
-        // wants them all in one part, so that part is the reason this Dialog
-        // is here. Ties go to a Response, then a phrasing, then a name.
-        const ORDER = ["response", "phrase", "name"]
-        const score = (t) =>
-          termRes.filter((re) => {
-            re.lastIndex = 0
-            return re.test(_dropPlaceholders(t || ""))
-          }).length
+        // Only nodes the search counted (`explainMatch`): a node holding one
+        // of two words is not why the Dialog is here.
+        const mi = contentMatchFor(item)
+        const counted = mi && mi.n.length ? new Set(mi.n.map((i) => nodes[i])) : null
         let best = null
         for (const n of nodes) {
-          for (const r of nodeMatchReasons(n, termRes, item)) {
-            const sc = score(r.text)
-            if (
-              !best ||
-              sc > best.sc ||
-              (sc === best.sc && ORDER.indexOf(r.kind) < ORDER.indexOf(best.r.kind))
-            )
-              best = { n, r, sc }
-          }
+          if (counted && !counted.has(n)) continue
+          const b = _bestNodeReason(n, termRes, item)
+          if (b && (!best || _reasonBeats(b, best))) best = { n, ...b }
         }
         for (const kind of best ? [best.r.kind] : []) {
           const { n, r } = best
@@ -16471,6 +17367,49 @@
         )
           return { label: "Description", text: _snippetAround(item.description, termRes) }
         return null
+      }
+
+      const _REASON_ORDER = ["response", "phrase", "name"]
+      function _reasonBeats(a, b) {
+        return (
+          a.sc > b.sc ||
+          (a.sc === b.sc &&
+            _REASON_ORDER.indexOf(a.r.kind) < _REASON_ORDER.indexOf(b.r.kind))
+        )
+      }
+
+      /// The reason holding the most of the searched words, of one node — the
+      /// search wants them all in one part, so that part is why the node
+      /// matched. Ties go to a Response, then a phrasing, then a name.
+      /// `{r, sc}`, or null when nothing in the node matches.
+      function _bestNodeReason(n, termRes, dialog) {
+        const score = (t) =>
+          termRes.filter((re) => {
+            re.lastIndex = 0
+            return re.test(_dropPlaceholders(t || ""))
+          }).length
+        let best = null
+        for (const r of nodeMatchReasons(n, termRes, dialog)) {
+          const b = { r, sc: score(r.text) }
+          if (!best || _reasonBeats(b, best)) best = b
+        }
+        return best
+      }
+
+      /// What in a node matched, as one line: a window of its Response, or
+      /// what the user says there, or (when that is all) nothing — the node's
+      /// name is shown beside it anyway. For Share Content.
+      function _nodeReasonText(n, termRes, dialog) {
+        const tags = _nodeTagText(n)
+        const b = termRes.length ? _bestNodeReason(n, termRes, dialog) : null
+        let text = ""
+        if (b && b.r.kind === "response")
+          text =
+            (b.r.contextual ? "(contextual) " : "") +
+            (b.r.articleId ? "Article qa-" + b.r.articleId + ": " : "") +
+            _snippetAround(b.r.text, termRes)
+        else if (b && b.r.kind === "phrase") text = "User says “" + b.r.text + "”"
+        return tags && text ? "[" + tags + "] " + text : tags || text
       }
 
       function nonDefaultDialogMatchSnippet(item, q) {
@@ -16731,7 +17670,8 @@
       }
 
       function _syncModalFilterBtn() {
-        const hasQuery = !!gQuery
+        const hasQuery = _contentMatchActive()
+        const what = gQuery ? '"' + gQuery + '"' : "the search"
         ;["article-modal-filter-btn", "dialog-modal-filter-btn"].forEach(
           (btnId) => {
             const btn = document.getElementById(btnId)
@@ -16743,17 +17683,17 @@
             btn.style.display = hasQuery ? "" : "none"
             btn.title = hasQuery
               ? modalMatchFilter
-                ? 'Showing only content matching "' +
-                  gQuery +
-                  '" — click to show everything'
-                : 'Show only content matching "' + gQuery + '"'
+                ? "Showing only content matching " +
+                  what +
+                  " — click to show everything"
+                : "Show only content matching " + what
               : "No active search query"
           },
         )
       }
 
       function toggleModalMatchFilter() {
-        if (!gQuery) return
+        if (!_contentMatchActive()) return
         modalMatchFilter = !modalMatchFilter
         _syncModalFilterBtn()
         if (!_navCurrentModal) return
@@ -16949,7 +17889,7 @@
                 if (t && t !== "any") vals.push(t)
               }
             }
-            if (vals.length) ctxSet[name] = vals
+            _ctxAdd(ctxSet, name, vals)
           }
         } else {
           for (const cv of contextVars || []) {
@@ -16959,7 +17899,7 @@
               .split(",")
               .map((v) => v.trim())
               .filter(Boolean)
-            if (vals.length) ctxSet[name] = vals
+            _ctxAdd(ctxSet, name, vals)
           }
         }
         const parts = Object.keys(ctxSet)
@@ -18429,18 +19369,26 @@
       function _renderArticleModalBody(art, kind) {
         const termRes =
           gQuery && modalMatchFilter ? _buildModalTermRegexes() : []
-        const filterActive = termRes.length > 0
+        // What the card counted, when this Article is in the results — see
+        // `_renderDialogModalBody`. Indexes into the questions and into the
+        // Answer outputs, in order.
+        const counted = modalMatchFilter ? contentMatchFor(art) : null
+        const filterActive = termRes.length > 0 || !!counted
+        const answerOutputs = art.Outputs.filter((o) => o.Type === "Answer")
+        const answerCounted = (o) => counted.r.includes(answerOutputs.indexOf(o))
 
-        const makeChip = (qs) => {
+        const makeChip = (qs, qi) => {
           if (
             filterActive &&
-            (searchContent ||
-              contentContextFilters.length > 0 ||
-              (!_anyTermMatches(termRes, qs.Text) &&
-                !(
-                  matchingEntityNames.size > 0 &&
-                  matchingEntityNames.has(qs.Text.toUpperCase())
-                )))
+            (counted
+              ? !counted.q.includes(qi)
+              : searchContent ||
+                contentContextFilters.length > 0 ||
+                (!_anyTermMatches(termRes, qs.Text) &&
+                  !(
+                    matchingEntityNames.size > 0 &&
+                    matchingEntityNames.has(qs.Text.toUpperCase())
+                  )))
           )
             return ""
           const linkedEntity = getEntityForChip(qs.Text)
@@ -18504,16 +19452,27 @@
         if (kind === "answer") {
           const raw = art._displayResponse || ""
           const rawExpanded = expandVarNames(art._response || "")
+          // The output `_displayResponse` was read from.
+          const shownOutput =
+            answerOutputs.find((o) => o.IsDefault) || answerOutputs[0]
           if (
             !filterActive ||
-            _anyTermMatches(termRes, raw) ||
-            _anyTermMatches(termRes, rawExpanded)
+            (counted
+              ? answerCounted(shownOutput)
+              : _anyTermMatches(termRes, raw) ||
+                _anyTermMatches(termRes, rawExpanded))
           ) {
+            const shownTags = shownOutput
+              ? renderOutputTagsHtml(shownOutput.ContextVariables, shownOutput.OutputMetaData, true)
+              : ""
             if (raw)
               html +=
-                '<div class="detail-section"><h4>Response</h4><div class="response-box">' +
+                '<div class="detail-section"><h4>Response</h4>' +
+                '<div class="response-box">' +
                 hlVar(hl(raw, gQuery)) +
-                "</div></div>"
+                "</div>" +
+                (shownTags ? '<div class="output-tags below">' + shownTags + "</div>" : "") +
+                "</div>"
           }
           // Contextual responses
           const hasCtxFilter = contentContextFilters.length > 0
@@ -18521,16 +19480,19 @@
           const contextualOutputs = art.Outputs.filter(
             (o) => o.Type === "Answer" && o !== defaultOutput,
           ).map((o) => ({
+            output: o,
             displayText: stripDisplay(o.Text, o.Links),
             isUnreachable: !articleAnswerHasContext(o),
             contextVars: o.ContextVariables || [],
+            meta: o.OutputMetaData || null,
             escGroup:
               (o.OutputMetaData && o.OutputMetaData.escalationGroup) || null,
             isArticle: true,
             isContextMatch: ctxVarsMatchFilters(o.ContextVariables || [], true),
           }))
-          const visibleContextual =
-            filterActive || hasCtxFilter
+          const visibleContextual = counted
+            ? contextualOutputs.filter((o) => answerCounted(o.output))
+            : filterActive || hasCtxFilter
               ? contextualOutputs.filter(
                   (o) =>
                     !(searchExcludeNonDefault && filterActive) &&
@@ -18589,9 +19551,13 @@
               ")</span>"
           }
           if (!ref) return null
-          const pills = renderCtxVarPills(o.ContextVariables || [], true, null)
+          const pills = renderOutputTagsHtml(o.ContextVariables, o.OutputMetaData, true)
           if (pills) routeHasCtx = true
-          return '<span class="route-ref">' + ref + pills + "</span>"
+          return (
+            '<span class="route-ref">' + ref +
+            (pills ? '<span class="output-tags below">' + pills + "</span>" : "") +
+            "</span>"
+          )
         }).filter(Boolean)
         if (
           refs.length &&
@@ -18824,7 +19790,12 @@
 
         const termRes =
           gQuery && modalMatchFilter ? _buildModalTermRegexes() : []
-        const filterActive = termRes.length > 0
+        // What the card counted, when this Dialog is in the results: the nodes
+        // the search found — by words, tags or the panel. Anything else
+        // (opened from a link, or matched by id only) falls back to any node
+        // holding any searched word.
+        const counted = modalMatchFilter ? contentMatchFor(item) : null
+        const filterActive = termRes.length > 0 || !!counted
 
         let html = ""
 
@@ -18833,6 +19804,7 @@
             !filterActive ||
             (!searchContent &&
               !contentContextFilters.length &&
+              (!counted || counted.h) &&
               _anyTermMatches(termRes, item.description))
           ) {
             html +=
@@ -18844,15 +19816,33 @@
 
         const nodes = item.nodes || []
         if (nodes.length > 0) {
-          const visibleNodes = filterActive
-            ? nodes.filter((n) => nodeMatchesQuery(n, termRes, item))
-            : nodes
+          const shown = counted
+            ? new Set(counted.n.map((i) => nodes[i]))
+            : filterActive
+            ? new Set(nodes.filter((n) => nodeMatchesQuery(n, termRes, item)))
+            : null
+          // In flow order — the order a conversation meets them — not the
+          // export's creation order. See `dialogFlow`.
+          const visibleNodes = dialogFlow(item).order.filter((n) => !shown || shown.has(n))
+          // The whole Dialog as a tree first, every node in it; what the
+          // search found is marked rather than left out.
+          if (nodes.length > 1)
+            html +=
+              '<div class="detail-section"><h4>Flow' +
+              '<span class="flow-legend">' +
+              (shown ? "the search's nodes are marked · " : "") +
+              'click a name for its details</span>' +
+              '<span class="ft-tools"><button onclick="flowTreeOpenAll(this,true)">Expand all</button>' +
+              '<button onclick="flowTreeOpenAll(this,false)">Collapse all</button></span></h4>' +
+              dialogFlowTreeHtml(item, shown ? new Set([...shown].map((n) => n.id)) : null) +
+              "</div>"
           if (visibleNodes.length) {
             html +=
               '<div class="detail-section"><h4>Nodes' +
               (filterActive && visibleNodes.length < nodes.length
                 ? " (" + visibleNodes.length + "/" + nodes.length + ")"
                 : "") +
+              '<span class="flow-legend">in flow order, with what leads in and out</span>' +
               '</h4><div style="display:flex;flex-direction:column;gap:8px">'
             visibleNodes.forEach((node) => {
               html += renderNodeHtml(node, item, gQuery, filterActive)
@@ -18951,6 +19941,7 @@
         filteredDialogs = new Int32Array(0)
         filteredEntities = new Int32Array(0)
         matchingEntityNames = new Set()
+        contentMatchInfo = new Map()
         showSearchLoading(false)
 
         document.getElementById("all-result-count").textContent =
@@ -19001,6 +19992,11 @@
         filteredDialogs = msg.filteredDialogsIdx
         filteredEntities = msg.filteredEntitiesIdx
         matchingEntityNames = new Set(msg.matchingEntityNames)
+        contentMatchInfo = new Map()
+        for (const [gidx, info] of msg.matchInfo || []) {
+          const it = allCombinedItems[gidx]
+          if (it) contentMatchInfo.set(_matchKey(it), info)
+        }
         allPage = 1
         aPage = 1
         dPage = 1
@@ -19011,7 +20007,10 @@
         const totAll = allCombinedItems.length,
           matAll = filteredAll.length
         document.getElementById("all-result-count").textContent =
-          matAll + (matAll !== totAll ? " of " + totAll : "") + " results"
+          matAll +
+          (matAll !== totAll ? " of " + totAll : "") +
+          " results" +
+          _matchTotalsText(filteredAll, (i) => allCombinedItems[i])
         document.getElementById("tab-all-count").textContent = matAll
         document.getElementById("all-pagination").innerHTML = pagHtml(
           allPage,
@@ -19022,7 +20021,10 @@
         const totA = allArticles.length,
           matA = filteredArticles.length
         document.getElementById("a-result-count").textContent =
-          matA + (matA !== totA ? " of " + totA : "") + " articles"
+          matA +
+          (matA !== totA ? " of " + totA : "") +
+          " articles" +
+          _matchTotalsText(filteredArticles, (i) => allArticles[i])
         document.getElementById("tab-a-count").textContent = matA
         document.getElementById("a-pagination").innerHTML = pagHtml(
           aPage,
@@ -19033,7 +20035,10 @@
         const totD = allDialogsCombined.length,
           matD = filteredDialogs.length
         document.getElementById("d-result-count").textContent =
-          matD + (matD !== totD ? " of " + totD : "") + " dialogs"
+          matD +
+          (matD !== totD ? " of " + totD : "") +
+          " dialogs" +
+          _matchTotalsText(filteredDialogs, (i) => allDialogsCombined[i])
         document.getElementById("tab-d-count").textContent = matD
         document.getElementById("d-pagination").innerHTML = pagHtml(
           dPage,
@@ -19125,6 +20130,7 @@
       let _contentSuggestRows = []
       let _contentSuggestIdx = -1
       const CONTENT_EXPR_HANDLERS = {
+        field: "content",
         remove: "removeContentToken",
         cycle: "cycleContentOp",
         lead: "toggleContentLeadNot",
@@ -19186,20 +20192,28 @@
         if (grp) {
           let d = 0
           for (const it of contentExpr) d += it.t === "(" ? 1 : it.t === ")" ? -1 : 0
-          grp.textContent = d > 0 ? " ) " : "( )"
-          grp.classList.toggle("on", d > 0)
+          const sel = !!_exprSel.content
+          grp.textContent = sel ? "(…)" : d > 0 ? " ) " : "( )"
+          grp.classList.toggle("on", d > 0 || sel)
           grp.disabled = searchRegex
+          grp.setAttribute(
+            "data-tooltip",
+            sel
+              ? "Group the selected chips"
+              : "Group — everything after ( is one condition · or Shift-click chips to select them, then group them",
+          )
         }
         const clearBtn = document.getElementById("clearSearch")
         if (clearBtn)
           clearBtn.classList.toggle("visible", contentExpr.length > 0 || !!contentPendingText())
         const inp = document.getElementById("g-search")
-        if (inp) inp.placeholder = contentExpr.length ? "" : "Search…"
+        if (inp) inp.placeholder = _exprSelHint("content") || (contentExpr.length ? "" : "Search…")
       }
 
       /// Re-run the search after the chips changed.
       function _contentExprChanged() {
         contentExpr = exprNormalize(contentExpr)
+        _exprAfterChange("content", contentExpr)
         renderContentTokens()
         gQuery = contentTextTerms()
         triggerSearch()
@@ -19250,6 +20264,7 @@
       }
 
       function toggleContentGroup() {
+        if (exprWrapSelection("content")) return
         commitContentPendingText()
         let d = 0
         for (const it of contentExpr) d += it.t === "(" ? 1 : it.t === ")" ? -1 : 0
@@ -19277,11 +20292,13 @@
         const raw = inp ? inp.value.trim() : ""
         if (inp) inp.value = ""
         if (!raw) return false
-        for (const it of convScanExprText(raw, searchRegex)) {
-          if (_convIsOperand(it)) _contentAppend(it)
-          else contentExpr.push(it)
-        }
-        contentExpr = exprNormalize(contentExpr)
+        exprInsertingAfterSelection("content", () => {
+          for (const it of convScanExprText(raw, searchRegex)) {
+            if (_convIsOperand(it)) _contentAppend(it)
+            else contentExpr.push(it)
+          }
+          contentExpr = exprNormalize(contentExpr)
+        })
         return true
       }
 
@@ -19437,7 +20454,7 @@
           inp.value = ""
           inp.focus()
         }
-        _contentAppend(_convItemFor(cand))
+        exprInsertingAfterSelection("content", () => _contentAppend(_convItemFor(cand)))
         closeContentSuggest()
         _contentExprChanged()
       }
@@ -19484,6 +20501,7 @@
             return
           }
         }
+        if (exprSelectionKey("content", e)) return
         if (e.key === "Backspace" && !e.target.value && contentExpr.length) {
           e.preventDefault()
           removeContentToken(contentExpr.length - 1)
@@ -19706,17 +20724,20 @@
       // the clipboard can never disagree.
       let _exportFilter = ""
       let _exportDropped = new Set() // "<kind>:<id>"
+      // Matched Dialog nodes removed by hand, by token ("dn-<dialog>-<node>").
+      // Per open, like `_exportDropped`.
+      let _exportDroppedNodes = new Set()
 
       // What each view actually produces, said out loud. "Grouped" in
       // particular does three things at once — sections, id order, and Dialog →
       // Article relations replacing the response column — which no user is
       // going to infer from the word.
       const EXPORT_VIEW_HINTS = {
-        list: "Every item in one flat list — Articles, then Dialogs, then Transactional Dialogs, each by number.",
+        list: "Every item in one flat list — Articles, then Dialogs, then Transactional Dialogs, each by number. A Dialog lists the nodes the search matched, each linking straight to that node.",
         grouped:
-          "Split into Articles, Dialogs and Transactional Dialogs, each by number. Dialog rows show the Articles that route into them instead of their response text.",
+          "Split into Articles, Dialogs and Transactional Dialogs, each by number. Dialog rows show the Articles that route into them instead of their response text, and the nodes the search matched, each with its own link.",
         table:
-          "ID, title and matched responses as a table, by number — pastes into a spreadsheet or a ticket with its columns intact.",
+          "ID, title and matched responses as a table, by number — pastes into a spreadsheet or a ticket with its columns intact. A Dialog's matched nodes are rows of their own beneath it, each with its own link.",
       }
 
       function _exportKey(item) {
@@ -19729,7 +20750,10 @@
         return (
           _itemIdToken(item).toLowerCase().includes(q) ||
           (item.title || "").toLowerCase().includes(q) ||
-          item.responses.some((r) => (r || "").toLowerCase().includes(q))
+          item.responses.some((r) => (r || "").toLowerCase().includes(q)) ||
+          (item.nodes || []).some((n) =>
+            (n.token + " " + n.name + " " + n.text).toLowerCase().includes(q),
+          )
         )
       }
 
@@ -19758,12 +20782,64 @@
         }
       }
 
+      /// The Dialog nodes the search counted, each with its own link — the
+      /// part of a shared Dialog someone actually has to go to. Empty without a
+      /// query, or when the Dialog matched on its name, an id or a tag alone.
+      function _exportMatchedNodes(item) {
+        const mi = item._kind === "dialog" ? contentMatchFor(item) : null
+        if (!mi || !mi.n.length) return []
+        // Share Content reads its items several times a render and again on
+        // every keystroke in its filter; `mi` is new on every search, so it is
+        // the cache, keyed by the Context URL the links were built from.
+        const hit = _exportNodesCache.get(mi)
+        if (hit && hit.base === cmBaseUrl) return hit.nodes
+        const termRes = _buildModalTermRegexes()
+        const nodes = mi.n.map((i) => {
+          const n = item.nodes[i]
+          return {
+            id: n.id,
+            token: "dn-" + item.id + "-" + n.id,
+            name: (n.name || "").trim() || "node " + n.id,
+            url: buildNodeUrl(item.id, n.id),
+            text: _nodeReasonText(n, termRes, item),
+          }
+        })
+        _exportNodesCache.set(mi, { base: cmBaseUrl, nodes })
+        return nodes
+      }
+      const _exportNodesCache = new WeakMap()
+
       function _getMatchedResponses(item /* raw article or dialog */) {
-        if (!gQuery) {
+        // What the search counted (`explainMatch`) — by words, tags or the
+        // panel. The fallback below read `_answerItems` / `_searchNodes`, which
+        // exist only inside the worker, so on its own it never listed a
+        // matched Response at all.
+        const mi = contentMatchFor(item)
+        if (!mi && !gQuery) {
           // No search — return the default response/description
           if (item.Id != null) return item._response ? [item._response] : []
           return item.description ? [item.description] : []
         }
+        if (mi && item.Id != null) {
+          const answers = (item.Outputs || []).filter((o) => o.Type === "Answer")
+          const def = defaultArticleAnswer(item)
+          const out = mi.r.map((i) => {
+            const o = answers[i]
+            const t = stripDisplay(o.Text || "", o.Links || []).trim()
+            const tags = gQuery ? "" : _articleOutputTagText(o)
+            return (
+              (o !== def && answers.length > 1 ? "(contextual) " : "") +
+              (tags ? "[" + tags + "] " : "") +
+              t
+            )
+          })
+          if (out.length) return out
+          const qs = mi.q.map((i) => "“" + item.Questions[i].Text + "”")
+          if (qs.length) return ["(matched on: entit" + (qs.length > 1 ? "ies " : "y ") + qs.join(", ") + ")"]
+        }
+        // A Dialog's matched nodes are listed as nodes, with their own links.
+        if (mi && mi.n && mi.n.length) return []
+        if (!gQuery) return item.description ? [item.description] : []
         const re = buildSearchRegex(gQuery)
         if (!re) return []
         const matched = []
@@ -19818,6 +20894,7 @@
               id: item.Id,
               title: aFaqQ(item) || "(no question)",
               responses: _getMatchedResponses(item),
+              nodes: [],
               _raw: item,
             }
           }
@@ -19826,6 +20903,7 @@
             id: item.id,
             title: item.name || "",
             responses: _getMatchedResponses(item),
+            nodes: _exportMatchedNodes(item),
             _raw: item,
           }
         }
@@ -19867,12 +20945,25 @@
       // The single source of truth for both rendering and every copy action.
       function getExportItemsForCurrentView() {
         const q = _exportFilter.trim().toLowerCase()
-        const items = getActiveExportItems().filter(
-          (item) =>
-            !_exportDropped.has(_exportKey(item)) &&
-            _exportItemMatches(item, q),
-        )
+        const items = getActiveExportItems()
+          .map(_exportWithoutDroppedNodes)
+          .filter(
+            (item) =>
+              !_exportDropped.has(_exportKey(item)) &&
+              _exportItemMatches(item, q),
+          )
         return groupedExportItems(items)
+      }
+
+      /// The item with the nodes removed by hand left out, and how many were.
+      /// A copy: the node list is shared with `_exportNodesCache`. A Dialog
+      /// whose every matched node was removed stays — it is still a result,
+      /// and its own link is still what the share is about.
+      function _exportWithoutDroppedNodes(item) {
+        if (!_exportDroppedNodes.size || !item.nodes || !item.nodes.length) return item
+        const nodes = item.nodes.filter((n) => !_exportDroppedNodes.has(n.token))
+        if (nodes.length === item.nodes.length) return item
+        return { ...item, nodes, nodesRemoved: item.nodes.length - nodes.length }
       }
 
       function buildItemUrl(kind, id) {
@@ -19972,7 +21063,57 @@
               idToken,
             )}</span>`
       }
+      /// A Dialog's matched nodes, one line each under its row: the node's own
+      /// `dn-D-N` link, its name, and what in it matched. A shared Dialog is
+      /// dozens of nodes; the person it is sent to needs the one to open.
+      function _exportNodesHtml(item) {
+        if (!item.nodes || !item.nodes.length) return ""
+        return (
+          '<div class="export-row-nodes">' +
+          item.nodes
+            .map((n) => {
+              const idHtml = n.url
+                ? `<span class="export-row-id" onclick="openLink('${esc(
+                    n.url,
+                  )}')" title="Open this node in CM.com">${esc(n.token)}</span>`
+                : `<span class="export-row-no-url" title="Set CM.com Context URL in Settings to enable links">${esc(
+                    n.token,
+                  )}</span>`
+              return `<div class="export-node-line">
+                  <span class="export-node-arrow">&#8627;</span>${idHtml}
+                  <span class="export-node-name" title="${esc(n.name)}">${esc(n.name)}</span>
+                  <span class="export-node-text" title="${esc(n.text)}">${esc(n.text)}</span>
+                  <button class="export-row-copy" title="Copy this node as link"
+                    onclick="copyJiraLink('${esc(n.url)}', ${esc(
+                      JSON.stringify(n.token),
+                    )}, ${esc(JSON.stringify(item.title + " › " + n.name))}, this)"><svg class=ui-icon><use href=#i-link /></svg> Copy link</button>
+                  <button class="export-row-drop" title="Remove this node from the share"
+                    onclick="_exportDropNode('${esc(n.token)}')">&#x2715;</button>
+                </div>`
+            })
+            .join("") +
+          "</div>"
+        )
+      }
+
+      /// "3 of 40 nodes match" — what a Dialog row says in place of Responses
+      /// when its matched nodes are listed beneath it.
+      function _exportNodeCountText(item) {
+        const total = ((item._raw && item._raw.nodes) || []).length
+        const removed = item.nodesRemoved || 0
+        if (!item.nodes.length && removed)
+          return "all " + removed + " matched node" + (removed !== 1 ? "s" : "") + " removed"
+        return (
+          _matchCountText(item.nodes.length, total, "Node", "nodes") +
+          (removed ? " · " + removed + " removed" : "")
+        )
+      }
+
       function _exportResponsesHtml(item) {
+        if (!item.responses.length && item.nodes && (item.nodes.length || item.nodesRemoved))
+          return `<span class="export-row-response">${esc(
+            _exportNodeCountText(item),
+          )}</span>`
         return item.responses
           .map(
             (r) =>
@@ -20011,6 +21152,7 @@
                 onclick="_exportDropItem('${esc(
                   _exportKey(item),
                 )}')">&#x2715;</button>
+              ${_exportNodesHtml(item)}
             </div>`
       }
 
@@ -20048,15 +21190,31 @@
                   idToken,
                 )}</span>${badge}</td>`
               : `<td class="td-id-plain">${esc(idToken)}${badge}</td>`
-            const responseText = item.responses.join(" · ")
+            const responseText =
+              item.responses.join(" · ") ||
+              (item.nodes && (item.nodes.length || item.nodesRemoved) ? _exportNodeCountText(item) : "")
             const responseCell = responseText
               ? `<td class="td-response">${esc(responseText)}</td>`
               : `<td class="td-response" style="opacity:0.3">—</td>`
+            const nodeRows = (item.nodes || [])
+              .map((n) => {
+                const nodeId = n.url
+                  ? `<td class="td-id td-node"><span class="export-node-arrow">&#8627;</span><span class="td-id-link" onclick="openLink('${esc(
+                      n.url,
+                    )}')" title="Open this node in CM.com">${esc(n.token)}</span></td>`
+                  : `<td class="td-id-plain td-node"><span class="export-node-arrow">&#8627;</span>${esc(n.token)}</td>`
+                return `<tr class="export-node-tr">${nodeId}<td>${esc(
+                  n.name,
+                )}</td><td class="td-response">${esc(n.text) || "—"}</td><td class="td-drop"><button class="export-row-drop" title="Remove this node from the share" onclick="_exportDropNode('${esc(
+                  n.token,
+                )}')">&#x2715;</button></td></tr>`
+              })
+              .join("")
             return `<tr>${idCell}<td>${esc(
               item.title,
             )}</td>${responseCell}<td class="td-drop"><button class="export-row-drop" title="Remove from this share" onclick="_exportDropItem('${esc(
               _exportKey(item),
-            )}')">&#x2715;</button></td></tr>`
+            )}')">&#x2715;</button></td></tr>${nodeRows}`
           })
           .join("")
         list.innerHTML = `<table class="export-table">
@@ -20165,22 +21323,33 @@
       // The primary action names its own count, because the set being copied is
       // no longer necessarily the set the tab returned — a filter or a removed
       // row changes it, and "Copy all" would then be a lie.
+      /// How many matched Dialog nodes a share carries, each a link of its own.
+      function _exportNodeTotal(items) {
+        return items.reduce((sum, it) => sum + ((it.nodes && it.nodes.length) || 0), 0)
+      }
+
       function _renderExportFooter() {
         const actions = document.getElementById("exportFooterActions")
-        const n = getExportItemsForCurrentView().length
+        const shown = getExportItemsForCurrentView()
+        const n = shown.length
+        const nodeCount = _exportNodeTotal(shown)
         const dis = n ? "" : " disabled"
         const plain =
           `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}><svg class=ui-icon><use href=#i-clipboard /></svg> Copy as plain text</button>` +
           `<button class="btn-secondary" onclick="openContentAiModal()"${dis} title="Save these items in full — questions, Responses, routes and Dialog nodes — as Markdown or JSON Lines">Export for AI…</button>`
         if (_exportView === "table") {
           actions.innerHTML =
-            `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}><svg class=ui-icon><use href=#i-table /></svg> Copy table (${n} row${
-              n !== 1 ? "s" : ""
-            })</button>` + plain
+            `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}><svg class=ui-icon><use href=#i-table /></svg> Copy table (${
+              n + nodeCount
+            } row${n + nodeCount !== 1 ? "s" : ""})</button>` + plain
         } else {
           actions.innerHTML =
             `<button class="btn-primary" onclick="_copyExportLinks(this)"${dis}><svg class=ui-icon><use href=#i-link /></svg> Copy ${n} link${
               n !== 1 ? "s" : ""
+            }${
+              nodeCount
+                ? " + " + nodeCount + " node" + (nodeCount !== 1 ? "s" : "")
+                : ""
             }</button>` + plain
         }
       }
@@ -20230,7 +21399,7 @@
               const t = v.trim()
               if (t && t !== "any" && !vals.includes(t)) vals.push(t)
             }
-          if (vals.length) set[name] = vals
+          _ctxAdd(set, name, vals)
         }
         return set
       }
@@ -20396,6 +21565,7 @@
           metadata_filters: contentMetadataFilters,
           share_filter: _exportFilter.trim(),
           removed_by_hand: _exportDropped.size || undefined,
+          nodes_removed_by_hand: _exportDroppedNodes.size || undefined,
         })
       }
 
@@ -20598,8 +21768,13 @@
         _exportDropped.add(key)
         _renderExportBody()
       }
+      function _exportDropNode(token) {
+        _exportDroppedNodes.add(token)
+        _renderExportBody()
+      }
       function _exportRestoreAll() {
         _exportDropped.clear()
+        _exportDroppedNodes.clear()
         _renderExportBody()
       }
       function _renderExportToolbar() {
@@ -20614,9 +21789,12 @@
         const restore = document.getElementById("exportRestoreBtn")
         if (restore) {
           const dropped = _exportDropped.size
-          restore.style.display = dropped ? "" : "none"
-          restore.textContent =
-            "Restore " + dropped + " removed item" + (dropped !== 1 ? "s" : "")
+          const nodes = _exportDroppedNodes.size
+          restore.style.display = dropped || nodes ? "" : "none"
+          const parts = []
+          if (dropped) parts.push(dropped + " removed item" + (dropped !== 1 ? "s" : ""))
+          if (nodes) parts.push(nodes + (dropped ? "" : " removed") + " node" + (nodes !== 1 ? "s" : ""))
+          restore.textContent = "Restore " + parts.join(" and ")
         }
         const filterEl = document.getElementById("exportFilter")
         if (filterEl)
@@ -20658,7 +21836,19 @@
             ? `<a href="${esc(url)}">${esc(idToken)}</a> → ${esc(item.title)}`
             : `${esc(idToken)} → ${esc(item.title)}`
           const relation = _exportView === "grouped" ? _exportRelationText(item) : ""
-          return relation ? label + " <span style=\"color:#64738b\">(" + esc(relation) + ")</span>" : label
+          const line = relation ? label + " <span style=\"color:#64738b\">(" + esc(relation) + ")</span>" : label
+          // Each matched node on its own indented line with its own link. Real
+          // no-break spaces, not `&nbsp;`: the plain-text half strips tags only.
+          const nodeLines = (item.nodes || []).map(
+            (n) =>
+              "\u00a0\u00a0\u00a0\u00a0\u21b3 " +
+              (n.url
+                ? `<a href="${esc(n.url)}">${esc(n.token)}</a>`
+                : esc(n.token)) +
+              " → " +
+              esc(n.name),
+          )
+          return [line, ...nodeLines].join("<br>")
         }
         let htmlStr
         if (_exportView === "grouped") {
@@ -20680,7 +21870,12 @@
         }
         copyRichHtml(htmlStr)
         _setBtnCopied(btn, "Copied!")
-        _showCopyFeedback("✓ " + items.length + " links copied")
+        const nodeCount = _exportNodeTotal(items)
+        _showCopyFeedback(
+          "✓ " + items.length + " links" +
+            (nodeCount ? " + " + nodeCount + " node links" : "") +
+            " copied",
+        )
       }
 
       function _copyExportPlain(btn) {
@@ -20693,7 +21888,11 @@
           if (relation) parts.push(relation)
           if (item.responses.length) parts.push(item.responses.join(" | "))
           if (url) parts.push(url)
-          return parts.join("\t")
+          const nodeLines = (item.nodes || []).map((n) =>
+            // Every column kept, empty or not, so the url stays in its column.
+            ["    \u21b3 " + n.token, n.name, n.text, n.url].join("\t"),
+          )
+          return [parts.join("\t"), ...nodeLines].join("\n")
         }
         let text
         if (_exportView === "grouped") {
@@ -20726,16 +21925,24 @@
       function _copyExportTable(btn) {
         const items = getExportItemsForCurrentView()
         const header = ["ID", "Title / Question", "Matched Response(s)"]
-        const rows = items.map((item) => {
-          const idToken = _itemIdToken(item)
-          const url = buildItemUrl(item.kind, item.id)
-          return {
-            idToken,
+        // A Dialog's matched nodes are rows of their own beneath it, each with
+        // its own link, so the table keeps its three columns.
+        const rows = items.flatMap((item) => [
+          {
+            idToken: _itemIdToken(item),
             title: item.title,
-            responses: item.responses.join(" | "),
-            url,
-          }
-        })
+            responses:
+              item.responses.join(" | ") ||
+              (item.nodes && (item.nodes.length || item.nodesRemoved) ? _exportNodeCountText(item) : ""),
+            url: buildItemUrl(item.kind, item.id),
+          },
+          ...(item.nodes || []).map((n) => ({
+            idToken: "\u21b3 " + n.token,
+            title: n.name,
+            responses: n.text,
+            url: n.url,
+          })),
+        ])
         const htmlRows = rows
           .map((r) => {
             const idCell = r.url
@@ -20776,6 +21983,7 @@
         // mirror of the tab's current result set.
         _exportFilter = ""
         _exportDropped.clear()
+        _exportDroppedNodes.clear()
         const filterEl = document.getElementById("exportFilter")
         if (filterEl) filterEl.value = ""
 
@@ -20794,7 +22002,12 @@
           (items.length !== 1 ? "s" : "") +
           "</b> from <b>" +
           esc(tabLabel) +
-          "</b></span>" +
+          "</b>" +
+          (_exportNodeTotal(items)
+            ? " · " + _exportNodeTotal(items) + " matched node" +
+              (_exportNodeTotal(items) !== 1 ? "s" : "")
+            : "") +
+          "</span>" +
           (gQuery
             ? '<span class="export-meta-chip">matching “' +
               esc(gQuery) +
@@ -37394,6 +38607,15 @@
       /// Mirrors `outputCtxSet` in search-worker.js, which decides what a chip
       /// returns — see the comment there. Every output type carries conditions,
       /// so callers pass all of them, not only Answers.
+      /// Adds values to a context set, keeping what is there: a Dialog stores a
+      /// condition on several values as one entry per value with the same id.
+      /// Mirrors `ctxAdd` in search-worker.js — see there.
+      function _ctxAdd(set, name, vals) {
+        if (!vals.length) return
+        const cur = set[name] || (set[name] = [])
+        for (const v of vals) if (!cur.includes(v)) cur.push(v)
+      }
+
       function _outputCtxSet(cvs, isArticle) {
         const set = {}
         for (const cv of cvs || []) {
@@ -37407,7 +38629,7 @@
               if (t && t !== "any") vals.push(t)
             }
           }
-          if (vals.length) set[name] = vals
+          _ctxAdd(set, name, vals)
         }
         return set
       }
@@ -39743,7 +40965,7 @@
         }
         const clearBtn = document.getElementById("convClearSearch")
         if (clearBtn) clearBtn.classList.remove("visible")
-        _convAppendOperand(item)
+        exprInsertingAfterSelection("conv", () => _convAppendOperand(item))
         normalizeConvExpr()
         closeConvSuggest()
         // Not a search: the question may not be finished. The search button
@@ -39810,6 +41032,7 @@
 
       /// The `( )` button: open a group, or close the one that is open.
       function toggleConvGroupBracket() {
+        if (exprWrapSelection("conv")) return
         commitConvPendingText()
         convExpr.push({ t: convOpenGroupDepth() > 0 ? ")" : "(" })
         normalizeConvExpr()
@@ -39837,6 +41060,341 @@
       /// (`convExprToQuery`).
       function normalizeConvExpr() {
         convExpr = exprNormalize(convExpr)
+      }
+
+      // ── Selecting chips, to group them afterwards ───────────────────────
+      //
+      // Groups used to be built only as you typed: "(" first, then the
+      // chips. A search already on screen could only be regrouped by deleting
+      // and re-adding it. Now chips can be selected — Shift-click one, then
+      // another, or Shift+← from an empty input — and the ( ) button, or
+      // typing "(", wraps the selection; Backspace removes it, Esc lets go.
+      // The operators stay where they are: a group only adds brackets.
+
+      /// Where a bracket's partner is, or -1 (an opener still being built).
+      function _exprPartner(list, k) {
+        const open = list[k].t === "("
+        const step = open ? 1 : -1
+        let depth = 0
+        for (let j = k; j >= 0 && j < list.length; j += step) {
+          if (list[j].t === list[k].t) depth++
+          else if (list[j].t === (open ? ")" : "(") && --depth === 0) return j
+        }
+        return -1
+      }
+
+      /// The run from chip `a` to chip `b`, widened until its brackets pair up
+      /// — half a group cannot be wrapped, so selecting into one takes all of
+      /// it. `{a, b}`, list indexes, inclusive.
+      function exprSelectionSpan(list, a, b) {
+        let lo = Math.min(a, b)
+        let hi = Math.max(a, b)
+        for (let guard = 0; guard <= list.length; guard++) {
+          let moved = false
+          let depth = 0
+          for (let k = lo; k <= hi && !moved; k++) {
+            if (list[k].t === "(") depth++
+            else if (list[k].t === ")" && depth-- === 0) {
+              const p = _exprPartner(list, k)
+              if (p >= 0 && p < lo) {
+                lo = p
+                moved = true
+              }
+            }
+          }
+          depth = 0
+          for (let k = hi; k >= lo && !moved; k--) {
+            if (list[k].t === ")") depth++
+            else if (list[k].t === "(" && depth-- === 0) {
+              const p = _exprPartner(list, k)
+              const to = p < 0 ? list.length - 1 : p
+              if (to > hi) {
+                hi = to
+                moved = true
+              }
+            }
+          }
+          if (!moved) break
+        }
+        return { a: lo, b: hi }
+      }
+
+      /// The list with brackets around the span — the operators stay put.
+      function exprWrapSpan(list, span) {
+        return exprNormalize([
+          ...list.slice(0, span.a),
+          { t: "(" },
+          ...list.slice(span.a, span.b + 1),
+          { t: ")" },
+          ...list.slice(span.b + 1),
+        ])
+      }
+
+      /// The list with the span moved one step (`dir` ±1), operators left in
+      /// place: past the neighbouring condition (a chip or a whole group), or
+      /// across a bracket — into the group beside it, or out of the one it is
+      /// in. `{list, first, last}` (the span's first and last chip, to find it
+      /// again after normalising), or null at either end.
+      function exprMoveSpan(list, span, dir) {
+        const chipsOf = (l, a, b) => l.slice(a, b + 1).filter((it) => it.t !== "op" && it.t !== "(" && it.t !== ")")
+        const unitChips = chipsOf(list, span.a, span.b)
+        if (!unitChips.length) return null
+        // Leftwards is rightwards on the mirrored list.
+        const flip = (l) =>
+          l.slice().reverse().map((it) => (it.t === "(" ? { t: ")" } : it.t === ")" ? { t: "(" } : it))
+        const work = dir < 0 ? flip(list) : list
+        const a = dir < 0 ? list.length - 1 - span.b : span.a
+        const b = dir < 0 ? list.length - 1 - span.a : span.b
+        const unit = work.slice(a, b + 1)
+        const next = work[b + 1]
+        let out = null
+        if (next && next.t === ")") {
+          // Leave the group: its ")" jumps in front of the unit, and the
+          // operator that joined the unit inside it now joins it outside.
+          let head = work.slice(0, a)
+          const op = head.length && head[head.length - 1].t === "op" ? [head.pop()] : []
+          out = [...head, next, ...op, ...unit, ...work.slice(b + 2)]
+        } else if (next && next.t === "op" && work[b + 2]) {
+          const nb = work[b + 2]
+          if (nb.t === "(")
+            // Enter the group beside it: its "(" moves in front of the unit.
+            out = [...work.slice(0, a), nb, ...unit, next, ...work.slice(b + 3)]
+          else if (nb.t !== "op" && nb.t !== ")")
+            // Trade places with the next chip; the operator stays between.
+            out = [...work.slice(0, a), nb, next, ...unit, ...work.slice(b + 3)]
+        }
+        if (!out) return null
+        return { list: exprNormalize(dir < 0 ? flip(out) : out), first: unitChips[0], last: unitChips[unitChips.length - 1] }
+      }
+
+      /// The list without the span.
+      function exprRemoveSpan(list, span) {
+        return exprNormalize([...list.slice(0, span.a), ...list.slice(span.b + 1)])
+      }
+
+      /// The selection per field: `{anchor, cur, a, b}` — the chip it started
+      /// from, the chip it reaches to, and the widened span between them.
+      /// Dropped whenever the field changes.
+      const _exprSel = { conv: null, content: null }
+
+      function _exprSelField(field) {
+        return field === "conv"
+          ? {
+              list: () => convExpr,
+              assign: (l) => {
+                convExpr = l
+              },
+              set: (l) => {
+                convExpr = l
+                normalizeConvExpr()
+                closeConvSuggest()
+                _afterConvExprChange(false)
+              },
+              render: () => {
+                renderConvTokens()
+                syncConvGroupBtn()
+              },
+              input: "convSearch",
+              regex: () => convSearchRegex,
+            }
+          : {
+              list: () => contentExpr,
+              assign: (l) => {
+                contentExpr = l
+              },
+              set: (l) => {
+                contentExpr = l
+                closeContentSuggest()
+                _contentExprChanged()
+              },
+              render: renderContentTokens,
+              input: "g-search",
+              regex: () => searchRegex,
+            }
+      }
+
+      const _exprIsChip = (it) => it && it.t !== "op" && it.t !== "(" && it.t !== ")"
+
+      /// Shift-click: start a selection at this chip, or stretch it to here.
+      /// Shift-clicking the one chip selected lets go.
+      function exprSelectToken(field, i) {
+        const F = _exprSelField(field)
+        const list = F.list()
+        if (!_exprIsChip(list[i])) return
+        const s = _exprSel[field]
+        if (s && s.a === i && s.b === i) _exprSel[field] = null
+        else {
+          const anchor = s ? s.anchor : i
+          _exprSel[field] = { anchor, cur: i, ...exprSelectionSpan(list, anchor, i) }
+        }
+        F.render()
+        const inp = document.getElementById(F.input)
+        if (inp) inp.focus()
+      }
+
+      /// Shift+← / Shift+→ from an empty input: move the selection's free end
+      /// one chip; past the last chip lets go.
+      function exprSelectStep(field, dir) {
+        const F = _exprSelField(field)
+        const list = F.list()
+        const chips = list.map((it, i) => (_exprIsChip(it) ? i : -1)).filter((i) => i >= 0)
+        if (!chips.length) return
+        const s = _exprSel[field]
+        if (!s) {
+          if (dir > 0) return
+          const last = chips[chips.length - 1]
+          _exprSel[field] = { anchor: last, cur: last, a: last, b: last }
+        } else {
+          const at = chips.indexOf(s.cur)
+          const next = chips[at + dir]
+          if (next === undefined) {
+            if (dir > 0) _exprSel[field] = null
+            else return
+          } else _exprSel[field] = { anchor: s.anchor, cur: next, ...exprSelectionSpan(list, s.anchor, next) }
+        }
+        F.render()
+      }
+
+      /// ← / → from an empty input: a one-chip selection that walks the chips
+      /// — the keyboard's way to reach an early one. → past the last chip lets
+      /// go and returns to typing.
+      function exprCursorStep(field, dir) {
+        const F = _exprSelField(field)
+        const list = F.list()
+        const chips = list.map((it, i) => (_exprIsChip(it) ? i : -1)).filter((i) => i >= 0)
+        if (!chips.length) return false
+        const s = _exprSel[field]
+        let c
+        if (!s) {
+          if (dir > 0) return false
+          c = chips[chips.length - 1]
+        } else {
+          c = chips[chips.indexOf(s.cur) + dir]
+          if (c === undefined) {
+            if (dir > 0) _exprSel[field] = null
+            F.render()
+            return true
+          }
+        }
+        _exprSel[field] = { anchor: c, cur: c, a: c, b: c }
+        F.render()
+        return true
+      }
+
+      /// Alt+← / Alt+→: move the selection one step — past its neighbour, or
+      /// into or out of a group. It stays selected, so it can keep moving.
+      function exprMoveSelection(field, dir) {
+        const s = _exprSel[field]
+        const F = _exprSelField(field)
+        if (!s) return false
+        const r = exprMoveSpan(F.list(), s, dir)
+        if (!r) return true
+        _exprPendingSel[field] = { first: r.first, last: r.last }
+        F.set(r.list)
+        return true
+      }
+
+      /// The chips a change should leave selected, by identity — indexes do
+      /// not survive normalising. Read once by `_exprAfterChange`.
+      const _exprPendingSel = { conv: null, content: null }
+
+      /// After a field changed: select what the change asked to keep
+      /// selected, or nothing — an old selection's indexes would point at the
+      /// wrong chips.
+      function _exprAfterChange(field, list) {
+        const want = _exprPendingSel[field]
+        _exprPendingSel[field] = null
+        _exprSel[field] = null
+        if (!want) return
+        const a = list.indexOf(want.first)
+        const b = list.indexOf(want.last)
+        if (a < 0 || b < 0) return
+        _exprSel[field] = { anchor: a, cur: b, ...exprSelectionSpan(list, a, b) }
+      }
+
+      /// Add chips where the selection is rather than at the end: the field is
+      /// cut after the selection, `add` appends as it always does — operator
+      /// guessing included — and the rest goes back after it. Select the last
+      /// chip inside a group and what you add lands inside the group. The last
+      /// chip added becomes the selection, so the next one follows it.
+      function exprInsertingAfterSelection(field, add) {
+        const s = _exprSel[field]
+        if (!s) return add()
+        const F = _exprSelField(field)
+        const list = F.list()
+        const tail = list.slice(s.b + 1)
+        F.assign(list.slice(0, s.b + 1))
+        const r = add()
+        const added = F.list().slice(s.b + 1).filter(_exprIsChip)
+        F.assign(exprNormalize(F.list().concat(tail)))
+        const last = added[added.length - 1]
+        _exprPendingSel[field] = last ? { first: last, last } : { first: list[s.a], last: list[s.b] }
+        return r
+      }
+
+      function exprClearSelection(field) {
+        if (!_exprSel[field]) return false
+        _exprSel[field] = null
+        _exprSelField(field).render()
+        return true
+      }
+
+      /// Wrap the selection in brackets. False when nothing is selected, so
+      /// the ( ) button falls back to opening or closing a group.
+      function exprWrapSelection(field) {
+        const s = _exprSel[field]
+        const F = _exprSelField(field)
+        if (!s || F.regex()) return false
+        _exprSel[field] = null
+        F.set(exprWrapSpan(F.list(), s))
+        const inp = document.getElementById(F.input)
+        if (inp) inp.focus()
+        return true
+      }
+
+      function exprRemoveSelection(field) {
+        const s = _exprSel[field]
+        if (!s) return false
+        _exprSel[field] = null
+        const F = _exprSelField(field)
+        F.set(exprRemoveSpan(F.list(), s))
+        return true
+      }
+
+      /// The keys a selection answers to, from an empty input. True when the
+      /// key was taken.
+      function exprSelectionKey(field, e) {
+        if (e.target.value) return false
+        const arrow = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0
+        if (arrow && e.shiftKey) {
+          e.preventDefault()
+          exprSelectStep(field, arrow)
+          return true
+        }
+        if (arrow && e.altKey && _exprSel[field]) {
+          e.preventDefault()
+          return exprMoveSelection(field, arrow)
+        }
+        if (arrow && !e.altKey && !e.metaKey && !e.ctrlKey) {
+          if (!exprCursorStep(field, arrow)) return false
+          e.preventDefault()
+          return true
+        }
+        if (!_exprSel[field]) return false
+        if (e.key === "Escape") {
+          e.preventDefault()
+          e.stopPropagation()
+          return exprClearSelection(field)
+        }
+        if (e.key === "Backspace" || e.key === "Delete") {
+          e.preventDefault()
+          return exprRemoveSelection(field)
+        }
+        if ((e.key === "(" || e.key === ")") && !_exprSelField(field).regex()) {
+          e.preventDefault()
+          return exprWrapSelection(field)
+        }
+        return false
       }
 
       function exprNormalize(list) {
@@ -40097,11 +41655,13 @@
         const clearBtn = document.getElementById("convClearSearch")
         if (clearBtn) clearBtn.classList.remove("visible")
         if (!raw) return false
-        for (const it of convScanExprText(raw, convSearchRegex)) {
-          if (_convIsOperand(it)) _convAppendOperand(it)
-          else convExpr.push(it)
-        }
-        normalizeConvExpr()
+        exprInsertingAfterSelection("conv", () => {
+          for (const it of convScanExprText(raw, convSearchRegex)) {
+            if (_convIsOperand(it)) _convAppendOperand(it)
+            else convExpr.push(it)
+          }
+          normalizeConvExpr()
+        })
         _convDedupeOperands()
         return true
       }
@@ -40125,6 +41685,7 @@
       /// do the "search this in Conversations" jumps from elsewhere. Until
       /// then the search button says the list is out of date.
       function _afterConvExprChange(run) {
+        _exprAfterChange("conv", convExpr)
         convQuery = convTextTerms()
         renderConvTokens()
         syncConvGroupBtn()
@@ -40156,11 +41717,16 @@
         const btn = document.getElementById("convOptGroup")
         if (!btn) return
         const open = convOpenGroupDepth() > 0
-        btn.textContent = open ? " ) " : "( )"
-        btn.classList.toggle("on", open)
+        const sel = !!_exprSel.conv
+        btn.textContent = sel ? "(…)" : open ? " ) " : "( )"
+        btn.classList.toggle("on", open || sel)
         btn.setAttribute(
           "data-tooltip",
-          open ? "Close the group" : "Open a group — everything after ( is one condition",
+          sel
+            ? "Group the selected chips"
+            : open
+            ? "Close the group"
+            : "Open a group — everything after ( is one condition · or Shift-click chips to select them, then group them",
         )
       }
 
@@ -40174,11 +41740,22 @@
         const host = document.getElementById("convTokens")
         if (!host) return
         host.innerHTML = exprTokensHtml(convExpr, CONV_EXPR_HANDLERS)
+        const inp = document.getElementById("convSearch")
+        if (inp) inp.placeholder = _exprSelHint("conv") || "Search…"
+      }
+
+      /// What the keys do while chips are selected — in the input's
+      /// placeholder, which shows exactly when they apply (an empty input).
+      function _exprSelHint(field) {
+        return _exprSel[field]
+          ? "type to add here · ( group · Alt+←→ move"
+          : ""
       }
 
       /// The inline handlers a chip field's buttons call — the only thing the
       /// Conversations and Content fields draw differently.
       const CONV_EXPR_HANDLERS = {
+        field: "conv",
         remove: "removeConvToken",
         cycle: "cycleConvOp",
         lead: "toggleConvLeadNot",
@@ -40193,6 +41770,8 @@
       function exprTokensHtml(list, H) {
         let html = ""
         let open = 0
+        const sel = H.field ? _exprSel[H.field] : null
+        const inSel = (i) => !!sel && i >= sel.a && i <= sel.b
         // Only the very first condition can carry an exclusion of its own; an
         // exclusion anywhere else is written after the thing it narrows.
         if (list.length && list[0].t !== "op") {
@@ -40206,7 +41785,8 @@
           if (it.t === "(") {
             open++
             html +=
-              '<span class="conv-group"><button class="conv-paren" title="Remove group" ' +
+              '<span class="conv-group"><button class="conv-paren' + (inSel(i) ? " is-selected" : "") +
+              '" title="Remove these brackets — the chips stay" ' +
               'onclick="event.stopPropagation();' +
               H.remove +
               "(" +
@@ -40216,7 +41796,8 @@
           }
           if (it.t === ")") {
             html +=
-              '<button class="conv-paren" title="Remove group" ' +
+              '<button class="conv-paren' + (inSel(i) ? " is-selected" : "") +
+              '" title="Remove these brackets — the chips stay" ' +
               'onclick="event.stopPropagation();' +
               H.remove +
               "(" +
@@ -40233,6 +41814,7 @@
             html +=
               '<button class="conv-op is-' +
               esc(it.op) +
+              (inSel(i) ? " is-selected" : "") +
               '" title="' +
               (it.op === "not"
                 ? "Excluding what follows — click to switch"
@@ -40246,13 +41828,13 @@
               "</button>"
             return
           }
-          html += _convChipHtml(it, i, H)
+          html += _convChipHtml(it, i, H, inSel(i))
         })
         while (open-- > 0) html += "</span>"
         return html
       }
 
-      function _convChipHtml(it, i, H) {
+      function _convChipHtml(it, i, H, selected) {
         const h = H || CONV_EXPR_HANDLERS
         let cls = "text"
         let text = ""
@@ -40292,7 +41874,7 @@
             : ""
         const label =
           (it.t === "id" || it.t === "tag") && pickable
-            ? '<button class="conv-token-label" onclick="event.stopPropagation();' +
+            ? '<button class="conv-token-label" onclick="if(event.shiftKey)return;event.stopPropagation();' +
               (it.t === "tag" ? h.tagPick : h.pick) +
               "(" +
               i +
@@ -40301,7 +41883,7 @@
               esc(text) +
               ' <span class="conv-token-caret">&#x25BE;</span></button>'
             : it.t === "text"
-            ? '<button class="conv-token-label" onclick="event.stopPropagation();' +
+            ? '<button class="conv-token-label" onclick="if(event.shiftKey)return;event.stopPropagation();' +
               h.edit +
               "(" +
               i +
@@ -40313,11 +41895,17 @@
           '<span class="conv-token is-' +
           esc(cls) +
           (pickable || it.t === "text" ? " is-pickable" : "") +
+          (selected ? " is-selected" : "") +
           '" data-token-index="' +
           i +
           '" title="' +
-          esc(title) +
-          '">' +
+          esc(title + " · Shift-click to select, then ( ) to group") +
+          '"' +
+          (h.field
+            ? ' onclick="if(event.shiftKey){event.stopPropagation();event.preventDefault();exprSelectToken(\'' +
+              h.field + "'," + i + ')}"'
+            : "") +
+          ">" +
           label +
           '<button class="conv-token-x" title="Remove" onclick="event.stopPropagation();' +
           h.remove +
@@ -40796,6 +42384,7 @@
         }
         // Backspace into the chips: the last one is what the caret is sitting
         // against, so that is what it deletes.
+        if (exprSelectionKey("conv", e)) return
         if (e.key === "Backspace" && !e.target.value && convExpr.length) {
           e.preventDefault()
           removeConvToken(convExpr.length - 1)
