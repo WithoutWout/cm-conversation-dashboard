@@ -59,6 +59,17 @@ let contentMetadataFilters = []
  * together through the aggregate set (`outputEscGroups`). Mirrored by
  * `_outputCtxSet` in index.html.
  */
+/// Adds values to a context set, keeping what is there. A Dialog stores a
+/// condition on several values as one entry *per value* with the same id —
+/// `{id: 2, value: "Tablet"}, {id: 2, value: "Mobile"}, …` — so assigning
+/// instead kept only the last: on the 2026-08-15 export 66 of the 141 context
+/// values Dialogs carry found few or none of them (DeviceType=Mobile: 0 of 48).
+function ctxAdd(set, name, vals) {
+  if (!vals.length) return
+  const cur = set[name] || (set[name] = [])
+  for (const v of vals) if (!cur.includes(v)) cur.push(v)
+}
+
 function outputCtxSet(cvs, isArticle) {
   const set = {}
   for (const cv of cvs || []) {
@@ -72,7 +83,7 @@ function outputCtxSet(cvs, isArticle) {
         if (t && t !== "any") vals.push(t)
       }
     }
-    if (vals.length) set[name] = vals
+    ctxAdd(set, name, vals)
   }
   return set
 }
@@ -546,6 +557,13 @@ function precomputeArticle(a) {
   // together (off under ¬T). `ph` is what entity enrichment resolves.
   const _ncF = [a._searchId, ...a.Questions.map((qs) => qs.Text)]
   a._ncParts = [{ f: _ncF, l: _ncF.map(fold), ph: a._searchQuestionsUpper }]
+  // One question at a time, only to count which ones matched (`explainMatch`);
+  // the search itself still reads the questions as one part.
+  a._qParts = a.Questions.map((qs, i) => ({
+    f: [qs.Text],
+    l: [fold(qs.Text)],
+    ph: [a._searchQuestionsUpper[i]],
+  }))
 
   // One context set per output of every type, in output order. A route into a
   // Dialog is conditioned on context exactly like an Answer is, and on the real
@@ -577,6 +595,18 @@ function precomputeArticle(a) {
   // Build aligned per-answer data: {s, r, e, ctxSet} for every Answer output.
   // This links text and context conditions for the SAME answer so combined
   // text+context filtering can require both to be satisfied by one answer.
+  // Per Answer output, its own context and metadata — what a ctx:/meta: chip
+  // or the panel is counted against (`explainMatch`). The aggregate
+  // escalationGroup set sits apart, as `matchesContentContext` reads it.
+  a._answerTags = []
+  for (const _ao of a.Outputs) {
+    if (_ao.Type !== "Answer") continue
+    const esc = outputEscGroups(_ao.OutputMetaData, _ao.ContextVariables, true)
+    const ctxSets = [outputCtxSet(_ao.ContextVariables, true)]
+    if (esc.length) ctxSets.push({ escalationGroup: esc })
+    a._answerTags.push({ ctxSets, metaSets: [metaSetOf(_ao.OutputMetaData)] })
+  }
+
   a._answerItems = []
   for (const _ao of a.Outputs) {
     if (_ao.Type !== "Answer") continue
@@ -602,7 +632,7 @@ function precomputeArticle(a) {
             if (t && t !== "any") vals.push(t)
           }
         }
-        if (vals.length) _aCtx[name] = vals
+        ctxAdd(_aCtx, name, vals)
       }
     }
     // Tag and condition together, as the item-level aggregate reads them.
@@ -681,7 +711,7 @@ function precomputeDialog(item) {
           .split(",")
           .map((v) => v.trim())
           .filter(Boolean)
-        if (vals.length) _nCtx[name] = vals
+        ctxAdd(_nCtx, name, vals)
       }
       const _nEscGroups = outputEscGroups(_nai.metadata, _nCvs, false)
       if (_nEscGroups.length) _nCtx.escalationGroup = _nEscGroups
@@ -703,7 +733,19 @@ function precomputeDialog(item) {
       })
     }
     const refId = n.output ? n.output.kbaIdReference : null
+    // Every output of the node — Answers and routes — for context, as
+    // `_ctxSets` reads them; Answers only for metadata, as `_metaSets` does.
+    const _nItems = (n.output && n.output.items) || []
+    const _nEsc = []
+    for (const oi of _nItems)
+      for (const g of outputEscGroups(oi.metadata, oi.contextVariables, false))
+        if (!_nEsc.includes(g)) _nEsc.push(g)
+    const ctxSets = _nItems.map((oi) => outputCtxSet(oi.contextVariables, false))
+    if (_nEsc.length) ctxSets.push({ escalationGroup: _nEsc })
+    const metaSets = _nItems.filter((oi) => oi.type === "Answer").map((oi) => metaSetOf(oi.metadata))
     return {
+      ctxSets,
+      metaSets,
       name: n.name || "",
       // A node that shows an Article rather than a Response of its own, or a
       // GoTo that jumps to one.
@@ -743,10 +785,32 @@ function precomputeDialog(item) {
   const part = (fields, ph) => ({ f: fields, l: fields.map(fold), ph })
   item._ncParts = [part([item._searchId, item._searchName, item._searchDesc])]
   item._refParts = []
-  for (const sn of item._searchNodes)
-    (sn.isRef ? item._refParts : item._ncParts).push(part([sn.name]))
-  for (const t of _phrases) item._ncParts.push(part([t], [t.toUpperCase()]))
+  for (const sn of item._searchNodes) {
+    sn.namePart = part([sn.name])
+    ;(sn.isRef ? item._refParts : item._ncParts).push(sn.namePart)
+  }
+  const phrasePart = new Map()
+  for (const t of _phrases) {
+    const p = part([t], [t.toUpperCase()])
+    phrasePart.set(t, p)
+    item._ncParts.push(p)
+  }
   for (const t of _refNames) item._refParts.push(part([t]))
+  // The same phrasing parts, by the node whose links carry them — the node
+  // `nodeMatchReasons` credits a phrasing to — so a match can be counted per
+  // node (`explainMatch`). Shared objects, deduplicated per node.
+  nodes.forEach((n, i) => {
+    const own = []
+    for (const link of n.links || []) {
+      const c = link.condition || {}
+      if (c.type !== "Recognition" || !c.data || c.data.isFallback) continue
+      for (const qo of c.data.questions || []) {
+        const p = qo.text && phrasePart.get(qo.text)
+        if (p && !own.includes(p)) own.push(p)
+      }
+    }
+    item._searchNodes[i].phraseParts = own
+  })
 
   // Pre-compute entity question texts for entity-word enrichment
   item._entityQuestionTexts = []
@@ -1275,8 +1339,11 @@ function tagSetHas(set, name, values) {
   const vals = set[name]
   if (!vals) return false
   if (!values.length) return true
+  // The chip's values are trimmed when it is read, so the stored ones are
+  // too: "Voer hier je voor- en achternaam in " is in the export with the
+  // space, and could not be found by its own chip.
   const want = values.map((v) => v.toLowerCase())
-  return vals.some((v) => want.includes(String(v).toLowerCase()))
+  return vals.some((v) => want.includes(String(v).trim().toLowerCase()))
 }
 
 function exprLeafMatches(n, item) {
@@ -1324,6 +1391,134 @@ function evalContentExpr(n, item) {
   if (n.k === "or") return n.kids.some((k) => evalContentExpr(k, item))
   if (n.k === "not") return !evalContentExpr(n.kid, item)
   return exprLeafMatches(n, item)
+}
+
+// ── Where an item matched ───────────────────────────────────────────────────
+//
+// A result card says how many of its nodes, Responses and entities matched,
+// and the info modal's "Matches only" shows exactly those. Both read this, so
+// they agree with each other and with inclusion: a part counts when it would
+// on its own have satisfied the words of the search — every word of a chip,
+// and every AND-ed text chip, in that one part. Counting any part that holds
+// any one word is what made "kinderen korting" read as 8 matching nodes on a
+// Dialog where one node says both.
+
+/// The search's positive conditions — its words and its ctx:/meta: tags —
+/// with the exclusions and the other item-level leaves (ids, entities) left
+/// out, or null when none remain. `keep` picks the leaves: "all", "text"
+/// or "tag". `parkeren AND NOT kosten` → `parkeren`.
+function positiveTree(n, keep) {
+  if (!n) return null
+  if (n.k === "text") return keep !== "tag" ? n : null
+  if (n.k === "tag") return keep !== "text" ? n : null
+  if (n.k !== "and" && n.k !== "or") return null
+  const kids = n.kids.map((k) => positiveTree(k, keep)).filter(Boolean)
+  if (!kids.length) return null
+  return kids.length === 1 ? kids[0] : { k: n.k, kids }
+}
+
+/// Does a unit — a Dialog node, or one of an Article's Responses or
+/// questions — hold the tree on its own? Text is read in its parts, under the
+/// same rule as inclusion (AND-ed words meet in one part); a tag in its own
+/// outputs' context and metadata. The mirror of `evalContentExpr`, one level
+/// down.
+function evalOnUnit(n, u) {
+  if (n.k === "tag") {
+    const sets = n.kind === "metadata" ? u.metaSets : u.ctxSets
+    return sets.some((set) => tagSetHas(set, n.name, n.values))
+  }
+  if (isTextTree(n)) return u.parts.some((p) => evalOnPart(n, p))
+  if (n.k === "or") return n.kids.some((k) => evalOnUnit(k, u))
+  const text = n.kids.filter(isTextTree)
+  for (const k of n.kids) if (!isTextTree(k) && !evalOnUnit(k, u)) return false
+  if (text.length < 2) return text.every((k) => evalOnUnit(k, u))
+  return u.parts.some((p) => text.every((k) => evalOnPart(k, p)))
+}
+
+/// How this search reads a unit, or null when nothing in it can point at a
+/// part of an item (no words, no tags, no panel filter). `modes` are tried in
+/// order per item until one counts something: words and tags together, then
+/// the words alone, then the tags alone — so an item found because its words
+/// sit in one node and its tag in another still says where.
+function matchExplainer(tree, hasCtxFilter, hasMetaFilter) {
+  const panel = hasCtxFilter || hasMetaFilter
+  const panelOk = (u) =>
+    (!hasCtxFilter || matchesContentContext({ _ctxSets: u.ctxSets })) &&
+    (!hasMetaFilter || matchesContentMetadata({ _metaSets: u.metaSets }))
+  let all = null
+  let text = null
+  let tag = null
+  if (tree) {
+    all = positiveTree(tree, "all")
+    text = positiveTree(tree, "text")
+    tag = positiveTree(tree, "tag")
+  } else if (_orRegexGroups.length && _orRegexGroups.every((g) => g.length)) {
+    text = all = { k: "text", groups: _orRegexGroups }
+  }
+  if (!all && !panel) return null
+  const terms = text ? exprTextLeaves(text).flatMap((l) => l.groups.flat()) : []
+  const mode = (t, withPanel) =>
+    t || withPanel ? (u) => (!t || evalOnUnit(t, u)) && (!withPanel || panelOk(u)) : null
+  return {
+    modes: [mode(all, panel), text && (tag || panel) ? mode(text, false) : null, tag && text ? mode(tag, panel) : null].filter(Boolean),
+    // The words alone, for an Article's questions and a Dialog's name: they
+    // carry no tags of their own, so a tag never counts them.
+    text: text ? (p) => evalOnPart(text, p) : null,
+    // The loose reading (any one word), only to say which questions an
+    // Article matched on when its words were spread across several of them —
+    // the questions are one part to the search.
+    any: (p) => terms.some((c) => partHasTerm(p, c)),
+    // A plain query under a context filter matches Responses only
+    // (`matchArticleCombined`), so questions and names are no reason then.
+    onlyAnswers: !tree && hasCtxFilter && !!text,
+  }
+}
+
+/// Which parts of a matched item the search found, by index:
+/// an Article → `{q, r}` (its questions; its Answer outputs, in order),
+/// a Dialog → `{n, h}` (its nodes; whether its name/description did).
+function explainMatch(item, ex) {
+  // A Response counts only under the Context filter, as the modal shows it.
+  const answerOk = (ai) =>
+    !(searchExcludeNonDefault && ai.isNonDefault) && ctxSetMatchesFilters(ai.ctxSet)
+  const textOk = !searchContent && !ex.onlyAnswers
+  const first = (count) => {
+    for (const m of ex.modes) {
+      const hits = count(m)
+      if (hits.length) return hits
+    }
+    return []
+  }
+  if (item._kind === "article") {
+    const r = first((m) => {
+      const out = []
+      item._answerItems.forEach((ai, i) => {
+        if (answerOk(ai) && m({ parts: [ai], ...item._answerTags[i] })) out.push(i)
+      })
+      return out
+    })
+    const q = []
+    if (textOk && ex.text) {
+      item._qParts.forEach((p, i) => ex.text(p) && q.push(i))
+      if (!q.length && ex.text(item._ncParts[0]))
+        item._qParts.forEach((p, i) => ex.any(p) && q.push(i))
+    }
+    return { q, r }
+  }
+  if (item._kind !== "dialog") return null
+  const n = first((m) => {
+    const out = []
+    item._searchNodes.forEach((sn, i) => {
+      const parts = nodeAnswerItems(sn).filter(answerOk)
+      if (textOk) {
+        if (!sn.isRef || searchIncludeRefs) parts.push(sn.namePart)
+        parts.push(...sn.phraseParts)
+      }
+      if (m({ parts, ctxSets: sn.ctxSets, metaSets: sn.metaSets })) out.push(i)
+    })
+    return out
+  })
+  return { n, h: textOk && !!ex.text && ex.text(item._ncParts[0]) }
 }
 
 // ── Message handler ───────────────────────────────────────────────────────────
@@ -1522,6 +1717,18 @@ self.onmessage = function (e) {
       if (tree) _orRegexGroups = q ? buildOrRegexGroups(orGroups) : []
     }
 
+    // Where each matched item matched, for its card and "Matches only".
+    // Keyed by `_gidx`; only items the words of the search found are in it.
+    const matchInfo = new Map()
+    const ex = needsMatch ? matchExplainer(tree, hasCtxFilter, hasMetaFilter) : null
+    if (ex) {
+      for (const item of allItems) {
+        if (!item._mc) continue
+        const info = explainMatch(item, ex)
+        if (info) matchInfo.set(item._gidx, info)
+      }
+    }
+
     // ── Filter: All (articles + dialogs combined) ─────────────────────────
     let filteredAll
     if (!needsMatch && allFilterPill === "all") {
@@ -1639,6 +1846,7 @@ self.onmessage = function (e) {
         filteredDialogsIdx,
         filteredEntitiesIdx,
         matchingEntityNames: Array.from(matchingEntityNames),
+        matchInfo,
       },
       [
         filteredAllIdx.buffer,

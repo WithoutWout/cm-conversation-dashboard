@@ -6,7 +6,7 @@ const vm = require("vm")
 const { extract } = require("./extract")
 
 const NAMES = [
-  "_parseCollectionItemKey","_rowContextText","_prepareExclusionPatterns","_rowMatchingPatterns",
+  "_parseCollectionItemKey","_ctxAdd","_rowContextText","_prepareExclusionPatterns","_rowMatchingPatterns",
   "_articleExportRows","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature",
   "_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",

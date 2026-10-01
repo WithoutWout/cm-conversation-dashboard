@@ -19,7 +19,8 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - `ND` means **Exclude non-default responses from search**. It only affects matching when a text query is active and must not hide items for an empty query.
 - A response is user-facing unreachable only when it is not the default response and it has no context condition. Non-default responses with context are reachable for users in that context and should not be labeled "non-default" or "unreachable" in result cards.
 - Contextual/non-default query hits should show a compact snippet or reason on result cards so users can see why an item matched without opening the modal.
-- The info modals' **Matches only** toggle (`modalMatchFilter`, `toggleModalMatchFilter`) must use the same answer/node sections that caused worker result inclusion. It is hidden entirely when no query is active — it can do nothing then, and a permanently greyed-out control reads as broken rather than inapplicable.
+- The info modals' **Matches only** toggle (`modalMatchFilter`, `toggleModalMatchFilter`) must use the same answer/node sections that caused worker result inclusion — for an item in the results it now reads them from the worker (see "A card says how much of it matched" below). It is hidden entirely when no query is active — it can do nothing then, and a permanently greyed-out control reads as broken rather than inapplicable.
+- **A result card says how much of it matched** — "3 of 40 nodes match", "2 of 5 responses match · 1 contextual", "4 of 20 entities match". See below.
 
 ## Conversations search semantics
 
@@ -423,10 +424,40 @@ validation step in front of it.
   question a bracket answers. The brackets themselves stay visible because that
   is what someone asked for when they asked for parentheses.
 - **The `( )` button opens a group, or closes the one that is open**, and typing
-  `(` or `)` at a term boundary does the same. Groups are built as you go rather
-  than wrapped around chips after the fact — with left-to-right evaluation the
-  only shape that needs one is `a AND (b OR c)`, and that is exactly the order
-  you type it in.
+  `(` or `)` at a term boundary does the same — `a AND (b OR c)` in the order
+  you type it.
+- **…or wraps chips already there.** Building as you go was the only way at
+  first, so a search already on screen could only be regrouped by deleting and
+  re-adding it. Now a run of chips can be selected — Shift-click one, then
+  another, or Shift+← / Shift+→ from an empty input — and the `( )` button
+  (which then reads `(…)`) or a typed `(` wraps it; Backspace removes it, Esc
+  lets go. Both bars share it (`exprSelectToken`, `exprSelectionKey`, keyed by
+  field in `_exprSel`).
+  - **A selection reaching into a group takes the whole group**
+    (`exprSelectionSpan`) — half a group cannot be wrapped — and the operators
+    stay where they are: a group only adds brackets (`exprWrapSpan`). A leading
+    `not` stays outside and applies to the new group.
+  - **The keyboard reaches every chip.** From an empty input, ← selects the
+    last chip and walks left one chip at a time, → walks back (past the last
+    chip it lets go, back to typing), and Shift+←/→ stretches the selection
+    from wherever the walk is (`exprCursorStep`, `exprSelectStep`). The input's
+    placeholder names the keys while chips are selected — it shows exactly
+    when they apply.
+  - **What you add goes where the selection is** (`exprInsertingAfterSelection`):
+    typed text, a pasted expression or a picked suggestion lands right after
+    the selection instead of at the end, so selecting the last chip inside a
+    group adds to the group. It cuts the field after the selection and lets the
+    usual append run, so the operator guess is the one appending always made;
+    the new chip becomes the selection, and the next one follows it.
+  - **Alt+←/→ moves the selection** one step (`exprMoveSpan`): past the
+    neighbouring condition, or across a bracket into or out of a group. The
+    operators stay where they are — under left-to-right evaluation that is
+    what moving a chip means. Leftwards is rightwards on the mirrored list, so
+    the two directions cannot drift apart. The moved chips stay selected,
+    found again by identity after normalising (`_exprPendingSel`).
+  - **Removing a group is clicking either of its brackets**; the chips stay.
+  - The selection is dropped whenever the field changes, so it never points at
+    the wrong chips. `frontend/tests/expr-group.test.js`.
 - **Under `.*` the brackets belong to the pattern.** `a(b|c)` is a group the
   *user* wrote, and reading it as ours would silently search for two different
   things. The operators still apply, so an id or entity leaf can sit beside a
@@ -616,6 +647,9 @@ The Content Context tab used to read **Answers only**: the worker's `_ctxSets`, 
   - Combining them was a deliberate choice over splitting the tag onto the Metadata tab: one chip per group answers "what content is tied to this group?", which is the question people ask. The cost is that a chip mixes "belongs to" and "fires when"; the pills in the info modals still show which one an output carries.
   - This is filtering only. For Collections reachability the tag is still never a condition — see `docs/collections.md`.
 - `CAI_EXPORT_DIR=~/Downloads node frontend/tests/context-filter.test.js` runs the real-export half when the export is not checked out beside the app. On the old worker it fails 9 checks.
+- **A Dialog stores a condition on several values as one entry per value**, all with the same id — `{id: 2, value: "Tablet"}, {id: 2, value: "Mobile"}, …` — where an Article has one entry with a `Values` array. Every reader assigned `set[name] = vals` per entry, so each overwrote the last and only the final value survived. On the 2026-08-15 export **66 of the 141 context values Dialogs carry** found few or none of their Dialogs (`DeviceType = Mobile`: 0 of 48; the panel did not even offer it), through the chip and the panel alike. `ctxAdd` (worker) / `_ctxAdd` (renderer) merge instead, and every reader goes through them: `outputCtxSet`, the per-Response sets, `answerPassesContextFilters`, `ctxVarsMatchFilters`, the Collections context text (`_rowContextText`) and Export for AI (`_aiCtx`). Now all 141 find every Dialog that sets them, checked against the raw export, and the panel offers 286 chips. `context-filter.test.js` pins it.
+- **The info modals show every output's tags** (`renderOutputTagsHtml`), always *below* the content they belong to — the Response first, then what it is conditioned on and tagged with: under an Article's default Response, under a Dialog node's answer, under each contextual Response, and on their own line under each route. Context pills are grouped per variable, so a Dialog's one-entry-per-value condition reads as one pill ("DeviceType: Tablet, Mobile, …") rather than one per entry; escalation groups by tag or condition share one pill on the context side, as the panel has them; then metadata as "key = value", teal, JSON values flattened by `_flattenMetaEntry` as the Metadata filter reads them. Before, a default Response showed no context at all and metadata was never shown except `escalationGroup`. A pill that a `ctx:` / `meta:` chip or a panel filter asks for is marked (`_activeTagConds`, the same list a tag-only card snippet reads). Metadata hidden in Settings stays hidden here — it is the noise the user chose not to see. `frontend/tests/modal-tags.test.js`.
+- **A tag chip's value is compared trimmed on both sides** (`tagSetHas`). The chip trims what is typed; the export keeps `entryPlaceholder = "Voer hier je voor- en achternaam in "` with its space, so its own chip could not find it.
 
 ## What a Dialog is searched by
 
@@ -690,6 +724,114 @@ each pinned by `frontend/tests/dialog-search.test.js`.
   case measured, a whole-word search for one letter, went 13 → ~70 ms.
 - Not done, on purpose, yet: letting the words of one text chip spread across a
   Dialog's nodes, a "Best match" sort, and the texts inside CaptureInput nodes.
+
+## A card says how much of it matched
+
+A Dialog is dozens of nodes and an Article dozens of entities and several
+Responses, and a card used to say only *that* the item matched. It now says how
+much of it did — "3 of 40 nodes match", "2 of 5 responses match · 1 contextual",
+"4 of 20 entities match" — and, for an Article whose title does not show the
+hit, *what* matched (a **Response** or **Entities** snippet, as a Dialog card
+already had a **Node** one). The pill sits in the card header: a click opens the
+item with "Matches only" on, which lists exactly what the pill counted.
+
+- **The worker counts, not the renderer** (`explainMatch`, sent as `matchInfo`,
+  kept as `contentMatchInfo` by card key). Only the worker knows the parts and
+  the expression, so it is the only place a count can mean "why this item is
+  here": a part counts when it would on its own have satisfied the words of the
+  search — every word of a chip, every AND-ed text chip, in that one part
+  (`positiveTextTree` drops `not` subtrees and the item-level leaves first, so
+  `parkeren AND NOT kosten` counts by `parkeren`).
+- **"Matches only" reads the same set**, and that is a behaviour change. It used
+  to keep any node or entity holding *any one* searched word
+  (`nodeMatchesQuery`), so on the real export "kinderen korting" showed
+  "Betalen - kinderen" with **4 of 12** nodes, of which 1 says both. A card
+  saying 1 and a modal saying 4 would have been the same contradiction the
+  snippets were fixed for. The old loose reading is still the fallback for an
+  item the worker did not count — opened from a link, or found by id, entity or
+  tag alone.
+- **Tags and the panel count too.** A `ctx:` / `meta:` chip, or a Context ·
+  Metadata panel filter with or without words, counts the nodes and Responses
+  whose own outputs carry it: context on any output (a route included),
+  metadata on Responses only — the same split inclusion uses. A node is the
+  unit: `korting AND meta:nochat="true"` counts the node that says korting and
+  is tagged. Text keeps its one-part rule within the node (`evalOnUnit`, the
+  mirror of `evalContentExpr` one level down). When nothing in an item holds
+  the words and the tag together, its words are counted, then its tags
+  (`matchExplainer`'s `modes`), so an item found by a word in one node and a
+  tag in another still says where. Checked over every context and metadata
+  value on the 2026-08-15 export: the counted nodes are exactly the ones whose
+  outputs carry the value (7964 Dialog × value pairs, chip and panel). Without
+  words, a card's snippet, a shared node's line and an Article's shared
+  Response name the value they carry ("Livechat — DeviceType = Mobile"), and
+  "Matches only" is offered (`_contentMatchActive`).
+- **Per node, a match is**: one of its Responses (under the Context filter and
+  ND, as the modal shows them; an Article's under Ref for a reference node), its
+  name (not a reference's, unless Ref), or a phrasing on its own links — the
+  node `nodeMatchReasons` credits a phrasing to. ¬T and a plain query under a
+  Context filter leave names and phrasings out, as inclusion does.
+- **An Article's questions are one part to the search but counted one by one.**
+  When the words only meet across two questions ("hotel" in one, "annuleren" in
+  another), no single question satisfies the search; then every question
+  holding any searched word is counted, which is what the Article was found by.
+- **Indexes, not objects**: an Article's are into its questions and into its
+  Answer outputs in order (the worker's `_answerItems`); a Dialog's into
+  `nodes`. Which Response is "contextual" is decided on the renderer by
+  `defaultArticleAnswer`, the same reading the modal labels with.
+- The Dialog snippet (`dialogNodeMatchSnippet`) picks only among counted nodes.
+- **Each tab's result count sums them** (`_matchTotalsText`): "149 of 4209
+  results · 72 nodes · 46 responses (32 contextual)". Nodes are Dialogs',
+  Responses Articles' — an Article found by its entities adds none, which is
+  why 113 Articles can hold 46 Responses. It says how spread out a phrase is
+  before a single card is opened.
+- **Share Content carries the counted nodes**, each with its own `currentNode`
+  link, in every view and copy format — see CLAUDE.md → "Share Content modal".
+  `frontend/tests/share-content-nodes.test.js` runs the real copy functions.
+- Cost, real export: 1–3 ms on a typical search, +15 ms on the worst case
+  measured (`e`, 3745 results), since every part of every result is read once
+  more instead of stopping at the first hit.
+- `frontend/tests/search-match-count.test.js` drives the real worker: a node
+  holding one of two words is not counted, AND / OR / NOT, phrasings credited
+  to their node, Ref, ¬T, ND, the Context filter, questions that only meet
+  together, and no count for an item found by id alone.
+
+## The Dialog modal reads as a flow
+
+The export lists a Dialog's nodes in creation order with links between them,
+so read top to bottom the modal was a pile of nodes whose connections had to be
+reconstructed by hand. It now opens with the Dialog as a tree, then the nodes
+as cards in the same order.
+
+- **The tree** (`dialogFlowTreeHtml`): one line per node — step, kind, name,
+  the first words of its answer — each way out leading to the next with its
+  condition on the line ("“Tickets” → 2 Tickets", "Anything else →", "if
+  antwoordReactie is “Ja” →", "jumps to →", "starts Dialog →"). Every node
+  appears once; a way to one placed elsewhere — a loop, a second way in — is a
+  "↩ 3 · Tickets" line, so the tree stays finite. Branches are native
+  `<details>`, with Expand all / Collapse all; a Dialog over 30 nodes opens two
+  levels deep. A name goes to that node's card. Under a search the tree keeps
+  every node and marks the ones the search found; only the cards narrow.
+- **Each node sits under the parent closest to the start** (`dialogFlow`):
+  placed breadth-first from the entry points, each node's ways out in CM.com's
+  evaluation order — `evaluationPriority`, fallbacks last (`_flowLinks`) — then
+  read depth-first, a branch to its end before the next. Depth-first placement
+  was tried first and buried hubs: on Dialog 6270 "In het park" lists every
+  restaurant, the first restaurant links to all the others again, and they all
+  landed under it, collapsed, with the hub holding only references. Nodes
+  nothing reaches are roots of their own under "Not reached from a start".
+  The 306-node 6270 renders in ~30 ms.
+- **The cards** follow the tree's order and numbering: **From** (the steps that
+  lead in), the content with its tags below, and **Then** — one row per way out,
+  in full ("User says “…” “…” → 3 · Tickets", `_flowLogicalText` for a Logical
+  condition: groups are alternatives, the expressions in one group all hold) —
+  or "End of this path". A CaptureInput, API call or Halo tool says what it does.
+  "Matches only" keeps the order and only drops cards.
+- **A step chip goes to that node's card** (`flowJumpToNode`) and marks it. If
+  "Matches only" is hiding it, the filter goes off first: the user just asked
+  to see it.
+- `frontend/tests/dialog-flow.test.js`: the order, a hub keeping its options,
+  loops as references, every node once, unreached nodes last, parents, and the
+  Logical wording.
 
 ## References are not a Dialog's content
 

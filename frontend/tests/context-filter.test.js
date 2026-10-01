@@ -104,6 +104,7 @@ vm.runInContext(
   let dialogMap = new Map()
   let tDialogMap = new Map()
   ${[
+    "_ctxAdd",
     "_outputCtxSet",
     "_outputEscGroups",
     "_itemOutputCtxSets",
@@ -393,6 +394,43 @@ function checkMirror(label, articles, dialogs, ctxVars) {
   if (diffs.length) out.push("         " + diffs.slice(0, 3).join("; "))
 }
 checkMirror("fixture", ARTS, DLGS, CTX_VARS)
+
+// ── A Dialog condition on several values is one entry per value ─────────────
+// `{id, value: "Tablet"}, {id, value: "Mobile"}, …` with the same id. Each
+// entry used to overwrite the last, so only "Unknown" survived: on the
+// 2026-08-15 export DeviceType=Mobile found 0 of the 48 Dialogs that set it.
+{
+  const DEVICE = 2
+  const vars = [{ id: DEVICE, name: "DeviceType" }]
+  const cvs = ["Tablet", "Mobile", "Unknown"].map((value) => ({ id: DEVICE, value }))
+  const dlg = {
+    id: 77,
+    name: "Apparaat",
+    description: "",
+    nodes: [
+      {
+        id: 1,
+        type: "Output",
+        name: "Mobiel",
+        output: {
+          kbaIdReference: null,
+          items: [{ type: "Answer", isDefault: false, data: { text: "Op je telefoon." }, contextVariables: cvs, metadata: {} }],
+        },
+        links: [],
+      },
+    ],
+  }
+  const { wctx } = loadWorker()
+  wctx.__setCtxVars(vars)
+  ctx.setData([], [], vars)
+  eq("worker keeps every value of a repeated Dialog condition",
+    wctx.__outputCtxSet(cvs, false), { DeviceType: ["Tablet", "Mobile", "Unknown"] })
+  eq("…and so does the renderer", ctx._outputCtxSet(cvs, false), { DeviceType: ["Tablet", "Mobile", "Unknown"] })
+  const find = searcher([], [dlg], vars)
+  eq("a value before the last finds the Dialog", find([{ name: "DeviceType", value: "Mobile" }]), ["d77"])
+  eq("…with a query on the same Response too", find([{ name: "DeviceType", value: "Tablet" }], "telefoon"), ["d77"])
+  checkMirror("repeated condition", [], [dlg], vars)
+}
 
 // ── The real export ──────────────────────────────────────────────────────────
 // Checked out beside the app, or pointed at with CAI_EXPORT_DIR.
