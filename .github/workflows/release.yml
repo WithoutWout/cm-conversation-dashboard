@@ -91,32 +91,26 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Search results say where they matched
-            - Every result shows how much of it matched: "3 of 40 nodes match",
-              "2 of 5 responses match · 1 contextual", "4 of 20 entities match" —
-              and the result count adds them up. Click the count to open the item
-              with just those parts showing.
-            - Article cards now say which entities or Response matched.
-            - Searching on a context or metadata value counts and shows the nodes
-              and Responses that carry it.
-            - Fixed: Dialogs with a context condition on several values (such as
-              DeviceType) were missing from context searches.
+            ### Leave images out of a collection without losing the answer
+            - New Sentence smart filter: it cuts only the sentence that matches
+              and keeps the rest of the Response. Use `[Image]` to drop image
+              placeholders, and the word your Responses use to announce an image
+              to drop that sentence too.
+            - The export preview shows what was cut, struck through, under each
+              shortened Response. Filtered out lists every cut sentence.
 
-            ### Share Content
-            - A shared Dialog lists the nodes that matched, each with its own link
-              straight to that node in CM.com — and its own ✕ to leave it out.
-            - Article rows show the Responses that actually matched.
+            ### Shorter, cleaner triggers
+            - Entity phrases are combined into the unique Entities they are made
+              of: "overwinningsbandje kopen | overwinningsbandje prijs" becomes
+              "OVERWINNINGSBANDJE | KOPEN | PRIJS". Words that are not an Entity
+              are kept.
+            - Applies to the Collections export and to the Article cards. Turn
+              it off in Settings → Content.
 
-            ### Clearer Dialogs and Articles
-            - The Dialog window opens with the whole flow as a tree: what leads
-              where, with branches you can fold. Click a name to jump to its step.
-            - Every Response and route shows its context and metadata underneath.
-
-            ### Easier to edit the search bar
-            - Select chips with Shift-click or the arrow keys, then press ( ) to
-              put brackets around them, Backspace to remove them, or Alt+← / →
-              to move them into or out of a group.
-            - With a chip selected, what you type next is added right after it.
+            ### Edit your smart filters
+            - Click a filter's pattern to change it. Enter saves, Esc undoes.
+            - A regex that doesn't work is now marked in red instead of quietly
+              matching nothing.
 
             ---
 
