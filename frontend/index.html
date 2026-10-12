@@ -4869,6 +4869,28 @@
       }
       /* A hand-removal is the user's own decision, not a rule firing — accent
          rather than the orange used for "a pattern caught this". */
+      /* A cut sentence: the row survives, only that sentence is gone. */
+      .col-row-cut {
+        margin-top: 7px;
+        padding-left: 8px;
+        border-left: 2px solid rgba(251, 146, 60, 0.35);
+        font-size: 0.72rem;
+      }
+      .col-row-cut-head {
+        color: var(--orange);
+        margin-bottom: 3px;
+      }
+      .col-row-cut-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .col-row-cut-line s {
+        text-decoration-color: rgba(251, 146, 60, 0.7);
+      }
       .col-matched-chip.manual {
         background: rgba(139, 129, 246, 0.12);
         border-color: rgba(139, 129, 246, 0.32);
@@ -5049,6 +5071,10 @@
         background: rgba(139, 129, 246, 0.14);
         color: #9a90f0;
       }
+      .col-item-kind.sentence {
+        background: rgba(251, 146, 60, 0.12);
+        color: var(--orange);
+      }
       .col-item-name {
         flex: 1;
         min-width: 0;
@@ -5166,6 +5192,27 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      /* The editable pattern in the Smart filters pane: reads as text until
+         hovered or focused, so the list doesn't look like a form. */
+      input.export-filter-pattern {
+        min-width: 0;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 4px 8px;
+        outline: none;
+      }
+      input.export-filter-pattern:hover {
+        border-color: var(--border);
+      }
+      input.export-filter-pattern:focus {
+        background: var(--bg);
+        border-color: var(--accent);
+      }
+      input.export-filter-pattern.invalid {
+        border-color: rgba(248, 113, 113, 0.5);
+        color: var(--red);
       }
       .export-filter-label {
         font-size: 0.7rem;
@@ -12266,6 +12313,23 @@
                 >
               </div>
             </div>
+            <div style="margin-top: 14px">
+              <label>Entities on Article cards</label>
+              <label class="radio-option" style="display: flex">
+                <input
+                  type="checkbox"
+                  id="condenseEntitiesToggle"
+                  onchange="setCondenseEntities(this.checked)"
+                />
+                Condense phrases into the unique Entities they are made of
+              </label>
+              <p class="hint">
+                Shows <code>OVERWINNINGSBANDJE · KOPEN · PRIJS</code> instead of
+                every phrase that combines them. Needs the EntitiesExport CSV;
+                words no Entity claims are kept. The Collections export follows
+                the same setting.
+              </p>
+            </div>
             <div
               style="
                 margin-top: 14px;
@@ -14286,11 +14350,21 @@
       function saveKeepUnreachable(on) {
         localStorage.setItem("cm-export-keep-unreachable", on ? "1" : "0")
       }
+      // Condensing trigger phrases into the unique Entities they resolve to —
+      // on by default; storing "0" turns it off. Applies to the Collections
+      // export and to the Article cards and info modal alike.
+      function loadCondenseEntities() {
+        return localStorage.getItem("cm-condense-entities") !== "0"
+      }
+      function saveCondenseEntities(on) {
+        localStorage.setItem("cm-condense-entities", on ? "1" : "0")
+      }
       let collectionSelectMode = false
       let collectionSelection = new Set() // keys: "article:<Id>" | "dialog:<id>"
       let cmCollections = loadCollections()
       let cmExportFilters = loadExportFilters()
       let cmExportKeepUnreachable = loadKeepUnreachable()
+      let cmCondenseEntities = loadCondenseEntities()
       // Collections modal (master/detail) view state. `_colView` is a collection
       // id, or COL_FILTERS_VIEW for the global Smart Filters pane — one place a
       // collection is chosen, so the detail tabs never ask again.
@@ -15655,10 +15729,15 @@
             "</span>"
           )
         }
-        const visibleChips = art.Questions.slice(0, ENTITY_PREVIEW)
-          .map(makeChip)
-          .join("")
-        const hiddenQs = art.Questions.slice(ENTITY_PREVIEW)
+        // Condensed, the chips are the Entities the phrases are made of —
+        // see condenseEntityPhrases. Off, they are the phrases as authored.
+        const chipList = cmCondenseEntities
+          ? condenseEntityPhrases(art.Questions.map((x) => x.Text)).map(
+              (t) => condensedChipHtml(t, q),
+            )
+          : art.Questions.map(makeChip)
+        const visibleChips = chipList.slice(0, ENTITY_PREVIEW).join("")
+        const hiddenQs = chipList.slice(ENTITY_PREVIEW)
         const overflowId = "eo-" + art.Id
         const entityGridHtml =
           hiddenQs.length > 0
@@ -15666,7 +15745,7 @@
               '<div class="chip-overflow" id="' +
               overflowId +
               '">' +
-              hiddenQs.map(makeChip).join("") +
+              hiddenQs.join("") +
               "</div>" +
               '<button class="show-more-btn" onclick="toggleEntityOverflow(\'' +
               overflowId +
@@ -17951,6 +18030,10 @@
           return v
         }
         for (const e of prepared) {
+          // A sentence filter cuts part of a response and never drops the row;
+          // _cutSentences handles it. Without this guard the fallback below
+          // would test it against the trigger phrases, as if it were Entity.
+          if (e.field === "sentence") continue
           const haystacks =
             e.field === "content"
               ? [row.content]
@@ -17966,6 +18049,51 @@
       }
       function _rowMatchesExclusion(row, prepared) {
         return _rowMatchingPatterns(row, prepared).length > 0
+      }
+
+      // Sentence filters: cut the sentence holding a match out of a response
+      // and keep the rest. Built for the `[Image]` placeholder and the sentence
+      // announcing it — dropping the whole response over them loses the answer,
+      // keeping them hands an LLM an image it cannot see.
+      //
+      // `stripDisplay` collapses every newline, so a response is one run of
+      // text and `[Image]` sits flush against the sentence after it. It is
+      // therefore a segment of its own — otherwise cutting it would take that
+      // sentence too. Otherwise a sentence ends at `.` `!` `?` followed by
+      // whitespace, so `10.30 uur` and the dots in a markdown URL stay whole.
+      // Returns `{ text, cut: [{ sentence, p }] }`; when nothing matched, `text`
+      // is `content` itself — byte-identical, so merging and the hand-removal
+      // key behave exactly as before.
+      const _SENTENCE_RE = /\[Image\]\s*|[^]*?(?:[.!?]+(?=\s|$)|(?=\[Image\])|$)\s*/g
+      function _cutSentences(content, prepared) {
+        if (!prepared || !prepared.length || !content)
+          return { text: content, cut: [] }
+        const cut = []
+        const kept = []
+        for (const s of content.match(_SENTENCE_RE) || []) {
+          const t = s.trim()
+          if (!t) continue
+          const hit = prepared.find((e) =>
+            e.re ? e.re.test(t) : t.toLowerCase().includes(e.needle),
+          )
+          if (hit) cut.push({ sentence: t, p: hit.p })
+          else kept.push(t)
+        }
+        if (!cut.length) return { text: content, cut }
+        return { text: kept.join(" "), cut }
+      }
+
+      // The trigger text a row is exported with: its phrases condensed to the
+      // unique Entities they resolve to when that setting is on, verbatim when
+      // it is off. Smart filters keep testing the verbatim phrases — this is
+      // only what gets written.
+      function _rowTrigger(phrases) {
+        return _triggerTexts(phrases).join(" | ")
+      }
+      function _triggerTexts(phrases) {
+        return cmCondenseEntities
+          ? condenseEntityPhrases(phrases).map((t) => t.text)
+          : phrases
       }
 
       // Every candidate row for one article, NOT yet filtered. Unreachable rows
@@ -18172,13 +18300,31 @@
         const rows = _itemExportRows(key)
         if (collection && _colExcludedItems(collection).has(key)) return 0
         const muted = collection ? _colExcludedContent(collection) : null
+        const sentences = collection
+          ? _sentencePatterns(
+              _prepareExclusionPatterns(_colEffectivePatterns(collection)),
+            )
+          : []
         let n = 0
         for (const r of rows) {
           if (!cmExportKeepUnreachable && r.unreachable) continue
-          if (muted && muted.has(r.content)) continue
+          const trimmed = _cutSentences(r.content, sentences).text
+          if (muted && _handRemovedKey(muted, r.content, trimmed) !== null)
+            continue
           n++
         }
         return n
+      }
+      function _sentencePatterns(prepared) {
+        return prepared.filter((e) => e.field === "sentence")
+      }
+      // A hand-removal is keyed by content, and the preview shows — so the ✕
+      // stores — the response *after* sentence filters cut it. Both spellings
+      // therefore count, and the one that matched is what Restore must delete.
+      function _handRemovedKey(muted, raw, trimmed) {
+        if (muted.has(raw)) return raw
+        if (trimmed !== raw && muted.has(trimmed)) return trimmed
+        return null
       }
 
       // Identifies the inputs a build depends on: the enabled patterns and the
@@ -18193,6 +18339,7 @@
             p.pattern,
           ]),
           cmExportKeepUnreachable,
+          cmCondenseEntities,
           collection.itemKeys || [],
           collection.excludedItemKeys || [],
           collection.excludedContent || [],
@@ -18223,27 +18370,40 @@
       const MANUAL_ROW_REASON = "Removed by hand"
       const MANUAL_ITEM_REASON = "Removed by hand: whole item"
       function _buildCollectionExportRows(collection, patterns) {
-        const prepared = _prepareExclusionPatterns(patterns)
+        const allPrepared = _prepareExclusionPatterns(patterns)
+        const prepared = allPrepared.filter((e) => e.field !== "sentence")
+        const sentences = _sentencePatterns(allPrepared)
         const mutedItems = _colExcludedItems(collection)
         const mutedContent = _colExcludedContent(collection)
         const survivors = []
         const excludedRows = []
+        const cutSentences = []
+        // What each surviving content string had cut out of it, for the
+        // preview's "N sentences cut" marker. Keyed like the merge.
+        const cutByContent = new Map()
         let totalCandidates = 0
         let unreachableCount = 0
         let manualCount = 0
+        const reasonOf = (p) => (p.field || "entity") + ": " + p.pattern
         for (const key of collection.itemKeys || []) {
           const itemMuted = mutedItems.has(key)
           for (const r of _itemExportRows(key)) {
             totalCandidates++
+            // Pure, and a no-op without sentence filters. Computed up front
+            // only because a hand-removal may be keyed by the cut text.
+            const trimmed = _cutSentences(r.content, sentences)
             // Hand-removed is checked first, before any rule. An explicit choice
             // outranks a rule, and — more importantly — it must always be listed
             // with a Restore button rather than attributed to something the user
             // cannot undo from that row.
-            if (itemMuted || mutedContent.has(r.content)) {
+            const mutedKey = itemMuted
+              ? null
+              : _handRemovedKey(mutedContent, r.content, trimmed.text)
+            if (itemMuted || mutedKey !== null) {
               manualCount++
               excludedRows.push({
-                trigger: r.phrases.join(" | "),
-                content: r.content,
+                trigger: _rowTrigger(r.phrases),
+                content: itemMuted ? r.content : mutedKey,
                 matchedFields: [
                   itemMuted ? MANUAL_ITEM_REASON : MANUAL_ROW_REASON,
                 ],
@@ -18256,7 +18416,7 @@
               unreachableCount++
               if (!cmExportKeepUnreachable) {
                 excludedRows.push({
-                  trigger: r.phrases.join(" | "),
+                  trigger: _rowTrigger(r.phrases),
                   content: r.content,
                   matchedFields: [UNREACHABLE_REASON],
                   unreachable: true,
@@ -18264,29 +18424,60 @@
                 continue
               }
             }
+            // Row-level patterns see the response as it would be published.
+            const row = trimmed.cut.length
+              ? { ...r, content: trimmed.text }
+              : r
             const matched = prepared.length
-              ? _rowMatchingPatterns(r, prepared)
+              ? _rowMatchingPatterns(row, prepared)
               : []
             if (matched.length) {
               excludedRows.push({
-                trigger: r.phrases.join(" | "),
+                trigger: _rowTrigger(r.phrases),
                 content: r.content,
-                matchedFields: matched.map(
-                  (p) => (p.field || "entity") + ": " + p.pattern,
-                ),
+                matchedFields: matched.map(reasonOf),
               })
               continue
             }
-            survivors.push(r)
+            if (trimmed.cut.length && !trimmed.text) {
+              // Every sentence was cut: nothing is left to export.
+              excludedRows.push({
+                trigger: _rowTrigger(r.phrases),
+                content: r.content,
+                matchedFields: [
+                  ...new Set(trimmed.cut.map((c) => reasonOf(c.p))),
+                ],
+                emptied: true,
+              })
+              continue
+            }
+            if (trimmed.cut.length) {
+              const trigger = _rowTrigger(r.phrases)
+              let list = cutByContent.get(row.content)
+              if (!list) cutByContent.set(row.content, (list = []))
+              for (const c of trimmed.cut) {
+                list.push({ sentence: c.sentence, reason: reasonOf(c.p) })
+                cutSentences.push({
+                  trigger,
+                  content: c.sentence,
+                  matchedFields: [reasonOf(c.p)],
+                  cut: true,
+                })
+              }
+            }
+            survivors.push(row)
           }
         }
         const rows = _mergeRowsByContent(survivors).map((r) => ({
-          trigger: r.phrases.join(" | "),
+          trigger: _rowTrigger(r.phrases),
           content: r.content,
         }))
         return {
           rows,
           excludedRows,
+          cutSentences,
+          cutCount: cutSentences.length,
+          cutByContent,
           excludedCount: excludedRows.length,
           // Candidates the rule *considers* unreachable, whether or not it is
           // currently switched on — so the setting can state its own impact.
@@ -18524,7 +18715,7 @@
           .map(
             (r) =>
               '<div class="chp-row"><div class="chp-trigger">' +
-              esc(_cpTrunc((r.phrases || []).join(" · "), 100)) +
+              esc(_cpTrunc(_triggerTexts(r.phrases || []).join(" · "), 100)) +
               '</div><div class="chp-content">' +
               esc(_cpTrunc(r.content, 200)) +
               "</div></div>",
@@ -18780,6 +18971,136 @@
           }
         }
         return best
+      }
+
+      // ── Condensed triggers: phrases → the unique Entities they are made of ──
+      //
+      // An Article's phrases are mostly the same few Entities recombined —
+      // `overwinningsbandje kopen`, `overwinningsbandje prijs`, `flight tag
+      // kopen`… Each phrase is read as a sequence of Entities (greedy, longest
+      // Entity word first, since words like `een aanbod` span tokens) and the
+      // Article is shown — and exported — as the union. A token no Entity claims
+      // is kept as the word itself, so condensing never loses a term.
+      //
+      // Without an EntitiesExport there is nothing to resolve against, and
+      // splitting phrases into bare words would be a different feature; the
+      // phrases are then only de-duplicated.
+      let _condenseCache = new Map() // phrase → [{ entity } | { word }]
+      let _entityWordMaxTokens = 0
+      const _CONDENSE_EDGE_PUNCT = /^[,;.!?()"'“”]+|[,;.!?()"'“”]+$/g
+
+      function _entityAt(gram) {
+        return entityWordMap.get(gram) || entityMap.get(gram.toUpperCase()) || null
+      }
+
+      function _phraseEntityTags(phrase) {
+        let tags = _condenseCache.get(phrase)
+        if (tags) return tags
+        tags = []
+        const whole = _entityAt(phrase.trim().toLowerCase())
+        if (whole) tags.push({ entity: whole })
+        else {
+          if (!_entityWordMaxTokens) {
+            for (const k of entityWordMap.keys()) {
+              const n = k.split(/\s+/).length
+              if (n > _entityWordMaxTokens) _entityWordMaxTokens = n
+            }
+            _entityWordMaxTokens = Math.min(Math.max(_entityWordMaxTokens, 1), 6)
+          }
+          const toks = phrase
+            .toLowerCase()
+            .split(/\s+/)
+            .map((t) => t.replace(_CONDENSE_EDGE_PUNCT, ""))
+            .filter(Boolean)
+          let i = 0
+          while (i < toks.length) {
+            let hit = null
+            let len = 1
+            for (
+              let n = Math.min(_entityWordMaxTokens, toks.length - i);
+              n >= 1;
+              n--
+            ) {
+              const gram = n === 1 ? toks[i] : toks.slice(i, i + n).join(" ")
+              // Same floor as the chips: a lone one- or two-letter token
+              // naming an Entity is noise more often than meaning.
+              if (n === 1 && gram.length < 3) break
+              const e = _entityAt(gram)
+              if (e) {
+                hit = e
+                len = n
+                break
+              }
+            }
+            tags.push(hit ? { entity: hit } : { word: toks[i] })
+            i += len
+          }
+        }
+        _condenseCache.set(phrase, tags)
+        return tags
+      }
+
+      // `[{ text, entity, from }]` — `entity` is null for a kept word, `from`
+      // counts the phrases that contributed it. First-seen order.
+      function condenseEntityPhrases(phrases) {
+        const out = []
+        const byKey = new Map()
+        const noEntities = entityWordMap.size === 0 && entityMap.size === 0
+        for (const raw of phrases || []) {
+          const phrase = (raw || "").trim()
+          if (!phrase) continue
+          const tags = noEntities
+            ? [{ word: phrase }]
+            : _phraseEntityTags(phrase)
+          const seenHere = new Set()
+          for (const t of tags) {
+            const key = t.entity
+              ? "e:" + t.entity.name.toUpperCase()
+              : "w:" + t.word.toLowerCase()
+            let entry = byKey.get(key)
+            if (!entry) {
+              entry = {
+                text: t.entity ? t.entity.name : t.word,
+                entity: t.entity || null,
+                from: 0,
+              }
+              byKey.set(key, entry)
+              out.push(entry)
+            }
+            if (!seenHere.has(key)) {
+              seenHere.add(key)
+              entry.from++
+            }
+          }
+        }
+        return out
+      }
+
+      // One chip for a condensed tag: an Entity opens its info modal like a
+      // phrase chip that resolved to it; a kept word is plain.
+      function condensedChipHtml(t, q) {
+        const title = t.entity
+          ? "Entity: " +
+            t.entity.name +
+            " · from " +
+            t.from +
+            (t.from === 1 ? " phrase" : " phrases")
+          : "Not an Entity · from " +
+            t.from +
+            (t.from === 1 ? " phrase" : " phrases")
+        return (
+          '<span class="chip' +
+          (t.entity ? " is-entity-link" : "") +
+          '"' +
+          (t.entity
+            ? " onclick=\"openEntityInfoModal('" + esc(t.entity.name) + "')\""
+            : "") +
+          ' title="' +
+          esc(title) +
+          '">' +
+          hl(t.text, q) +
+          "</span>"
+        )
       }
 
       // UPPERCASE entity name → { articles: [], dialogs: [] }.
@@ -19413,7 +19734,16 @@
         // Split on the *rendered* chips, not on art.Questions — with the match
         // filter on, makeChip returns "" for the ones that don't match, and
         // slicing the raw list would spend the preview budget on blanks.
-        const shownChips = art.Questions.map(makeChip).filter(Boolean)
+        // Condensing runs over the phrases the match filter let through, so a
+        // filtered modal shows the Entities of the matching phrases only.
+        const shownPhrases = cmCondenseEntities
+          ? art.Questions.filter((x, i) => makeChip(x, i)).map((x) => x.Text)
+          : null
+        const shownChips = shownPhrases
+          ? condenseEntityPhrases(shownPhrases).map((t) =>
+              condensedChipHtml(t, gQuery),
+            )
+          : art.Questions.map(makeChip).filter(Boolean)
         const visibleChipCount = shownChips.length
         // An Article can carry dozens of entity phrases; left uncollapsed they
         // push the Response — the thing you opened the modal for — below the
@@ -19438,9 +19768,18 @@
           : shownChips.join("")
         let html = chips
           ? '<div class="detail-section"><h4>Entities (' +
-            (filterActive
-              ? visibleChipCount + "/" + art.Questions.length
-              : art.Questions.length) +
+            // Condensed, the chips are no longer one per phrase, so the count
+            // says both: how many tags, and how many phrases they came from.
+            (shownPhrases
+              ? visibleChipCount +
+                " from " +
+                (filterActive
+                  ? shownPhrases.length + "/" + art.Questions.length
+                  : art.Questions.length) +
+                (art.Questions.length === 1 ? " phrase" : " phrases")
+              : filterActive
+                ? visibleChipCount + "/" + art.Questions.length
+                : art.Questions.length) +
             ")</h4>" +
             '<div class="chip-grid">' +
             chips +
@@ -22122,7 +22461,7 @@
       }
 
       function _colStats(c) {
-        const { rows, excludedRows, unreachableCount, manualCount } =
+        const { rows, excludedRows, unreachableCount, manualCount, cutCount } =
           buildCollectionExportRows(c)
         const itemKeys = c.itemKeys || []
         const held = _colExcludedItems(c)
@@ -22131,6 +22470,7 @@
           excludedRows,
           unreachableCount,
           manualCount,
+          cutCount,
           itemCount: itemKeys.length,
           heldCount: held.size,
           // A held-out item contributes nothing *by choice*, which is not the
@@ -22344,7 +22684,7 @@
         const c = cmCollections.find((x) => x.id === _colView)
         const wrap = document.getElementById("colRowsWrap")
         if (!c || !wrap) return
-        const { rows } = buildCollectionExportRows(c)
+        const { rows, cutByContent } = buildCollectionExportRows(c)
         const q = (_colQuery || "").trim()
         const ql = q.toLowerCase()
         const filtered = q ? rows.filter((r) => _colRowMatches(r, ql)) : rows
@@ -22364,7 +22704,7 @@
                 _colRowHtml(
                   r,
                   q,
-                  "",
+                  _colCutMarkerHtml(cutByContent.get(r.content), q),
                   '<button class="col-row-action" title="Remove this response from the export" onclick="excludeVisibleRow(' +
                     i +
                     ')">&#x2715;</button>',
@@ -22397,6 +22737,28 @@
               "</div></div>"
             : '<div class="col-empty"><div class="col-empty-title">This collection is empty</div>' +
               '<div class="col-empty-text">Add Articles or Dialogs from the Content tab and their responses will appear here as export rows.</div></div>'
+      }
+      // A response a sentence filter shortened shows what was cut, right under
+      // it — struck through, with the pattern that cut it — so the preview is
+      // never a silently shorter text. The Filtered out tab lists them too.
+      function _colCutMarkerHtml(cut, q) {
+        if (!cut || !cut.length) return ""
+        return (
+          '<div class="col-row-cut"><div class="col-row-cut-head">' +
+          _colPlural(cut.length, "sentence") +
+          " cut by a sentence filter</div>" +
+          cut
+            .map(
+              (c) =>
+                '<div class="col-row-cut-line"><s>' +
+                hl(c.sentence, q) +
+                '</s><span class="col-matched-chip">' +
+                esc(c.reason) +
+                "</span></div>",
+            )
+            .join("") +
+          "</div>"
+        )
       }
       // One row renderer for both tabs. They were separate copies, and had already
       // drifted — Filtered out escaped its text where the preview highlighted it,
@@ -22662,7 +23024,7 @@
         // Rows can be excluded with no smart filter enabled at all — the
         // reachability rule removes them too. Checking the rows first is what
         // makes those visible; gating on the filter list hid them entirely.
-        if (!st.excludedRows.length) {
+        if (!st.excludedRows.length && !st.cutCount) {
           if (!_colEnabledFilters().length) {
             return (
               '<div class="col-empty"><div class="col-empty-title">No smart filters are enabled</div>' +
@@ -22690,6 +23052,11 @@
         if (byRule) parts.push(_colPlural(byRule, "row") + " unreachable")
         if (byPattern)
           parts.push(_colPlural(byPattern, "row") + " matched a smart filter")
+        if (st.cutCount)
+          parts.push(
+            _colPlural(st.cutCount, "sentence") +
+              " cut from responses that are still exported",
+          )
         const breakdown = parts.join(", ") + "."
         return (
           '<div class="col-note">These rows exist in the collection but are removed before export. ' +
@@ -22713,17 +23080,23 @@
         const c = cmCollections.find((x) => x.id === _colView)
         const wrap = document.getElementById("colFilteredWrap")
         if (!c || !wrap) return
-        const { excludedRows } = buildCollectionExportRows(c)
+        // Cut sentences are listed after the dropped rows: the row they came
+        // from is still exported, only the sentence is not.
+        const built = buildCollectionExportRows(c)
+        const excludedRows = built.excludedRows.concat(built.cutSentences)
         const q = (_colQuery || "").trim()
         const ql = q.toLowerCase()
         const filtered = q
           ? excludedRows.filter((r) => _colRowMatches(r, ql, r.matchedFields))
           : excludedRows
         const countEl = document.getElementById("colFilteredCount")
+        const total = built.cutCount
+          ? _colPlural(built.excludedCount, "row") +
+            " · " +
+            _colPlural(built.cutCount, "sentence")
+          : _colPlural(excludedRows.length, "row")
         if (countEl)
-          countEl.textContent = q
-            ? filtered.length + " of " + _colPlural(excludedRows.length, "row")
-            : _colPlural(excludedRows.length, "row")
+          countEl.textContent = q ? filtered.length + " of " + total : total
         if (!filtered.length) {
           wrap.innerHTML =
             '<div class="col-empty"><div class="col-empty-title">No matches</div>' +
@@ -22745,7 +23118,8 @@
               _colRowHtml(
                 r,
                 q,
-                '<div class="col-row-matched">Removed by' +
+                '<div class="col-row-matched">' +
+                  (r.cut ? "Sentence cut by" : "Removed by") +
                   r.matchedFields
                     .map(
                       (m) =>
@@ -22823,11 +23197,16 @@
             // Counted with only this one filter active, so the number answers
             // "what does *this* pattern remove here" rather than being confounded
             // by whatever else is switched on.
-            const hits = appliedHere
-              ? buildCollectionExportRows(c, { patterns: [f] }).excludedRows
-                  .filter((r) => !r.unreachable && !r.manual)
-                  .length
-              : 0
+            const isSentence = f.field === "sentence"
+            const one = appliedHere
+              ? buildCollectionExportRows(c, { patterns: [f] })
+              : null
+            const hits = !one
+              ? 0
+              : isSentence
+                ? one.cutCount
+                : one.excludedRows.filter((r) => !r.unreachable && !r.manual)
+                    .length
             return (
               '<div class="export-filter-row' +
               (globallyOff ? " global-off" : "") +
@@ -22853,7 +23232,9 @@
               (globallyOff
                 ? "off globally"
                 : appliedHere
-                  ? _colPlural(hits, "row") + " removed here"
+                  ? isSentence
+                    ? _colPlural(hits, "sentence") + " cut here"
+                    : _colPlural(hits, "row") + " removed here"
                   : "not applied here") +
               "</span>" +
               '<label class="export-filter-label"><input type="checkbox" ' +
@@ -22900,6 +23281,7 @@
       const EXPORT_FILTER_FIELDS = [
         { value: "entity", label: "Entity" },
         { value: "content", label: "Content" },
+        { value: "sentence", label: "Sentence" },
         { value: "context", label: "Context" },
       ]
       function _exportFilterFieldOptions(selected) {
@@ -22918,22 +23300,30 @@
         // Live impact, so an exclusion pattern is never a guess about what it
         // is doing to the collections you actually have.
         let removed = 0
+        let cut = 0
         let touched = 0
         let unreachable = 0
         for (const c of cmCollections) {
           const st = buildCollectionExportRows(c)
           removed += st.excludedCount
+          cut += st.cutCount
           unreachable += st.unreachableCount
-          if (st.excludedCount) touched++
+          if (st.excludedCount || st.cutCount) touched++
         }
         const head =
           '<div class="col-detail-head"><div class="col-detail-titles">' +
           '<div class="col-detail-name">Smart filters</div>' +
           '<div class="col-detail-sub">' +
           (cmExportFilters.length
-            ? removed
-              ? '<span class="warn">Removing ' +
-                _colPlural(removed, "row") +
+            ? removed || cut
+              ? '<span class="warn">' +
+                [
+                  removed ? "Removing " + _colPlural(removed, "row") : "",
+                  cut ? "cutting " + _colPlural(cut, "sentence") : "",
+                ]
+                  .filter(Boolean)
+                  .join(" and ")
+                  .replace(/^c/, "C") +
                 " across " +
                 _colPlural(touched, "collection") +
                 "</span>"
@@ -22960,18 +23350,21 @@
               ? _colPlural(unreachable, "row") + " kept by this being off"
               : _colPlural(unreachable, "row") + " dropped"
             : "No rows affected") +
-          "</span></div>"
+          "</span></div>" +
+          _condenseRuleRowHtml()
         const note =
           '<div class="col-note">Below that, a row is dropped when any enabled pattern matches it. ' +
           "<b>Entity</b> tests each trigger phrase, <b>Content</b> tests the response text, and <b>Context</b> tests a flattened " +
           "<code>name:value</code> string per response, e.g. <code>escalationGroup:overnachten resort:R_EBR_BH12</code>. " +
+          "<b>Sentence</b> never drops a row: it cuts only the sentence holding the match and keeps the rest of the response — " +
+          "e.g. <code>[Image]</code> for image placeholders, or the word your responses use to announce one. " +
           "Matching is case-insensitive substring unless you tick Regex.</div>"
         const addRow =
           '<div class="col-filter-add">' +
           '<select id="newFilterFieldInput" class="sort-select">' +
           _exportFilterFieldOptions("entity") +
           "</select>" +
-          '<input type="text" id="newFilterPatternInput" placeholder="Pattern to exclude, e.g. zzz" onkeydown="if(event.key===\'Enter\')addExportFilterFromInput()" />' +
+          '<input type="text" id="newFilterPatternInput" placeholder="Pattern, e.g. zzz — or [Image] as a Sentence filter" onkeydown="if(event.key===\'Enter\')addExportFilterFromInput()" />' +
           '<label class="export-filter-label"><input type="checkbox" id="newFilterRegexInput" /> Regex</label>' +
           '<button class="btn-secondary" onclick="addExportFilterFromInput()">Add filter</button>' +
           "</div>"
@@ -22984,11 +23377,21 @@
               "', this.value)\">" +
               _exportFilterFieldOptions(f.field || "entity") +
               "</select>" +
-              '<span class="export-filter-pattern" title="' +
+              // Edited in place: Enter or leaving the field saves, Esc puts the
+              // old pattern back. stopPropagation keeps Esc from also closing
+              // the modal through the document-level handler.
+              '<input type="text" class="export-filter-pattern' +
+              (_exportFilterRegexError(f) ? " invalid" : "") +
+              '" value="' +
               esc(f.pattern) +
-              '">' +
-              esc(f.pattern) +
-              "</span>" +
+              '" title="' +
+              esc(
+                _exportFilterRegexError(f) ||
+                  "Edit the pattern — Enter saves, Esc undoes",
+              ) +
+              '" spellcheck="false" onkeydown="event.stopPropagation();if(event.key===\'Enter\')this.blur();else if(event.key===\'Escape\'){this.value=this.defaultValue;this.blur()}" onchange="updateExportFilterPattern(\'' +
+              esc(f.id) +
+              "', this)\" />" +
               '<label class="export-filter-label"><input type="checkbox" ' +
               (f.isRegex ? "checked" : "") +
               ' onchange="toggleExportFilterRegex(\'' +
@@ -23047,10 +23450,72 @@
         invalidateCollectionCaches()
         renderCollectionsModal()
       }
+      // The condense setting, as a rule row beside the reachability rule. It is
+      // the same setting as the one in Settings → Content: the export and the
+      // Article cards read one flag, so they can never disagree.
+      function _condenseRuleRowHtml() {
+        const noEntities = entityWordMap.size === 0
+        return (
+          '<div class="col-rule-row">' +
+          '<label class="col-rule-main"><input type="checkbox" ' +
+          (cmCondenseEntities ? "checked" : "") +
+          ' onchange="setCondenseEntities(this.checked)" />' +
+          "<span><b>Condense triggers into Entities</b>" +
+          '<span class="col-rule-desc">Each trigger is written as the unique Entities its phrases are made of instead of every phrase in full — ' +
+          "<code>overwinningsbandje kopen | overwinningsbandje prijs</code> becomes <code>OVERWINNINGSBANDJE | KOPEN | PRIJS</code>. " +
+          "Words no Entity claims are kept as they are. Also applies to the Article cards.</span></span></label>" +
+          '<span class="col-rule-impact' +
+          (noEntities && cmCondenseEntities ? " warn" : "") +
+          '">' +
+          (noEntities
+            ? "No EntitiesExport loaded — phrases are only de-duplicated"
+            : cmCondenseEntities
+              ? "On"
+              : "Off") +
+          "</span></div>"
+        )
+      }
+      function setCondenseEntities(on) {
+        cmCondenseEntities = !!on
+        saveCondenseEntities(cmCondenseEntities)
+        const cb = document.getElementById("condenseEntitiesToggle")
+        if (cb) cb.checked = cmCondenseEntities
+        invalidateCollectionCaches()
+        _rerenderActiveContentTab()
+        if (document.getElementById("collectionsModal")?.classList.contains("open"))
+          renderCollectionsModal()
+      }
       function toggleExportFilterField(id, field) {
         const f = cmExportFilters.find((x) => x.id === id)
         if (!f) return
         f.field = field
+        saveExportFilters(cmExportFilters)
+        renderCollectionsModal()
+      }
+      // A regex that does not compile matches nothing (_prepareExclusionPatterns
+      // skips it), which used to be silent — the row now says so.
+      function _exportFilterRegexError(f) {
+        if (!f.isRegex || !f.pattern) return ""
+        try {
+          new RegExp(f.pattern, "i")
+          return ""
+        } catch (e) {
+          return "Invalid regex — this filter matches nothing: " + e.message
+        }
+      }
+      function updateExportFilterPattern(id, input) {
+        const f = cmExportFilters.find((x) => x.id === id)
+        if (!f) return
+        const pattern = (input.value || "").trim()
+        if (!pattern) {
+          // An empty pattern would match everything or nothing depending on
+          // the field; removing a filter is what Remove is for.
+          input.value = f.pattern
+          showImportToast("error", "A filter needs a pattern — use Remove to delete it")
+          return
+        }
+        if (pattern === f.pattern) return
+        f.pattern = pattern
         saveExportFilters(cmExportFilters)
         renderCollectionsModal()
       }
@@ -23353,6 +23818,8 @@
           `input[name="chat-copy-format"][value="${chatCopyFormat}"]`,
         )
         if (_cfRadio) _cfRadio.checked = true
+        document.getElementById("condenseEntitiesToggle").checked =
+          cmCondenseEntities
         renderDataFolderState()
         setDataFolderFeedback(dataFolderFeedback.text, dataFolderFeedback.color)
         loadAnalyticsConfigIntoSettings()
@@ -23517,6 +23984,7 @@
         { key: "cm-collections" },
         { key: "cm-export-filters" },
         { key: "cm-export-keep-unreachable" },
+        { key: "cm-condense-entities" },
         { key: "chat-copy-format" },
         { key: "conv-low-recog-threshold" },
         { key: "cm-metadata-hidden" },
@@ -24192,6 +24660,8 @@
             })
           })
           _chipEntityCache = new Map()
+          _condenseCache = new Map()
+          _entityWordMaxTokens = 0
           _entityRefIndex = null
           // The search bar's type-ahead indexes are projections of this
           // export — the entity one too, since it reads its trigger words
