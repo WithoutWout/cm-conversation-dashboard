@@ -60,4 +60,12 @@ function extract(name) {
   throw new Error("unbalanced: " + name)
 }
 
-module.exports = { extract }
+// A one-line `const NAME = …` (a regex literal, usually) verbatim, so a harness
+// does not carry a copy of a pattern that can drift from the source.
+function extractConst(name) {
+  const m = src.match(new RegExp("const " + name + " = [^\\n]*"))
+  if (!m) throw new Error("not found: const " + name)
+  return m[0]
+}
+
+module.exports = { extract, extractConst }

@@ -1,4 +1,4 @@
-const { extract } = require("./extract")
+const { extract, extractConst } = require("./extract")
 const vm = require("vm")
 
 const NAMES = [
@@ -8,12 +8,19 @@ const NAMES = [
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
   "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
   "defaultArticleAnswer","defaultDialogAnswerItem",
+  "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts",
+  "condenseEntityPhrases","_phraseEntityTags","_entityAt",
 ]
 const ctx = vm.createContext({ console })
 vm.runInContext(`
   let articleMap = new Map(), dialogMap = new Map(), ctxVarMap = new Map()
   let cmExportFilters = []
   let cmExportKeepUnreachable = false
+  let cmCondenseEntities = true
+  let entityMap = new Map(), entityWordMap = new Map()
+  let _condenseCache = new Map(), _entityWordMaxTokens = 0
+  ${extractConst("_SENTENCE_RE")}
+  ${extractConst("_CONDENSE_EDGE_PUNCT")}
   const UNREACHABLE_REASON = "Not reachable: non-default response with no context"
   const MANUAL_ROW_REASON = "Removed by hand"
   const MANUAL_ITEM_REASON = "Removed by hand: whole item"

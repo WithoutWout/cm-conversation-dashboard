@@ -75,7 +75,7 @@ frontend/
     share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js,
     gap-session-cache.test.js, content-refs.test.js, dialog-search.test.js,
     search-match-count.test.js, share-content-nodes.test.js, modal-tags.test.js,
-    dialog-flow.test.js, expr-group.test.js
+    dialog-flow.test.js, expr-group.test.js, entity-condense.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -675,7 +675,8 @@ Always use these terms in the UI:
 | `cm-insights-segment-total-only` | `"1"` to apply the search's filters to the Segments **Total** row only, the breakdown rows counting every conversation in the date range; anything else, including absent, filters every row. See `docs/insights.md` → "Filters on the Total row only" |
 | `cm-insights-segment-utc-days` | `"1"` to read the Segments table's date range as UTC days, as CM.com's dashboards do, while the rest of the app stays in the display timezone; anything else, including absent, uses the display timezone. See `docs/insights.md` → "UTC days" |
 | `cm-insights-segments`     | JSON array of `{kind, name}` (`kind`: `"culture"` \| `"context"` \| `"metadata"`) — which slices the Insights Segments table compares. Read entry by entry, so a hand-edited file cannot introduce an unknown kind or a duplicate row. An empty array is a legitimate state: the Total row alone is still an answer |
-| `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export |
+| `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"sentence"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export. `"sentence"` cuts only the matching sentence; see `docs/collections.md` |
+| `cm-condense-entities`     | `"0"` to show and export trigger phrases verbatim; anything else, including absent, condenses them into the unique Entities they are made of — Article cards, the Article info modal and the Collections export alike. See `docs/collections.md` → "Condensed triggers" |
 
 Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer. A settings backup does export them, and still does not break that rule; see `docs/settings-and-updates.md` → "Settings backup".
 
