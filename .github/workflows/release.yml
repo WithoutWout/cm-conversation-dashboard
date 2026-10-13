@@ -91,27 +91,22 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Collections export all of a Dialog
-            - A collection with Dialogs now exports every answer a user can
-              reach in them. Answers behind a GoTo step, nodes that show an
-              Article, and Dialogs that Articles open at a newer entry point
-              were left out before — exporting every Dialog now gives about
-              80% more rows.
-
-            ### Answers behind a button know the question
-            - An answer reached by tapping a button inside a Dialog used to be
-              exported with only the button as its trigger, such as "Tickets".
-              It now also carries the Entities of the Articles that lead into
-              the Dialog, then the buttons tapped:
-              "DUBBEL | BETALEN | … | → Tickets". Entities that appear in the
-              answer come first.
-            - At most 30 Entities are added per answer. Change the number, or
-              switch it off, in Collections → Smart filters.
-            - Replies that many Dialogs share, such as handing over to a
-              colleague, keep their buttons only. A button that several routes
-              share is written out once.
-            - Your existing collections will export more rows, with longer
-              triggers.
+            ### Triggers a chatbot can find
+            - Collections now write each trigger as a few of the Article's own
+              phrases — "ticket dubbel betaald | kaart nog een keer
+              afgeschreven" — instead of Entity names such as "ENTREETICKET |
+              DUBBEL | BETALEN". Entity names are labels, not words people type.
+              In a test on a full content export, a knowledge search found the
+              right answer first 69% of the time with phrases, against 47%
+              with Entity names.
+            - Choose the style under Collections → Smart filters → Write
+              triggers as: Phrases, User words, Entity names or Every phrase.
+              The median trigger length is shown beside it.
+            - Answers behind a Dialog button get their context in the same
+              style.
+            - The Condense setting in Settings → Content now only affects the
+              Article cards. If you had it switched off, your export keeps
+              writing every phrase.
 
             ---
 
