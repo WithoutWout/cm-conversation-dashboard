@@ -18162,7 +18162,7 @@
               if (t) fromWays.push(t)
             }
           }
-          paths.push("→ " + w.steps.map((s) => s.join(" / ")).join(" → "))
+          paths.push(w.steps)
           for (const p of w.steps[w.steps.length - 1]) lastSteps.add(p)
         }
         const keyOf = (t) =>
@@ -18202,11 +18202,45 @@
         return {
           text: [
             ...kept.map((r) => r.t.text),
-            ...new Set(paths),
+            ..._compactPaths(paths),
             ...plain,
           ].join(" | "),
           capped,
         }
+      }
+
+      // Button paths as `→ A → B` lines, each button's phrases written in full
+      // the first time it appears in the row and by its first phrase after that.
+      // Routes into a node often share their last buttons, and repeating them
+      // made those buttons outweigh the question in a retrieval index: the
+      // Monorail reply carried `Monorail / Volk van Laaf` eight times. On the
+      // 2026-08-15 export this shortens 230 rows and drops no word. Identical
+      // routes collapse first, so one route can never be written two ways.
+      function _compactPaths(paths) {
+        const seenRoutes = new Set()
+        const seenSteps = new Set()
+        const out = []
+        for (const steps of paths) {
+          const route = steps.map((s) => s.join(" / "))
+          const key = route.join(" → ")
+          if (seenRoutes.has(key)) continue
+          seenRoutes.add(key)
+          out.push(
+            "→ " +
+              route
+                .map((step, i) => {
+                  if (!seenSteps.has(step)) {
+                    seenSteps.add(step)
+                    return step
+                  }
+                  return steps[i][0]
+                })
+                .join(" → "),
+          )
+        }
+        // Two different buttons can share a first phrase ("Ja, graag"), so two
+        // routes can compact to the same line.
+        return [...new Set(out)]
       }
 
       // `text` as lower-cased words: a Set of them, and the words joined by single

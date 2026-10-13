@@ -3,7 +3,7 @@ const vm = require("vm")
 
 const NAMES = [
   "_parseCollectionItemKey","_ctxAdd","_rowContextText","_prepareExclusionPatterns","_rowMatchingPatterns",
-  "_articleExportRows","_pushArticleAnswerRows","_dialogEntryNodeId","_nodeLandsOn","nodeIsRef","_recognitionPhrases","_dialogWaysIn","_pushNodeAnswerRows","_contextTrigger","_textGrams","_entityInGrams","_dialogContentIsShared","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
+  "_articleExportRows","_pushArticleAnswerRows","_dialogEntryNodeId","_nodeLandsOn","nodeIsRef","_recognitionPhrases","_dialogWaysIn","_pushNodeAnswerRows","_contextTrigger","_compactPaths","_textGrams","_entityInGrams","_dialogContentIsShared","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature","_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
   "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
@@ -431,6 +431,34 @@ const sharedData = (n) => {
 }
 ok("a reply reached from 10 Dialogs keeps its buttons only", plainIs(trig(sharedData(10), "SHARED-REPLY"), "Nee"))
 ok("...from 9 it still gets context", trig(sharedData(9), "SHARED-REPLY").includes("→ Nee"))
+
+// Each button's phrases are written once per row; later it is named by its
+// first phrase. The real case: the Monorail reply repeated
+// "Monorail / Volk van Laaf" eight times.
+const mono = [["Een andere dag", "morgen"], ["Monorail", "Volk van Laaf"]]
+const cp = ctx._compactPaths([mono, [["Monorail", "Volk van Laaf"]], mono, [["Ja, graag", "Morgen"], ["Monorail", "Volk van Laaf"]]])
+ok("a button repeated across routes is written in full once", cp.filter((l) => l.includes("Volk van Laaf")).length === 1)
+ok("...and by its first phrase after that", cp[1] === "→ Monorail" && cp[2] === "→ Ja, graag / Morgen → Monorail")
+ok("an identical route is written once, not twice in two forms", cp.length === 3)
+// [J / G] seen, so route 2 compacts to "→ J" — the very line route 3 writes.
+ok("two routes that compact to the same line are written once",
+   JSON.stringify(ctx._compactPaths([[["J", "G"], ["X"]], [["J", "G"]], [["J"]]])) === JSON.stringify(["→ J / G → X", "→ J"]))
+// End to end: two Articles reach one response by routes sharing their last button.
+ctx.setData(
+  new Map([
+    [30, { Id: 30, Questions: [{ Text: "monorail" }], Outputs: [{ Type: "DialogStart", DialogId: 80, DialogStartNodeId: 1, IsDefault: true }] }],
+    [31, { Id: 31, Questions: [{ Text: "attractie dicht" }], Outputs: [{ Type: "DialogStart", DialogId: 80, DialogStartNodeId: 2, IsDefault: true }] }],
+  ]),
+  new Map([[80, { id: 80, nodes: [
+    { id: 1, output: ans("WELKE DAG"), links: [{ childNodeId: 2, condition: { type: "Recognition", data: { questions: [{ text: "Een andere dag" }, { text: "morgen" }] } } }] },
+    { id: 2, output: ans("WELKE ATTRACTIE"), links: [{ childNodeId: 3, condition: { type: "Recognition", data: { questions: [{ text: "Monorail" }, { text: "Volk van Laaf" }] } } }] },
+    { id: 3, output: ans("MONORAIL-OPEN") },
+  ] }]]),
+  new Map(),
+)
+const mt = trig(ctx.buildCollectionExportRows({ id: "mono", itemKeys: ["dialog:80"] }), "MONORAIL-OPEN").split(" | ")
+ok("in an export row the shared last button is written in full once",
+   mt.includes("→ Een andere dag / morgen → Monorail / Volk van Laaf") && mt.includes("→ Monorail"))
 ctx.setEntities([])
 
 console.log(out.join("\n"))

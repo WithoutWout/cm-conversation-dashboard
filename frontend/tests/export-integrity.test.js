@@ -7,7 +7,7 @@ const { extract, extractConst } = require("./extract")
 
 const NAMES = [
   "_parseCollectionItemKey","_ctxAdd","_rowContextText","_prepareExclusionPatterns","_rowMatchingPatterns",
-  "_articleExportRows","_pushArticleAnswerRows","_dialogEntryNodeId","_nodeLandsOn","nodeIsRef","_recognitionPhrases","_dialogWaysIn","_pushNodeAnswerRows","_contextTrigger","_textGrams","_entityInGrams","_dialogContentIsShared","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
+  "_articleExportRows","_pushArticleAnswerRows","_dialogEntryNodeId","_nodeLandsOn","nodeIsRef","_recognitionPhrases","_dialogWaysIn","_pushNodeAnswerRows","_contextTrigger","_compactPaths","_textGrams","_entityInGrams","_dialogContentIsShared","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature",
   "_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
