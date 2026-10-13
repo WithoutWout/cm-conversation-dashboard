@@ -7,7 +7,7 @@ const { extract, extractConst } = require("./extract")
 
 const NAMES = [
   "_parseCollectionItemKey","_ctxAdd","_rowContextText","_prepareExclusionPatterns","_rowMatchingPatterns",
-  "_articleExportRows","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
+  "_articleExportRows","_pushArticleAnswerRows","_dialogEntryNodeId","_nodeLandsOn","nodeIsRef","_recognitionPhrases","_dialogWaysIn","_pushNodeAnswerRows","_contextTrigger","_compactPaths","_textGrams","_entityInGrams","_dialogContentIsShared","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature",
   "_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
@@ -27,6 +27,11 @@ vm.runInContext(`
   ${extractConst("_SENTENCE_RE")}
   ${extractConst("_CONDENSE_EDGE_PUNCT")}
   let _colRouteIndexCache = null
+  const _dialogNodesById = new WeakMap()
+  let _colSharedContentCache = null
+  const _entityGramWords = new WeakMap()
+  let cmDialogContext = true, cmDialogContextCap = 30
+  const DIALOG_CONTEXT_DEFAULT_CAP = 30, DIALOG_CONTEXT_MAX_STEPS = 3, DIALOG_CONTEXT_SHARED = 10
   const _colItemRowsCache = new Map(), _colBuildCache = new Map()
   const UNREACHABLE_REASON = "Not reachable: non-default response with no context"
   const MANUAL_ROW_REASON = "Removed by hand"

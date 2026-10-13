@@ -4837,6 +4837,10 @@
         border-radius: 5px;
         padding: 1px 7px;
       }
+      .col-trigger-chip.path {
+        background: rgba(45, 212, 191, 0.08);
+        border-color: rgba(45, 212, 191, 0.3);
+      }
       .col-row-content {
         font-size: 0.78rem;
         color: var(--muted);
@@ -5008,6 +5012,16 @@
         font-size: 0.75rem;
         color: var(--muted);
         max-width: 72ch;
+      }
+      .col-rule-num {
+        width: 4.2em;
+        margin: 0 2px;
+        padding: 1px 4px;
+        font: inherit;
+        color: var(--text);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
       }
       .col-rule-impact {
         flex-shrink: 0;
@@ -14359,12 +14373,29 @@
       function saveCondenseEntities(on) {
         localStorage.setItem("cm-condense-entities", on ? "1" : "0")
       }
+      // Dialog button context — see _contextTrigger. On unless "0"; the cap is
+      // how many Entities context may add to one row. 30 is what 95% of the
+      // Article rows already exported stay within, so a Dialog row comes out no
+      // bigger than a large ordinary Article; on the 2026-08-15 export it keeps
+      // 78% of the phrasings that lead in fully recognised (3 kept 14%).
+      const DIALOG_CONTEXT_DEFAULT_CAP = 30
+      const DIALOG_CONTEXT_MAX_STEPS = 3
+      const DIALOG_CONTEXT_SHARED = 10
+      function loadDialogContext() {
+        return localStorage.getItem("cm-dialog-context") !== "0"
+      }
+      function loadDialogContextCap() {
+        const n = parseInt(localStorage.getItem("cm-dialog-context-cap"), 10)
+        return n >= 1 && n <= 200 ? n : DIALOG_CONTEXT_DEFAULT_CAP
+      }
       let collectionSelectMode = false
       let collectionSelection = new Set() // keys: "article:<Id>" | "dialog:<id>"
       let cmCollections = loadCollections()
       let cmExportFilters = loadExportFilters()
       let cmExportKeepUnreachable = loadKeepUnreachable()
       let cmCondenseEntities = loadCondenseEntities()
+      let cmDialogContext = loadDialogContext()
+      let cmDialogContextCap = loadDialogContextCap()
       // Collections modal (master/detail) view state. `_colView` is a collection
       // id, or COL_FILTERS_VIEW for the global Smart Filters pane — one place a
       // collection is chosen, so the detail tabs never ask again.
@@ -17902,9 +17933,11 @@
       let _colRouteIndexCache = null // dialogId -> [{ article, nodeId }]
       const _colItemRowsCache = new Map() // item key -> raw (pre-filter) rows
       const _colBuildCache = new Map() // collection id -> { sig, result }
+      let _colSharedContentCache = null // Set of shared reply contents
 
       function invalidateCollectionCaches() {
         _colRouteIndexCache = null
+        _colSharedContentCache = null
         _colItemRowsCache.clear()
         _colBuildCache.clear()
       }
@@ -18096,6 +18129,175 @@
           : phrases
       }
 
+      // The trigger of a merged row that a Dialog button leads to, when Dialog
+      // button context is on: the Entities of every Article that leads there,
+      // then each run of buttons as its own `→ Tickets` line. Without it such a
+      // row is triggered by the button alone — `Tickets`, `Ja, graag` — and the
+      // question that led into the Dialog is nowhere in it.
+      //
+      // Returns `{ text, capped }`, or null when the row keeps today's trigger:
+      // no way in from an Article, or the setting is off.
+      //
+      // - The row's own Article phrases (an Article routing straight in, or the
+      //   Article's own row merged with it) are always kept: context only adds.
+      // - Context terms are ranked — Entities found in the Response first (the
+      //   topic that tells sibling rows apart: ABONNEMENT, OVERNACHTING), then
+      //   the other Entities by how many phrases use them, then leftover words —
+      //   and cut to fit `cmDialogContextCap`. Ranking by the Response costs no
+      //   recognition at any cap; the Entities *not* in the Response are the
+      //   user's own words for it, which is why the cap is not lower.
+      // - A button phrase that ends no path stays a plain phrase, as today.
+      function _contextTrigger(m) {
+        if (!cmDialogContext || !m.ways || !m.ways.length) return null
+        const own = m.phrases.filter((p) => !m.buttons.has(p))
+        const fromWays = []
+        const seenArt = new Set()
+        const paths = []
+        const lastSteps = new Set()
+        for (const w of m.ways) {
+          if (!seenArt.has(w.article)) {
+            seenArt.add(w.article)
+            for (const q of w.article.Questions || []) {
+              const t = (q.Text || "").trim()
+              if (t) fromWays.push(t)
+            }
+          }
+          paths.push(w.steps)
+          for (const p of w.steps[w.steps.length - 1]) lastSteps.add(p)
+        }
+        const keyOf = (t) =>
+          t.entity ? "e:" + t.entity.name.toUpperCase() : "w:" + t.text.toLowerCase()
+        const terms = (phrases) =>
+          cmCondenseEntities
+            ? condenseEntityPhrases(phrases)
+            : [...new Set(phrases)].map((p) => ({ text: p, entity: null, from: 1 }))
+        const ownKeys = new Set(terms(own).map(keyOf))
+        const grams = _textGrams(m.content)
+        const ranked = terms([...own, ...fromWays])
+          .map((t, i) => ({
+            t,
+            i,
+            own: ownKeys.has(keyOf(t)),
+            inResponse: !!t.entity && _entityInGrams(t.entity, grams),
+          }))
+          .sort(
+            (a, b) =>
+              b.inResponse - a.inResponse ||
+              !!b.t.entity - !!a.t.entity ||
+              b.t.from - a.t.from ||
+              a.i - b.i,
+          )
+        let room = Math.max(0, cmDialogContextCap - ownKeys.size)
+        let capped = false
+        const kept = ranked.filter((r) => {
+          if (r.own) return true
+          if (room > 0) {
+            room--
+            return true
+          }
+          capped = true
+          return false
+        })
+        const plain = [...m.buttons].filter((p) => !lastSteps.has(p))
+        return {
+          text: [
+            ...kept.map((r) => r.t.text),
+            ..._compactPaths(paths),
+            ...plain,
+          ].join(" | "),
+          capped,
+        }
+      }
+
+      // Button paths as `→ A → B` lines, each button's phrases written in full
+      // the first time it appears in the row and by its first phrase after that.
+      // Routes into a node often share their last buttons, and repeating them
+      // made those buttons outweigh the question in a retrieval index: the
+      // Monorail reply carried `Monorail / Volk van Laaf` eight times. On the
+      // 2026-08-15 export this shortens 230 rows and drops no word. Identical
+      // routes collapse first, so one route can never be written two ways.
+      function _compactPaths(paths) {
+        const seenRoutes = new Set()
+        const seenSteps = new Set()
+        const out = []
+        for (const steps of paths) {
+          const route = steps.map((s) => s.join(" / "))
+          const key = route.join(" → ")
+          if (seenRoutes.has(key)) continue
+          seenRoutes.add(key)
+          out.push(
+            "→ " +
+              route
+                .map((step, i) => {
+                  if (!seenSteps.has(step)) {
+                    seenSteps.add(step)
+                    return step
+                  }
+                  return steps[i][0]
+                })
+                .join(" → "),
+          )
+        }
+        // Two different buttons can share a first phrase ("Ja, graag"), so two
+        // routes can compact to the same line.
+        return [...new Set(out)]
+      }
+
+      // `text` as lower-cased words: a Set of them, and the words joined by single
+      // spaces and padded, so a multi-word Entity word is one substring check.
+      function _textGrams(text) {
+        const toks = (text || "")
+          .toLowerCase()
+          .split(/[^\p{L}\p{N}]+/u)
+          .filter(Boolean)
+        return { words: new Set(toks), hay: " " + toks.join(" ") + " " }
+      }
+      // An Entity's words, normalised the way _textGrams splits text — once per
+      // Entity: an Entity can have hundreds of words, and every context row asks.
+      const _entityGramWords = new WeakMap()
+      function _entityInGrams(entity, grams) {
+        let words = _entityGramWords.get(entity)
+        if (!words) {
+          words = []
+          for (const w of entity.words || []) {
+            const toks = (w.text || "")
+              .toLowerCase()
+              .split(/[^\p{L}\p{N}]+/u)
+              .filter(Boolean)
+            const g = toks.join(" ")
+            if (g.length >= 3) words.push({ first: toks[0], g: " " + g + " " })
+          }
+          _entityGramWords.set(entity, words)
+        }
+        // The first word is a cheap Set lookup; only then scan the text.
+        return words.some(
+          (w) => grams.words.has(w.first) && grams.hay.includes(w.g),
+        )
+      }
+
+      // Responses reachable from DIALOG_CONTEXT_SHARED or more Dialogs of the
+      // loaded export — escalation and "anything else?" replies. They keep their
+      // buttons only: one of them is reached from 448 Dialogs, and with context
+      // it would carry hundreds of path lines. Counted over the whole export, not
+      // the collection, since "shared" is a property of the reply. Built once.
+      function _dialogContentIsShared(content) {
+        if (!_colSharedContentCache) {
+          const count = new Map()
+          for (const id of dialogMap.keys()) {
+            const seen = new Set()
+            for (const r of _itemExportRows("dialog:" + id)) {
+              if (seen.has(r.content)) continue
+              seen.add(r.content)
+              count.set(r.content, (count.get(r.content) || 0) + 1)
+            }
+          }
+          _colSharedContentCache = new Set(
+            [...count].filter(([, n]) => n >= DIALOG_CONTEXT_SHARED).map(([c]) => c),
+          )
+        }
+        return _colSharedContentCache.has(content)
+      }
+
       // Every candidate row for one article, NOT yet filtered. Unreachable rows
       // (non-default with no real context) are *tagged*, not dropped, so the
       // reachability rule can be reported and switched off downstream instead of
@@ -18105,9 +18307,18 @@
         const entityPhrases = (art.Questions || [])
           .map((q) => (q.Text || "").trim())
           .filter(Boolean)
-        if (!entityPhrases.length) return out
+        _pushArticleAnswerRows(out, art, entityPhrases, false)
+        return out
+      }
+
+      // One row per Answer of `art`, triggered by `phrases`. Shared by the
+      // Article's own rows and by a Dialog node that shows this Article
+      // (`output.kbaIdReference`), where the phrases are the Dialog's and
+      // `routeUnreachable` is the reachability of the route into that node.
+      function _pushArticleAnswerRows(out, art, phrases, routeUnreachable) {
+        if (!phrases.length) return
         const answers = (art.Outputs || []).filter((o) => o.Type === "Answer")
-        if (!answers.length) return out // routing article — no direct content
+        if (!answers.length) return // routing article — no direct content
         const def = defaultArticleAnswer(art)
         for (const o of answers) {
           const content = stripDisplay(o.Text, o.Links)
@@ -18118,14 +18329,15 @@
               true,
             )
             out.push({
-              phrases: entityPhrases,
+              phrases,
               content,
               ctxText,
-              unreachable: o !== def && !articleAnswerHasContext(o),
+              unreachable:
+                !!routeUnreachable ||
+                (o !== def && !articleAnswerHasContext(o)),
             })
           }
         }
-        return out
       }
 
       // Articles whose Questions route directly into a dialog via a reachable
@@ -18138,6 +18350,9 @@
       // Dialogs re-walked every Article and every one of its Outputs a few hundred
       // times — per render, and the Collections modal renders it several times over.
       // Insertion order still follows articleMap, so the emitted rows are unchanged.
+      //
+      // `DialogStartNodeId` is an *entry point* id, resolved to a node through the
+      // Dialog's `entryPoints` — see _dialogEntryNodeId.
       function _colRouteIndex() {
         if (_colRouteIndexCache) return _colRouteIndexCache
         const idx = new Map()
@@ -18175,7 +18390,10 @@
               // survive so the rule stays reportable and switchable.
               arr.push({
                 article: art,
-                nodeId: o.DialogStartNodeId,
+                nodeId: _dialogEntryNodeId(
+                  dialogMap.get(dialogId),
+                  o.DialogStartNodeId,
+                ),
                 unreachable: o !== def && !articleAnswerHasContext(o),
               })
             }
@@ -18188,6 +18406,19 @@
         return _colRouteIndex().get(dialogId) || []
       }
 
+      // The node a Dialog Link enters on. An Article's `DialogStartNodeId` (and a
+      // node's `entryPointId`) names one of the Dialog's `entryPoints`, which maps
+      // it to a node. Older Dialogs happen to use the node's own id for the entry
+      // point, which is why reading it as a node id worked for some routes: on
+      // the 2026-08-15 export it found 637 of 1562 and dropped the other 925 in
+      // silence. A Dialog without `entryPoints` keeps the old reading.
+      function _dialogEntryNodeId(dialog, entryId) {
+        const ep = ((dialog && dialog.entryPoints) || []).find(
+          (e) => e.id === entryId,
+        )
+        return ep ? ep.nodeId : entryId
+      }
+
       // Every candidate row for one dialog: triggers come from (a) every
       // non-fallback Recognition link within the dialog, and (b) every referencing
       // Article's Questions routing directly into a node via DialogStart.
@@ -18195,49 +18426,44 @@
       function _dialogExportRows(dialog) {
         const out = []
         const nodes = dialog.nodes || []
-        const nodeMap = new Map(nodes.map((n) => [n.id, n])) // local per-dialog map
 
         // `routeUnreachable` propagates: a reachable response behind an
         // unreachable route is still not something a user can get to.
-        const emitAnswers = (phrases, targetNode, routeUnreachable) => {
-          if (!phrases.length || !targetNode) return
-          const items = (targetNode.output && targetNode.output.items) || []
-          const answerItems = items.filter((i) => i.type === "Answer")
-          if (!answerItems.length) return
-          const def = defaultDialogAnswerItem(items)
-          for (const item of answerItems) {
-            const content = stripDisplay(
-              (item.data && item.data.text) || "",
-              (item.data && item.data.hyperlinks) || [],
-            )
-            if (content) {
-              const ctxText = _rowContextText(
-                item.contextVariables || [],
-                (item.metadata && item.metadata.escalationGroup) || null,
-                false,
-              )
-              out.push({
-                phrases,
-                content,
-                ctxText,
-                unreachable:
-                  !!routeUnreachable ||
-                  (item !== def && !dialogAnswerHasContext(item)),
-              })
-            }
+        //
+        // A trigger answers with whatever the user is shown, so the target is
+        // the node it lands on once GoTo jumps are followed, and a node that
+        // shows an Article (`kbaIdReference`) answers with that Article's
+        // Responses. Reading only the linked node's own Answers lost both: on
+        // the 2026-08-15 export 2240 links went through a GoTo and 3088 landed
+        // on an Article reference, against 2621 that were exported.
+        //
+        // A row reached by a button (`viaButton`) is tagged `button` and carries
+        // the `ways` an Article leads to it — see _dialogWaysIn. Both are read
+        // only when the trigger is written, by _contextTrigger.
+        const waysIn = _dialogWaysIn(dialog)
+        const emitAnswers = (phrases, targetId, routeUnreachable, viaButton) => {
+          if (!phrases.length) return
+          const targetNode = _nodeLandsOn(dialog, targetId)
+          if (!targetNode) return
+          const first = out.length
+          if (nodeIsRef(targetNode)) {
+            const art = articleMap.get(targetNode.output.kbaIdReference)
+            if (art) _pushArticleAnswerRows(out, art, phrases, routeUnreachable)
+          } else {
+            _pushNodeAnswerRows(out, targetNode, phrases, routeUnreachable)
+          }
+          if (!viaButton) return
+          const ways = waysIn.get(targetNode.id) || null
+          for (let i = first; i < out.length; i++) {
+            out[i].button = true
+            out[i].ways = ways
           }
         }
 
         for (const node of nodes) {
           for (const link of node.links || []) {
-            const cond = link.condition
-            if (!cond || cond.type !== "Recognition") continue
-            const data = cond.data || {}
-            if (data.isFallback) continue
-            const phrases = (data.questions || [])
-              .map((q) => (q.text || "").trim())
-              .filter(Boolean)
-            emitAnswers(phrases, nodeMap.get(link.childNodeId), false)
+            const phrases = _recognitionPhrases(link)
+            if (phrases) emitAnswers(phrases, link.childNodeId, false, true)
           }
         }
 
@@ -18245,10 +18471,93 @@
           const phrases = (route.article.Questions || [])
             .map((q) => (q.Text || "").trim())
             .filter(Boolean)
-          emitAnswers(phrases, nodeMap.get(route.nodeId), route.unreachable)
+          emitAnswers(phrases, route.nodeId, route.unreachable, false)
         }
 
         return out
+      }
+
+      // The phrases of a button: a non-fallback Recognition link. null for any
+      // other link (GoTo, fallback, a condition) — those are not something a
+      // user types or taps.
+      function _recognitionPhrases(link) {
+        const cond = link.condition
+        if (!cond || cond.type !== "Recognition") return null
+        const data = cond.data || {}
+        if (data.isFallback) return null
+        const phrases = (data.questions || [])
+          .map((q) => (q.text || "").trim())
+          .filter(Boolean)
+        return phrases.length ? phrases : null
+      }
+
+      // How users get to a node by buttons: for every reachable Article route
+      // into the Dialog, the shortest run of buttons from its entry node, at most
+      // DIALOG_CONTEXT_MAX_STEPS long. `node id -> [{ article, steps }]`, where a
+      // step is one button's phrases. Shortest-only and capped on purpose:
+      // following every path through the 2026-08-15 export produced 158,000
+      // three-step paths, nearly all of them round escalation loops.
+      function _dialogWaysIn(dialog) {
+        const byNode = new Map()
+        for (const route of _articlesRoutingIntoDialog(dialog.id)) {
+          if (route.unreachable) continue
+          const start = _nodeLandsOn(dialog, route.nodeId)
+          if (!start) continue
+          const seen = new Set([start.id])
+          let frontier = [{ node: start, steps: [] }]
+          for (
+            let depth = 0;
+            depth < DIALOG_CONTEXT_MAX_STEPS && frontier.length;
+            depth++
+          ) {
+            const next = []
+            for (const { node, steps } of frontier) {
+              for (const link of node.links || []) {
+                const phrases = _recognitionPhrases(link)
+                if (!phrases) continue
+                const to = _nodeLandsOn(dialog, link.childNodeId)
+                if (!to || seen.has(to.id)) continue
+                seen.add(to.id)
+                const way = { article: route.article, steps: [...steps, phrases] }
+                let list = byNode.get(to.id)
+                if (!list) byNode.set(to.id, (list = []))
+                list.push(way)
+                next.push({ node: to, steps: way.steps })
+              }
+            }
+            frontier = next
+          }
+        }
+        return byNode
+      }
+
+      // One row per Answer item on a Dialog node, triggered by `phrases`.
+      function _pushNodeAnswerRows(out, targetNode, phrases, routeUnreachable) {
+        const items = (targetNode.output && targetNode.output.items) || []
+        const answerItems = items.filter((i) => i.type === "Answer")
+        if (!answerItems.length) return
+        const def = defaultDialogAnswerItem(items)
+        for (const item of answerItems) {
+          const content = stripDisplay(
+            (item.data && item.data.text) || "",
+            (item.data && item.data.hyperlinks) || [],
+          )
+          if (content) {
+            const ctxText = _rowContextText(
+              item.contextVariables || [],
+              (item.metadata && item.metadata.escalationGroup) || null,
+              false,
+            )
+            out.push({
+              phrases,
+              content,
+              ctxText,
+              unreachable:
+                !!routeUnreachable ||
+                (item !== def && !dialogAnswerHasContext(item)),
+            })
+          }
+        }
       }
 
       // Combines rows with byte-identical content into one row, unioning their
@@ -18257,20 +18566,31 @@
       // phrases down with it just because they happened to share content.
       function _mergeRowsByContent(rows) {
         const order = []
-        const phrasesByContent = new Map()
+        const byContent = new Map()
         for (const r of rows) {
-          let set = phrasesByContent.get(r.content)
-          if (!set) {
-            set = new Set()
-            phrasesByContent.set(r.content, set)
+          let m = byContent.get(r.content)
+          if (!m) {
+            m = { phrases: new Set(), buttons: new Set(), own: new Set(), ways: [] }
+            byContent.set(r.content, m)
             order.push(r.content)
           }
-          for (const p of r.phrases) set.add(p)
+          for (const p of r.phrases) {
+            m.phrases.add(p)
+            ;(r.button ? m.buttons : m.own).add(p)
+          }
+          if (r.ways) m.ways.push(...r.ways)
         }
-        return order.map((content) => ({
-          phrases: [...phrasesByContent.get(content)],
-          content,
-        }))
+        // `buttons` are the phrases only a button contributed; a phrase that an
+        // Article also brought is an Article phrase. `ways` feed _contextTrigger.
+        return order.map((content) => {
+          const m = byContent.get(content)
+          return {
+            phrases: [...m.phrases],
+            buttons: new Set([...m.buttons].filter((p) => !m.own.has(p))),
+            ways: m.ways,
+            content,
+          }
+        })
       }
 
       // Raw (reachability-filtered, pre-exclusion) rows for one collection item.
@@ -18340,6 +18660,8 @@
           ]),
           cmExportKeepUnreachable,
           cmCondenseEntities,
+          cmDialogContext,
+          cmDialogContextCap,
           collection.itemKeys || [],
           collection.excludedItemKeys || [],
           collection.excludedContent || [],
@@ -18465,13 +18787,27 @@
                 })
               }
             }
-            survivors.push(row)
+            // A shared reply keeps its buttons only — _dialogContentIsShared.
+            survivors.push(
+              row.ways && cmDialogContext && _dialogContentIsShared(r.content)
+                ? { ...row, ways: null }
+                : row,
+            )
           }
         }
-        const rows = _mergeRowsByContent(survivors).map((r) => ({
-          trigger: _rowTrigger(r.phrases),
-          content: r.content,
-        }))
+        let contextRows = 0
+        let contextCapped = 0
+        const rows = _mergeRowsByContent(survivors).map((r) => {
+          const ctx = _contextTrigger(r)
+          if (ctx) {
+            contextRows++
+            if (ctx.capped) contextCapped++
+          }
+          return {
+            trigger: ctx ? ctx.text : _rowTrigger(r.phrases),
+            content: r.content,
+          }
+        })
         return {
           rows,
           excludedRows,
@@ -18484,6 +18820,10 @@
           unreachableCount,
           manualCount,
           totalCandidates,
+          // Rows whose trigger got Dialog button context, and how many of those
+          // the cap shortened — for the rule row's impact readout.
+          contextRows,
+          contextCapped,
         }
       }
 
@@ -22767,7 +23107,13 @@
         const chips = r.trigger
           .split(" | ")
           .filter((p) => p)
-          .map((p) => '<span class="col-trigger-chip">' + hl(p, q) + "</span>")
+          .map((p) =>
+            p.startsWith("→ ")
+              ? '<span class="col-trigger-chip path">→ ' +
+                hl(p.slice(2), q) +
+                "</span>"
+              : '<span class="col-trigger-chip">' + hl(p, q) + "</span>",
+          )
           .join("")
         return (
           '<div class="col-row' +
@@ -23303,11 +23649,15 @@
         let cut = 0
         let touched = 0
         let unreachable = 0
+        let contextRows = 0
+        let contextCapped = 0
         for (const c of cmCollections) {
           const st = buildCollectionExportRows(c)
           removed += st.excludedCount
           cut += st.cutCount
           unreachable += st.unreachableCount
+          contextRows += st.contextRows
+          contextCapped += st.contextCapped
           if (st.excludedCount || st.cutCount) touched++
         }
         const head =
@@ -23351,7 +23701,8 @@
               : _colPlural(unreachable, "row") + " dropped"
             : "No rows affected") +
           "</span></div>" +
-          _condenseRuleRowHtml()
+          _condenseRuleRowHtml() +
+          _dialogContextRuleRowHtml(contextRows, contextCapped)
         const note =
           '<div class="col-note">Below that, a row is dropped when any enabled pattern matches it. ' +
           "<b>Entity</b> tests each trigger phrase, <b>Content</b> tests the response text, and <b>Context</b> tests a flattened " +
@@ -23484,6 +23835,50 @@
         _rerenderActiveContentTab()
         if (document.getElementById("collectionsModal")?.classList.contains("open"))
           renderCollectionsModal()
+      }
+      // Dialog button context, as a rule row. The cap is a number rather than a
+      // fixed rule because the right size depends on how the knowledge tool
+      // indexes a row, which this app cannot see — the impact readout is there
+      // so it can be set by looking, after trying real questions.
+      function _dialogContextRuleRowHtml(rows, capped) {
+        return (
+          '<div class="col-rule-row">' +
+          '<div class="col-rule-main"><input type="checkbox" id="dialogContextToggle" ' +
+          (cmDialogContext ? "checked" : "") +
+          ' onchange="setDialogContext(this.checked)" />' +
+          '<span><label for="dialogContextToggle"><b>Give Dialog buttons the question that led to them</b></label>' +
+          '<span class="col-rule-desc">A response reached by tapping a button inside a Dialog is otherwise triggered by the button alone (<code>Tickets</code>). ' +
+          "With this on, its trigger also carries the Entities of the Articles that lead into the Dialog, then the buttons tapped: " +
+          "<code>DUBBEL | BETALEN | AFSCHRIJVEN | → Tickets</code>. Entities found in the response come first. " +
+          'At most <input type="number" class="col-rule-num" min="1" max="200" value="' +
+          cmDialogContextCap +
+          '" onchange="setDialogContextCap(this.value)"' +
+          (cmDialogContext ? "" : " disabled") +
+          " /> Entities are added per row. Responses reached from " +
+          DIALOG_CONTEXT_SHARED +
+          " or more Dialogs keep their buttons only.</span></span></div>" +
+          '<span class="col-rule-impact">' +
+          (!cmDialogContext
+            ? "Off"
+            : rows
+              ? _colPlural(rows, "row") +
+                " with context" +
+                (capped ? " · " + capped + " shortened" : "")
+              : "No rows affected") +
+          "</span></div>"
+        )
+      }
+      function setDialogContext(on) {
+        cmDialogContext = !!on
+        localStorage.setItem("cm-dialog-context", on ? "1" : "0")
+        renderCollectionsModal()
+      }
+      function setDialogContextCap(v) {
+        const n = parseInt(v, 10)
+        cmDialogContextCap =
+          n >= 1 && n <= 200 ? n : DIALOG_CONTEXT_DEFAULT_CAP
+        localStorage.setItem("cm-dialog-context-cap", String(cmDialogContextCap))
+        renderCollectionsModal()
       }
       function toggleExportFilterField(id, field) {
         const f = cmExportFilters.find((x) => x.id === id)
@@ -23985,6 +24380,8 @@
         { key: "cm-export-filters" },
         { key: "cm-export-keep-unreachable" },
         { key: "cm-condense-entities" },
+        { key: "cm-dialog-context" },
+        { key: "cm-dialog-context-cap" },
         { key: "chat-copy-format" },
         { key: "conv-low-recog-threshold" },
         { key: "cm-metadata-hidden" },
