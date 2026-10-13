@@ -3,7 +3,7 @@ const vm = require("vm")
 
 const NAMES = [
   "_parseCollectionItemKey","_ctxAdd","_rowContextText","_prepareExclusionPatterns","_rowMatchingPatterns",
-  "_articleExportRows","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
+  "_articleExportRows","_pushArticleAnswerRows","_dialogEntryNodeId","_nodeLandsOn","nodeIsRef","_recognitionPhrases","_dialogWaysIn","_pushNodeAnswerRows","_contextTrigger","_textGrams","_entityInGrams","_dialogContentIsShared","_colRouteIndex","_articlesRoutingIntoDialog","_dialogExportRows",
   "_mergeRowsByContent","_itemExportRows","_itemExportRowCount","_colBuildSignature","_colExcludedItems","_colExcludedContent","_colDisabledFilters","_colEffectivePatterns",
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
   "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
@@ -25,6 +25,11 @@ vm.runInContext(`
   const MANUAL_ROW_REASON = "Removed by hand"
   const MANUAL_ITEM_REASON = "Removed by hand: whole item"
   let _colRouteIndexCache = null
+  const _dialogNodesById = new WeakMap()
+  let _colSharedContentCache = null
+  const _entityGramWords = new WeakMap()
+  let cmDialogContext = true, cmDialogContextCap = 30
+  const DIALOG_CONTEXT_DEFAULT_CAP = 30, DIALOG_CONTEXT_MAX_STEPS = 3, DIALOG_CONTEXT_SHARED = 10
   const _colItemRowsCache = new Map()
   const _colBuildCache = new Map()
   // Not under test here: collapse HTML to its text, which is all the row needs.
@@ -33,6 +38,13 @@ vm.runInContext(`
   function setData(a, d, c) { articleMap = a; dialogMap = d; ctxVarMap = c; invalidateCollectionCaches() }
   function setFilters(f) { cmExportFilters = f }
   function setKeep(k) { cmExportKeepUnreachable = k; invalidateCollectionCaches() }
+  function setContext(on, cap) { cmDialogContext = on; cmDialogContextCap = cap || 30 }
+  function setEntities(list) {
+    entityMap = new Map(list.map((e) => [e.name.toUpperCase(), e]))
+    entityWordMap = new Map()
+    for (const e of list) for (const w of e.words) entityWordMap.set(w.text.toLowerCase(), e)
+    _condenseCache = new Map(); _entityWordMaxTokens = 0; invalidateCollectionCaches()
+  }
   function getFilterCount() { return cmExportFilters.length }
   function articleById(id) { return articleMap.get(id) }
 `, ctx)
@@ -265,6 +277,161 @@ ok("no dialog Answer is default when the default item is not an Answer",
      { type: "DialogStart", isDefault: true },
      { type: "Answer", data: { text: "x" } },
    ]) === null)
+
+out.push("")
+out.push("Dialog Links enter through entryPoints; GoTo and Article references are followed:")
+// Real shape of Dialog 6401: the Article's DialogStartNodeId 13580 is an entry
+// point id, mapped to node 2. Node 3 is there to catch a lookup that still
+// reads the entry id as a node id: here entry 3 maps to node 5, not node 3.
+ctx.setData(
+  new Map([
+    [10, { Id: 10, Questions: [{ Text: "zwembad openingstijden" }], Outputs: [
+      { Type: "DialogStart", DialogId: 6401, DialogStartNodeId: 13580, IsDefault: true },
+    ] }],
+    [11, { Id: 11, Questions: [{ Text: "badhuys" }], Outputs: [
+      { Type: "DialogStart", DialogId: 6401, DialogStartNodeId: 3, IsDefault: true },
+    ] }],
+    [12, { Id: 12, Questions: [{ Text: "zwemkleding" }], Outputs: [
+      { Type: "Answer", Text: "REFERENCED-DEFAULT", IsDefault: true },
+      { Type: "Answer", Text: "REFERENCED-NOCTX" },
+    ] }],
+  ]),
+  new Map([[6401, { id: 6401, name: "Badhuys", entryPoints: [{ id: 13580, nodeId: 2 }, { id: 3, nodeId: 5 }], nodes: [
+    { id: 2, type: "Recognition", output: { items: [{ type: "Answer", data: { text: "ENTRY-NODE" }, isDefault: true }] },
+      links: [
+        { childNodeId: 6, condition: { type: "Recognition", data: { questions: [{ text: "Tickets" }] } } },
+        { childNodeId: 8, condition: { type: "Recognition", data: { questions: [{ text: "Kleding" }] } } },
+        { childNodeId: 9, condition: { type: "Recognition", data: { questions: [{ text: "Via goto" }] } } },
+      ] },
+    { id: 3, type: "Output", output: { items: [{ type: "Answer", data: { text: "WRONG-NODE" }, isDefault: true }] } },
+    { id: 5, type: "Output", output: { items: [{ type: "Answer", data: { text: "SECOND-ENTRY" }, isDefault: true }] } },
+    { id: 6, type: "GoTo", links: [{ childNodeId: 7, condition: { type: "GoTo" } }] },
+    { id: 7, type: "Output", output: { items: [{ type: "Answer", data: { text: "BEHIND-GOTO" }, isDefault: true }] } },
+    { id: 8, type: "Output", output: { kbaIdReference: 12, items: [] } },
+    { id: 9, type: "GoTo", links: [{ childNodeId: 8, condition: { type: "GoTo" } }] },
+  ] }]]),
+  new Map(),
+)
+ctx.setFilters([]); ctx.setKeep(false)
+// These pin *which* responses are exported; the trigger context is tested below.
+ctx.setContext(false)
+const ep = ctx.buildCollectionExportRows({ id: "ep", itemKeys: ["dialog:6401"] })
+ctx.setContext(true)
+const epRow = (s) => ep.rows.find((r) => r.content.includes(s))
+ok("an entry point id is resolved to its node", !!epRow("ENTRY-NODE") && epRow("ENTRY-NODE").trigger.includes("zwembad openingstijden"))
+ok("an entry id that is also some node's id still goes through entryPoints",
+   !epRow("WRONG-NODE") && !!epRow("SECOND-ENTRY") && epRow("SECOND-ENTRY").trigger.includes("badhuys"))
+ok("a Dialog without entryPoints keeps reading it as a node id",
+   ctx._dialogEntryNodeId({ nodes: [] }, 100) === 100 && ctx._dialogEntryNodeId(null, 100) === 100)
+ok("a link through a GoTo exports the node it lands on", !!epRow("BEHIND-GOTO") && epRow("BEHIND-GOTO").trigger === "Tickets")
+ok("a link onto an Article reference exports that Article's Response",
+   !!epRow("REFERENCED-DEFAULT") && epRow("REFERENCED-DEFAULT").trigger.split(" | ").sort().join(",") === "Kleding,Via goto")
+ok("...the referenced Article's reachability rule still applies", !epRow("REFERENCED-NOCTX") && ep.unreachableCount === 2)
+ok("the Article's own row is unchanged", ctx._itemExportRows("article:12").length === 2)
+
+
+out.push("")
+out.push("Dialog button context: a button-reached response carries the question that led in:")
+// Modelled on "Afgeschreven/dubbel betaald": the Article leads into a question
+// node, the information sits one button further.
+ctx.setEntities([
+  { name: "DUBBEL", words: [{ text: "dubbel" }] },
+  { name: "BETALEN", words: [{ text: "betaald" }, { text: "betalen" }] },
+  { name: "AFSCHRIJVEN", words: [{ text: "afgeschreven" }] },
+  { name: "TICKET", words: [{ text: "ticket" }] },
+])
+const btn = (text, to) => ({ childNodeId: to, condition: { type: "Recognition", data: { questions: [{ text }] } } })
+const ans = (text) => ({ items: [{ type: "Answer", data: { text }, isDefault: true }] })
+const dubbelDialog = (extraArticles) => ctx.setData(
+  new Map([
+    [20, { Id: 20, Questions: [{ Text: "dubbel betaald" }, { Text: "dubbel afgeschreven" }, { Text: "twee keer betaald" }], Outputs: [
+      { Type: "DialogStart", DialogId: 70, DialogStartNodeId: 900, IsDefault: true },
+    ] }],
+    ...(extraArticles || []),
+  ]),
+  new Map([[70, { id: 70, name: "Afgeschreven/dubbel betaald", entryPoints: [{ id: 900, nodeId: 1 }, { id: 901, nodeId: 2 }], nodes: [
+    { id: 1, type: "Output", output: ans("ENTRY Waar gaat het om?"), links: [btn("Tickets", 2), btn("Abonnement", 3)] },
+    { id: 2, type: "Output", output: ans("Is het bedrag van je tickets 2 keer afgeschreven?"), links: [btn("Ja, graag", 4)] },
+    { id: 3, type: "Output", output: ans("ABONNEMENT-DUBBEL") },
+    { id: 4, type: "Output", output: ans("COLLEGA") },
+    { id: 6, type: "Output", output: ans("NOBODY-GETS-HERE"), links: [btn("Los", 5)] },
+    { id: 5, type: "Output", output: ans("ORPHAN") },
+  ] }]]),
+  new Map(),
+)
+dubbelDialog()
+ctx.setFilters([]); ctx.setKeep(false); ctx.setContext(true)
+const dd = () => ctx.buildCollectionExportRows({ id: "dd", itemKeys: ["dialog:70"] })
+const trig = (r, s) => r.rows.find((x) => x.content.includes(s)).trigger
+// Today's plain trigger is condensed, which lower-cases a word no Entity claims.
+const plainIs = (t, p) => t.toLowerCase() === p.toLowerCase()
+let cr = dd()
+const t2 = trig(cr, "tickets 2 keer").split(" | ")
+ok("a button-reached response carries the leading Article's Entities", t2.includes("DUBBEL") && t2.includes("BETALEN"))
+ok("...and the button as its own path line, not a bare phrase", t2[t2.length - 1] === "→ Tickets" && !t2.includes("Tickets"))
+ok("an Entity found in the response comes first", t2[0] === "AFSCHRIJVEN")
+ok("leftover words come after every Entity", t2.indexOf("twee") > t2.indexOf("BETALEN") && t2.indexOf("keer") > t2.indexOf("BETALEN"))
+ok("a deeper response carries the whole run of buttons", trig(cr, "COLLEGA").endsWith("→ Tickets → Ja, graag"))
+ok("a response no Article leads to keeps its plain button trigger", plainIs(trig(cr, "ORPHAN"), "Los"))
+ok("the response an Article enters on keeps today's trigger", !trig(cr, "ENTRY").includes("→"))
+ok("the build reports how many rows got context", cr.contextRows === 3 && cr.contextCapped === 0)
+
+ctx.setContext(false)
+ok("with the setting off, the button alone is the trigger again", plainIs(trig(dd(), "tickets 2 keer"), "Tickets"))
+ctx.setContext(true, 2)
+cr = dd()
+ok("the cap limits the context terms, in rank order",
+   trig(cr, "tickets 2 keer") === "AFSCHRIJVEN | DUBBEL | → Tickets" && cr.contextCapped === 3)
+ctx.setContext(true)
+
+ctx.setFilters([{ id: "fe", field: "entity", pattern: "dubbel", enabled: true }])
+ok("an Entity smart filter still tests the button phrases only", dd().rows.some((r) => r.content.includes("tickets 2 keer")))
+ctx.setFilters([])
+
+// An Article routing straight into the same node: its phrases are the row's
+// own, and the cap never removes them.
+dubbelDialog([[21, { Id: 21, Questions: [{ Text: "ticket dubbel betaald" }], Outputs: [
+  { Type: "DialogStart", DialogId: 70, DialogStartNodeId: 901, IsDefault: true },
+] }]])
+ctx.setContext(true, 1)
+const own = trig(dd(), "tickets 2 keer").split(" | ")
+ok("the row's own Article Entities survive any cap", ["TICKET", "DUBBEL", "BETALEN"].every((t) => own.includes(t)))
+ok("...while context beyond the cap is dropped", !own.includes("AFSCHRIJVEN") && own.includes("→ Tickets"))
+ctx.setContext(true)
+
+// A route the reachability rule rejects is not a way in.
+ctx.setData(
+  new Map([[22, { Id: 22, Questions: [{ Text: "dubbel betaald" }], Outputs: [
+    { Type: "Answer", Text: "ART-22", IsDefault: true },
+    { Type: "DialogStart", DialogId: 71, DialogStartNodeId: 1 },
+  ] }]]),
+  new Map([[71, { id: 71, nodes: [
+    { id: 1, output: ans("START"), links: [btn("Tickets", 2)] },
+    { id: 2, output: ans("BEHIND-UNREACHABLE-ROUTE") },
+  ] }]]),
+  new Map(),
+)
+ok("an unreachable route adds no context",
+   plainIs(trig(ctx.buildCollectionExportRows({ id: "ur", itemKeys: ["dialog:71"] }), "BEHIND-UNREACHABLE"), "Tickets"))
+
+// A reply reached from 10 or more Dialogs keeps its buttons only.
+const sharedData = (n) => {
+  const arts = new Map(), dls = new Map()
+  for (let i = 0; i < n; i++) {
+    arts.set(100 + i, { Id: 100 + i, Questions: [{ Text: "onderwerp" + i }], Outputs: [
+      { Type: "DialogStart", DialogId: 200 + i, DialogStartNodeId: 1, IsDefault: true },
+    ] })
+    dls.set(200 + i, { id: 200 + i, nodes: [
+      { id: 1, output: ans("Q" + i), links: [btn("Nee", 2)] },
+      { id: 2, output: ans("SHARED-REPLY") },
+    ] })
+  }
+  ctx.setData(arts, dls, new Map())
+  return ctx.buildCollectionExportRows({ id: "sh" + n, itemKeys: [...dls.keys()].map((id) => "dialog:" + id) })
+}
+ok("a reply reached from 10 Dialogs keeps its buttons only", plainIs(trig(sharedData(10), "SHARED-REPLY"), "Nee"))
+ok("...from 9 it still gets context", trig(sharedData(9), "SHARED-REPLY").includes("→ Nee"))
+ctx.setEntities([])
 
 console.log(out.join("\n"))
 console.log(failed ? "\n" + failed + " FAILED" : "\nAll checks passed")

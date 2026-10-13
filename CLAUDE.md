@@ -677,6 +677,8 @@ Always use these terms in the UI:
 | `cm-insights-segments`     | JSON array of `{kind, name}` (`kind`: `"culture"` \| `"context"` \| `"metadata"`) — which slices the Insights Segments table compares. Read entry by entry, so a hand-edited file cannot introduce an unknown kind or a duplicate row. An empty array is a legitimate state: the Total row alone is still an answer |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"sentence"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export. `"sentence"` cuts only the matching sentence; see `docs/collections.md` |
 | `cm-condense-entities`     | `"0"` to show and export trigger phrases verbatim; anything else, including absent, condenses them into the unique Entities they are made of — Article cards, the Article info modal and the Collections export alike. See `docs/collections.md` → "Condensed triggers" |
+| `cm-dialog-context`        | `"0"` to trigger a response reached by a Dialog button with the button alone; anything else, including absent, adds the Entities of the Articles that lead into the Dialog and the buttons tapped. See `docs/collections.md` → "Dialog button context" |
+| `cm-dialog-context-cap`    | How many Entities that context may add to one row, 1–200; absent or invalid means 30 |
 
 Analytics API credentials are deliberately **not** in localStorage — they live in `app_data_dir()/analytics-api.json`, written by Rust with `0600` perms, so the client secret never reaches the renderer. A settings backup does export them, and still does not break that rule; see `docs/settings-and-updates.md` → "Settings backup".
 
