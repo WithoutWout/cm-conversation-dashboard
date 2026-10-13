@@ -12340,8 +12340,9 @@
               <p class="hint">
                 Shows <code>OVERWINNINGSBANDJE · KOPEN · PRIJS</code> instead of
                 every phrase that combines them. Needs the EntitiesExport CSV;
-                words no Entity claims are kept. The Collections export follows
-                the same setting.
+                words no Entity claims are kept. The Collections export writes
+                its triggers in its own style, set in Collections → Smart
+                filters.
               </p>
             </div>
             <div
@@ -14381,6 +14382,16 @@
       const DIALOG_CONTEXT_DEFAULT_CAP = 30
       const DIALOG_CONTEXT_MAX_STEPS = 3
       const DIALOG_CONTEXT_SHARED = 10
+      // How export triggers are written — see _triggerTerms. A stored value
+      // wins; without one, an install that had switched condensing off (which
+      // used to export every phrase verbatim) keeps exactly that, and everyone
+      // else gets phrases.
+      const TRIGGER_STYLES = ["phrases", "words", "names", "all"]
+      function loadTriggerStyle() {
+        const v = localStorage.getItem("cm-trigger-style")
+        if (TRIGGER_STYLES.includes(v)) return v
+        return localStorage.getItem("cm-condense-entities") === "0" ? "all" : "phrases"
+      }
       function loadDialogContext() {
         return localStorage.getItem("cm-dialog-context") !== "0"
       }
@@ -14394,6 +14405,7 @@
       let cmExportFilters = loadExportFilters()
       let cmExportKeepUnreachable = loadKeepUnreachable()
       let cmCondenseEntities = loadCondenseEntities()
+      let cmTriggerStyle = loadTriggerStyle()
       let cmDialogContext = loadDialogContext()
       let cmDialogContextCap = loadDialogContextCap()
       // Collections modal (master/detail) view state. `_colView` is a collection
@@ -18116,17 +18128,109 @@
         return { text: kept.join(" "), cut }
       }
 
-      // The trigger text a row is exported with: its phrases condensed to the
-      // unique Entities they resolve to when that setting is on, verbatim when
-      // it is off. Smart filters keep testing the verbatim phrases — this is
-      // only what gets written.
+      // The trigger text a row is exported with, written in the trigger style
+      // (`cmTriggerStyle`). Smart filters keep testing the verbatim phrases —
+      // this is only what gets written.
       function _rowTrigger(phrases) {
         return _triggerTexts(phrases).join(" | ")
       }
       function _triggerTexts(phrases) {
-        return cmCondenseEntities
-          ? condenseEntityPhrases(phrases).map((t) => t.text)
-          : phrases
+        return _triggerTerms(phrases).map((t) => t.text)
+      }
+
+      // A row's trigger terms in the current style. Every style returns
+      // `[{ text, keys, holds, entity, entities, from }]`: `keys` are the
+      // Entities and words a term added, `holds` every one it holds (what the
+      // Dialog context cap charges), `entity` / `entities` what it holds of
+      // real Entities (what ranking asks about).
+      // `covered` leaves out what a row already holds — how context adds to a
+      // row's own phrases without repeating them.
+      //
+      // - phrases — the fewest of the phrases that together hold every Entity
+      //   and word: `ticket dubbel betaald | kaart nog een keer afgeschreven`.
+      // - words   — each Entity once, as the phrases write it: `ticket | dubbel`.
+      // - names   — each Entity once, by its CM.com name: `ENTREETICKET | DUBBEL`.
+      // - all     — every phrase verbatim.
+      //
+      // Why phrases is the default: a held-out phrase per Article, searched
+      // against the whole export (2026-08-15, 7432 rows), came back first 47.0%
+      // of the time with phrases, 46.9% with words and 30.5% with names (no
+      // trigger at all: 29.6%) using a multilingual embedding model, and 51.8 /
+      // 48.1 / 42.9% when the Response is searched too; with keyword search
+      // 67.7 / 57.3 / 47.3%. Names barely register with an embedding model —
+      // they are labels, not the words people type.
+      function _triggerTerms(phrases, covered) {
+        const done = covered || new Set()
+        if (cmTriggerStyle === "phrases") return _coverPhrases(phrases, done)
+        const keyOf = (t) =>
+          t.entity
+            ? "e:" + t.entity.name.toUpperCase()
+            : "w:" + t.text.toLowerCase()
+        const terms =
+          cmTriggerStyle === "all"
+            ? [...new Set((phrases || []).map((p) => (p || "").trim()))]
+                .filter(Boolean)
+                .map((p) => ({ text: p, entity: null, from: 1, said: p }))
+            : condenseEntityPhrases(phrases)
+        const out = []
+        for (const t of terms) {
+          const key = cmTriggerStyle === "all" ? "p:" + t.text.toLowerCase() : keyOf(t)
+          if (done.has(key)) continue
+          out.push({
+            text: cmTriggerStyle === "words" && t.entity ? t.said : t.text,
+            keys: [key],
+            holds: [key],
+            entity: t.entity,
+            entities: t.entity ? [t.entity] : [],
+            from: t.from,
+          })
+        }
+        return out
+      }
+
+      // Greedy cover: repeatedly the phrase holding the most Entities and words
+      // not yet held (the shorter on a tie), until every one is held. An
+      // Article's phrases are mostly the same Entities recombined, so a cover
+      // is about half of them (median 7 of 12 on the real export), and each is
+      // still a question as people ask it.
+      function _coverPhrases(phrases, covered) {
+        const done = new Set(covered)
+        const keyOf = (t) =>
+          t.entity ? "e:" + t.entity.name.toUpperCase() : "w:" + t.word.toLowerCase()
+        const cands = [...new Set((phrases || []).map((p) => (p || "").trim()))]
+          .filter(Boolean)
+          .map((p) => {
+            const tags = _phraseEntityTags(p)
+            return {
+              text: p,
+              keys: [...new Set(tags.map(keyOf))],
+              entities: tags.filter((t) => t.entity).map((t) => t.entity),
+            }
+          })
+        const out = []
+        for (;;) {
+          let best = null
+          let bestN = 0
+          for (const c of cands) {
+            let n = 0
+            for (const k of c.keys) if (!done.has(k)) n++
+            if (n > bestN || (n === bestN && n && c.text.length < best.text.length)) {
+              best = c
+              bestN = n
+            }
+          }
+          if (!best) return out
+          const added = best.keys.filter((k) => !done.has(k))
+          for (const k of added) done.add(k)
+          out.push({
+            text: best.text,
+            keys: added,
+            holds: best.keys,
+            entity: null,
+            entities: best.entities,
+            from: added.length,
+          })
+        }
       }
 
       // The trigger of a merged row that a Dialog button leads to, when Dialog
@@ -18165,34 +18269,40 @@
           paths.push(w.steps)
           for (const p of w.steps[w.steps.length - 1]) lastSteps.add(p)
         }
-        const keyOf = (t) =>
-          t.entity ? "e:" + t.entity.name.toUpperCase() : "w:" + t.text.toLowerCase()
-        const terms = (phrases) =>
-          cmCondenseEntities
-            ? condenseEntityPhrases(phrases)
-            : [...new Set(phrases)].map((p) => ({ text: p, entity: null, from: 1 }))
-        const ownKeys = new Set(terms(own).map(keyOf))
+        const ownTerms = _triggerTerms(own)
+        const covered = new Set(ownTerms.flatMap((t) => t.keys))
         const grams = _textGrams(m.content)
-        const ranked = terms([...own, ...fromWays])
-          .map((t, i) => ({
-            t,
+        const ranked = [
+          ...ownTerms.map((t) => ({ t, own: true })),
+          ..._triggerTerms(fromWays, covered).map((t) => ({ t, own: false })),
+        ]
+          .map((r, i) => ({
+            ...r,
             i,
-            own: ownKeys.has(keyOf(t)),
-            inResponse: !!t.entity && _entityInGrams(t.entity, grams),
+            inResponse: r.t.entities.some((e) => _entityInGrams(e, grams)),
           }))
           .sort(
             (a, b) =>
               b.inResponse - a.inResponse ||
-              !!b.t.entity - !!a.t.entity ||
+              !!b.t.entities.length - !!a.t.entities.length ||
               b.t.from - a.t.from ||
               a.i - b.i,
           )
-        let room = Math.max(0, cmDialogContextCap - ownKeys.size)
+        // The cap counts Entities and words in every style. A phrase is
+        // charged for what it adds to what is already kept — asked here, in
+        // rank order, not in the order the cover chose it — so one that does
+        // not fit is skipped, a smaller one after it may still fit, and one
+        // that adds nothing is left out.
+        let room = Math.max(0, cmDialogContextCap - covered.size)
         let capped = false
+        const have = new Set(covered)
         const kept = ranked.filter((r) => {
           if (r.own) return true
-          if (room > 0) {
-            room--
+          const adds = r.t.holds.filter((k) => !have.has(k))
+          if (!adds.length) return false
+          if (adds.length <= room) {
+            room -= adds.length
+            for (const k of adds) have.add(k)
             return true
           }
           capped = true
@@ -18659,7 +18769,7 @@
             p.pattern,
           ]),
           cmExportKeepUnreachable,
-          cmCondenseEntities,
+          cmTriggerStyle,
           cmDialogContext,
           cmDialogContextCap,
           collection.itemKeys || [],
@@ -19325,7 +19435,7 @@
       // Without an EntitiesExport there is nothing to resolve against, and
       // splitting phrases into bare words would be a different feature; the
       // phrases are then only de-duplicated.
-      let _condenseCache = new Map() // phrase → [{ entity } | { word }]
+      let _condenseCache = new Map() // phrase → [{ entity, said } | { word }]
       let _entityWordMaxTokens = 0
       const _CONDENSE_EDGE_PUNCT = /^[,;.!?()"'“”]+|[,;.!?()"'“”]+$/g
 
@@ -19337,8 +19447,10 @@
         let tags = _condenseCache.get(phrase)
         if (tags) return tags
         tags = []
+        // `said` is the words that matched the Entity, as the phrase has them —
+        // what the "User words" trigger style writes instead of its name.
         const whole = _entityAt(phrase.trim().toLowerCase())
-        if (whole) tags.push({ entity: whole })
+        if (whole) tags.push({ entity: whole, said: phrase.trim().toLowerCase() })
         else {
           if (!_entityWordMaxTokens) {
             for (const k of entityWordMap.keys()) {
@@ -19372,7 +19484,11 @@
                 break
               }
             }
-            tags.push(hit ? { entity: hit } : { word: toks[i] })
+            tags.push(
+              hit
+                ? { entity: hit, said: toks.slice(i, i + len).join(" ") }
+                : { word: toks[i] },
+            )
             i += len
           }
         }
@@ -19380,8 +19496,10 @@
         return tags
       }
 
-      // `[{ text, entity, from }]` — `entity` is null for a kept word, `from`
-      // counts the phrases that contributed it. First-seen order.
+      // `[{ text, entity, from, said }]` — `entity` is null for a kept word, `from`
+      // counts the phrases that contributed it, `said` is the form the phrases
+      // use most for it (an Entity's name is a label: ENTREETICKET is "ticket").
+      // First-seen order.
       function condenseEntityPhrases(phrases) {
         const out = []
         const byKey = new Map()
@@ -19403,15 +19521,25 @@
                 text: t.entity ? t.entity.name : t.word,
                 entity: t.entity || null,
                 from: 0,
+                said: null,
+                _said: new Map(),
               }
               byKey.set(key, entry)
               out.push(entry)
             }
+            const said = t.said || t.word
+            entry._said.set(said, (entry._said.get(said) || 0) + 1)
             if (!seenHere.has(key)) {
               seenHere.add(key)
               entry.from++
             }
           }
+        }
+        for (const e of out) {
+          let best = null
+          for (const [w, n] of e._said) if (!best || n > best[1]) best = [w, n]
+          e.said = best ? best[0] : e.text
+          delete e._said
         }
         return out
       }
@@ -23651,6 +23779,7 @@
         let unreachable = 0
         let contextRows = 0
         let contextCapped = 0
+        const triggerLengths = []
         for (const c of cmCollections) {
           const st = buildCollectionExportRows(c)
           removed += st.excludedCount
@@ -23658,6 +23787,7 @@
           unreachable += st.unreachableCount
           contextRows += st.contextRows
           contextCapped += st.contextCapped
+          for (const r of st.rows) triggerLengths.push(r.trigger.length)
           if (st.excludedCount || st.cutCount) touched++
         }
         const head =
@@ -23701,7 +23831,7 @@
               : _colPlural(unreachable, "row") + " dropped"
             : "No rows affected") +
           "</span></div>" +
-          _condenseRuleRowHtml() +
+          _triggerStyleRuleRowHtml(triggerLengths) +
           _dialogContextRuleRowHtml(contextRows, contextCapped)
         const note =
           '<div class="col-note">Below that, a row is dropped when any enabled pattern matches it. ' +
@@ -23801,30 +23931,62 @@
         invalidateCollectionCaches()
         renderCollectionsModal()
       }
-      // The condense setting, as a rule row beside the reachability rule. It is
-      // the same setting as the one in Settings → Content: the export and the
-      // Article cards read one flag, so they can never disagree.
-      function _condenseRuleRowHtml() {
+      // How export triggers are written (_triggerTerms), as a rule row. The
+      // readout is the median trigger across every collection, since length is
+      // what a style trades for recognition.
+      const TRIGGER_STYLE_INFO = {
+        phrases: {
+          label: "Phrases (recommended)",
+          desc: "The Article\u2019s own phrases \u2014 the fewest that together hold every Entity: <code>ticket dubbel betaald | kaart nog een keer afgeschreven</code>. Reads like the questions people ask, which is what a knowledge search matches best.",
+        },
+        words: {
+          label: "User words",
+          desc: "Each Entity once, written the way the phrases write it: <code>ticket | dubbel | betaald | afgeschreven</code>. The shortest triggers.",
+        },
+        names: {
+          label: "Entity names",
+          desc: "Each Entity once, by its name in CM.com: <code>ENTREETICKET | DUBBEL | BETALEN | AFSCHRIJVEN</code>. Names are labels, not words people type, so a knowledge search finds these rows least often.",
+        },
+        all: {
+          label: "Every phrase",
+          desc: "Every phrase exactly as it is in CM.com. The longest triggers.",
+        },
+      }
+      function _triggerStyleRuleRowHtml(lengths) {
         const noEntities = entityWordMap.size === 0
+        const sorted = [...lengths].sort((a, b) => a - b)
+        const median = sorted.length ? sorted[sorted.length >> 1] : 0
         return (
           '<div class="col-rule-row">' +
-          '<label class="col-rule-main"><input type="checkbox" ' +
-          (cmCondenseEntities ? "checked" : "") +
-          ' onchange="setCondenseEntities(this.checked)" />' +
-          "<span><b>Condense triggers into Entities</b>" +
-          '<span class="col-rule-desc">Each trigger is written as the unique Entities its phrases are made of instead of every phrase in full — ' +
-          "<code>overwinningsbandje kopen | overwinningsbandje prijs</code> becomes <code>OVERWINNINGSBANDJE | KOPEN | PRIJS</code>. " +
-          "Words no Entity claims are kept as they are. Also applies to the Article cards.</span></span></label>" +
-          '<span class="col-rule-impact' +
-          (noEntities && cmCondenseEntities ? " warn" : "") +
-          '">' +
-          (noEntities
-            ? "No EntitiesExport loaded — phrases are only de-duplicated"
-            : cmCondenseEntities
-              ? "On"
-              : "Off") +
+          '<div class="col-rule-main"><span><b>Write triggers as</b> ' +
+          '<select class="sort-select" onchange="setTriggerStyle(this.value)">' +
+          TRIGGER_STYLES.map(
+            (k) =>
+              '<option value="' +
+              k +
+              '"' +
+              (k === cmTriggerStyle ? " selected" : "") +
+              ">" +
+              TRIGGER_STYLE_INFO[k].label +
+              "</option>",
+          ).join("") +
+          "</select>" +
+          '<span class="col-rule-desc">' +
+          TRIGGER_STYLE_INFO[cmTriggerStyle].desc +
+          (noEntities && cmTriggerStyle !== "all"
+            ? " No EntitiesExport is loaded, so phrases are read as plain words."
+            : "") +
+          "</span></span></div>" +
+          '<span class="col-rule-impact">' +
+          (sorted.length ? "Median trigger " + median + " characters" : "No rows yet") +
           "</span></div>"
         )
+      }
+      function setTriggerStyle(v) {
+        if (!TRIGGER_STYLES.includes(v)) return
+        cmTriggerStyle = v
+        localStorage.setItem("cm-trigger-style", v)
+        renderCollectionsModal()
       }
       function setCondenseEntities(on) {
         cmCondenseEntities = !!on
@@ -23848,8 +24010,8 @@
           ' onchange="setDialogContext(this.checked)" />' +
           '<span><label for="dialogContextToggle"><b>Give Dialog buttons the question that led to them</b></label>' +
           '<span class="col-rule-desc">A response reached by tapping a button inside a Dialog is otherwise triggered by the button alone (<code>Tickets</code>). ' +
-          "With this on, its trigger also carries the Entities of the Articles that lead into the Dialog, then the buttons tapped: " +
-          "<code>DUBBEL | BETALEN | AFSCHRIJVEN | → Tickets</code>. Entities found in the response come first. " +
+          "With this on, its trigger also carries the Articles that lead into the Dialog, written as set above, then the buttons tapped: " +
+          "<code>dubbel afgeschreven | twee keer betaald | → Tickets</code>. What is found in the response comes first. " +
           'At most <input type="number" class="col-rule-num" min="1" max="200" value="' +
           cmDialogContextCap +
           '" onchange="setDialogContextCap(this.value)"' +
@@ -24380,6 +24542,7 @@
         { key: "cm-export-filters" },
         { key: "cm-export-keep-unreachable" },
         { key: "cm-condense-entities" },
+        { key: "cm-trigger-style" },
         { key: "cm-dialog-context" },
         { key: "cm-dialog-context-cap" },
         { key: "chat-copy-format" },

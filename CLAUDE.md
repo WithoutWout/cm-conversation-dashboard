@@ -593,6 +593,8 @@ The orientation map for the whole window. It says what is on screen and where;
                      with the rows it removes here and an Applied toggle
   detail (Smart filters): live "removing N rows across M collections" summary,
     reachability rule checkbox + its own live impact count,
+    "Write triggers as" (Phrases · User words · Entity names · Every phrase)
+    with the median trigger length, Dialog button context + its cap,
     field selector (Entity/Content/Context) + pattern + regex add row,
     list with Field/Regex/Enabled toggles
   empty state: what a collection is, and the three steps to make one
@@ -676,7 +678,8 @@ Always use these terms in the UI:
 | `cm-insights-segment-utc-days` | `"1"` to read the Segments table's date range as UTC days, as CM.com's dashboards do, while the rest of the app stays in the display timezone; anything else, including absent, uses the display timezone. See `docs/insights.md` → "UTC days" |
 | `cm-insights-segments`     | JSON array of `{kind, name}` (`kind`: `"culture"` \| `"context"` \| `"metadata"`) — which slices the Insights Segments table compares. Read entry by entry, so a hand-edited file cannot introduce an unknown kind or a duplicate row. An empty array is a legitimate state: the Total row alone is still an answer |
 | `cm-export-filters`        | JSON array of `{ id, field, pattern, isRegex, enabled }` (`field`: `"entity"` \| `"content"` \| `"sentence"` \| `"context"`, missing = `"entity"`) — global smart-exclusion patterns for Collections export. `"sentence"` cuts only the matching sentence; see `docs/collections.md` |
-| `cm-condense-entities`     | `"0"` to show and export trigger phrases verbatim; anything else, including absent, condenses them into the unique Entities they are made of — Article cards, the Article info modal and the Collections export alike. See `docs/collections.md` → "Condensed triggers" |
+| `cm-condense-entities`     | `"0"` to show trigger phrases verbatim on the Article cards and in the Article info modal; anything else, including absent, condenses them into the unique Entities they are made of. No longer decides the Collections export. See `docs/collections.md` → "Condensed Entities on Article cards" |
+| `cm-trigger-style`         | How the Collections export writes triggers: `"phrases"` (the fewest phrases holding every Entity), `"words"`, `"names"` (Entity names) or `"all"` (every phrase). Absent means `"all"` if `cm-condense-entities` is `"0"`, else `"phrases"`. See `docs/collections.md` → "Trigger styles" |
 | `cm-dialog-context`        | `"0"` to trigger a response reached by a Dialog button with the button alone; anything else, including absent, adds the Entities of the Articles that lead into the Dialog and the buttons tapped. See `docs/collections.md` → "Dialog button context" |
 | `cm-dialog-context-cap`    | How many Entities that context may add to one row, 1–200; absent or invalid means 30 |
 
