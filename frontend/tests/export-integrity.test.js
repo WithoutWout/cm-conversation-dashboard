@@ -13,7 +13,7 @@ const NAMES = [
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
   "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
   "defaultArticleAnswer","defaultDialogAnswerItem",
-  "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts",
+  "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts","_triggerTerms","_coverPhrases",
   "condenseEntityPhrases","_phraseEntityTags","_entityAt",
 ]
 const ctx = vm.createContext({ console })
@@ -22,6 +22,7 @@ vm.runInContext(`
   let cmExportFilters = []
   let cmExportKeepUnreachable = false
   let cmCondenseEntities = true
+  let cmTriggerStyle = "phrases"
   let entityMap = new Map(), entityWordMap = new Map()
   let _condenseCache = new Map(), _entityWordMaxTokens = 0
   ${extractConst("_SENTENCE_RE")}

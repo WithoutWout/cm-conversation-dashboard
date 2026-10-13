@@ -3,12 +3,13 @@
 const vm = require("vm")
 const { extract, extractConst } = require("./extract")
 
-const NAMES = ["condenseEntityPhrases", "_phraseEntityTags", "_entityAt", "_rowTrigger", "_triggerTexts"]
+const NAMES = ["condenseEntityPhrases", "_phraseEntityTags", "_entityAt", "_rowTrigger", "_triggerTexts", "_triggerTerms", "_coverPhrases"]
 const ctx = vm.createContext({ console })
 vm.runInContext(`
   let entityMap = new Map(), entityWordMap = new Map()
   let _condenseCache = new Map(), _entityWordMaxTokens = 0
   let cmCondenseEntities = true
+  let cmTriggerStyle = "names"
   ${extractConst("_CONDENSE_EDGE_PUNCT")}
   ${NAMES.map(extract).join("\n")}
   // Mirrors the load in index.html: name → entity, lowercase word → first entity.
@@ -23,6 +24,7 @@ vm.runInContext(`
     _entityWordMaxTokens = 0
   }
   function setCondense(on) { cmCondenseEntities = on }
+  function setStyle(v) { cmTriggerStyle = v }
 `, ctx)
 
 const out = []
@@ -71,12 +73,45 @@ ok("an Entity tag carries its entity; a kept word carries none",
    ctx.condenseEntityPhrases(["kopen efteling"]).map((t) => !!t.entity).join() === "true,false")
 
 out.push("")
-out.push("The export trigger follows the setting:")
-ok("on: the condensed tags", ctx._rowTrigger(["overwinningsbandje kopen", "overwinningsbandje prijs"]) ===
-   "OVERWINNINGSBANDJE | KOPEN | PRIJS")
-ctx.setCondense(false)
-ok("off: every phrase verbatim", ctx._rowTrigger(["overwinningsbandje kopen", "overwinningsbandje prijs"]) ===
-   "overwinningsbandje kopen | overwinningsbandje prijs")
+out.push("The export trigger follows the trigger style (Article 10348's real phrases):")
+ctx.setEntities([
+  E("ENTREETICKET", "ticket", "tickets", "entreebewijs"),
+  E("DUBBEL", "dubbel"),
+  E("BETALEN", "betaald", "betalen"),
+  E("AFSCHRIJVEN", "afgeschreven", "afschrijving"),
+  E("NOG", "nog"),
+  E("KAART", "kaart"),
+])
+const art = [
+  "ticket dubbel betaald", "ticket dubbel afgeschreven", "ticket dubbel afgeschreven betaald",
+  "ticket nog een keer afgeschreven", "kaart dubbel afgeschreven", "kaart dubbel betaald",
+  "kaart nog een keer afgeschreven",
+]
+ctx.setStyle("names")
+ok("names: each Entity once, by its CM.com name",
+   ctx._rowTrigger(art) === "ENTREETICKET | DUBBEL | BETALEN | AFSCHRIJVEN | NOG | een | keer | KAART")
+ctx.setStyle("words")
+ok("words: the same Entities, written as the phrases write them",
+   ctx._rowTrigger(art) === "ticket | dubbel | betaald | afgeschreven | nog | een | keer | kaart")
+ok("words: the form the phrases use most wins",
+   ctx._rowTrigger(["tickets kopen", "tickets prijs", "ticket kwijt"]).startsWith("tickets"))
+ctx.setStyle("phrases")
+ok("phrases: the fewest phrases that hold every Entity and word",
+   ctx._rowTrigger(art) === "kaart nog een keer afgeschreven | ticket dubbel betaald")
+const cover = ctx._triggerTerms(art)
+ok("phrases: every Entity and word of the Article is in the cover",
+   new Set(cover.flatMap((t) => t.keys)).size === 8)
+ok("phrases: a term's keys are only the ones it added", cover[1].keys.length === 3 && cover[1].from === 3)
+ok("phrases: what a row already holds is not covered twice",
+   ctx._triggerTerms(art, new Set(cover[0].keys)).map((t) => t.text).join() === "ticket dubbel betaald")
+ok("phrases: a tie goes to the shorter phrase",
+   ctx._rowTrigger(["ticket dubbel betaald", "dubbel betaald ticket!!"]) === "ticket dubbel betaald")
+ctx.setStyle("all")
+ok("all: every phrase verbatim", ctx._rowTrigger(art) === art.join(" | "))
+ctx.setEntities([])
+ctx.setStyle("phrases")
+ok("phrases without an EntitiesExport: covers the words",
+   ctx._rowTrigger(["dubbel betaald", "betaald dubbel", "dubbel afgeschreven"]) === "dubbel betaald | dubbel afgeschreven")
 
 console.log(out.join("\n"))
 console.log("")

@@ -8,7 +8,7 @@ const NAMES = [
   "buildCollectionExportRows","_buildCollectionExportRows","invalidateCollectionCaches",
   "articleAnswerHasContext","dialogAnswerHasContext","_defaultAnswerAmong",
   "defaultArticleAnswer","defaultDialogAnswerItem",
-  "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts",
+  "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts","_triggerTerms","_coverPhrases",
   "condenseEntityPhrases","_phraseEntityTags","_entityAt",
 ]
 const ctx = vm.createContext({ console })
@@ -17,6 +17,7 @@ vm.runInContext(`
   let cmExportFilters = []
   let cmExportKeepUnreachable = false
   let cmCondenseEntities = true
+  let cmTriggerStyle = "names"
   let entityMap = new Map(), entityWordMap = new Map()
   let _condenseCache = new Map(), _entityWordMaxTokens = 0
   ${extractConst("_SENTENCE_RE")}
@@ -39,6 +40,7 @@ vm.runInContext(`
   function setFilters(f) { cmExportFilters = f }
   function setKeep(k) { cmExportKeepUnreachable = k; invalidateCollectionCaches() }
   function setContext(on, cap) { cmDialogContext = on; cmDialogContextCap = cap || 30 }
+  function setStyle(v) { cmTriggerStyle = v }
   function setEntities(list) {
     entityMap = new Map(list.map((e) => [e.name.toUpperCase(), e]))
     entityWordMap = new Map()
@@ -459,6 +461,69 @@ ctx.setData(
 const mt = trig(ctx.buildCollectionExportRows({ id: "mono", itemKeys: ["dialog:80"] }), "MONORAIL-OPEN").split(" | ")
 ok("in an export row the shared last button is written in full once",
    mt.includes("→ Een andere dag / morgen → Monorail / Volk van Laaf") && mt.includes("→ Monorail"))
+ctx.setEntities([])
+
+out.push("")
+out.push("Trigger styles:")
+// Migration: a stored style wins; condensing switched off meant every phrase
+// verbatim, so it stays that; everyone else gets phrases.
+{
+  const store = new Map()
+  const lctx = vm.createContext({ localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null) } })
+  vm.runInContext(extractConst("TRIGGER_STYLES") + "\n" + extract("loadTriggerStyle"), lctx)
+  const load = () => vm.runInContext("loadTriggerStyle()", lctx)
+  ok("a fresh install writes phrases", load() === "phrases")
+  store.set("cm-condense-entities", "1")
+  ok("condensing on (the old default) moves to phrases", load() === "phrases")
+  store.set("cm-condense-entities", "0")
+  ok("condensing off keeps exporting every phrase", load() === "all")
+  store.set("cm-trigger-style", "words")
+  ok("a chosen style wins", load() === "words")
+  store.set("cm-trigger-style", "bogus")
+  ok("an unknown stored style falls back", load() === "all")
+}
+// The cap counts Entities in every style: a context phrase costs the Entities
+// it adds. Reuses the "Afgeschreven/dubbel betaald" fixture.
+ctx.setEntities([
+  { name: "DUBBEL", words: [{ text: "dubbel" }] },
+  { name: "BETALEN", words: [{ text: "betaald" }, { text: "betalen" }] },
+  { name: "AFSCHRIJVEN", words: [{ text: "afgeschreven" }] },
+])
+dubbelDialog()
+ctx.setFilters([]); ctx.setKeep(false)
+ctx.setStyle("phrases"); ctx.setContext(true)
+let ps = trig(dd(), "tickets 2 keer").split(" | ")
+// Cover of "dubbel betaald | dubbel afgeschreven | twee keer betaald": the last
+// holds 3 keys, then "dubbel afgeschreven" adds DUBBEL and AFSCHRIJVEN, and
+// "dubbel betaald" adds nothing. AFSCHRIJVEN is in the response, so it ranks first.
+ok("phrases: a button-reached row carries the leading Article's cover phrases",
+   JSON.stringify(ps) === JSON.stringify(["dubbel afgeschreven", "twee keer betaald", "→ Tickets"]))
+ok("phrases: a phrase that adds nothing is not written", !ps.includes("dubbel betaald"))
+ctx.setContext(true, 2)
+ps = trig(dd(), "tickets 2 keer").split(" | ")
+// "twee keer betaald" was chosen first by the cover (3 keys) but ranks second;
+// once "dubbel afgeschreven" is kept it would still add 3, which no longer fits.
+ok("phrases: the cap counts Entities, so a 2-Entity phrase fills a cap of 2",
+   ps.filter((p) => !p.startsWith("→")).length === 1 && ps.includes("→ Tickets"))
+// "dubbel afgeschreven" comes second in the cover, where it adds only
+// AFSCHRIJVEN; ranked first (AFSCHRIJVEN is in the response) it adds DUBBEL too.
+dubbelDialog([[20, { Id: 20, Questions: [{ Text: "twee keer dubbel betaald" }, { Text: "dubbel afgeschreven" }], Outputs: [
+  { Type: "DialogStart", DialogId: 70, DialogStartNodeId: 900, IsDefault: true },
+] }]])
+ctx.setContext(true, 1)
+ok("phrases: a phrase is charged what it adds where it is kept, not where the cover chose it",
+   trig(dd(), "tickets 2 keer") === "→ Tickets")
+ctx.setContext(true, 2)
+ok("...and fits once the cap allows both Entities", trig(dd(), "tickets 2 keer") === "dubbel afgeschreven | → Tickets")
+dubbelDialog()
+ctx.setContext(true)
+ctx.setStyle("words")
+ps = trig(dd(), "tickets 2 keer").split(" | ")
+ok("words: context is written as user words", ps.includes("afgeschreven") && ps.includes("dubbel") && !ps.includes("AFSCHRIJVEN"))
+ctx.setStyle("all")
+ps = trig(dd(), "tickets 2 keer").split(" | ")
+ok("all: context is every leading phrase", ["dubbel betaald", "dubbel afgeschreven", "twee keer betaald"].every((p) => ps.includes(p)))
+ctx.setStyle("names")
 ctx.setEntities([])
 
 console.log(out.join("\n"))
