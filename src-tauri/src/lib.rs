@@ -317,7 +317,6 @@ struct FlaggedInteractionRow {
 struct ImportResult {
     inserted: i64,
     skipped: i64,
-    purged: i64,
     errors: Vec<String>,
     /// Per-phase wall clock, so the import modal's Details log can show where
     /// the time actually went instead of us guessing at it.
@@ -327,20 +326,20 @@ struct ImportResult {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FinalizeResult {
-    purged: i64,
     timings: ImportTimings,
 }
 
 /// Wall-clock milliseconds per import phase.
 ///
-/// The tail phases (`purge_ms` and after) are zero on a deferred import — they
-/// move to [`finalize_import_run`], which reports them separately.
+/// The tail phases (`summary_ms` and after) are zero on a deferred import —
+/// they move to [`finalize_import_run`], which reports them separately. There
+/// is no purge phase: the retention purge runs once at launch
+/// ([`purge_expired_data`]), not at the end of an import.
 #[derive(Serialize, Default, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
 struct ImportTimings {
     /// CSV parse plus the row loop, including its per-batch commits.
     rows_ms: u64,
-    purge_ms: u64,
     summary_ms: u64,
     fts_optimize_ms: u64,
     pragma_optimize_ms: u64,
@@ -1590,6 +1589,9 @@ fn contexts_worth_interning(json: &str) -> bool {
 const META_ANSWER_INDEX_BUILT: &str = "answer_index_built";
 
 const META_SESSION_SUMMARY_RULES: &str = "session_summary_rules";
+/// Set once `repair_unsettled_coverage` has cleared the hours the old
+/// `h0..=h1` recording claimed before they were complete.
+const META_COVERAGE_SETTLED: &str = "coverage_settled";
 
 /// Which *rules* the stored `session_summary` rows were derived with. The
 /// summary is a cache, so a change to [`session_summary_insert_sql`] that
@@ -2442,6 +2444,18 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
         }
     }
 
+    if !meta_flag_set(&conn, META_COVERAGE_SETTLED) {
+        match repair_unsettled_coverage(&conn) {
+            Ok(n) => {
+                if n > 0 {
+                    log::info!(target: "import", "cleared unsettled coverage on {n} day(s)");
+                }
+                set_meta_flag(&conn, META_COVERAGE_SETTLED);
+            }
+            Err(e) => log::warn!(target: "import", "coverage repair skipped: {e}"),
+        }
+    }
+
     // Optional FTS5 and materialized summaries are repairable caches.
     repair_fts_index(&conn);
     // An import run that never reached its finalize step left session_summary
@@ -2579,7 +2593,22 @@ fn is_iso_second_prefix(s: &str) -> bool {
         && (b[10] == b'T' || b[10] == b' ')
 }
 
-/// Delete interactions older than `max_days`.
+/// The retention cutoff as epoch seconds: UTC midnight of the day `max_days`
+/// before `now_secs`. Everything before it goes.
+///
+/// A day boundary, not "now minus N days", because the purge runs on every
+/// launch: a cutoff that moved with the clock found a handful of rows that
+/// had just aged out on almost every start (4, 6, 25), and deleting even
+/// four sets off the summary rebuild and FTS merge — about 1.5 s with the
+/// database held. Snapped to a day, only the first launch of a UTC day has
+/// anything to remove. It also keeps whole UTC days, which is how the
+/// coverage masks and Stored data's "Older than retention" count them.
+fn retention_cutoff_secs(now_secs: u64, max_days: u64) -> u64 {
+    let raw = now_secs.saturating_sub(max_days * 24 * 3600);
+    raw - raw % 86400
+}
+
+/// Delete interactions older than `max_days` — see [`retention_cutoff_secs`].
 ///
 /// Records every affected session in [`TOUCHED_TABLE`] rather than rebuilding
 /// `session_summary` itself, so one scoped rebuild in the caller covers both the
@@ -2595,7 +2624,7 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        secs.saturating_sub(max_days * 24 * 3600)
+        retention_cutoff_secs(secs, max_days)
     };
     // timestamp_start stored as ISO text "YYYY-MM-DDTHH:MM:SS"
     // We compare against an ISO cutoff string
@@ -3493,10 +3522,7 @@ async fn begin_import_run(db_state: State<'_, SharedDbState>) -> Result<(), Stri
 /// the renderer can put it in a `finally` without tracking whether the run got
 /// far enough to need it.
 #[tauri::command]
-async fn finalize_import_run(
-    db_state: State<'_, SharedDbState>,
-    max_age_days: Option<i64>,
-) -> Result<FinalizeResult, String> {
+async fn finalize_import_run(db_state: State<'_, SharedDbState>) -> Result<FinalizeResult, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = db.lock().map_err(|e| e.to_string())?;
@@ -3504,7 +3530,7 @@ async fn finalize_import_run(
             .conn
             .as_mut()
             .ok_or("No database open. Set a database path first.")?;
-        finalize_import_run_into(conn, max_age_days)
+        finalize_import_run_into(conn)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -3512,19 +3538,12 @@ async fn finalize_import_run(
 
 /// The finalize step, against an open connection, so tests can drive a whole
 /// deferred run without a Tauri `State`.
-fn finalize_import_run_into(
-    conn: &mut Connection,
-    max_age_days: Option<i64>,
-) -> Result<FinalizeResult, String> {
+fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, String> {
     let started = Instant::now();
     let mut timings = ImportTimings::default();
 
-    let t = Instant::now();
-    let purged = purge_old(conn, max_age_days.unwrap_or(90).max(1) as u64);
-    timings.purge_ms = t.elapsed().as_millis() as u64;
-
     let mut rebuild = Ok(());
-    if purged > 0 || has_touched_sessions(conn) {
+    if has_touched_sessions(conn) {
         let t = Instant::now();
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
@@ -3551,18 +3570,71 @@ fn finalize_import_run_into(
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "finalize: {purged} purged, purge {}ms, summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
-        timings.purge_ms, timings.summary_ms, timings.fts_optimize_ms,
-        timings.pragma_optimize_ms, timings.total_ms
+        "finalize: summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
+        timings.summary_ms, timings.fts_optimize_ms, timings.pragma_optimize_ms, timings.total_ms
     );
-    Ok(FinalizeResult { purged, timings })
+    Ok(FinalizeResult { timings })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PurgeResult {
+    purged: i64,
+    duration_ms: u64,
+}
+
+/// Apply the retention setting: delete everything older than `max_age_days`.
+///
+/// Runs once at launch, right after the database opens, instead of at the end
+/// of every import. The renderer folds it into the open (`convDbOpen`), so
+/// every read waits for it exactly as it waits for the open. The connection is
+/// one lock, so nothing could have read the database while it ran anyway.
+/// Moving it out of the import was the point: on a day the cutoff crossed a
+/// busy stretch it was most of the import's finishing time (5.5 s for
+/// 110,008 rows), and with nothing to delete it is a range seek.
+#[tauri::command]
+async fn purge_expired_data(
+    db_state: State<'_, SharedDbState>,
+    max_age_days: i64,
+) -> Result<PurgeResult, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        purge_expired_into(conn, max_age_days)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The purge, its scoped summary rebuild and the FTS merge, against an open
+/// connection. Bracketed by the same crash marker an import run uses: rows
+/// deleted with the summary not yet rebuilt is exactly what `open_db` repairs
+/// when it finds `pending_finalize` still set.
+fn purge_expired_into(conn: &Connection, max_age_days: i64) -> Result<PurgeResult, String> {
+    let started = Instant::now();
+    reset_touched_sessions(conn)?;
+    set_meta_flag(conn, META_PENDING_FINALIZE);
+    let purged = purge_old(conn, max_age_days.max(1) as u64);
+    let mut rebuild = Ok(());
+    if purged > 0 {
+        rebuild = rebuild_session_summary_touched(conn);
+        // A purge leaves FTS tombstones that only go away on merge.
+        let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
+        let _ = conn.execute_batch("PRAGMA optimize;");
+    }
+    drop_touched_sessions(conn);
+    rebuild?;
+    clear_meta_flag(conn, META_PENDING_FINALIZE);
+    let duration_ms = started.elapsed().as_millis() as u64;
+    log::info!(target: "import", "retention purge: {purged} removed in {duration_ms}ms");
+    Ok(PurgeResult { purged, duration_ms })
 }
 
 #[tauri::command]
 async fn import_interactions_csv(
     db_state: State<'_, SharedDbState>,
     file_path: String,
-    max_age_days: Option<i64>,
     delimiter: Option<String>,
     defer_finalize: Option<bool>,
 ) -> Result<ImportResult, String> {
@@ -3588,7 +3660,7 @@ async fn import_interactions_csv(
             .conn
             .as_mut()
             .ok_or("No database open. Set a database path first.")?;
-        import_csv_into(conn, &file_path, max_age_days, delim, finalize)
+        import_csv_into(conn, &file_path, delim, finalize)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -4115,13 +4187,12 @@ fn intern_existing_contexts(
 /// without a Tauri `State`.
 ///
 /// `finalize` false means this file is one of several in a run: the touched-session
-/// set accumulates instead of resetting, and the tail (purge, summary rebuild, FTS
+/// set accumulates instead of resetting, and the tail (summary rebuild, FTS
 /// merge, planner stats) is left to [`finalize_import_run_into`]. The result is
 /// identical either way — the tail only recomputes derived state.
 fn import_csv_into(
     conn: &mut Connection,
     file_path: &str,
-    max_age_days: Option<i64>,
     delim: u8,
     finalize: bool,
 ) -> Result<ImportResult, String> {
@@ -4496,19 +4567,12 @@ fn import_csv_into(
             "{file_path}: {inserted} new, {skipped} duplicate, rows {}ms (finalize deferred)",
             timings.rows_ms
         );
-        return Ok(ImportResult { inserted, skipped, purged: 0, errors, timings });
+        return Ok(ImportResult { inserted, skipped, errors, timings });
     }
 
-    // purge_old adds the sessions it stripped to the same touched-session table
-    // and cleans up their contexts, so a single scoped rebuild below covers the
-    // import and the purge together. No orphan sweep is needed for the import
-    // itself: adding rows can never orphan a context row.
-    let t = Instant::now();
-    let purged = purge_old(conn, max_age_days.unwrap_or(90).max(1) as u64);
-    timings.purge_ms = t.elapsed().as_millis() as u64;
-
+    // No orphan sweep is needed: adding rows can never orphan a context row.
     let mut rebuild = Ok(());
-    if inserted > 0 || purged > 0 {
+    if inserted > 0 {
         let t = Instant::now();
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
@@ -4531,11 +4595,11 @@ fn import_csv_into(
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "{file_path}: {inserted} new, {skipped} duplicate, {purged} purged — rows {}ms, purge {}ms, summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
-        timings.rows_ms, timings.purge_ms, timings.summary_ms,
+        "{file_path}: {inserted} new, {skipped} duplicate — rows {}ms, summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
+        timings.rows_ms, timings.summary_ms,
         timings.fts_optimize_ms, timings.pragma_optimize_ms, timings.total_ms
     );
-    Ok(ImportResult { inserted, skipped, purged, errors, timings })
+    Ok(ImportResult { inserted, skipped, errors, timings })
 }
 
 #[derive(Serialize)]
@@ -7897,6 +7961,149 @@ async fn release_insight_scope(db_state: State<'_, SharedDbState>) -> Result<(),
 /// sentinel into `Ok(None)`, which reaches the renderer as `null`.
 const INSIGHTS_CANCELLED: &str = "__insights_cancelled__";
 
+/// `(rated, positive)` answers of `answer_from`, over a resolved insight
+/// scope — see the comment at its call in `conversation_insights` for how a
+/// rating is met against its answer. One spelling for the Feedback card and
+/// the Conversations list's positive share, so the two cannot disagree.
+fn insight_feedback_counts(conn: &Connection, answer_from: &str) -> Result<(i64, i64), String> {
+    conn.query_row(
+        &format!(
+            "WITH {}",
+            feedback_counts_tail(
+                "insight_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid",
+                answer_from
+            )
+        ),
+        [],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    )
+    .map_err(insight_err)
+}
+
+/// The ratings CTE and the counting SELECT. `ratings_from` yields the
+/// conversations' interactions as `i`; `answer_from` the answers, also as `i`.
+/// Shared by the Insights read and the list's positive share, which reaches
+/// the same numbers without building Insights' temp tables.
+fn feedback_counts_tail(ratings_from: &str, answer_from: &str) -> String {
+    format!(
+            "r AS MATERIALIZED ( \
+               SELECT COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
+                        json_extract(i.feedback_info, '$.originatingInteractionId') END, \
+                        i.interaction_uuid) AS origin_uuid, \
+                      MAX(i.log_id) AS last_log, \
+                      CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END AS pos \
+               FROM {ratings_from} \
+               WHERE {FEEDBACK_ROW} \
+               GROUP BY origin_uuid) \
+             SELECT COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r)), 0), \
+                    COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r WHERE pos = 1)), 0) \
+             FROM {answer_from} \
+             WHERE {IS_ANSWER_ROW}"
+    )
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchFeedback {
+    /// Matching answers that got a rating — the latest one counts.
+    rated: i64,
+    /// Of those, the ones whose latest rating was a thumbs up.
+    positive: i64,
+}
+
+/// The positive share of the answers a Conversations search matched, over
+/// **every** result, not the page on screen.
+///
+/// Only the matching answers count, not every answer of the conversations
+/// holding them: a search for "parkeren" asks how the parking answers were
+/// rated, and a thumbs down on the opening hours later in the same chat is not
+/// part of that. The figure is the Insights *interactions* reading's Positive
+/// feedback tile — same matching turns, same rating rule — but read in one
+/// query: going through `resolve_insight_scope` built its temp tables first,
+/// 4 s with the database held for an unfiltered list on a real 105k-row
+/// database. With no query and no pill every answer in range matches, so it
+/// is the overall share.
+fn search_feedback_into(conn: &Connection, args: &GetSessionsArgs) -> Result<(i64, i64), String> {
+    let fq = build_session_filter_query(conn, args)?;
+    let (scope, scope_params) = interaction_scope_sql(args, "i", fq.param_values.len() + 1);
+    // The matching answers, as `resolve_insight_scope_uncached` spells them for
+    // `insight_matches`: the search's own match relation when something
+    // narrowed it, else every answer in range of the matched conversations.
+    // Only conversations holding a rating at all (`fb_sessions`, from the
+    // summary's feedback flags, which `session_summary_insert_sql` derives
+    // with the same `FEEDBACK_ROW`): an answer anywhere else cannot be rated,
+    // and reading those rows was most of the cost of an unfiltered list.
+    // DISTINCT for what `INSERT OR IGNORE` did there — two OR groups can match
+    // one row.
+    let matched = match fq.match_rows.as_deref() {
+        Some(match_rows) => format!(
+            "SELECT DISTINCT i.log_id, i.interaction_uuid, i.main_interaction_type \
+             FROM ({match_rows}) m \
+             JOIN fb_sessions s ON s.session_uuid = m.session_uuid \
+             JOIN interactions i ON i.log_id = m.match_log_id \
+             WHERE m.match_log_id IS NOT NULL AND {IS_ANSWER_ROW}{scope}"
+        ),
+        None => format!(
+            "SELECT i.log_id, i.interaction_uuid, i.main_interaction_type \
+             FROM fb_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid \
+             WHERE {IS_ANSWER_ROW}{scope}"
+        ),
+    };
+    let sql = format!(
+        r#"WITH
+base_sessions AS (
+    SELECT s.*
+    FROM session_summary s
+    {base_where}
+)
+{search_cte},
+filtered_sessions AS (
+    {filtered_from}
+),
+fb_sessions AS MATERIALIZED (
+    SELECT session_uuid FROM filtered_sessions
+    WHERE session_uuid IS NOT NULL AND session_uuid != ''
+      AND (has_pos_feedback = 1 OR has_neg_feedback = 1)
+),
+fb_answers AS MATERIALIZED ({matched}),
+{tail}"#,
+        base_where = fq.base_where.as_str(),
+        search_cte = fq.search_cte.as_str(),
+        filtered_from = fq.filtered_from.as_str(),
+        // CROSS JOIN pins the order: from the rated conversations into their
+        // rows by `idx_session_log`. Left to itself the planner scanned the
+        // whole table for the rating rows — 945 MB read cold on a real
+        // database, for 2,148 ratings.
+        tail = feedback_counts_tail(
+            "fb_sessions s CROSS JOIN interactions i ON i.session_uuid = s.session_uuid",
+            "fb_answers i"
+        ),
+    );
+    let mut params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+    params.extend(scope_params.iter().map(|b| b.as_ref()));
+    conn.query_row(&sql, params.as_slice(), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+        .map_err(insight_err)
+}
+
+#[tauri::command]
+async fn get_search_feedback(
+    db_state: State<'_, SharedDbState>,
+    args: GetSessionsArgs,
+) -> Result<Option<SearchFeedback>, String> {
+    let db = db_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let conn = state.conn.as_ref().ok_or("No database open.")?;
+        match search_feedback_into(conn, &args) {
+            Ok((rated, positive)) => Ok(Some(SearchFeedback { rated, positive })),
+            Err(e) if e == INSIGHTS_CANCELLED => Ok(None),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Every rusqlite error in this section goes through here.
 fn insight_err(e: rusqlite::Error) -> String {
     if let rusqlite::Error::SqliteFailure(err, _) = &e {
@@ -8798,27 +9005,7 @@ fn conversation_insights_timed(
         let (rated_answers, positive_answers) = if !sections.quality {
             (None, None)
         } else {
-            let (rated, positive) = conn.query_row(
-                &format!(
-                    "WITH r AS MATERIALIZED ( \
-                       SELECT COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
-                                json_extract(i.feedback_info, '$.originatingInteractionId') END, \
-                                i.interaction_uuid) AS origin_uuid, \
-                              MAX(i.log_id) AS last_log, \
-                              CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END AS pos \
-                       FROM insight_sessions s \
-                       JOIN interactions i ON i.session_uuid = s.session_uuid \
-                       WHERE {FEEDBACK_ROW} \
-                       GROUP BY origin_uuid) \
-                     SELECT COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r)), 0), \
-                            COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r WHERE pos = 1)), 0) \
-                     FROM {answer_from} \
-                     WHERE {IS_ANSWER_ROW}"
-                ),
-                [],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
-            )
-            .map_err(insight_err)?;
+            let (rated, positive) = insight_feedback_counts(conn, answer_from)?;
             (Some(rated), Some(positive))
         };
         phases.mark("feedback");
@@ -10424,15 +10611,17 @@ async fn get_db_daily_stats(db_state: State<'_, SharedDbState>) -> Result<DbDail
 #[serde(rename_all = "camelCase")]
 struct DayCoverage {
     date: String,
-    /// Bitmask of the UTC hours (0..23) this day is *covered* for: the union of
-    /// the hours holding at least one interaction and the hours an Analytics API
-    /// window explicitly requested.
+    /// Bitmask of the UTC hours (0..23) this day is *covered* for. For a day an
+    /// Analytics API window was recorded against, the hours those windows
+    /// fetched whole and settled (`settled_window_mask`); for any other day,
+    /// the hours holding at least one interaction.
     ///
-    /// The union is the point. Row presence alone cannot tell an hour the API
-    /// answered with nothing apart from an hour never requested, so a quiet
-    /// night left a day permanently short of 24 and it was re-downloaded on
-    /// every run. Rows still count on their own, which is what keeps manually
-    /// imported portal CSVs — which have no request window — working unchanged.
+    /// Requests, not rows, because row presence alone cannot tell an hour the
+    /// API answered with nothing apart from an hour never requested — a quiet
+    /// night left a day permanently short of 24 — nor a whole hour from the
+    /// first twenty minutes of one. Rows still decide days with no request
+    /// record, which keeps manually imported portal CSVs and databases from
+    /// before the record existed working unchanged.
     hours: i64,
     count: i64,
 }
@@ -10513,8 +10702,9 @@ fn hour_coverage(conn: &Connection, since_date: Option<String>) -> Result<Vec<Da
             e.count += count;
         }
 
-        // Union in the hours we actually requested. An hour the API answered
-        // with zero interactions is covered, and without this it would look
+        // Then the hours we actually requested, which replace the row hours
+        // for every day the API was asked about. An hour the API answered with
+        // zero interactions is covered, and without this it would look
         // identical to an hour that was never fetched — the whole reason a
         // quiet night used to leave a day permanently orange.
         //
@@ -10539,7 +10729,7 @@ fn hour_coverage(conn: &Connection, since_date: Option<String>) -> Result<Vec<Da
             })
             .map_err(|e| format!("Query error: {e}"))?;
         for (day, hours) in w_rows.flatten() {
-            if day.is_empty() || hours == 0 {
+            if day.is_empty() {
                 continue;
             }
             let e = by_day.entry(day.clone()).or_insert_with(|| DayCoverage {
@@ -10547,10 +10737,17 @@ fn hour_coverage(conn: &Connection, since_date: Option<String>) -> Result<Vec<Da
                 hours: 0,
                 count: 0,
             });
-            e.hours |= hours & ALL_HOURS_MASK;
+            // A day the API was asked about is read from its requests alone.
+            // A single row proves nothing about the rest of its hour: a window
+            // that ended at 14:20 leaves rows in 14:00, and counting them made
+            // the hour — and so the day — look complete.
+            e.hours = hours & ALL_HOURS_MASK;
         }
 
-        Ok(by_day.into_values().collect())
+        Ok(by_day
+            .into_values()
+            .filter(|d| d.hours != 0 || d.count != 0)
+            .collect())
     }
 }
 
@@ -10590,35 +10787,134 @@ fn window_day_hours(start_utc: &str, end_utc: &str) -> Result<(String, u32, u32)
     Ok((start_day, h0, h1))
 }
 
-/// Mark every UTC hour a successfully imported window covered.
+/// How long after an hour ends before a fetch of it counts as complete.
+///
+/// CM.com processes interactions with a lag, so a window fetched at 14:20 for
+/// "up to now" comes back short for the last stretch before it. Recording those
+/// hours as covered was what turned a half-imported day green and then had
+/// "Skip days already imported in full" skip it on every later run.
+const COVERAGE_SETTLE_SECS: i64 = 2 * 3600;
+
+/// The UTC day and the hour mask a fetched window may record as covered:
+/// only the hours that lie **wholly** inside the window and had ended at least
+/// [`COVERAGE_SETTLE_SECS`] before `now_secs`.
+///
+/// The old rule recorded every hour the window touched, `h0..=h1`, so a window
+/// ending at 14:20 claimed the whole 14:00 hour, and a window running to
+/// 23:59:59 of today claimed hours that had not happened yet. The mask may come
+/// back empty — the window is still worth recording, because a day with a
+/// request record is read from its requests alone (see `hour_coverage`).
+fn settled_window_mask(start_utc: &str, end_utc: &str, now_secs: i64) -> Result<(String, i64), String> {
+    let (day, _, _) = window_day_hours(start_utc, end_utc)?;
+    let epoch = |s: &str| -> Result<i64, String> {
+        let mut t = String::new();
+        parse_ts_into(s, &mut t);
+        t.get(..19)
+            .and_then(analytics_api::parse_utc_iso)
+            .ok_or_else(|| format!("Unparseable window bound: {s}"))
+    };
+    let start = epoch(start_utc)?;
+    // Windows end on :59:59 — the second is inclusive, so the window runs to
+    // the next whole second.
+    let end = (epoch(end_utc)? + 1).min(now_secs - COVERAGE_SETTLE_SECS);
+    let day_start = analytics_api::parse_utc_iso(&format!("{day}T00:00:00"))
+        .ok_or_else(|| format!("Unparseable window day: {day}"))?;
+    let mut mask: i64 = 0;
+    for h in 0..24 {
+        let hs = day_start + h * 3600;
+        if hs >= start && hs + 3600 <= end {
+            mask |= 1 << h;
+        }
+    }
+    Ok((day, mask))
+}
+
+/// Mark the UTC hours a successfully imported window covered in full — see
+/// [`settled_window_mask`] for which hours those are.
 ///
 /// Called once per downloaded window, after its rows are in — never for a
-/// manual CSV import, which has no request window to record.
+/// manual CSV import, which has no request window to record. An empty mask is
+/// still written: it is what marks the day as one the API was asked about.
 #[tauri::command]
 async fn record_imported_window(
     db_state: State<'_, SharedDbState>,
     start_utc: String,
     end_utc: String,
 ) -> Result<(), String> {
-    let (day, h0, h1) = window_day_hours(&start_utc, &end_utc)?;
-    let mut mask: i64 = 0;
-    for h in h0..=h1 {
-        mask |= 1 << h;
-    }
+    let now_secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let (day, mask) = settled_window_mask(&start_utc, &end_utc, now_secs)?;
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = db.lock().map_err(|e| e.to_string())?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
-        conn.execute(
-            "INSERT INTO imported_windows(day, hours) VALUES (?1, ?2) \
-             ON CONFLICT(day) DO UPDATE SET hours = hours | excluded.hours",
-            params![day, mask],
-        )
-        .map_err(|e| format!("Cannot record the imported window: {e}"))?;
-        Ok(())
+        insert_window_mask(conn, &day, mask)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn insert_window_mask(conn: &Connection, day: &str, mask: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO imported_windows(day, hours) VALUES (?1, ?2) \
+         ON CONFLICT(day) DO UPDATE SET hours = hours | excluded.hours",
+        params![day, mask],
+    )
+    .map_err(|e| format!("Cannot record the imported window: {e}"))?;
+    Ok(())
+}
+
+/// One-time repair for coverage recorded under the old `h0..=h1` rule.
+///
+/// Those records claimed hours that were unfinished — or had not started —
+/// when they were fetched. The fetch time was never stored, but every row
+/// carries `imported_at`, and the latest of a day's rows is when that day was
+/// last fetched with something new in it. An hour that had not ended
+/// [`COVERAGE_SETTLE_SECS`] before that moment cannot have been complete, so
+/// its bit goes and the next import fetches it again. A day with no rows is
+/// left alone: there is nothing to date it by.
+fn repair_unsettled_coverage(conn: &Connection) -> Result<usize, String> {
+    let days: Vec<(String, i64)> = conn
+        .prepare("SELECT day, hours FROM imported_windows")
+        .and_then(|mut st| {
+            st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+                .collect::<Result<_, _>>()
+        })
+        .map_err(|e| format!("Cannot read imported windows: {e}"))?;
+    let mut changed = 0;
+    for (day, hours) in days {
+        // 'T' < 'U', so this is every timestamp of the day, as an index range.
+        let latest: Option<i64> = conn
+            .query_row(
+                "SELECT MAX(imported_at) FROM interactions \
+                 WHERE timestamp_start >= ?1 AND timestamp_start < ?1 || 'U'",
+                params![day],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("Cannot date {day}: {e}"))?;
+        let (Some(latest), Some(day_start)) =
+            (latest, analytics_api::parse_utc_iso(&format!("{day}T00:00:00")))
+        else {
+            continue;
+        };
+        let mut keep: i64 = 0;
+        for h in 0..24 {
+            if day_start + (h + 1) * 3600 + COVERAGE_SETTLE_SECS <= latest {
+                keep |= 1 << h;
+            }
+        }
+        if hours & keep != hours {
+            conn.execute(
+                "UPDATE imported_windows SET hours = ?2 WHERE day = ?1",
+                params![day, hours & keep],
+            )
+            .map_err(|e| format!("Cannot repair {day}: {e}"))?;
+            changed += 1;
+        }
+    }
+    Ok(changed)
 }
 
 #[derive(Deserialize)]
@@ -11749,10 +12045,12 @@ pub fn run() {
             import_interactions_csv,
             begin_import_run,
             finalize_import_run,
+            purge_expired_data,
             compact_database,
             get_sessions,
             get_conversation_insights,
             release_insight_scope,
+            get_search_feedback,
             get_insight_tags,
             get_insight_tag_values,
             get_insight_segments,
@@ -12309,7 +12607,7 @@ mod tests {
         conn.execute_batch(FTS_SCHEMA).expect("fts schema");
 
         // Retention has to be wide enough that the 2026 sample isn't purged.
-        let res = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+        let res = import_csv_into(&mut conn, csv_path.to_str().unwrap(), b'|', true)
             .expect("import succeeds");
         assert!(res.inserted > 0, "sample export produced no rows");
 
@@ -12323,7 +12621,7 @@ mod tests {
 
         // Re-importing the same file is a pure duplicate run: nothing inserted,
         // and the summary must still be correct afterwards.
-        let again = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+        let again = import_csv_into(&mut conn, csv_path.to_str().unwrap(), b'|', true)
             .expect("re-import succeeds");
         assert_eq!(again.inserted, 0, "re-import should insert nothing");
         assert_eq!(
@@ -12348,7 +12646,7 @@ mod tests {
             .expect("delete a row");
         conn.execute("DELETE FROM interactions_fts WHERE rowid <= ?1", params![cut])
             .expect("delete fts row");
-        let refill = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+        let refill = import_csv_into(&mut conn, csv_path.to_str().unwrap(), b'|', true)
             .expect("third import succeeds");
         assert!(refill.inserted > 0, "deleted rows should come back");
         let after_refill = summary_snapshot(&conn);
@@ -12419,13 +12717,12 @@ mod tests {
         set_meta_flag(&conn, META_PENDING_FINALIZE);
         let mut inserted = 0;
         for p in &parts {
-            let r = import_csv_into(&mut conn, p.to_str().unwrap(), Some(36500), b'|', false)
+            let r = import_csv_into(&mut conn, p.to_str().unwrap(), b'|', false)
                 .expect("deferred import succeeds");
-            assert_eq!(r.purged, 0, "a deferred import must not purge");
             inserted += r.inserted;
         }
         assert!(inserted > 0, "sample export produced no rows");
-        finalize_import_run_into(&mut conn, Some(36500)).expect("finalize succeeds");
+        finalize_import_run_into(&mut conn).expect("finalize succeeds");
 
         assert!(
             !meta_flag_set(&conn, META_PENDING_FINALIZE),
@@ -12484,7 +12781,7 @@ mod tests {
         )
         .expect("seed row");
 
-        let res = import_csv_into(&mut conn, csv.to_str().unwrap(), Some(36500), b'|', true)
+        let res = import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', true)
             .expect("import");
         assert_eq!(res.inserted, 0, "the row already exists");
         assert_eq!(res.skipped, 1);
@@ -12502,7 +12799,7 @@ mod tests {
 
         // Second run: nothing is empty now, so the probe turns the backfill off.
         // The value must survive untouched rather than being cleared.
-        let again = import_csv_into(&mut conn, csv.to_str().unwrap(), Some(36500), b'|', true)
+        let again = import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', true)
             .expect("re-import");
         assert_eq!(again.skipped, 1);
         let still: String = conn
@@ -12597,7 +12894,7 @@ mod tests {
         let db_path = dir.join("t.db");
         let mut conn = open_db(db_path.to_str().unwrap()).expect("open");
 
-        let first = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+        let first = import_csv_into(&mut conn, csv_path.to_str().unwrap(), b'|', true)
             .expect("import");
         assert!(first.inserted > 0);
         let count_fts = |c: &Connection| -> i64 {
@@ -12623,7 +12920,7 @@ mod tests {
         // Re-import the identical file three times.
         for _ in 0..3 {
             let again =
-                import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+                import_csv_into(&mut conn, csv_path.to_str().unwrap(), b'|', true)
                     .expect("re-import");
             assert_eq!(again.inserted, 0, "a re-import must insert nothing");
         }
@@ -13146,6 +13443,51 @@ mod tests {
         assert_eq!(scoped, summary_snapshot(&conn));
     }
 
+    /// The cutoff is a UTC midnight, so repeated launches in one day find
+    /// nothing new to remove.
+    #[test]
+    fn the_retention_cutoff_is_a_day_boundary() {
+        let now = analytics_api::parse_utc_iso("2026-10-14T19:35:55").unwrap() as u64;
+        let cut = retention_cutoff_secs(now, 30);
+        assert_eq!(cut as i64, analytics_api::parse_utc_iso("2026-09-14T00:00:00").unwrap());
+        let later = analytics_api::parse_utc_iso("2026-10-14T23:59:59").unwrap() as u64;
+        assert_eq!(retention_cutoff_secs(later, 30), cut, "same day, same cutoff");
+        let next = analytics_api::parse_utc_iso("2026-10-15T00:00:00").unwrap() as u64;
+        assert_eq!(retention_cutoff_secs(next, 30), cut + 86400);
+    }
+
+    /// The launch purge: old rows go, their sessions leave the summary, and
+    /// the crash marker it sets for the duration is cleared again.
+    #[test]
+    fn the_launch_purge_removes_old_rows_and_keeps_the_summary_exact() {
+        let conn = test_conn();
+        // Straddle the wall-clock cutoff by construction, as above.
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, imported_at) \
+             VALUES (1,'u','old','1971-01-01T09:00:00',0), (2,'u','new','2999-01-01T09:00:00',0)",
+            [],
+        )
+        .unwrap();
+        rebuild_session_summary(&conn).expect("full rebuild");
+
+        let res = purge_expired_into(&conn, 30).expect("purge");
+        assert_eq!(res.purged, 1);
+        let left: Vec<String> = conn
+            .prepare("SELECT session_uuid FROM session_summary ORDER BY 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["new".to_string()]);
+        let scoped = summary_snapshot(&conn);
+        rebuild_session_summary(&conn).expect("full rebuild");
+        assert_eq!(scoped, summary_snapshot(&conn));
+        assert!(!meta_flag_set(&conn, META_PENDING_FINALIZE));
+        // Nothing left to remove: a no-op, not an error.
+        assert_eq!(purge_expired_into(&conn, 30).expect("purge again").purged, 0);
+    }
+
     /// Dropping the orphan-context sweep from the import path is only safe if an
     /// import genuinely cannot orphan a context row. It can't: it only ever adds
     /// sessions. A purge can, and the scoped sweep must catch exactly those.
@@ -13196,18 +13538,108 @@ mod tests {
         .expect("insert");
     }
 
+    /// Records a window as `record_imported_window` would, fetched long after
+    /// every hour in it had settled.
     fn record_window(conn: &Connection, start: &str, end: &str) {
-        let (day, h0, h1) = window_day_hours(start, end).expect("valid window");
-        let mut mask: i64 = 0;
-        for h in h0..=h1 {
-            mask |= 1 << h;
+        record_window_at(conn, start, end, i64::MAX / 2);
+    }
+
+    fn record_window_at(conn: &Connection, start: &str, end: &str, now_secs: i64) {
+        let (day, mask) = settled_window_mask(start, end, now_secs).expect("valid window");
+        insert_window_mask(conn, &day, mask).expect("record window");
+    }
+
+    fn epoch(s: &str) -> i64 {
+        analytics_api::parse_utc_iso(s).expect("timestamp")
+    }
+
+    fn hours_of(mask: i64) -> Vec<i64> {
+        (0..24).filter(|h| mask & (1 << h) != 0).collect()
+    }
+
+    /// The bug behind green days that were only partly imported: a window
+    /// running to 23:59:59 of today, fetched at 14:20, recorded all 24 hours.
+    #[test]
+    fn a_window_ending_now_does_not_cover_the_current_hour() {
+        let now = epoch("2026-07-24T14:20:00");
+        let (_, mask) =
+            settled_window_mask("2026-07-24T00:00:00Z", "2026-07-24T23:59:59Z", now).unwrap();
+        // 12:00 ends at 13:00, less than two hours before 14:20.
+        assert_eq!(hours_of(mask), (0..12).collect::<Vec<_>>());
+        // The same fetch long after the day ended takes all of it.
+        let later = epoch("2026-07-26T00:00:00");
+        let (_, mask) =
+            settled_window_mask("2026-07-24T00:00:00Z", "2026-07-24T23:59:59Z", later).unwrap();
+        assert_eq!(mask, ALL_HOURS_MASK);
+    }
+
+    /// An hour the window only touches is not an hour it fetched.
+    #[test]
+    fn a_window_covers_only_the_hours_wholly_inside_it() {
+        let later = epoch("2026-08-01T00:00:00");
+        let (_, mask) =
+            settled_window_mask("2026-07-24T10:30:00Z", "2026-07-24T14:20:59Z", later).unwrap();
+        assert_eq!(hours_of(mask), vec![11, 12, 13]);
+        let (_, mask) =
+            settled_window_mask("2026-07-24T14:00:00Z", "2026-07-24T14:20:59Z", later).unwrap();
+        assert_eq!(mask, 0);
+    }
+
+    /// Once the API was asked about a day, a stray row in an hour it did not
+    /// fetch whole must not make that hour — and the day — read as complete.
+    #[test]
+    fn rows_do_not_cover_hours_on_a_day_the_api_was_asked_about() {
+        let conn = test_conn();
+        for h in 0..24 {
+            insert_interaction(&conn, 100 + h, &format!("2026-07-24T{h:02}:05:00"));
         }
+        assert_eq!(coverage_of(&conn, "2026-07-24").unwrap().hours, ALL_HOURS_MASK);
+        record_window_at(
+            &conn,
+            "2026-07-24T00:00:00Z",
+            "2026-07-24T23:59:59Z",
+            epoch("2026-07-24T14:20:00"),
+        );
+        let day = coverage_of(&conn, "2026-07-24").unwrap();
+        assert_eq!(hours_of(day.hours), (0..12).collect::<Vec<_>>());
+        assert_eq!(day.count, 24, "the row count is unaffected");
+        // A day with no request record still reads from its rows: manual CSVs.
+        insert_interaction(&conn, 1, "2026-07-25T03:00:00");
+        assert_eq!(coverage_of(&conn, "2026-07-25").unwrap().hours, 1 << 3);
+    }
+
+    /// Databases recorded under the old rule: the hours that had not settled
+    /// by the time the day's rows landed lose their bit, the rest keep it.
+    #[test]
+    fn the_repair_clears_hours_recorded_before_they_were_complete() {
+        let conn = test_conn();
+        let imported_at = epoch("2026-07-24T14:20:00");
         conn.execute(
-            "INSERT INTO imported_windows(day, hours) VALUES (?1, ?2) \
-             ON CONFLICT(day) DO UPDATE SET hours = hours | excluded.hours",
-            params![day, mask],
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+             timestamp_start, imported_at) VALUES (1, 'u', 's', '2026-07-24T09:00:00', ?1)",
+            params![imported_at],
         )
-        .expect("record window");
+        .unwrap();
+        // Old rule: the whole day, recorded at 14:20.
+        insert_window_mask(&conn, "2026-07-24", ALL_HOURS_MASK).unwrap();
+        // A day long settled, and a fetched day with no rows to date it by.
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+             timestamp_start, imported_at) VALUES (2, 'u', 's', '2026-07-20T09:00:00', ?1)",
+            params![imported_at],
+        )
+        .unwrap();
+        insert_window_mask(&conn, "2026-07-20", ALL_HOURS_MASK).unwrap();
+        insert_window_mask(&conn, "2026-07-21", ALL_HOURS_MASK).unwrap();
+
+        assert_eq!(repair_unsettled_coverage(&conn).unwrap(), 1);
+        assert_eq!(
+            hours_of(coverage_of(&conn, "2026-07-24").unwrap().hours),
+            (0..12).collect::<Vec<_>>()
+        );
+        assert_eq!(coverage_of(&conn, "2026-07-20").unwrap().hours, ALL_HOURS_MASK);
+        assert_eq!(coverage_of(&conn, "2026-07-21").unwrap().hours, ALL_HOURS_MASK);
+        assert_eq!(repair_unsettled_coverage(&conn).unwrap(), 0, "idempotent");
     }
 
     fn coverage_of(conn: &Connection, day: &str) -> Option<DayCoverage> {
@@ -14257,7 +14689,7 @@ mod perf {
         fs::write(&csv, s).expect("write csv");
         let db_path = dir.join("ins.db");
         let mut conn = open_db(db_path.to_str().unwrap()).expect("open");
-        import_csv_into(&mut conn, csv.to_str().unwrap(), Some(36500), b'|', false)
+        import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', false)
             .expect("import");
         drop(conn);
         (dir, db_path)
@@ -14552,7 +14984,7 @@ mod perf {
             let db_path = dir.join(if tail_per_file { "old.db" } else { "new.db" });
             let _ = fs::remove_file(&db_path);
             let mut conn = open_db(db_path.to_str().unwrap()).expect("open");
-            import_csv_into(&mut conn, baseline.to_str().unwrap(), Some(36500), b'|', true)
+            import_csv_into(&mut conn, baseline.to_str().unwrap(), b'|', true)
                 .expect("baseline import");
 
             let t0 = Instant::now();
@@ -14564,7 +14996,7 @@ mod perf {
             }
             for p in &windows {
                 let r = import_csv_into(
-                    &mut conn, p.to_str().unwrap(), Some(36500), b'|', tail_per_file,
+                    &mut conn, p.to_str().unwrap(), b'|', tail_per_file,
                 )
                 .expect("import");
                 assert_eq!(r.inserted, ROWS_PER_WINDOW, "window should insert every row");
@@ -14572,7 +15004,7 @@ mod perf {
                 tail_ms += r.timings.total_ms - r.timings.rows_ms;
             }
             if !tail_per_file {
-                let f = finalize_import_run_into(&mut conn, Some(36500)).expect("finalize");
+                let f = finalize_import_run_into(&mut conn).expect("finalize");
                 tail_ms += f.timings.total_ms;
             }
             println!(
@@ -14785,7 +15217,7 @@ mod perf {
         fs::write(&csv, s).expect("write csv");
         let db_path = dir.join("fb.db");
         let mut conn = open_db(db_path.to_str().unwrap()).expect("open");
-        import_csv_into(&mut conn, csv.to_str().unwrap(), Some(36500), b'|', false)
+        import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', false)
             .expect("import");
         drop(conn);
         (dir, db_path)
@@ -15002,7 +15434,7 @@ Faq|88|{{\"intent\":\"hours\"}}|[{{\"name\":\"lang\",\"value\":\"nl\"}},{{\"name
 
         let db = dir.join("t.db");
         let mut conn = open_db(db.to_str().unwrap()).expect("open");
-        import_csv_into(&mut conn, base_csv.to_str().unwrap(), Some(36500), b'|', true)
+        import_csv_into(&mut conn, base_csv.to_str().unwrap(), b'|', true)
             .expect("baseline");
         let base_bytes = fs::metadata(&db).map(|m| m.len()).unwrap_or(0);
 
@@ -15012,11 +15444,11 @@ Faq|88|{{\"intent\":\"hours\"}}|[{{\"name\":\"lang\",\"value\":\"nl\"}},{{\"name
         let _ = conn.query_row("PRAGMA wal_autocheckpoint = 20000", [], |_| Ok(()));
         let mut inserted = 0i64;
         for p in &days {
-            inserted += import_csv_into(&mut conn, p.to_str().unwrap(), Some(36500), b'|', false)
+            inserted += import_csv_into(&mut conn, p.to_str().unwrap(), b'|', false)
                 .expect("import")
                 .inserted;
         }
-        let f = finalize_import_run_into(&mut conn, Some(36500)).expect("finalize");
+        let f = finalize_import_run_into(&mut conn).expect("finalize");
         let total = t0.elapsed();
 
         println!(
@@ -16365,7 +16797,7 @@ mod insights {
         let mut conn = Connection::open(&db_path).expect("open db");
         conn.execute_batch(DB_SCHEMA).expect("schema");
         conn.execute_batch(FTS_SCHEMA).expect("fts schema");
-        let res = import_csv_into(&mut conn, csv_path.to_str().unwrap(), Some(36500), b'|', true)
+        let res = import_csv_into(&mut conn, csv_path.to_str().unwrap(), b'|', true)
             .expect("import succeeds");
         assert!(res.inserted > 0, "sample export produced no rows");
 
@@ -16912,6 +17344,41 @@ mod conv_search {
             query: Some(query.to_string()),
             query_scope: Some(scope.to_string()),
             ..Default::default()
+        }
+    }
+
+    /// The list's positive share counts the ratings of the answers the search
+    /// matched — not every rating in the conversations holding them.
+    #[test]
+    fn search_feedback_counts_only_the_matching_answers() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "s1", user: "waar kan ik parkeren", bot: "op P1", ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "s1", user: "openingstijden", bot: "tien uur", ..Default::default() });
+        add(&conn, Turn { log_id: 3, session: "s2", user: "parkeren kosten", bot: "twintig euro", ..Default::default() });
+        add(&conn, Turn { log_id: 4, session: "s3", user: "parkeren", bot: "op P2", ..Default::default() });
+        add_feedback(&conn, 10, "s1", 1, 1);
+        add_feedback(&conn, 11, "s1", -1, 2); // same chat, not a parking answer
+        add_feedback(&conn, 12, "s2", -1, 3);
+        rebuild_session_summary(&conn).expect("summary");
+        assert_eq!(
+            search_feedback_into(&conn, &text_args("parkeren", "user")).unwrap(),
+            (2, 1),
+            "answers 1 and 3 were rated, 1 positively; answer 2's thumbs down is not about parking"
+        );
+        // No search: every answer in range, so the overall share.
+        assert_eq!(search_feedback_into(&conn, &GetSessionsArgs::default()).unwrap(), (3, 1));
+        // And it is the Insights interactions reading's tile, for both.
+        for args in [text_args("parkeren", "user"), GetSessionsArgs::default()] {
+            let d = conversation_insights(
+                &conn,
+                &args,
+                InsightUnit::Interactions,
+                InsightSections::default(),
+                &mut InsightScopeCache::default(),
+            )
+            .expect("insights");
+            let (rated, positive) = search_feedback_into(&conn, &args).unwrap();
+            assert_eq!((d.rated_answers, d.positive_answers), (Some(rated), Some(positive)));
         }
     }
 

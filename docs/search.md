@@ -322,8 +322,9 @@ conversations where the bot never said it. Nothing on screen said why.
 - **One side is always searched.** Switching off the only active one flips to
   the other, which makes U → B one click. Like everything else in the bar, it
   waits for Enter — see "Only Enter searches" below.
-- **The chat follows the scope.** `chatSearchScope` is set from U / B when a
-  result is opened (as `chatSearchRegex` mirrors `.*`): `turnMatches` reads
+- **The chat follows the scope.** `chatSearchScope` is set from the scope
+  the list was searched with (`lastConvSearchArgs.queryScope`), not from the
+  buttons, when a result is opened (as `chatSearchRegex` mirrors `.*`): `turnMatches` reads
   only that side and the `<mark>`s go only on that side's bubbles. A small
   **U** / **B** badge by the chat search says it is narrowed; a click widens it,
   and clearing the chat search does too. Before, a user-scoped search opened
@@ -900,3 +901,36 @@ two consumers — which is the same arrangement `entityArticleNames` /
 - **The worker's "Used in Articles" / "Used in Dialogs" pills are fed from the same index.** `buildEntityXrefSets` used to recompute the relationship itself with a name-equality check, so the pills filtered on a different rule than the cards they were filtering. It now just receives two name lists over the init message; the resolution stays on the main thread, where `getEntityForChip` lives.
 - One entity per phrase (the first that resolves), matching what the chip displays, and an item is listed once however many of its phrases resolve to it.
 - `_chipEntityCache` memoizes phrase → entity because the same phrases recur constantly and the index build asks for every phrase in the export; `null` is a real answer and is cached too. Building the index costs ~48 ms on the real export (3295 Articles, 808 Dialogs, 2233 entities), once per data load.
+
+### The positive share beside the count
+
+The result count in the Conversations list is followed by the positive share
+of the search: of the answers it **matched**, across every result rather than
+the page on screen, the share whose latest rating was a thumbs up
+(`get_search_feedback`, `loadConvFeedback`).
+
+- **Only the matching answers.** A search for "parkeren" asks how the parking
+  answers were rated. A thumbs down on the opening hours later in the same
+  chat is not part of that, so ratings on other answers in the matched
+  conversations do not count. With no query and no pill every answer in range
+  matches, so it is the overall share.
+- **It is the Insights interactions reading's Positive feedback tile.** It uses
+  the same matching answers (`match_rows`, else every answer in range) and the
+  same rating rule, through the shared `feedback_counts_tail`.
+  `search_feedback_counts_only_the_matching_answers` asserts the two are
+  equal.
+- **One query, not Insights' scope resolution.** Going through
+  `resolve_insight_scope` built its temp tables first: 4 s with the database
+  held for an unfiltered list on a real 105k-row database. The direct query
+  reads only conversations whose summary says they hold a rating, and a
+  `CROSS JOIN` pins the order. Left alone, the planner scanned the whole
+  945 MB table for 2,148 rating rows. Measured on that database: 73 ms
+  unfiltered, 24 ms for "parkeren", with a warm connection. The first query on
+  a brand-new connection paid about 2 s, which the app's long-lived connection
+  doesn't.
+- **Read after the list paints, once per search.** It is keyed by the search
+  arguments without the page, so paging reuses it. `insDropPayloadCache`, which
+  runs wherever rows arrive or go, forgets it.
+- **Nothing rated reads "no ratings"**, never `0%`, for the same reason as
+  everywhere else in Insights.
+

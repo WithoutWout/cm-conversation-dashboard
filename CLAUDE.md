@@ -128,23 +128,25 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `fetch_analytics_window`   | `fetchAnalyticsWindow(startUtc, endUtc)` | Downloads one window to a temp CSV, returns `{ tempPath, delimiter, rowCount, bytes, durationMs, trace }`; rejects with `{ kind, message, retryable, trace }`. The `trace` is a step-by-step account carried on both outcomes — see `docs/import.md` → "Diagnosing a failed import" |
 | `cleanup_analytics_temp`   | `cleanupAnalyticsTemp(paths?)`    | Deletes the given temp CSVs, or sweeps the whole temp dir when called with no argument |
 | `delete_interactions_between` | `deleteInteractionsBetween(ranges)` | Deletes the rows inside `[{fromUtc, toUtc}]` (days of the display timezone, as instants) with their satellites, and forgets only the request-coverage hours wholly inside. Stored data's delete; `delete_interactions_by_dates` is kept but unused |
-| `get_db_hour_coverage`     | `getDbHourCoverage(sinceDate?)`   | Per UTC day, a bitmask of the 24 hours the day is **covered** for — the union of hours holding interactions and hours an API window explicitly requested. Distinguishes a partially imported day from a complete one. `sinceDate` bounds an otherwise full-table aggregate against `idx_timestamp`; the Import modal passes the retention floor, Manage Database omits it because its calendar browses everything stored |
-| `record_imported_window`   | `recordImportedWindow(startUtc, endUtc)` | Marks every UTC hour a successfully imported API window covered. Called once per downloaded window, *after* its rows are in. See `docs/import.md` → "Coverage: asked-for vs present" |
+| `get_db_hour_coverage`     | `getDbHourCoverage(sinceDate?)`   | Per UTC day, a bitmask of the 24 hours the day is **covered** for — the hours API windows fetched whole and settled (2 h after the hour) for a day with a request record, else the hours holding interactions. Distinguishes a partially imported day from a complete one. `sinceDate` bounds an otherwise full-table aggregate against `idx_timestamp`; the Import modal passes the retention floor, Manage Database omits it because its calendar browses everything stored |
+| `record_imported_window`   | `recordImportedWindow(startUtc, endUtc)` | Marks the UTC hours a successfully imported API window covered **whole and settled** — not an hour it only touches, nor one that ended under 2 h before the fetch. Called once per downloaded window, *after* its rows are in. See `docs/import.md` → "Coverage: asked-for vs present" |
 | `begin_import_run`         | `beginImportRun()`                | Opens an import run: resets the touched-session set, sets the `pending_finalize` crash marker, raises `wal_autocheckpoint` |
-| `finalize_import_run`      | `finalizeImportRun(maxAgeDays)`   | Closes a run: purge, scoped summary rebuild, FTS merge, planner stats, WAL restore — once, instead of once per file. Safe no-op when no run is open |
+| `finalize_import_run`      | `finalizeImportRun()`             | Closes a run: scoped summary rebuild, FTS merge, planner stats, WAL restore — once, instead of once per file. Safe no-op when no run is open. It does **not** purge |
+| `purge_expired_data`       | `purgeExpiredData(maxAgeDays)`    | The retention purge, with its scoped summary rebuild and FTS merge, returning `{ purged, durationMs }`. Run by `convDbOpen` right after every open — at launch, in practice — never at the end of an import. See `docs/import.md` → "The retention purge runs at launch" |
 | `compact_database`         | `compactDatabase()`               | `VACUUM`s the database, returning pages freed by deletions and schema migrations to the filesystem. Returns `{ bytesBefore, bytesAfter, durationMs }` |
 | `get_conversation_insights` | `getConversationInsights(args, unit, sections)` | Volume comes back as `dayHours` — one row per UTC day per UTC hour — which the renderer folds into the day series, the hour histogram and the heatmap *in the display timezone*. No SQL here knows what a timezone is. The Insights aggregates for the **sections that were asked for**, over the **same `GetSessionsArgs`** `get_sessions` takes. `unit` is `"conversations"` (default) or `"interactions"` — see `docs/insights.md` → "The two readings"; `sections` is `{volume, quality, content}` — see `docs/insights.md` → "The chooser". Never the two tag sections. Returns `null` when the read was cancelled |
 | `release_insight_scope` | `releaseInsightScope()`         | Frees the resolved result set the Insights temp tables hold. Called when the modal closes — see `docs/insights.md` → "The result set is resolved once, not once per read" |
 | `get_insight_tags`    | `getInsightTags(args, unit, keys)` | The Context and Metadata sections, read *after* the dashboard paints — see `docs/insights.md` → "Why it is two reads, not one". `keys` is `{context, metadata, contextOn, metadataOn}` — which key each section is charting, and whether it was asked for at all |
 | `get_insight_tag_values` | `getInsightTagValues(args, unit, kind, name)` | One tag key's values, for switching the Context or Metadata chart |
 | `get_insight_segments` | `getInsightSegments(args, unit, breakdowns, withKeys, totalOnly)` | The Segments table: a Total row plus one block per breakdown, each row carrying feedback volume, positive share, recognition rate, recognition quality and interaction count. `breakdowns` is a list of `{kind, name}` where `kind` is `"culture"` \| `"context"` \| `"metadata"`. Counts as CM.com's dashboards do, in both readings — the interactions inside the date range, each under its own context, latest rating per answer, CM.com's recognition definitions; see `docs/insights.md` → "Counted as CM.com counts". `unit` is passed only to keep the scope cache aligned. `withKeys` (default true) also returns the context/metadata keys this result set has, for the picker — they are the fixed cost of the call and describe the result set rather than the breakdowns, so the renderer reads them once per payload. See `docs/insights.md` → "The Segments table" |
+| `get_search_feedback` | `getSearchFeedback(args)`         | `{ rated, positive }` — of the answers a Conversations search **matched**, across every result, how many were rated and how many got a thumbs up (latest rating counts). Equal to the Insights interactions reading's Positive feedback tile, read in one query without its temp tables. `null` when cancelled. See `docs/search.md` → "The positive share beside the count" |
 | `cancel_db_query`     | `cancelDbQuery()`                | Interrupts whatever the conversations database is running — a session search or an Insights read. A no-op when nothing is running |
 
 `get_entity_options` returns every entity the imported conversations have triggered — `{name, entityId, count}` — feeding both the conversation search bar's type-ahead and the only entity ids this app has (the EntitiesExport CSV carries none). See `docs/search.md` → "An entity is a leaf, not a filter".
 
 There are also Conversations DB commands exposed through `window.backend` for importing CSV interaction logs, selecting/opening a SQLite database, searching sessions, loading chat interactions, context and metadata options (`get_context_options` / `get_metadata_options`, both thin wrappers over `tag_options`), daily stats, deleting imported dates, and managing flagged conversations/folders. Keep conversation search separate from content search.
 
-`import_interactions_csv(filePath, maxAgeDays, delimiter?, deferFinalize?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it. `deferFinalize` defaults to false; both real callers pass `true` and bracket their loop with `begin_import_run` / `finalize_import_run` — see `docs/import.md`.
+`import_interactions_csv(filePath, delimiter?, deferFinalize?)` takes an optional single-character `delimiter`, defaulting to `|` (the portal export format). The Analytics API path sniffs the delimiter from the response header and passes it through; the manual path omits it. `deferFinalize` defaults to false; both real callers pass `true` and bracket their loop with `begin_import_run` / `finalize_import_run` — see `docs/import.md`.
 
 `export_conversations_for_ai(args, options)` writes the current result set as `.jsonl`. `options.matchedTurnsOnly` narrows each conversation to the turns the search matched, reusing `SessionFilterQuery::match_rows`; it is a struct of its own rather than a field on `GetSessionsArgs`, which is the Insights scope-cache fingerprint. Its schema and the reasoning behind it are in `docs/ai-export.md`.
 
@@ -380,9 +382,9 @@ The orientation map for the whole window. It says what is on screen and where;
 <header>
   brand | view switch: Content · Conversations · Flagged · Analysis (was GAP) |
   "Opening database…" pill while the conversations database opens | file tags |
-  Refresh | Settings (gear) | then, on Content only: Share Content · Collections;
-  on every other view the same slot holds Data (opens #convDataModal). The
-  swap plays an entrance and slides Refresh/Settings (`headerSlide`)
+  Refresh | Settings (gear) | on Content only: Share Content · Collections |
+  Data (opens #convDataModal), on every view and always rightmost. The Content
+  pair's entrance plays and the rest slide aside (`headerSlide`)
 
 <div.global-search-bar>
   chip field (#contentTokens + input, #contentSuggest type-ahead) |
@@ -525,7 +527,8 @@ The orientation map for the whole window. It says what is on screen and where;
     Alt+←/→ moves the selection, into and out of groups — clicking a bracket
     removes its group, keeping the chips
   date range button | tag filter button (Context · Metadata)
-  filter pills (GenAI / Feedback · thumbs up · thumbs down / Low % / Zero %)
+  filter pills (GenAI / Feedback · thumbs up · thumbs down / Low % / Zero %) |
+    N results · thumbs up N% positive (the matching answers' ratings, all results)
 
 <div#settingsModal>
   header: Settings | Backup… (opens #settingsBackupModal) | ✕
@@ -540,6 +543,10 @@ The orientation map for the whole window. It says what is on screen and where;
   what the file does and does not contain
   amber warning: the file holds live credentials, treat it as a password
   Export settings / Import settings | status line
+
+<div#missingDaysModal>   (once a day at launch, Analytics API set up — docs/import.md
+                         → "The daily missing-days check")
+  N days missing or partly imported, between … and … | Not now | Import N days
 
 <div#convDataModal>
   header: "Conversation data" | connected database filename (green) | ✕
@@ -661,7 +668,8 @@ Always use these terms in the UI:
 | `conv-low-recog-threshold` | Low recognition threshold |
 | `cm-metadata-hidden`       | JSON array of rule strings — metadata keys (`key`) or values (`key = value`, `*` wildcard) left out of every metadata picker. Display only; see `docs/search.md` → "Hidden metadata" |
 | `cm-display-timezone`      | IANA zone every date in the app is read in — chat, session list, date filter, Insights, Analysis, and the Import and Stored data calendars. `""` or absent means follow the system. Storage and API requests stay UTC — see `docs/import.md` → "Calendars are in your timezone; storage and requests are UTC" |
-| `conv-data-retention-days` | CSV import retention window |
+| `conv-data-retention-days` | Retention window in days — applied by the purge that runs each time the database opens |
+| `cm-missing-days-checked`  | The display-timezone day (`YYYY-MM-DD`) the launch check for missing import days last ran. It runs once a day, whatever the answer |
 | `chat-copy-format`         | Chat copy format preference |
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
