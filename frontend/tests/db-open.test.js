@@ -34,6 +34,9 @@ vm.runInContext(
       pending.push({ path, resolve, reject })
     })
   function convDbOpeningChanged() { changes++ }
+  // The one-time update card: told how each open ended.
+  const finishes = []
+  function dbUpgradeFinish(ok) { finishes.push(ok) }
   ${["convDbIsOpening", "convDbOpen", "convDbWhenReady", "convDbWaitText"].map(extract).join("\n")}
   globalThis.api = {
     convDbIsOpening, convDbOpen, convDbWhenReady, convDbWaitText,
@@ -41,6 +44,7 @@ vm.runInContext(
     holdPurge: (v) => { holdPurge = v },
     opened: () => convDbOpenedPath,
     changes: () => changes,
+    finishes,
   }
   `,
   ctx,
@@ -101,6 +105,24 @@ test("a failed open rejects its callers, releases its readers, and is not 'open'
   await ready // resolves: the read then fails on its own, with the backend's words
   assert.ok(!api.convDbIsOpening())
   assert.strictEqual(api.opened(), "/db/d", "still the last database that did open")
+})
+
+test("the update card hears how each open ended — after the purge, not before", async () => {
+  api.finishes.length = 0
+  api.holdPurge(true)
+  const ok = api.convDbOpen("/db/up")
+  await tick()
+  api.pending.shift().resolve()
+  await tick()
+  assert.deepStrictEqual([...api.finishes], [], "still purging, so not done yet")
+  api.purges.shift()()
+  await ok
+  api.holdPurge(false)
+  const bad = api.convDbOpen("/db/broken")
+  await tick()
+  api.pending.shift().reject(new Error("corrupt"))
+  await assert.rejects(bad, /corrupt/)
+  assert.deepStrictEqual([...api.finishes], [true, false])
 })
 
 test("a read waits for the retention purge too, which runs after the open", async () => {

@@ -80,6 +80,32 @@ open of the same file alongside the first.
 - `frontend/tests/db-open.test.js` pins joining, queueing, waiting and a failed
   open against a scripted `set_db_path`.
 
+### The one-time update
+
+The first open of a database after a new version can run migrations — on a
+90-day database, about 20 s of building the search indexes. The header pill
+said only "Indexing conversations for faster search…", so it read as the app
+having become slow, with nothing saying it was once, or why, or when it ended.
+
+- **`#dbUpgradeCard` appears on the first `db-migrating` phase of an open**, and
+  never otherwise: an ordinary open emits no phase, so a normal launch shows
+  nothing. It says what is happening and why (the new version's storage), that
+  it runs **once per database**, what waits (Conversations, Analysis, imports —
+  not Content), that a large database can take a minute or two, and that
+  closing the app restarts it next time.
+- **It names each step and counts the time** (`dbUpgradeStep`, ticking every
+  second). A step label alone sits still for the whole of an index build; the
+  clock is the only thing that visibly moves.
+- **The open tells it how it ended** (`dbUpgradeFinish`, chained in
+  `convDbOpen` after the retention purge, so "done" means the database is
+  really usable). Success turns it green — "Database updated · Done in 0:21.
+  You won't see this again for this database." — and it fades after 6 s.
+  Failure just hides it: the open's own error explains that, and the card
+  would contradict it.
+- **✕ hides it, and the update carries on**; the header pill still says it is
+  running. `db-open.test.js` pins that the card hears success only after the
+  purge, and failure as failure.
+
 **`yieldToPaint()` is a race, and the timeout half is the point.** WebKit will not repaint between a class change and a Tauri `invoke` that occupies the IPC channel, so the loading state needs two frames before the call goes out. But `requestAnimationFrame` **does not fire in a window that isn't being composited** — minimised, occluded, or on another space — so awaiting it bare parks the caller forever behind a spinner that never resolves. On screen the frames win and the paint happens; off screen the timer wins after `PAINT_YIELD_MS` and the work proceeds without one, which is correct: nobody is watching. `loadSessions` awaited the bare frames before this, so a minimised window could hang it indefinitely.
 
 - **There is one such helper, and awaiting a bare frame anywhere is the bug.** `waitForNextPaint` was a second, unbounded copy — a plain double `requestAnimationFrame` — and it survived the `loadSessions` fix untouched, so the hang simply moved: `loadData` awaited it before `getData`, and a launch or refresh with the window minimised, occluded or on another space parked it with `dataLoadInFlight` left `true`. That flag is the early-return guard, so every later `loadData()` call silently did nothing and the refresh button was dead until restart. It is gone; its two call sites go through `yieldToPaint`.
