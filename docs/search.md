@@ -648,11 +648,26 @@ search after launch without `sudo purge`):
 | entity, warm | 291 ms | 23 ms |
 | thumbs-down pill, warm | 197 ms | 24 ms |
 
-What is still slow cold is not bounded by the range: a feedback pill with
-**no** range (6.7 s cold — `feedback_origins` resolves each rating's origin by
-reading its conversation's rows), and the positive share of a very broad
-search (about 2 s cold, reading the answer rows of every rated conversation).
-Both would need an index on `(session_uuid, interaction_uuid)`.
+**The row a rating is about has an index too: `idx_session_interaction
+(session_uuid, interaction_uuid)`.** A rating names its answer by
+`interaction_uuid`, and finding that row used to read every row of the
+conversation to compare it — the whole cost of a feedback pill without a date
+range (6.7 s → 2.7 s cold over 91 days). `feedback_origins` picks it up
+unaided; the positive share names it, because with a date range the planner
+preferred `idx_session_ts` and was back to reading every row.
+
+The positive share is read **from the ratings**, not from the answers: each
+rating's origin (`fb_origins`), its row through that index, and only then the
+row itself for its type and date, kept when it is in the search's matches.
+That last test is written `+i.log_id IN (…)`, and the `+` is load-bearing: as
+`rowid IN (…)` the planner folded it into the index probe and stepped through
+every match per rating origin — 28k × 150k for a common word over 90 days,
+minutes of CPU. `the_positive_share_never_steps_through_every_match_per_rating`
+pins the plan.
+Reading every answer of every rated conversation and testing it against the
+ratings gave the same sums — an answer nobody rated adds 0 to both — while
+spending nearly all its time on those answers. Checked against the previous
+query on 16 searches over 91 days, for one week and for everything: identical.
 
 ## Metadata filtering (Context · Metadata)
 

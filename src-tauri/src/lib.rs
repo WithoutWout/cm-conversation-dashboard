@@ -2427,6 +2427,21 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
             Err(e) => log::warn!(target: "import", "{SEARCH_ID_INDEX} failed, will retry on next open: {e}"),
         }
     }
+    // Which row a rating is about, by its id within the conversation — the
+    // lookup `feedback_origins` and the positive share make for every rating.
+    // Without it each read every row of the rated conversation to compare
+    // `interaction_uuid`: 6.7 s cold for the thumbs-down pill over 90 days.
+    if !index_exists(&conn, SESSION_INTERACTION_INDEX) {
+        let started = Instant::now();
+        report(MigrationPhase::SearchIndex);
+        match conn.execute_batch(&format!(
+            "CREATE INDEX IF NOT EXISTS {SESSION_INTERACTION_INDEX} \
+             ON interactions(session_uuid, interaction_uuid);"
+        )) {
+            Ok(()) => log::info!(target: "import", "built {SESSION_INTERACTION_INDEX} in {}ms", started.elapsed().as_millis()),
+            Err(e) => log::warn!(target: "import", "{SESSION_INTERACTION_INDEX} failed, will retry on next open: {e}"),
+        }
+    }
     // The rating rows alone — 2% of interactions — for every query that looks
     // for ratings by conversation (the feedback pills, the positive share,
     // Insights). Without it each read every row of each rated conversation to
@@ -5358,6 +5373,12 @@ const SEARCH_ID_INDEX: &str = "idx_log_session";
 /// `feedback_info != ''` although their `LIKE`s already imply it.
 const FEEDBACK_ROWS_INDEX: &str = "idx_feedback_rows";
 
+/// `(session_uuid, interaction_uuid)` — the row a rating is about, found
+/// without reading every row of its conversation. `feedback_origins` gets it
+/// unaided; the positive share names it, because a date range made
+/// `idx_session_ts` look as good.
+const SESSION_INTERACTION_INDEX: &str = "idx_session_interaction";
+
 fn index_exists(conn: &Connection, name: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
@@ -6955,6 +6976,9 @@ const FEEDBACK_ROW: &str = "(i.feedback_info LIKE '%\"score\": 1%' \
      OR i.feedback_info LIKE '%\"score\":1%' \
      OR i.feedback_info LIKE '%\"score\": -1%' \
      OR i.feedback_info LIKE '%\"score\":-1%')";
+/// The interaction a rating row is about: the one it names, else itself.
+const FEEDBACK_ORIGIN_UUID: &str = "COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
+     json_extract(i.feedback_info, '$.originatingInteractionId') END, i.interaction_uuid)";
 const FEEDBACK_POS_ROW: &str = "((i.feedback_info LIKE '%\"score\": 1%' \
      OR i.feedback_info LIKE '%\"score\":1%') \
      AND i.feedback_info NOT LIKE '%\"score\": -1%' \
@@ -8172,9 +8196,7 @@ fn insight_feedback_counts(conn: &Connection, answer_from: &str) -> Result<(i64,
 fn feedback_counts_tail(ratings_from: &str, answer_from: &str) -> String {
     format!(
             "r AS MATERIALIZED ( \
-               SELECT COALESCE(CASE WHEN json_valid(i.feedback_info) THEN \
-                        json_extract(i.feedback_info, '$.originatingInteractionId') END, \
-                        i.interaction_uuid) AS origin_uuid, \
+               SELECT {FEEDBACK_ORIGIN_UUID} AS origin_uuid, \
                       MAX(i.log_id) AS last_log, \
                       CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END AS pos \
                FROM {ratings_from} \
@@ -8242,20 +8264,42 @@ fn search_feedback_sql(
         Some(match_rows) => format!("fb_match AS MATERIALIZED ({match_rows}),"),
         None => String::new(),
     };
-    let matched = match fq.match_rows.as_deref() {
-        Some(_) => format!(
-            "SELECT DISTINCT i.log_id, i.interaction_uuid, i.main_interaction_type \
-             FROM fb_match m \
-             JOIN fb_sessions s ON s.session_uuid = m.session_uuid \
-             JOIN interactions i ON i.log_id = m.match_log_id \
-             WHERE m.match_log_id IS NOT NULL AND {IS_ANSWER_ROW}{scope}"
-        ),
-        None => format!(
-            "SELECT i.log_id, i.interaction_uuid, i.main_interaction_type \
-             FROM fb_sessions s JOIN interactions i ON i.session_uuid = s.session_uuid \
-             WHERE {IS_ANSWER_ROW}{scope}"
-        ),
+    // Only answers that some rating is about can add to either sum, so the
+    // answers are read *from the ratings*: each rating's origin, found by
+    // `idx_session_interaction` without reading the row, and only then the
+    // origin row itself for its type and date. Read the other way round —
+    // every answer of every rated conversation, testing each against the
+    // ratings — it was 2 s cold for one week of 90 days, nearly all of it
+    // spent on answers nobody rated. Same sums: an unrated answer adds 0.
+    // The `+` is load-bearing: it keeps `log_id` out of the index lookup. As
+    // `rowid IN (…)` the planner folded it into the `idx_session_interaction`
+    // probe and stepped through *every* match per rating origin — 28k × 150k
+    // for a common word over 90 days, minutes of CPU. As `+log_id` it is one
+    // probe of the materialized set per row.
+    let in_match = if fq.match_rows.is_some() {
+        " AND +i.log_id IN (SELECT match_log_id FROM fb_match WHERE match_log_id IS NOT NULL)"
+    } else {
+        ""
     };
+    // Named, because with a date range the planner preferred `idx_session_ts`
+    // — conversation plus a timestamp range looks as selective — and read
+    // every row of the conversation in range to compare its uuid.
+    let by_origin = if index_exists(conn, SESSION_INTERACTION_INDEX) {
+        format!(" INDEXED BY {SESSION_INTERACTION_INDEX}")
+    } else {
+        String::new()
+    };
+    let matched = format!(
+        "SELECT DISTINCT i.log_id, i.interaction_uuid, i.main_interaction_type \
+         FROM fb_origins o \
+         JOIN interactions i{by_origin} ON i.session_uuid = o.session_uuid AND i.interaction_uuid = o.origin_uuid \
+         WHERE {IS_ANSWER_ROW}{scope}{in_match}"
+    );
+    let origins = format!(
+        "SELECT DISTINCT i.session_uuid, {FEEDBACK_ORIGIN_UUID} AS origin_uuid \
+         FROM fb_sessions s CROSS JOIN interactions i ON i.session_uuid = s.session_uuid \
+         WHERE i.feedback_info != '' AND {FEEDBACK_ROW}"
+    );
     let sql = format!(
         r#"WITH
 base_sessions AS (
@@ -8273,6 +8317,7 @@ fb_sessions AS MATERIALIZED (
       AND (has_pos_feedback = 1 OR has_neg_feedback = 1)
 ),
 {match_cte}
+fb_origins AS MATERIALIZED ({origins}),
 fb_answers AS MATERIALIZED ({matched}),
 {tail}"#,
         base_where = fq.base_where.as_str(),
@@ -18662,6 +18707,41 @@ mod conv_search {
         assert_eq!(found(&conn, &text_args("parkeren", "user")), vec!["a"]);
     }
 
+    /// The positive share reads each rating's answer through
+    /// `idx_session_interaction`, and the search's matches must stay a probe
+    /// *after* that lookup. Folded into it as `rowid IN (…)`, every origin
+    /// stepped through every match — minutes for a common word on 90 days.
+    #[test]
+    fn the_positive_share_never_steps_through_every_match_per_rating() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "a", user: "parkeren", bot: "x", ..Default::default() });
+        add_feedback(&conn, 2, "a", 1, 1);
+        conn.execute_batch(&format!(
+            "CREATE INDEX {SESSION_INTERACTION_INDEX} ON interactions(session_uuid, interaction_uuid);"
+        ))
+        .expect("index");
+        rebuild_session_summary(&conn).expect("summary");
+
+        let args = text_args("parkeren", "user");
+        assert_eq!(search_feedback_into(&conn, &args).expect("share"), (1, 1));
+        let (sql, ps) = search_feedback_sql(&conn, &args).expect("sql");
+        let ps: Vec<&dyn ToSql> = ps.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).expect("plan");
+        let plan: Vec<String> = stmt
+            .query_map(ps.as_slice(), |r| r.get::<_, String>(3))
+            .expect("plan")
+            .filter_map(|r| r.ok())
+            .collect();
+        let lookup: Vec<&String> =
+            plan.iter().filter(|l| l.contains(SESSION_INTERACTION_INDEX)).collect();
+        let plan = plan.join("\n");
+        assert!(!lookup.is_empty(), "{plan}");
+        assert!(
+            lookup.iter().all(|l| !l.contains("rowid=?")),
+            "the matches must not drive the lookup:\n{plan}"
+        );
+    }
+
     /// A plain search must compile to the SQL this file emitted before
     /// expressions existed — statement-cache key and query plan included.
     ///
@@ -19813,7 +19893,11 @@ mod range_perf {
             "{:<22} {:>14} {:>14} {:>14} {:>10}",
             "case", "all days", "newest week", "old week", "feedback(wk)"
         );
+        let only = std::env::var("CAI_ONLY").ok();
         for (label, filter, q, scope) in &cases {
+            if only.as_deref().map_or(false, |o| !label.contains(o)) {
+                continue;
+            }
             let mk = |r: &(Option<String>, Option<String>)| GetSessionsArgs {
                 filter: Some(filter.to_string()),
                 query: q.map(|s| s.to_string()),
@@ -19851,8 +19935,14 @@ mod range_perf {
                 let _ = search_feedback_into(&conn, &mk(&week));
             }
             let t = Instant::now();
-            let _ = search_feedback_into(&conn, &mk(&week));
+            let share = search_feedback_into(&conn, &mk(&week));
             let fb = t.elapsed().as_millis();
+            let share_all = if std::env::var("CAI_SHARE_ALL").is_ok() {
+                Some(search_feedback_into(&conn, &mk(&(None, None))))
+            } else {
+                None
+            };
+            println!("SHARE {label}: week {share:?} all {share_all:?}");
             println!(
                 "{label:<22} {:>6}ms {:>6} {:>6}ms {:>6} {:>6}ms {:>6} {:>8}ms",
                 all.0, all.1, wk.0, wk.1, ow.0, ow.1, fb
@@ -19863,7 +19953,8 @@ mod range_perf {
                 println!("    week:");
                 plan(&conn, &mk(&week));
                 println!("    feedback:");
-                let (sql, ps) = search_feedback_sql(&conn, &mk(&week)).unwrap();
+                let range = if std::env::var("CAI_PLAN_ALL").is_ok() { (None, None) } else { week.clone() };
+                let (sql, ps) = search_feedback_sql(&conn, &mk(&range)).unwrap();
                 let ps: Vec<&dyn ToSql> = ps.iter().map(|b| b.as_ref()).collect();
                 let mut st = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
                 let mut rows = st.query(ps.as_slice()).unwrap();
