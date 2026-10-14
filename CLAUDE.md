@@ -544,6 +544,11 @@ The orientation map for the whole window. It says what is on screen and where;
   amber warning: the file holds live credentials, treat it as a password
   Export settings / Import settings | status line
 
+<div#dbUpgradeCard>   (top right, only while a one-time migration runs after an update —
+                      docs/loading-states.md → "The one-time update")
+  what is happening and that it runs once per database | current step · elapsed |
+  what waits meanwhile → "Database updated · Done in m:ss", fades after 6 s
+
 <div#missingDaysModal>   (once a day at launch, Analytics API set up — docs/import.md
                          → "The daily missing-days check")
   N days missing or partly imported, between … and … | Not now | Import N days

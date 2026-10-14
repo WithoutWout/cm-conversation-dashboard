@@ -6316,6 +6316,93 @@
         height: 11px;
         flex: none;
       }
+      /* The one-time update after a new version. The pill says *that* the
+         database is busy; this says why, that it is once, and when it is done —
+         shown only when a migration phase actually runs, so an ordinary launch
+         never sees it. See docs/loading-states.md → "The one-time update". */
+      .db-upgrade-card {
+        position: fixed;
+        top: 58px;
+        right: 16px;
+        z-index: 300;
+        width: 360px;
+        max-width: calc(100vw - 32px);
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        padding: 14px 16px 14px 18px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+        color: var(--text);
+        font-size: 0.8rem;
+        line-height: 1.45;
+      }
+      .db-upgrade-card.visible {
+        display: flex;
+        animation: fade-in 0.18s ease-out;
+      }
+      .db-upgrade-card.leaving {
+        animation: fade-out 0.18s ease-in forwards;
+      }
+      .db-upgrade-card.done {
+        border-left-color: var(--green);
+      }
+      .db-upgrade-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 0.86rem;
+      }
+      .db-upgrade-head .db-upgrade-title {
+        flex: 1;
+      }
+      .db-upgrade-close {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.9rem;
+        padding: 0 2px;
+      }
+      .db-upgrade-close:hover {
+        color: var(--text);
+      }
+      .db-upgrade-body {
+        color: var(--muted);
+      }
+      .db-upgrade-step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 7px;
+        background: var(--surface2);
+      }
+      .db-upgrade-step .mini-spinner {
+        width: 12px;
+        height: 12px;
+        flex: none;
+      }
+      .db-upgrade-step .db-upgrade-check {
+        color: var(--green);
+        flex: none;
+      }
+      .db-upgrade-step .db-upgrade-label {
+        flex: 1;
+        min-width: 0;
+      }
+      .db-upgrade-step .db-upgrade-elapsed {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .db-upgrade-note {
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
       .pane-loading {
         display: flex;
         flex-direction: column;
@@ -10948,6 +11035,21 @@
       </button>
     </div>
 
+    <!-- The one-time database update after a new version -->
+    <div class="db-upgrade-card" id="dbUpgradeCard" role="status" aria-live="polite">
+      <div class="db-upgrade-head">
+        <span class="db-upgrade-title" id="dbUpgradeTitle">Updating your conversations database</span>
+        <button class="db-upgrade-close" type="button" onclick="dbUpgradeHide()" title="Hide — the update carries on">✕</button>
+      </div>
+      <div class="db-upgrade-body" id="dbUpgradeBody"></div>
+      <div class="db-upgrade-step">
+        <span class="mini-spinner" id="dbUpgradeSpinner"></span>
+        <span class="db-upgrade-check" id="dbUpgradeCheck" hidden>✓</span>
+        <span class="db-upgrade-label" id="dbUpgradeStep"></span>
+        <span class="db-upgrade-elapsed" id="dbUpgradeElapsed"></span>
+      </div>
+      <div class="db-upgrade-note" id="dbUpgradeNote"></div>
+    </div>
     <!-- HEADER -->
     <header class="app-header">
       <div class="brand">
@@ -14228,6 +14330,16 @@
               throw e
             },
           )
+          .then(
+            (v) => {
+              dbUpgradeFinish(true)
+              return v
+            },
+            (e) => {
+              dbUpgradeFinish(false)
+              throw e
+            },
+          )
           .finally(() => {
             if (_convDbOpening === entry) {
               _convDbOpening = null
@@ -14252,6 +14364,7 @@
       /// open still succeeds — old rows are untidy, not wrong.
       async function _convDbPurgeExpired() {
         convDbPhaseLabel = "Removing old data…"
+        if (_dbUpgrade && !_dbUpgrade.finished) dbUpgradeStep("Finishing up…")
         convDbPhaseTip =
           `Removing conversations older than ${dataRetentionDays} days, as the retention setting asks. ` +
           "Searches, charts and imports wait until it finishes."
@@ -14265,6 +14378,95 @@
         } catch (e) {
           console.warn("Retention purge failed:", e)
         }
+      }
+
+      // ── The one-time update ─────────────────────────────────────────
+      //
+      // After a new version, the first open of each database can run a
+      // migration — on a large one, a minute of a header pill that says only
+      // "Indexing…". Nothing said it was once, or for the update, or when it
+      // was over, so it read as the app having become slow. The card appears
+      // on the first `db-migrating` phase of an open (an ordinary launch emits
+      // none, and sees nothing), names each step, counts the time, and says
+      // when it is done. See docs/loading-states.md → "The one-time update".
+
+      let _dbUpgrade = null // {started, timer, hideTimer} while the card is up
+
+      function _dbUpgradeClock(ms) {
+        const s = Math.max(0, Math.floor(ms / 1000))
+        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
+      }
+
+      function _dbUpgradeTick() {
+        const el = document.getElementById("dbUpgradeElapsed")
+        if (el && _dbUpgrade) el.textContent = _dbUpgradeClock(Date.now() - _dbUpgrade.started)
+      }
+
+      /// A migration phase began: show the card if it is not up, and name the step.
+      function dbUpgradeStep(label) {
+        const card = document.getElementById("dbUpgradeCard")
+        if (!card) return
+        if (!_dbUpgrade || _dbUpgrade.finished) {
+          if (_dbUpgrade) {
+            clearInterval(_dbUpgrade.timer)
+            clearTimeout(_dbUpgrade.hideTimer)
+          }
+          _dbUpgrade = { started: Date.now(), timer: setInterval(_dbUpgradeTick, 1000), hidden: false }
+          card.classList.remove("done", "leaving")
+          document.getElementById("dbUpgradeTitle").textContent = "Updating your conversations database"
+          document.getElementById("dbUpgradeBody").textContent =
+            "This version stores your conversations in a way that is faster to search. " +
+            "It runs once for each database, the first time it opens after the update — " +
+            "after that it opens straight away."
+          document.getElementById("dbUpgradeNote").textContent =
+            "Conversations, Analysis and imports wait until it is done; Content works as usual. " +
+            "On a large database this can take a minute or two. Keep the app open — " +
+            "if it is closed, the update starts again next time."
+          document.getElementById("dbUpgradeSpinner").style.display = ""
+          document.getElementById("dbUpgradeCheck").hidden = true
+          fadeIndicator(card, true, "visible")
+        }
+        document.getElementById("dbUpgradeStep").textContent = label
+        _dbUpgradeTick()
+      }
+
+      /// The open settled. Only does anything when the card is up.
+      function dbUpgradeFinish(ok) {
+        if (!_dbUpgrade || _dbUpgrade.finished) return
+        _dbUpgrade.finished = true
+        clearInterval(_dbUpgrade.timer)
+        const took = _dbUpgradeClock(Date.now() - _dbUpgrade.started)
+        const card = document.getElementById("dbUpgradeCard")
+        if (!ok) {
+          // The open's own error is what explains this; the card would only
+          // contradict it with "updated".
+          dbUpgradeHide()
+          return
+        }
+        card.classList.add("done")
+        document.getElementById("dbUpgradeTitle").textContent = "Database updated"
+        document.getElementById("dbUpgradeBody").textContent =
+          `Done in ${took}. You won't see this again for this database.`
+        document.getElementById("dbUpgradeNote").textContent = ""
+        document.getElementById("dbUpgradeStep").textContent = "Ready to search"
+        document.getElementById("dbUpgradeElapsed").textContent = ""
+        document.getElementById("dbUpgradeSpinner").style.display = "none"
+        document.getElementById("dbUpgradeCheck").hidden = false
+        if (_dbUpgrade.hidden) return
+        _dbUpgrade.hideTimer = setTimeout(dbUpgradeHide, 6000)
+      }
+
+      /// ✕, or the done card timing out. Hiding mid-update leaves the header
+      /// pill to say it is still running.
+      function dbUpgradeHide() {
+        const card = document.getElementById("dbUpgradeCard")
+        if (_dbUpgrade) {
+          _dbUpgrade.hidden = true
+          clearTimeout(_dbUpgrade.hideTimer)
+          if (_dbUpgrade.finished) clearInterval(_dbUpgrade.timer)
+        }
+        if (!card || !card.classList.contains("visible")) return
+        fadeIndicator(card, false, "visible")
       }
 
       /// Resolves once no open is in flight — whether it worked or not. A read
@@ -46096,6 +46298,7 @@
           const p = (ev && ev.payload) || {}
           const label = DB_MIGRATION_LABELS[p.phase]
           if (!label || !convDbIsOpening()) return
+          dbUpgradeStep(label)
           convDbPhaseLabel =
             label +
             (p.phase === "contexts" && p.done > 0
