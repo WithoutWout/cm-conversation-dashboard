@@ -91,22 +91,30 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Triggers a chatbot can find
-            - Collections now write each trigger as a few of the Article's own
-              phrases — "ticket dubbel betaald | kaart nog een keer
-              afgeschreven" — instead of Entity names such as "ENTREETICKET |
-              DUBBEL | BETALEN". Entity names are labels, not words people type.
-              In a test on a full content export, a knowledge search found the
-              right answer first 69% of the time with phrases, against 47%
-              with Entity names.
-            - Choose the style under Collections → Smart filters → Write
-              triggers as: Phrases, User words, Entity names or Every phrase.
-              The median trigger length is shown beside it.
-            - Answers behind a Dialog button get their context in the same
-              style.
-            - The Condense setting in Settings → Content now only affects the
-              Article cards. If you had it switched off, your export keeps
-              writing every phrase.
+            ### Imports you can trust
+            - A day only turns green in the Data calendar once every hour of
+              it was fully downloaded. Importing "today" no longer marks the
+              rest of the day as done, so it gets finished on a later import.
+              Days wrongly marked green before are fixed automatically the
+              first time the app opens.
+            - Once a day, if your Analytics API is set up, the app checks for
+              days that are missing or only partly imported and offers to
+              import them in one click.
+            - Old conversations are now removed when the app starts instead of
+              at the end of every import, so imports finish sooner. The header
+              shows "Removing old data…" while it runs.
+            - The Data button is now on every screen, always on the far right.
+
+            ### Conversations
+            - Beside the number of results you now see how positively the
+              matching answers were rated, across all results — for example
+              "77.4% positive" when searching for parking. Only ratings on the
+              answers your search matched count.
+            - Article and Dialog buttons in a message's details open the item
+              in CM.com.
+            - Shift-click a user's message to copy all of it.
+            - An opened conversation now highlights the side (User or Bot) the
+              list was actually searched on.
 
             ---
 
