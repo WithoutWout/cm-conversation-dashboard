@@ -149,8 +149,7 @@
       }
       /* Header buttons that belong to one side of the app. The view is a class
          on <body>, set by `switchView` and once as the script starts. */
-      body:not(.view-is-content) .icon-btn.content-only,
-      body.view-is-content .icon-btn.not-content {
+      body:not(.view-is-content) .icon-btn.content-only {
         display: none;
       }
       /* The buttons a view switch brings in rise into the slot the others just
@@ -167,8 +166,7 @@
           transform: none;
         }
       }
-      body.view-anim.view-is-content .icon-btn.content-only,
-      body.view-anim:not(.view-is-content) .icon-btn.not-content {
+      body.view-anim.view-is-content .icon-btn.content-only {
         animation: hdr-btn-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
       }
       body.view-anim.view-is-content #collectionsBtn {
@@ -180,8 +178,7 @@
          Content's entirely, having no delay — before anything was drawn. */
       /* As specific as the rules that start it, and after them: the `animation`
          shorthand there resets the play state, so a plainer selector loses. */
-      body.view-anim.view-anim-hold .icon-btn.content-only,
-      body.view-anim.view-anim-hold .icon-btn.not-content {
+      body.view-anim.view-anim-hold .icon-btn.content-only {
         animation-play-state: paused;
       }
       .icon-btn .mini-spinner {
@@ -6253,6 +6250,29 @@
         white-space: nowrap;
         flex-shrink: 0;
       }
+      /* The positive share of the matching answers' ratings, beside the
+         count — see `loadConvFeedback`. */
+      .conv-feedback-share {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 0.71rem;
+        color: var(--muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-left: 8px;
+        cursor: default;
+      }
+      .conv-feedback-share[hidden] {
+        display: none;
+      }
+      .conv-feedback-share .ui-icon {
+        color: var(--green);
+      }
+      .conv-feedback-share strong {
+        color: var(--text);
+        font-weight: 600;
+      }
       .sessions-empty {
         padding: 32px 18px;
         text-align: center;
@@ -7542,6 +7562,25 @@
         color: var(--text);
         align-self: flex-end;
       }
+      /* Shift-click copied the message (`copyUserBubble`). Beside the bubble,
+         on its free left side: above it is the "User" label, and ::after is
+         taken by the feedback-origin badge. */
+      .bubble.user.copied::before {
+        content: "Copied";
+        position: absolute;
+        top: 50%;
+        right: calc(100% + 8px);
+        transform: translateY(-50%);
+        white-space: nowrap;
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: var(--green);
+        color: var(--bg);
+        font-size: 0.66rem;
+        font-weight: 600;
+        pointer-events: none;
+        animation: fade-out 0.3s ease-in 0.9s forwards;
+      }
       /* Values the log never stored. Two shapes, one visual language:
          .redacted-value is a whole user message (#Voornaam#), so it can afford
          a label; .tpl-var sits mid-sentence in a bot answer ({{name}}), so it
@@ -8586,8 +8625,7 @@
 
       @media (prefers-reduced-motion: reduce) {
         /* Outranks the view-state selectors that start it. */
-        .icon-btn.content-only,
-        .icon-btn.not-content {
+        .icon-btn.content-only {
           animation: none !important;
         }
         .settings-tab-panel.active,
@@ -11046,10 +11084,11 @@
         Settings
       </button>
       <!--
-        Share Content and Collections act on the Content tab's results and are
-        shown only there; everywhere else the same slot holds Data, which is
-        about the conversations database behind every other view. See
-        `switchView`.
+        Data is on every view, always the rightmost button: the conversations
+        database behind it is what Conversations, Flagged and Analysis read,
+        and an import is worth starting from wherever you are. Share Content
+        and Collections act on the Content tab's results and are shown only
+        there, before it. See `switchView`.
       -->
       <button class="icon-btn content-only" id="exportBtn">
         <svg
@@ -11082,7 +11121,7 @@
         Collections
       </button>
       <button
-        class="icon-btn not-content"
+        class="icon-btn"
         id="convDataBtn"
         title="Import interactions, review what's stored, and manage the database file"
       >
@@ -11815,6 +11854,7 @@
                 Zero %
               </button>
               <span class="conv-result-count" id="convResultCount"></span>
+              <span class="conv-feedback-share" id="convFeedbackShare" hidden></span>
             </div>
           </div>
           <div class="sessions-list" id="sessionsList"></div>
@@ -13013,6 +13053,24 @@
       </div>
     </div>
 
+    <!-- MISSING DAYS: the once-a-day check — see `checkMissingDays` -->
+    <div class="modal-overlay" id="missingDaysModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Days missing from your data</h3>
+          <button class="close-btn" id="closeMissingDays">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.85rem; line-height: 1.6" id="missingDaysText"></p>
+          <p class="hint" id="missingDaysDetail"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="missingDaysLater">Not now</button>
+          <button class="btn-primary" id="missingDaysImport">Import</button>
+        </div>
+      </div>
+    </div>
+
     <!-- CONVERSATION DATA MODAL -->
     <!--
       One modal for everything that puts data in the database or takes it out
@@ -13870,16 +13928,16 @@
           selectCsvFiles: () => invoke("select_csv_files"),
           selectDbSavePath: () => invoke("select_db_save_path"),
           selectDbOpenPath: () => invoke("select_db_open_path"),
-          importInteractionsCsv: (filePath, maxAgeDays, delimiter, deferFinalize) =>
+          importInteractionsCsv: (filePath, delimiter, deferFinalize) =>
             invoke("import_interactions_csv", {
               filePath,
-              maxAgeDays,
               delimiter,
               deferFinalize: !!deferFinalize,
             }),
           beginImportRun: () => invoke("begin_import_run"),
-          finalizeImportRun: (maxAgeDays) =>
-            invoke("finalize_import_run", { maxAgeDays }),
+          finalizeImportRun: () => invoke("finalize_import_run"),
+          purgeExpiredData: (maxAgeDays) =>
+            invoke("purge_expired_data", { maxAgeDays }),
           compactDatabase: () => invoke("compact_database"),
           // Analytics API commands
           getAnalyticsConfig: () => invoke("get_analytics_config"),
@@ -13904,6 +13962,7 @@
           // Frees the resolved result set the Insights temp tables hold. Called
           // on close — see `release_insight_scope`.
           releaseInsightScope: () => invoke("release_insight_scope"),
+          getSearchFeedback: (args) => invoke("get_search_feedback", { args }),
           // The export is one long invoke with a save dialog, a full-result
           // query and a file write in it; these are the phase boundaries.
           onAiExportProgress: (handler) =>
@@ -14023,7 +14082,9 @@
       if (!window.backend.beginImportRun)
         window.backend.beginImportRun = () => Promise.resolve()
       if (!window.backend.finalizeImportRun)
-        window.backend.finalizeImportRun = () => Promise.resolve({ purged: 0 })
+        window.backend.finalizeImportRun = () => Promise.resolve(null)
+      if (!window.backend.purgeExpiredData)
+        window.backend.purgeExpiredData = () => Promise.resolve({ purged: 0 })
       if (!window.backend.compactDatabase)
         window.backend.compactDatabase = _convStub
       if (!window.backend.getAnalyticsConfig)
@@ -14139,6 +14200,7 @@
       let _convDbOpening = null // {path, promise} while an open is in flight
       let convDbOpenedPath = "" // what the backend has open, as far as we know
       let convDbPhaseLabel = "" // the migration phase being run, if one is
+      let convDbPhaseTip = "" // the header pill's tooltip for that phase, if it has its own
       const _rawSetDbPath = window.backend.setDbPath
 
       function convDbIsOpening() {
@@ -14157,6 +14219,9 @@
           .then(
             () => {
               convDbOpenedPath = path
+              // Part of the open, so every read waits for it the way it waits
+              // for the open itself — see `_convDbPurgeExpired`.
+              return _convDbPurgeExpired()
             },
             (e) => {
               if (convDbOpenedPath === path) convDbOpenedPath = ""
@@ -14167,12 +14232,39 @@
             if (_convDbOpening === entry) {
               _convDbOpening = null
               convDbPhaseLabel = ""
+              convDbPhaseTip = ""
               convDbOpeningChanged()
             }
           })
         _convDbOpening = entry
         convDbOpeningChanged()
         return entry.promise
+      }
+
+      /// Apply the retention setting, once per open — at launch, in practice.
+      ///
+      /// It used to run at the end of every import, where on a day the cutoff
+      /// crossed a busy stretch it was most of "Finishing up…". It cannot run
+      /// in the background: the backend has one connection behind one lock, so
+      /// a search or a chart would only queue behind it while the screen said
+      /// it was ready. Folded into the open instead, every read waits for it
+      /// honestly and the header pill says why. A failure is logged and the
+      /// open still succeeds — old rows are untidy, not wrong.
+      async function _convDbPurgeExpired() {
+        convDbPhaseLabel = "Removing old data…"
+        convDbPhaseTip =
+          `Removing conversations older than ${dataRetentionDays} days, as the retention setting asks. ` +
+          "Searches, charts and imports wait until it finishes."
+        convDbOpeningChanged()
+        try {
+          const r = await window.backend.purgeExpiredData(dataRetentionDays)
+          if (r && r.purged > 0) {
+            insDropPayloadCache()
+            gapCoverageInvalidate()
+          }
+        } catch (e) {
+          console.warn("Retention purge failed:", e)
+        }
       }
 
       /// Resolves once no open is in flight — whether it worked or not. A read
@@ -14199,7 +14291,9 @@
         if (text) text.textContent = convDbPhaseLabel || "Opening database…"
         const pill = document.getElementById("dbOpeningPill")
         if (pill) {
-          pill.title = convDbPhaseLabel
+          pill.title = convDbPhaseTip
+            ? convDbPhaseTip
+            : convDbPhaseLabel
             ? convDbPhaseLabel + " This runs once, after an update."
             : "Opening the conversations database. Anything that reads it waits until it is ready."
         }
@@ -14232,6 +14326,7 @@
         "getInsightSegments",
         "getConversationInsights",
         "releaseInsightScope",
+        "getSearchFeedback",
         "getSessionInteractions",
         "getDateRange",
         "getContextOptions",
@@ -14492,6 +14587,7 @@
       let convAiExporting = false
       let convSearchSeq = 0 // incremented on each search; used to discard stale results
       let lastConvSearchArgs = null
+      let convFeedback = null // the list's positive share — see `loadConvFeedback`
       let convContextFilters = [] // [{name, value}] — active context filters
       let contextOptions = [] // [{name, value, count}] — all available context options
       let contextOptionsLoaded = false
@@ -26488,7 +26584,9 @@
               )}</span></div></div>`
             }
             if (turn.userRow) {
-              inner += `<div class="user-group"><span class="user-label">User</span><div class="bubble user">${userBubbleBody(
+              inner += `<div class="user-group"><span class="user-label">User</span><div class="bubble user" title="Shift-click to copy the message" data-copy="${esc(
+                turn.userRow.interactionValue,
+              )}" onmousedown="if(event.shiftKey)event.preventDefault()" onclick="copyUserBubble(this,event)">${userBubbleBody(
                 turn.userRow.interactionValue,
               )}</div><span class="bubble-ts">${esc(
                 fmtChatTime(turn.userRow.timestampStart),
@@ -28939,9 +29037,9 @@
       // ── View switcher ───────────────────────────────────────────────
 
       /// Run `change`, then slide every header item that stayed on screen from
-      /// where it was to where it now is (FLIP). Swapping Share Content and
-      /// Collections for Data changes the width of the button group, and
-      /// without this Refresh and Settings jump sideways by it. A transform
+      /// where it was to where it now is (FLIP). Share Content and Collections
+      /// coming or going changes the width of the button group, and without
+      /// this Refresh, Settings and Data jump sideways by it. A transform
       /// only, so nothing is laid out twice and no click waits for it. Returns
       /// the slides paused at their start, for the caller to play once the new
       /// view has painted.
@@ -29176,6 +29274,8 @@
         if (pag) pag.innerHTML = ""
         const countEl = document.getElementById("convResultCount")
         if (countEl) countEl.textContent = ""
+        const fbEl = document.getElementById("convFeedbackShare")
+        if (fbEl) fbEl.hidden = true
       }
 
       async function onEnterConversationsView() {
@@ -29458,19 +29558,17 @@
         setConvDbBusy(true)
         if (btn) btn.textContent = "Importing…"
         let totalInserted = 0,
-          totalSkipped = 0,
-          totalPurged = 0
+          totalSkipped = 0
         const allErrors = []
-        // Purge, summary rebuild and the FTS merge are per-run work, not
+        // The summary rebuild and the FTS merge are per-run work, not
         // per-file work — bracket the whole selection so they happen once.
         let finalized = false
         const finalizeOnce = async () => {
           if (finalized) return
           finalized = true
           try {
-            const f = await window.backend.finalizeImportRun(dataRetentionDays)
+            await window.backend.finalizeImportRun()
             insDropPayloadCache() // rows arrived; every aggregate is now stale
-            if (f) totalPurged += f.purged || 0
           } catch (_) {}
         }
         try {
@@ -29478,26 +29576,18 @@
           for (const fp of filePaths) {
             const fileName = fp.replace(/\\/g, "/").split("/").pop()
             setImportOverlay(true, fileName)
-            const res = await window.backend.importInteractionsCsv(
-              fp,
-              dataRetentionDays,
-              null,
-              true,
-            )
+            const res = await window.backend.importInteractionsCsv(fp, null, true)
             if (res) {
               totalInserted += res.inserted || 0
               totalSkipped += res.skipped || 0
-              totalPurged += res.purged || 0
               if (res.errors && res.errors.length)
                 allErrors.push(...res.errors.slice(0, 3))
             }
           }
-          // Before the toast is built, or it would report 0 purged.
           setImportOverlay(true, "Finishing up…")
           await finalizeOnce()
           let msg = `Imported ${totalInserted} interactions`
           if (totalSkipped > 0) msg += `, ${totalSkipped} duplicates skipped`
-          if (totalPurged > 0) msg += `, ${totalPurged} old entries purged`
           showImportToast("success", msg)
           contextOptionsLoaded = false // refresh context options on next panel open
           metadataOptionsLoaded = false
@@ -33018,6 +33108,9 @@
       /// every write path is greppable.
       function insDropPayloadCache() {
         insPayloadCache = new Map()
+        // Called wherever rows arrive or go, which is exactly when the list's
+        // positive share is stale too.
+        convFeedback = null
       }
 
       /// Raise or drop the in-place refresh overlay.
@@ -36964,19 +37057,24 @@
       function _impUtcKey(ms) {
         return new Date(ms).toISOString().slice(0, 10)
       }
-      /**
-       * True when every UTC hour this window touches already holds data.
-       *
-       * Checked per hour rather than per day because a range can start or end
-       * mid-day: picking 12:00 → 18:00 leaves the rest of the day missing, and
-       * treating that day as "already imported" would silently skip it. Chunks
-       * never span two UTC days, so one day's mask is enough.
-       */
+      /// Whether every hour a window fetches whole is already covered —
+      /// checked per hour, not per day, because a range can start or end
+      /// mid-day and the rest of that day must not be skipped. An hour
+      /// the window only touches — the retention floor's first, a range ending
+      /// at 14:20 — is never recorded (`settled_window_mask`), so requiring it
+      /// would re-fetch that day forever. A window inside a single hour falls
+      /// back to that hour.
       function _impWindowCovered(startUtc, endUtc) {
         const mask = _impDbHours.get(startUtc.slice(0, 10))
         if (!mask) return false
-        const h0 = parseInt(startUtc.slice(11, 13), 10)
-        const h1 = parseInt(endUtc.slice(11, 13), 10)
+        const s = Date.parse(startUtc)
+        const e = Date.parse(endUtc) + 1000
+        let h0 = Math.ceil(s / 3600000)
+        let h1 = Math.floor(e / 3600000) - 1
+        if (h1 < h0) h0 = h1 = Math.floor(s / 3600000)
+        const dayStart = Date.parse(startUtc.slice(0, 10) + "T00:00:00Z") / 3600000
+        h0 -= dayStart
+        h1 = Math.min(h1 - dayStart, 23)
         for (let h = h0; h <= h1; h++) {
           if (!((mask >> h) & 1)) return false
         }
@@ -37265,7 +37363,7 @@
       // ── import one day's parts ──
       async function _impImportParts(item, parts) {
         const remaining = parts.map((p) => p.tempPath)
-        const tally = { inserted: 0, skipped: 0, purged: 0, errors: [] }
+        const tally = { inserted: 0, skipped: 0, errors: [] }
         try {
           for (let i = 0; i < parts.length; i++) {
             const p = parts[i]
@@ -37284,7 +37382,6 @@
             try {
               res = await window.backend.importInteractionsCsv(
                 p.tempPath,
-                dataRetentionDays,
                 p.delimiter,
                 true, // deferFinalize — _impRunQueue finalizes once for the run
               )
@@ -37321,7 +37418,6 @@
             if (res) {
               tally.inserted += res.inserted || 0
               tally.skipped += res.skipped || 0
-              tally.purged += res.purged || 0
               if (res.errors && res.errors.length)
                 tally.errors.push(...res.errors.slice(0, 3))
             }
@@ -37412,7 +37508,7 @@
         _impOutcome = null
         convImporting = true
         setConvDbBusy(true)
-        const totals = { inserted: 0, skipped: 0, purged: 0, days: 0 }
+        const totals = { inserted: 0, skipped: 0, days: 0 }
         _impTotals = totals
 
         // Days already imported (and, on a retry, days done in an earlier run)
@@ -37428,7 +37524,7 @@
         let failure = null
         let failedIndex = -1
         try {
-          // Purge, summary rebuild and the FTS merge used to run once per
+          // The summary rebuild and the FTS merge used to run once per
           // downloaded window — 90 times for a 90-day import, each costing the
           // size of the whole database. Bracket the run so they happen once.
           await window.backend.beginImportRun()
@@ -37466,7 +37562,6 @@
               item.detail = `${tally.inserted} new · ${tally.skipped} duplicates`
               totals.inserted += tally.inserted
               totals.skipped += tally.skipped
-              totals.purged += tally.purged
               totals.days += 1
               _impRecountDone()
               _impSetOp(`Finished ${item.key}`, item.detail)
@@ -37494,17 +37589,13 @@
           // _impAfterImport reloads the list as soon as this returns.
           try {
             _impSetOp("Finishing up…", "Updating summaries and search index")
-            const f = await window.backend.finalizeImportRun(dataRetentionDays)
+            const f = await window.backend.finalizeImportRun()
             insDropPayloadCache() // rows arrived; every aggregate is now stale
-            if (f) {
-              totals.purged += f.purged || 0
-              const t = f.timings
+            const t = f && f.timings
+            if (t)
               _impLogLine(
-                t
-                  ? `Finalize: ${f.purged || 0} purged — purge ${t.purgeMs}ms, summaries ${t.summaryMs}ms, search index ${t.ftsOptimizeMs}ms, stats ${t.pragmaOptimizeMs}ms, total ${t.totalMs}ms`
-                  : `Finalize: ${f.purged || 0} purged`,
+                `Finalize: summaries ${t.summaryMs}ms, search index ${t.ftsOptimizeMs}ms, stats ${t.pragmaOptimizeMs}ms, total ${t.totalMs}ms`,
               )
-            }
           } catch (_) {}
           convImporting = false
           setConvDbBusy(false)
@@ -37565,7 +37656,6 @@
             totals.days === 1 ? "" : "s"
           }`
           if (totals.skipped > 0) msg += `, ${totals.skipped} duplicates skipped`
-          if (totals.purged > 0) msg += `, ${totals.purged} old entries purged`
           showImportToast("success", msg)
         } else if (_impOutcome && _impOutcome.type === "cancelled") {
           showImportToast(
@@ -37603,6 +37693,120 @@
         _impDbHours = hours
       }
 
+      // ── Missing days: the once-a-day check ──────────────────────────
+      //
+      // Insights and Analysis read whatever is stored, and nothing on either
+      // says a day in the range is short. So on the first launch of each day
+      // (display timezone), with the Analytics API set up, compare the stored
+      // coverage against the days that could be imported and offer to fetch
+      // what is missing. Confirming starts the import; the modal is where its
+      // progress lives, so it opens on it.
+
+      const MISSING_DAYS_CHECKED_KEY = "cm-missing-days-checked"
+      let _missingDays = []
+
+      /// The days of `zone` before `todayKey` that are not fully covered, from
+      /// the oldest day that holds anything — a database started last week is
+      /// not eighty days short. Bounded by the API's 90 days and by the
+      /// retention setting: a day past either cannot be completed (its first
+      /// hours are gone or would be purged at the next launch). Today is never complete.
+      /// Pure, for the test.
+      function missingImportDays(coverage, todayKey, retentionDays, zone) {
+        const span = Math.min(IMP_RETENTION_DAYS, Math.max(1, retentionDays || IMP_RETENTION_DAYS))
+        const out = []
+        let started = false
+        for (let d = insShiftDay(todayKey, -(span - 1)); d < todayKey; d = insShiftDay(d, 1)) {
+          const c = zoneDayCoverage(d, coverage, zone)
+          if (!started) {
+            if (!c.covered) continue
+            started = true
+          }
+          if (c.covered < c.total) out.push(d)
+        }
+        return out
+      }
+
+      function _missingDayLabel(key) {
+        return new Date(key + "T12:00:00Z").toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          timeZone: "UTC",
+        })
+      }
+
+      async function checkMissingDays() {
+        const today = zoneDayKey(Date.now(), insZone())
+        try {
+          if (localStorage.getItem(MISSING_DAYS_CHECKED_KEY) === today) return
+        } catch (_) {}
+        if (!convDbPath || convImporting) return
+        try {
+          analyticsConfig = await window.backend.getAnalyticsConfig()
+        } catch (_) {
+          return
+        }
+        if (!_impIsConfigured()) return
+        try {
+          await _impLoadDbState()
+        } catch (_) {
+          return
+        }
+        // Checked, whatever the answer: once a day means once, not until yes.
+        try {
+          localStorage.setItem(MISSING_DAYS_CHECKED_KEY, today)
+        } catch (_) {}
+        _missingDays = missingImportDays(_impDbHours, today, dataRetentionDays, insZone())
+        if (!_missingDays.length) return
+        // Never on top of another dialog — the update prompt opens at launch
+        // too. Wait for the screen to be free instead of stacking.
+        for (let i = 0; i < 300 && document.querySelector(".modal-overlay.open"); i++)
+          await new Promise((r) => setTimeout(r, 1000))
+        if (document.querySelector(".modal-overlay.open") || convImporting) return
+        const n = _missingDays.length
+        const partial = _missingDays.filter((d) => zoneDayCoverage(d, _impDbHours, insZone()).covered).length
+        const first = _missingDays[0]
+        const last = _missingDays[n - 1]
+        document.getElementById("missingDaysText").innerHTML =
+          `<strong>${n} day${n === 1 ? " is" : "s are"}</strong> missing or only partly imported` +
+          (n === 1
+            ? ` (${esc(_missingDayLabel(first))}).`
+            : `, between ${esc(_missingDayLabel(first))} and ${esc(_missingDayLabel(last))}.`) +
+          ` Insights and Analysis only count what is stored, so ${n === 1 ? "that day reads" : "those days read"} short until ${n === 1 ? "it is" : "they are"} imported.`
+        document.getElementById("missingDaysDetail").textContent =
+          (partial ? `${partial} of them partly imported, ${n - partial} not at all. ` : "") +
+          "Days already complete are skipped. This check runs once a day."
+        document.getElementById("missingDaysImport").textContent =
+          `Import ${n} day${n === 1 ? "" : "s"}`
+        document.getElementById("missingDaysModal").classList.add("open")
+      }
+
+      function closeMissingDays() {
+        document.getElementById("missingDaysModal").classList.remove("open")
+      }
+
+      /// Pre-fill the Import tab with the missing span and start it — skip
+      /// existing on, so only the incomplete days in between are fetched.
+      async function missingDaysImport() {
+        closeMissingDays()
+        if (!_missingDays.length || convImporting) return
+        _impSource = "api"
+        _impFromDate = _missingDays[0]
+        _impFromTime = "00:00"
+        _impToDate = _missingDays[_missingDays.length - 1]
+        _impToTime = "23:59"
+        _impSkipExisting = true
+        _impCalMonth = null
+        await openConvDataModal("import")
+        if (_impPhase === "setup" && _cdataTab === "import" && !convImporting) await impStart()
+      }
+
+      document.getElementById("closeMissingDays").addEventListener("click", closeMissingDays)
+      document.getElementById("missingDaysLater").addEventListener("click", closeMissingDays)
+      document.getElementById("missingDaysImport").addEventListener("click", missingDaysImport)
+      document.getElementById("missingDaysModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) closeMissingDays()
+      })
+
       // ── Import modal: rendering ─────────────────────────────────────
 
       /// The To time is inclusive to the end of the selected minute, so
@@ -37623,7 +37827,12 @@
         // the time the queue takes to reach it), not at that day's midnight.
         const floor = Date.now() - IMP_RETENTION_DAYS * IMP_DAY_MS + 60 * 1000
         const from = new Date(Math.max(picked.getTime(), floor))
-        const to = _impToInstant()
+        // Never ask for the future: the hours a window covers are recorded as
+        // imported, so a request running to 23:59 of today used to mark the
+        // whole of today done at lunchtime.
+        const pickedTo = _impToInstant()
+        const cappedAtNow = pickedTo.getTime() > Date.now()
+        const to = cappedAtNow ? new Date() : pickedTo
         if (to <= from) return { error: "The end must be after the start." }
         const all = buildImportQueue(from, to, { skipExisting: false })
         if (!all.length) return { error: "That range is too short to import." }
@@ -37634,6 +37843,7 @@
           toDownload: _impSkipExisting ? all.length - existing : all.length,
           from,
           to,
+          cappedAtNow,
         }
       }
 
@@ -37731,12 +37941,16 @@
                 partial === 1 ? " is" : "s are"
               } only partly imported and will be fetched again — duplicates are skipped automatically.</div>`
             : ""
+          const nowNote = p.cappedAtNow
+            ? `<div class="muted" style="margin-top:5px">The range ends now. CM.com needs about two hours to finish processing interactions, so the most recent hours stay partly imported until a later import.</div>`
+            : ""
           const first = p.all[0]
           const last = p.all[p.all.length - 1]
           summary =
             `<div class="import-summary">` +
             parts.join(" &middot; ") +
             partialNote +
+            nowNote +
             `<div class="muted" style="margin-top:5px">Requests ${esc(
               first.startUtc,
             )} &rarr; ${esc(last.endUtc)} (UTC)</div>` +
@@ -37796,7 +38010,7 @@
         const retentionMs = dataRetentionDays * IMP_DAY_MS
         if (p.from.getTime() < Date.now() - retentionMs) {
           out.push(
-            `<div class="import-warn">Your data retention setting is ${dataRetentionDays} days — anything older than that is purged right after import.</div>`,
+            `<div class="import-warn">Your data retention setting is ${dataRetentionDays} days — anything older than that is removed the next time the app starts.</div>`,
           )
         }
         if (p.toDownload === 0) {
@@ -38467,7 +38681,7 @@
         if (convImporting && _impPhase !== "running") return
         if (!convDbPath) tab = "database"
         document.getElementById("convDataModal").classList.add("open")
-        _cdataSetTab(tab || (_impPhase === "running" ? "import" : "import"))
+        return _cdataSetTab(tab || (_impPhase === "running" ? "import" : "import"))
       }
 
       function closeConvDataModal() {
@@ -38552,8 +38766,11 @@
         )
       }
 
+      /// Returns the tab's prepare, for a caller that has to act once the tab
+      /// has loaded (`missingDaysImport`).
       function _cdataSetTab(tab) {
         _cdataTab = tab
+        let prepared
         _cdataResize(() => {
           document.querySelectorAll("[data-cdata-tab]").forEach((b) => {
             b.classList.toggle("active", b.dataset.cdataTab === tab)
@@ -38577,10 +38794,11 @@
           // Each tab's prepare paints its own loading state synchronously
           // before awaiting, so it is part of the height this animates to
           // rather than a second jump straight after.
-          if (tab === "import") _impPrepareSetup()
-          else if (tab === "stored") _cdataPrepareStored()
-          else _cdataPrepareDatabase()
+          if (tab === "import") prepared = _impPrepareSetup()
+          else if (tab === "stored") prepared = _cdataPrepareStored()
+          else prepared = _cdataPrepareDatabase()
         })
+        return prepared
       }
 
       /// Header subtitle + footer. Every tab re-renders these, so the modal
@@ -39321,6 +39539,7 @@
           setConvDbBusy(false)
           setConvOverlay(false)
           renderSessionList()
+          loadConvFeedback(args)
         } catch (e) {
           if (mySeq !== convSearchSeq) return
           _submitBtn.classList.remove("loading")
@@ -39328,12 +39547,76 @@
           setConvOverlay(false)
           const _countEl = document.getElementById("convResultCount")
           if (_countEl) _countEl.textContent = ""
+          const _fbEl = document.getElementById("convFeedbackShare")
+          if (_fbEl) _fbEl.hidden = true
           document.getElementById(
             "sessionsList",
           ).innerHTML = `<div class="sessions-empty">Error loading sessions:<br>${esc(
             String(e),
           )}</div>`
         }
+      }
+
+      // ── The positive share of a search ─────────────────────────────
+      //
+      // Of the answers the search matched — across every result, not the page
+      // on screen — the share whose latest rating was a thumbs up. Only the
+      // matching answers: searching "parkeren" asks how the parking answers
+      // were rated, and a thumbs down on the opening hours later in the same
+      // chat is not part of that. It is the Insights interactions reading's
+      // Positive feedback, through the same backend path (`get_search_feedback`),
+      // so the two always agree. Read after the list has painted, once per
+      // search: paging does not change it.
+
+      function _convFeedbackKey(args) {
+        const o = { ...(args || {}) }
+        delete o.page
+        return JSON.stringify(o)
+      }
+
+      async function loadConvFeedback(args) {
+        const key = _convFeedbackKey(args)
+        if (convFeedback && convFeedback.key === key) {
+          renderConvFeedback()
+          return
+        }
+        convFeedback = { key, loading: true }
+        renderConvFeedback()
+        let res = null
+        try {
+          res = await window.backend.getSearchFeedback(args)
+        } catch (e) {
+          console.warn("Search feedback failed:", e)
+        }
+        if (!convFeedback || convFeedback.key !== key) return // a newer search owns it
+        convFeedback = res ? { key, rated: res.rated, positive: res.positive } : null
+        renderConvFeedback()
+      }
+
+      function renderConvFeedback() {
+        const el = document.getElementById("convFeedbackShare")
+        if (!el) return
+        const f = convFeedback
+        const current =
+          f && lastConvSearchArgs && f.key === _convFeedbackKey(lastConvSearchArgs) && convTotalSessions > 0
+        el.hidden = !current
+        if (!current) return
+        const icon = "<svg class=ui-icon><use href=#i-thumb-up /></svg>"
+        if (f.loading) {
+          el.innerHTML = icon + "…"
+          el.title = "Reading the feedback on the matching answers…"
+          return
+        }
+        if (!f.rated) {
+          el.innerHTML = icon + "no ratings"
+          el.title = "None of the answers this search matched was rated."
+          return
+        }
+        const pct = ((f.positive / f.rated) * 100).toFixed(1) + "%"
+        el.innerHTML = icon + "<strong>" + pct + "</strong> positive"
+        el.title =
+          `${f.positive.toLocaleString()} of the ${f.rated.toLocaleString()} rated answers this search matched got a thumbs up ` +
+          "(the latest rating counts), across all results. Ratings on other answers in these conversations are not counted."
       }
 
       /// Did anything actually single out particular interactions?
@@ -39550,6 +39833,7 @@
           }</div>`
           document.getElementById("sessionsPagination").innerHTML = ""
           if (countEl) countEl.textContent = ""
+          renderConvFeedback()
           perfEnd(perf, "empty")
           return
         }
@@ -43895,8 +44179,12 @@
         // Sync regex mode from session-list search into chat search
         chatSearchRegex = !!convSearchRegex
         // …and the U / B scope, so a user-only search does not open on the
-        // bot's answer marked — the side the list never looked at.
-        setChatSearchScope(_chatMirror ? convSearchScope : "both", true)
+        // bot's answer marked — the side the list never looked at. The scope
+        // the list was *searched* with, not the buttons: U / B wait for Enter,
+        // so after flipping them the buttons describe a search not yet run,
+        // and the chat marked one side while the list had matched the other.
+        const _listScope = (lastConvSearchArgs && lastConvSearchArgs.queryScope) || convSearchScope
+        setChatSearchScope(_chatMirror ? _listScope : "both", true)
         // …and the entities, so the turns the chat shows as matched are the
         // same turns that put this conversation in the result list: naming an
         // entity and then opening a forty-turn chat with nothing marked reads
@@ -44398,6 +44686,40 @@
         }
       }
 
+      /// An Article or Dialog chip in a chat bubble's details. It opens the
+      /// item in CM.com — the place to change it, and what someone reading a
+      /// conversation wants. Without a Context URL there is nowhere to send it,
+      /// so it falls back to the item in Content, and says so.
+      function bubbleItemLinkHtml(kind, id, label, icon) {
+        const url = buildItemUrl(kind, id)
+        const icn = `<svg class=ui-icon><use href=#${icon} /></svg> `
+        if (url)
+          return `<button class="bubble-link-btn" data-url="${esc(url)}" title="Open in CM.com" onclick="event.stopPropagation();openLink(this.dataset.url)">${icn}${esc(label)} &#x2197;</button>`
+        const go = kind === "article" ? `goToArticle(${+id})` : `jumpToDialog(${+id},${kind === "tdialog"})`
+        return `<button class="bubble-link-btn" title="Set a CM.com Context URL in Settings to open this in CM.com. Opens it in Content for now." onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>${go},100)">${icn}${esc(label)}</button>`
+      }
+
+      /// Shift-click a user's message: the whole of it, as they typed it, onto
+      /// the clipboard. Stops the click there, so it neither toggles a turn's
+      /// selection nor extends a text selection.
+      function copyUserBubble(el, e) {
+        if (!e.shiftKey) return
+        e.stopPropagation()
+        e.preventDefault()
+        const sel = window.getSelection && window.getSelection()
+        if (sel) sel.removeAllRanges()
+        insCopyText(el.dataset.copy || "").then(
+          () => {
+            el.classList.remove("copied")
+            void el.offsetWidth // restart the flash on a second shift-click
+            el.classList.add("copied")
+            clearTimeout(el._copiedTimer)
+            el._copiedTimer = setTimeout(() => el.classList.remove("copied"), 1200)
+          },
+          () => {},
+        )
+      }
+
       function renderBubbleDetail(interaction) {
         const articleIds = parseJsonSafe(interaction.articleIds) || []
         const dialogPaths = parseJsonSafe(interaction.dialogPaths) || {}
@@ -44455,7 +44777,7 @@
         if (qaIds.length) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           qaIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> Article ${id}</button>`
+            html += bubbleItemLinkHtml("article", id, "Article " + id, "i-document")
           })
           html += `</div></div>`
         }
@@ -44465,7 +44787,8 @@
         if (dialogIds.size) {
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">Dialogs</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           dialogIds.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>jumpToDialog(${id},false),100)"><svg class=ui-icon><use href=#i-dot /></svg> Dialog ${id}</button>`
+            const kind = tDialogMap.has(id) && !dialogMap.has(id) ? "tdialog" : "dialog"
+            html += bubbleItemLinkHtml(kind, id, "Dialog " + id, "i-dot")
           })
           html += `</div></div>`
         }
@@ -44478,7 +44801,7 @@
           const ids = faqsFound.DataRetrievalResults.slice(0, 8)
           html += `<div class="bubble-detail-row"><span class="bubble-detail-label">GenAI source articles</span><div style="display:flex;gap:5px;flex-wrap:wrap">`
           ids.forEach((id) => {
-            html += `<button class="bubble-link-btn" onclick="event.stopPropagation();_navReturnView=currentView;switchView('content');setTimeout(()=>goToArticle(${id}),100)"><svg class=ui-icon><use href=#i-document /></svg> ${id}</button>`
+            html += bubbleItemLinkHtml("article", id, String(id), "i-document")
           })
           html += `</div></div>`
         }
@@ -45347,7 +45670,9 @@
           if (turn.userRow) {
             html += `<div class="user-group">
               <span class="user-label">User</span>
-              <div class="bubble user${userHighlightClass}${feedbackOriginClass}">${userBubbleBody(
+              <div class="bubble user${userHighlightClass}${feedbackOriginClass}" title="Shift-click to copy the message" data-copy="${esc(
+                turn.userRow.interactionValue,
+              )}" onmousedown="if(event.shiftKey)event.preventDefault()" onclick="copyUserBubble(this,event)">${userBubbleBody(
               turn.userRow.interactionValue,
               userPlan,
             )}</div>
@@ -45779,11 +46104,13 @@
         })
         .catch(() => {})
       if (convDbPath) {
-        convDbOpen(convDbPath).catch(() => {
-          convDbPath = ""
-          localStorage.removeItem(CONV_DB_STORAGE_KEY)
-          updateConvDbStatus()
-        })
+        convDbOpen(convDbPath)
+          .then(() => checkMissingDays())
+          .catch(() => {
+            convDbPath = ""
+            localStorage.removeItem(CONV_DB_STORAGE_KEY)
+            updateConvDbStatus()
+          })
       }
       updateConvDbStatus()
     </script>

@@ -15,7 +15,16 @@ vm.runInContext(
   let _convDbOpening = null
   let convDbOpenedPath = ""
   let convDbPhaseLabel = ""
+  let convDbPhaseTip = ""
   const log = []
+  // The retention purge that runs as part of every open: logged, and held
+  // only when a test asks for it.
+  let holdPurge = false
+  const purges = []
+  function _convDbPurgeExpired() {
+    log.push("purge")
+    return holdPurge ? new Promise((r) => purges.push(r)) : Promise.resolve()
+  }
   const pending = []
   let changes = 0
   // Each invoke is held until the test lets it go.
@@ -28,7 +37,8 @@ vm.runInContext(
   ${["convDbIsOpening", "convDbOpen", "convDbWhenReady", "convDbWaitText"].map(extract).join("\n")}
   globalThis.api = {
     convDbIsOpening, convDbOpen, convDbWhenReady, convDbWaitText,
-    log, pending,
+    log, pending, purges,
+    holdPurge: (v) => { holdPurge = v },
     opened: () => convDbOpenedPath,
     changes: () => changes,
   }
@@ -75,7 +85,7 @@ test("a different file waits for the current open to settle", async () => {
   api.pending.shift().resolve()
   await first
   await tick()
-  assert.deepStrictEqual([...api.log], ["open /db/c", "open /db/d"])
+  assert.deepStrictEqual([...api.log], ["open /db/c", "purge", "open /db/d"])
   assert.ok(api.convDbIsOpening(), "the second open is still running")
   api.pending.shift().resolve()
   await second
@@ -91,6 +101,26 @@ test("a failed open rejects its callers, releases its readers, and is not 'open'
   await ready // resolves: the read then fails on its own, with the backend's words
   assert.ok(!api.convDbIsOpening())
   assert.strictEqual(api.opened(), "/db/d", "still the last database that did open")
+})
+
+test("a read waits for the retention purge too, which runs after the open", async () => {
+  api.log.length = 0
+  api.holdPurge(true)
+  const p = api.convDbOpen("/db/e")
+  let read = false
+  const r = api.convDbWhenReady().then(() => (read = true))
+  await tick()
+  api.pending.shift().resolve()
+  await tick()
+  assert.deepStrictEqual([...api.log], ["open /db/e", "purge"])
+  assert.strictEqual(read, false, "the read went out while the purge held the database")
+  assert.ok(api.convDbIsOpening(), "the pill must stay up through the purge")
+  api.purges.shift()()
+  await p
+  await r
+  assert.strictEqual(read, true)
+  assert.strictEqual(api.opened(), "/db/e")
+  api.holdPurge(false)
 })
 
 test("nothing opening: a read goes at once, and the pane keeps its own words", async () => {

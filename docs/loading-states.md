@@ -72,6 +72,11 @@ open of the same file alongside the first.
   database…" while it is, and keeps its own words in `data-label` for
   `convDbOpeningChanged` to put back the moment it opens. A search queued
   behind the open says so on the sessions overlay the same way.
+- **The retention purge is part of the open** (`_convDbPurgeExpired`, after
+  `set_db_path` returns). It holds the same lock, so reads wait for it as they
+  wait for the open. The pill reads "Removing old data…" and has a tooltip of
+  its own (`convDbPhaseTip`), because "This runs once, after an update" is
+  false of it. See `docs/import.md` → "The retention purge runs at launch".
 - `frontend/tests/db-open.test.js` pins joining, queueing, waiting and a failed
   open against a scripted `set_db_path`.
 
