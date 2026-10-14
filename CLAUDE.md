@@ -29,7 +29,7 @@ implementation was tried first and was wrong.
 
 | Doc | Read it before touching |
 | --- | --- |
-| `docs/search.md` | content search, conversations search (`build_session_filter_query`), the Context · Metadata tag filters, entity cross-references |
+| `docs/search.md` | content search, conversations search (`build_session_filter_query`, `date_span`), the Context · Metadata tag filters, entity cross-references |
 | `docs/insights.md` | the Insights dashboard — the chooser, the two units, the charts, the scope cache, the copy formats |
 | `docs/import.md` | the conversation data modal, the Analytics API client, import performance, day coverage, the shared calendar |
 | `docs/collections.md` | Collections, the export algorithm, smart filters, the Article/Dialog info modals |
@@ -157,7 +157,7 @@ There are also Conversations DB commands exposed through `window.backend` for im
 | `data-folder-updated` | `{ reason, folder }` | Emitted by `notify` file watcher once the folder settles after export files change — see `One drop, one notification` |
 | `ai-export-progress`  | `{ phase, sessionCount?, interactionCount? }` | Phase boundaries inside `export_conversations_for_ai` — `"querying"` once the save dialog is answered, `"writing"` once the result set is known |
 | `update-progress`     | `{ phase, downloaded, total? }` | Download/install progress for `install_update`. `total` is absent when the server sends no `Content-Length` |
-| `db-migrating`        | `{ phase, done? }`   | Phase updates for the one-time migrations `open_db` runs — `"answerIndex"`, `"contexts"` (with a running row count), `"compacting"`, `"summary"` (recounting interactions as answers — see `docs/insights.md` → "Interactions are answers"). Silent on every open that has nothing to migrate. See `docs/import.md` |
+| `db-migrating`        | `{ phase, done? }`   | Phase updates for the one-time migrations `open_db` runs — `"answerIndex"`, `"contexts"` (with a running row count), `"compacting"`, `"summary"` (recounting interactions as answers — see `docs/insights.md` → "Interactions are answers"), `"searchIndex"` (the search's id and rating indexes — see `docs/search.md` → "A date range bounds the ids"). Silent on every open that has nothing to migrate. See `docs/import.md` |
 
 ### One drop, one notification
 

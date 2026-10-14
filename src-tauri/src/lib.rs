@@ -77,6 +77,8 @@ enum MigrationPhase {
     Compacting,
     /// Rebuilding `session_summary` because the rules it is derived by changed.
     Summary,
+    /// Building `idx_log_session`, the id → conversation index search reads.
+    SearchIndex,
 }
 
 impl MigrationPhase {
@@ -86,6 +88,7 @@ impl MigrationPhase {
             Self::Contexts(done) => serde_json::json!({ "phase": "contexts", "done": done }),
             Self::Compacting => serde_json::json!({ "phase": "compacting" }),
             Self::Summary => serde_json::json!({ "phase": "summary" }),
+            Self::SearchIndex => serde_json::json!({ "phase": "searchIndex" }),
         }
     }
 }
@@ -1423,6 +1426,9 @@ CREATE INDEX IF NOT EXISTS idx_summary_neg_first ON session_summary(has_neg_feed
 CREATE INDEX IF NOT EXISTS idx_summary_pos_first ON session_summary(has_pos_feedback, first_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_summary_zero_first ON session_summary(has_zero_recog, first_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_summary_recog_first ON session_summary(min_positive_recognition_quality, first_ts DESC);
+-- The date span of the conversations a range admits (`date_span`): a session
+-- is in range by its *last* timestamp, which no other index leads with.
+CREATE INDEX IF NOT EXISTS idx_summary_last_first ON session_summary(last_ts, first_ts);
 CREATE TABLE IF NOT EXISTS app_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -2404,6 +2410,39 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
             Err(e) => {
                 log::warn!(target: "import", "answer backfill failed, will retry on next open: {e}");
             }
+        }
+    }
+
+    // The id → conversation index every text and id search reads its matches
+    // through. Not in the schema batch, because on a database that predates it
+    // the build is seconds (9 s on 1.37M rows) and has to say so; created here
+    // once, it is then kept by every insert like any other index.
+    if !index_exists(&conn, SEARCH_ID_INDEX) {
+        let started = Instant::now();
+        report(MigrationPhase::SearchIndex);
+        match conn.execute_batch(&format!(
+            "CREATE INDEX IF NOT EXISTS {SEARCH_ID_INDEX} ON interactions(log_id, session_uuid);"
+        )) {
+            Ok(()) => log::info!(target: "import", "built {SEARCH_ID_INDEX} in {}ms", started.elapsed().as_millis()),
+            Err(e) => log::warn!(target: "import", "{SEARCH_ID_INDEX} failed, will retry on next open: {e}"),
+        }
+    }
+    // The rating rows alone — 2% of interactions — for every query that looks
+    // for ratings by conversation (the feedback pills, the positive share,
+    // Insights). Without it each read every row of each rated conversation to
+    // test `feedback_info`, which sits past the widest columns: 2.4 s cold for
+    // one week's ratings on 90 days, 0.2 s through this. Analyzed at once, or
+    // the planner has no reason to prefer it; with the statistics it picks it
+    // unaided wherever a query states `feedback_info != ''`, which they do.
+    if !index_exists(&conn, FEEDBACK_ROWS_INDEX) {
+        let started = Instant::now();
+        report(MigrationPhase::SearchIndex);
+        match conn.execute_batch(&format!(
+            "CREATE INDEX IF NOT EXISTS {FEEDBACK_ROWS_INDEX} ON interactions(session_uuid, log_id) \
+             WHERE feedback_info != ''; ANALYZE {FEEDBACK_ROWS_INDEX};"
+        )) {
+            Ok(()) => log::info!(target: "import", "built {FEEDBACK_ROWS_INDEX} in {}ms", started.elapsed().as_millis()),
+            Err(e) => log::warn!(target: "import", "{FEEDBACK_ROWS_INDEX} failed, will retry on next open: {e}"),
         }
     }
 
@@ -5297,6 +5336,37 @@ fn fts_columns(scope: &str) -> String {
 /// its second caller. Both ask the same question for the same reason: a
 /// database imported by an older build may predate `entity_index`, and the
 /// answer has to be "no rows" rather than an error.
+/// `(log_id, session_uuid)` on `interactions`: which conversation a match is in,
+/// without reading the row.
+///
+/// The FTS index is contentless, so every match it returns is only an id, and
+/// the search needs its conversation. Read from the table, that is one random
+/// page per match — rows are wide (`recognition_details` alone is kilobytes),
+/// so 139k matches for a common word on 90 days is 139k scattered pages: 5.6 s
+/// cold, 0.38 s warm. Through this index, which is 77 MB and walked in id
+/// order because FTS returns ids in order, the same lookup is 0.13 s.
+///
+/// The planner never picks it on its own — a rowid lookup always wins its cost
+/// model — so `fts_from` names it with `INDEXED BY`, which is why its
+/// existence is checked rather than assumed: `INDEXED BY` a missing index is an
+/// error, not a slower plan.
+const SEARCH_ID_INDEX: &str = "idx_log_session";
+
+/// `(session_uuid, log_id) WHERE feedback_info != ''` — see where `open_db`
+/// builds it. A partial index is only used by a query whose WHERE repeats its
+/// condition, which is why `feedback_origins` and `feedback_counts_tail` say
+/// `feedback_info != ''` although their `LIKE`s already imply it.
+const FEEDBACK_ROWS_INDEX: &str = "idx_feedback_rows";
+
+fn index_exists(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+        params![name],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
+}
+
 fn table_exists(conn: &Connection, name: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?1",
@@ -5331,6 +5401,12 @@ struct SearchCtx<'a> {
     entity_from: &'a str,
     row_filter: &'a str,
     entity_row_filter: &'a str,
+    /// ` AND <id> BETWEEN ?a AND ?b` — the interaction ids the date range can
+    /// hold (see [`date_span`]), one spelling per table a leaf reads ids from.
+    /// Empty without a date range.
+    fts_range: &'a str,
+    i_range: &'a str,
+    e_range: &'a str,
     /// A feedback filter is on, so every leaf is asking about **the answer
     /// that was rated** — see [`ExprSql::leaf_id`] and [`ExprSql::leaf_tag`].
     rated_answers: bool,
@@ -5589,12 +5665,12 @@ impl<'a> ExprSql<'a> {
         self.modes.push("id".to_string());
         let row_filter = self.ctx.row_filter;
         let mut conds: Vec<String> = Vec::new();
-        let from = if self.ctx.fts_available {
+        let (from, range) = if self.ctx.fts_available {
             let p = self.param(Box::new(t.fts_match()));
             conds.push(format!("interactions_fts MATCH {p}"));
-            self.ctx.fts_from
+            (self.ctx.fts_from, self.ctx.fts_range)
         } else {
-            self.ctx.interactions_from
+            (self.ctx.interactions_from, self.ctx.i_range)
         };
         // Under a feedback filter the question is what *answered*, so a Dialog
         // only counts when the rated answer came from one of its nodes. Its
@@ -5610,7 +5686,7 @@ impl<'a> ExprSql<'a> {
         conds.push(format!("cai_id_hit(i.article_ids, {paths}, {ti})"));
         self.add_node(format!(
             "SELECT i.session_uuid, i.log_id AS match_log_id FROM {from} \
-             WHERE ({}){row_filter}",
+             WHERE ({}){range}{row_filter}",
             conds.join(" AND ")
         ))
     }
@@ -5635,9 +5711,10 @@ impl<'a> ExprSql<'a> {
         // same column, so they arrive in the right case already. Lowercased
         // again rather than trusted, because these crossed the bridge.
         let p = self.param(Box::new(name.trim().to_lowercase()));
+        let range = self.ctx.e_range;
         self.add_node(format!(
             "SELECT e.session_uuid, e.log_id AS match_log_id FROM {from} \
-             WHERE (e.name = {p}){entity_row_filter}"
+             WHERE (e.name = {p}){range}{entity_row_filter}"
         ))
     }
 
@@ -5671,9 +5748,10 @@ impl<'a> ExprSql<'a> {
             self.meta_leaves.push(t.clone());
             let from = self.ctx.interactions_from;
             let row_filter = self.ctx.row_filter;
+            let range = self.ctx.i_range;
             return self.add_node(format!(
                 "SELECT i.session_uuid, i.log_id AS match_log_id FROM {from} \
-                 WHERE cai_meta_hit(i.output_metadata, {mi}){row_filter}"
+                 WHERE cai_meta_hit(i.output_metadata, {mi}){range}{row_filter}"
             ));
         }
         let pn = self.param(Box::new(t.name.clone()));
@@ -5769,10 +5847,11 @@ impl<'a> ExprSql<'a> {
                     .collect::<Vec<_>>()
                     .join(" OR ");
                 let from = self.ctx.fts_from;
+                let range = self.ctx.fts_range;
                 let p = self.param(Box::new(format!("{} : ({expr})", fts_columns(scope))));
                 selects.push(format!(
                     "SELECT i.session_uuid, i.log_id AS match_log_id \
-                     FROM {from} WHERE (interactions_fts MATCH {p}){row_filter}"
+                     FROM {from} WHERE (interactions_fts MATCH {p}){range}{row_filter}"
                 ));
             } else if use_fts {
                 // One SELECT per OR group, because the exact re-check belongs to
@@ -5800,8 +5879,9 @@ impl<'a> ExprSql<'a> {
                     }
                     selects.push(format!(
                         "SELECT i.session_uuid, i.log_id AS match_log_id \
-                         FROM {from} WHERE ({}){row_filter}",
-                        conds.join(" AND ")
+                         FROM {from} WHERE ({}){}{row_filter}",
+                        conds.join(" AND "),
+                        self.ctx.fts_range
                     ));
                 }
             } else {
@@ -5826,8 +5906,9 @@ impl<'a> ExprSql<'a> {
                 // last disjunct alone.
                 selects.push(format!(
                     "SELECT i.session_uuid, i.log_id AS match_log_id \
-                     FROM {from} WHERE ({}){row_filter}",
-                    or_clauses.join(" OR ")
+                     FROM {from} WHERE ({}){}{row_filter}",
+                    or_clauses.join(" OR "),
+                    self.ctx.i_range
                 ));
             }
         }
@@ -5858,8 +5939,9 @@ impl<'a> ExprSql<'a> {
             }
             selects.push(format!(
                 "SELECT e.session_uuid, e.log_id AS match_log_id \
-                 FROM {from} WHERE ({}){entity_row_filter}",
-                or_clauses.join(" OR ")
+                 FROM {from} WHERE ({}){}{entity_row_filter}",
+                or_clauses.join(" OR "),
+                self.ctx.e_range
             ));
             mode = if self.ctx.text_scope.is_none() {
                 "entity".to_string()
@@ -5894,9 +5976,10 @@ impl<'a> ExprSql<'a> {
                     "cai_regexp({ri}, i.interaction_value) OR cai_regexp({ri}, i.output_text)"
                 ),
             };
+            let range = self.ctx.i_range;
             selects.push(format!(
                 "SELECT i.session_uuid, i.log_id AS match_log_id \
-                 FROM {from} WHERE ({cond}){row_filter}"
+                 FROM {from} WHERE ({cond}){range}{row_filter}"
             ));
         }
         if self.ctx.search_entities {
@@ -5905,7 +5988,8 @@ impl<'a> ExprSql<'a> {
             selects.push(format!(
                 "SELECT e.session_uuid, e.log_id AS match_log_id \
                  FROM {from} \
-                 WHERE (cai_regexp({ri}, e.name) OR cai_regexp({ri}, e.matched)){entity_row_filter}"
+                 WHERE (cai_regexp({ri}, e.name) OR cai_regexp({ri}, e.matched)){}{entity_row_filter}",
+                self.ctx.e_range
             ));
             if self.ctx.text_scope.is_none() {
                 mode = "entity_regex".to_string();
@@ -5918,6 +6002,58 @@ impl<'a> ExprSql<'a> {
         self.modes.push(mode);
         Ok(self.add_node(selects.join(" UNION ALL ")))
     }
+}
+
+/// What a date range spans, read from the conversations it admits.
+struct DateSpan {
+    /// The earliest start of an admitted conversation, `None` when none is.
+    first_ts: Option<String>,
+    /// The smallest and largest interaction id those conversations can hold.
+    log_ids: Option<(i64, i64)>,
+}
+
+/// The interaction ids a date range can reach — exactly, not approximately.
+///
+/// A conversation is in range when it overlaps it (`last_ts >= from`,
+/// `first_ts <= to`), and it can run for days — the longest on a real
+/// database ran for 5½ — so the range's own bounds would miss the turns of a
+/// conversation that started before it. The span is therefore taken from the
+/// admitted conversations themselves: every turn of each lies between its
+/// `first_ts` and `last_ts`, so every id lies between the smallest and largest
+/// id stamped inside `[MIN(first_ts), MAX(last_ts)]`. That holds whatever
+/// order the ids were imported in; ids that grow with time (CM.com's do) only
+/// make it tight.
+fn date_span(
+    conn: &Connection,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<DateSpan, String> {
+    let (first, last): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT MIN(first_ts), MAX(last_ts) FROM session_summary \
+             WHERE (?1 IS NULL OR last_ts >= ?1) AND (?2 IS NULL OR first_ts <= ?2)",
+            params![from, to],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| format!("Query error: {e}"))?;
+    let (Some(first), Some(last)) = (first, last) else {
+        return Ok(DateSpan { first_ts: None, log_ids: None });
+    };
+    let ids: (Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT MIN(log_id), MAX(log_id) FROM interactions \
+             WHERE timestamp_start >= ?1 AND timestamp_start <= ?2",
+            params![first, last],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| format!("Query error: {e}"))?;
+    Ok(DateSpan {
+        first_ts: Some(first),
+        log_ids: match ids {
+            (Some(lo), Some(hi)) => Some((lo, hi)),
+            _ => None,
+        },
+    })
 }
 
 fn build_session_filter_query(
@@ -5981,19 +6117,52 @@ fn build_session_filter_query(
         _ => {}
     }
 
-    if let Some(ref df) = args.date_from {
-        if !df.is_empty() {
-            let p = next_param(&mut param_idx);
-            base_conditions.push(format!("s.last_ts >= {p}"));
-            param_values.push(Box::new(df.clone()));
-        }
+    let date_from = args.date_from.as_deref().filter(|d| !d.is_empty());
+    let date_to = args.date_to.as_deref().filter(|d| !d.is_empty());
+    if let Some(df) = date_from {
+        let p = next_param(&mut param_idx);
+        base_conditions.push(format!("s.last_ts >= {p}"));
+        param_values.push(Box::new(df.to_string()));
     }
-    if let Some(ref dt) = args.date_to {
-        if !dt.is_empty() {
+    if let Some(dt) = date_to {
+        let p = next_param(&mut param_idx);
+        base_conditions.push(format!("s.first_ts <= {p}"));
+        param_values.push(Box::new(dt.to_string()));
+    }
+    // A date range bounds the interaction ids every leaf reads, not only the
+    // conversations it keeps. Without it a search for one week of a 90-day
+    // database found its matches across all 90 days — the FTS doclist, the
+    // entity table, one random read into `interactions` per match — and only
+    // then threw away the 12 weeks outside, so it cost what searching
+    // everything cost. See docs/search.md → "A date range bounds the ids".
+    let (mut fts_range, mut i_range, mut e_range, mut fb_range) =
+        (String::new(), String::new(), String::new(), String::new());
+    if date_from.is_some() || date_to.is_some() {
+        let span = date_span(conn, date_from, date_to)?;
+        // The earliest start of an admitted conversation: redundant with
+        // `last_ts >= from`, but it is the side `idx_summary_real_first` can
+        // seek on, so the newest week no longer walks every older summary.
+        if let Some(first) = span.first_ts {
             let p = next_param(&mut param_idx);
-            base_conditions.push(format!("s.first_ts <= {p}"));
-            param_values.push(Box::new(dt.clone()));
+            base_conditions.push(format!("s.first_ts >= {p}"));
+            param_values.push(Box::new(first));
         }
+        let (lo, hi) = span.log_ids.unwrap_or((1, 0));
+        let pa = next_param(&mut param_idx);
+        param_values.push(Box::new(lo));
+        let pb = next_param(&mut param_idx);
+        param_values.push(Box::new(hi));
+        // Stated on the conversations too, so every caller that runs
+        // `base_where` without a leaf — Insights, Segments, the AI export, a
+        // search of `ctx:` chips only — still references both parameters:
+        // rusqlite refuses a statement handed more parameters than it names.
+        // Redundant but true: the span holds ids exactly when some
+        // conversation is in range, and (1, 0) is the empty span.
+        base_conditions.push(format!("{pa} <= {pb}"));
+        fts_range = format!(" AND interactions_fts.rowid BETWEEN {pa} AND {pb}");
+        i_range = format!(" AND i.log_id BETWEEN {pa} AND {pb}");
+        e_range = format!(" AND e.log_id BETWEEN {pa} AND {pb}");
+        fb_range = format!(" AND fb.log_id BETWEEN {pa} AND {pb}");
     }
 
     // Context and metadata filter identically — same table shape, same
@@ -6121,6 +6290,11 @@ fn build_session_filter_query(
     //
     // Without a search term the planner already chose to materialize it, which
     // is why the pill alone was fast and the pill *plus* a query hung.
+    // `CROSS JOIN` pins the order — from the conversations the pill admits
+    // (`idx_summary_neg_first` and friends) into their rating rows
+    // (`idx_feedback_rows`). Left free, the planner preferred to walk every
+    // rating row in the database, both thumbs, and look each conversation up:
+    // 6.7 s → 10.5 s cold for the thumbs-down pill on 90 days.
     let feedback_origins_cte = if is_feedback_filter {
         format!(
             ", feedback_origins AS MATERIALIZED (\
@@ -6136,12 +6310,12 @@ fn build_session_filter_query(
                         ORDER BY prev.log_id DESC \
                         LIMIT 1\
                     ), fb.log_id) AS match_log_id \
-                FROM interactions fb \
-                JOIN base_sessions b ON b.session_uuid = fb.session_uuid \
+                FROM base_sessions b \
+                CROSS JOIN interactions fb ON fb.session_uuid = b.session_uuid \
                 LEFT JOIN interactions origin \
                   ON origin.session_uuid = fb.session_uuid \
                  AND origin.interaction_uuid = feedback_origin(fb.feedback_info) \
-                WHERE COALESCE(fb.feedback_info, '') != '' {feedback_score_filter}\
+                WHERE fb.feedback_info != ''{fb_range} {feedback_score_filter}\
             )"
         )
     } else {
@@ -6153,7 +6327,7 @@ fn build_session_filter_query(
                 SELECT i.session_uuid, i.log_id AS match_log_id \
                 FROM interactions i \
                 JOIN base_sessions b ON b.session_uuid = i.session_uuid \
-                WHERE 1 = 1{search_row_filter}\
+                WHERE 1 = 1{i_range}{search_row_filter}\
             )"
         )
     } else {
@@ -6189,11 +6363,19 @@ fn build_session_filter_query(
     } else {
         "interactions i JOIN base_sessions b ON b.session_uuid = i.session_uuid"
     };
-    let fts_from = if is_feedback_filter {
-        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid"
+    // Through `SEARCH_ID_INDEX` where it exists — see there for why it has to
+    // be named.
+    let fts_join = if index_exists(conn, SEARCH_ID_INDEX) {
+        format!("interactions_fts JOIN interactions i INDEXED BY {SEARCH_ID_INDEX} ON i.log_id = interactions_fts.rowid")
     } else {
-        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid JOIN base_sessions b ON b.session_uuid = i.session_uuid"
+        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid".to_string()
     };
+    let fts_from = if is_feedback_filter {
+        fts_join
+    } else {
+        format!("{fts_join} JOIN base_sessions b ON b.session_uuid = i.session_uuid")
+    };
+    let fts_from = fts_from.as_str();
     // The entity table only carries a log_id, so a row-level filter (GenAI, low
     // recognition) needs the interaction row joined back in to be applied.
     let entity_from = if is_feedback_filter {
@@ -6235,6 +6417,9 @@ fn build_session_filter_query(
         entity_from: entity_from.as_str(),
         row_filter,
         entity_row_filter,
+        fts_range: fts_range.as_str(),
+        i_range: i_range.as_str(),
+        e_range: e_range.as_str(),
         rated_answers: is_feedback_filter,
     };
 
@@ -7993,7 +8178,7 @@ fn feedback_counts_tail(ratings_from: &str, answer_from: &str) -> String {
                       MAX(i.log_id) AS last_log, \
                       CASE WHEN {FEEDBACK_POS_ROW} THEN 1 ELSE 0 END AS pos \
                FROM {ratings_from} \
-               WHERE {FEEDBACK_ROW} \
+               WHERE i.feedback_info != '' AND {FEEDBACK_ROW} \
                GROUP BY origin_uuid) \
              SELECT COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r)), 0), \
                     COALESCE(SUM(i.interaction_uuid IN (SELECT origin_uuid FROM r WHERE pos = 1)), 0) \
@@ -8024,6 +8209,18 @@ struct SearchFeedback {
 /// database. With no query and no pill every answer in range matches, so it
 /// is the overall share.
 fn search_feedback_into(conn: &Connection, args: &GetSessionsArgs) -> Result<(i64, i64), String> {
+    let (sql, params) = search_feedback_sql(conn, args)?;
+    let params: Vec<&dyn ToSql> = params.iter().map(|b| b.as_ref()).collect();
+    conn.query_row(&sql, params.as_slice(), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+        .map_err(insight_err)
+}
+
+/// [`search_feedback_into`]'s statement and parameters, split out so the perf
+/// harness can read its plan.
+fn search_feedback_sql(
+    conn: &Connection,
+    args: &GetSessionsArgs,
+) -> Result<(String, Vec<Box<dyn ToSql>>), String> {
     let fq = build_session_filter_query(conn, args)?;
     let (scope, scope_params) = interaction_scope_sql(args, "i", fq.param_values.len() + 1);
     // The matching answers, as `resolve_insight_scope_uncached` spells them for
@@ -8035,10 +8232,20 @@ fn search_feedback_into(conn: &Connection, args: &GetSessionsArgs) -> Result<(i6
     // and reading those rows was most of the cost of an unfiltered list.
     // DISTINCT for what `INSERT OR IGNORE` did there — two OR groups can match
     // one row.
+    //
+    // The match relation is its own MATERIALIZED CTE (`fb_match`), computed
+    // once. Inlined as a subquery the planner drove from `fb_sessions` and
+    // re-ran the leaf per rated conversation — for an entity search, a range
+    // scan of every interaction in the date range per conversation: 2 s on one
+    // week, and 13× that on each axis on 90 days.
+    let match_cte = match fq.match_rows.as_deref() {
+        Some(match_rows) => format!("fb_match AS MATERIALIZED ({match_rows}),"),
+        None => String::new(),
+    };
     let matched = match fq.match_rows.as_deref() {
-        Some(match_rows) => format!(
+        Some(_) => format!(
             "SELECT DISTINCT i.log_id, i.interaction_uuid, i.main_interaction_type \
-             FROM ({match_rows}) m \
+             FROM fb_match m \
              JOIN fb_sessions s ON s.session_uuid = m.session_uuid \
              JOIN interactions i ON i.log_id = m.match_log_id \
              WHERE m.match_log_id IS NOT NULL AND {IS_ANSWER_ROW}{scope}"
@@ -8065,6 +8272,7 @@ fb_sessions AS MATERIALIZED (
     WHERE session_uuid IS NOT NULL AND session_uuid != ''
       AND (has_pos_feedback = 1 OR has_neg_feedback = 1)
 ),
+{match_cte}
 fb_answers AS MATERIALIZED ({matched}),
 {tail}"#,
         base_where = fq.base_where.as_str(),
@@ -8079,10 +8287,9 @@ fb_answers AS MATERIALIZED ({matched}),
             "fb_answers i"
         ),
     );
-    let mut params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
-    params.extend(scope_params.iter().map(|b| b.as_ref()));
-    conn.query_row(&sql, params.as_slice(), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
-        .map_err(insight_err)
+    let mut params = fq.param_values;
+    params.extend(scope_params);
+    Ok((sql, params))
 }
 
 #[tauri::command]
@@ -18384,6 +18591,77 @@ mod conv_search {
         );
     }
 
+    /// A date range bounds the ids a search reads (`date_span`), and the bound
+    /// has to come from the conversations it admits rather than from the
+    /// range: a conversation that began before the range is in it, and a word
+    /// it said before the range began still finds it — as it did before the
+    /// bound existed. One that ended before the range is still left out.
+    #[test]
+    fn a_date_range_still_finds_what_a_conversation_said_before_it() {
+        let conn = search_conn();
+        let entity = r#"{"entityMatches":[{"name":"PARKING","displayName":"parking","matched":"parkeren","entityId":7}]}"#;
+        // "long" said the word on 1 June and was still going on 3 June.
+        add(&conn, Turn { log_id: 10, session: "long", user: "parkeren", bot: "x", recognition_details: entity, ..Default::default() });
+        add(&conn, Turn { log_id: 30, session: "long", user: "bedankt", bot: "x", ..Default::default() });
+        // "early" said it on 1 June and was done that day.
+        add(&conn, Turn { log_id: 11, session: "early", user: "parkeren", bot: "x", recognition_details: entity, ..Default::default() });
+        // "late" lies wholly inside the range and never says it.
+        add(&conn, Turn { log_id: 31, session: "late", user: "hallo", bot: "x", ..Default::default() });
+        conn.execute_batch(
+            "UPDATE interactions SET timestamp_start = '2026-06-03T10:00:00', \
+                    timestamp_end = '2026-06-03T10:00:00' WHERE log_id IN (30, 31);",
+        )
+        .expect("date the later turns");
+        rebuild_session_summary(&conn).expect("summary");
+
+        let in_range = |q: &str| GetSessionsArgs {
+            query: Some(q.to_string()),
+            query_scope: Some("user".to_string()),
+            date_from: Some("2026-06-03T00:00:00".to_string()),
+            date_to: Some("2026-06-03T23:59:59".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(found(&conn, &in_range("parkeren")), vec!["long"], "text");
+        assert_eq!(found(&conn, &in_range("entity:parking")), vec!["long"], "entity");
+        assert_eq!(found(&conn, &in_range("NOT parkeren")), vec!["late"], "negation");
+        // The bounds are in the SQL, not merely implied by the result.
+        let fq = build_session_filter_query(&conn, &in_range("parkeren")).expect("build");
+        assert!(fq.search_cte.contains("interactions_fts.rowid BETWEEN"), "{}", fq.search_cte);
+
+        // A range nothing overlaps is empty, and still a valid statement.
+        let none = GetSessionsArgs {
+            date_from: Some("2027-01-01T00:00:00".to_string()),
+            date_to: Some("2027-01-01T23:59:59".to_string()),
+            ..in_range("parkeren")
+        };
+        assert!(found(&conn, &none).is_empty());
+        let no_query = GetSessionsArgs { query: None, ..none };
+        assert!(found(&conn, &no_query).is_empty());
+    }
+
+    /// Every match is mapped to its conversation through `SEARCH_ID_INDEX`
+    /// when it exists, never through the wide table row. The planner always
+    /// prefers the rowid lookup unless told, so this pins that it is told.
+    #[test]
+    fn a_text_search_reads_conversations_through_the_id_index() {
+        let conn = search_conn();
+        add(&conn, Turn { log_id: 1, session: "a", user: "parkeren", bot: "x", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+        let without = plan_for(&conn, &text_args("parkeren", "user"));
+        assert!(!without.contains(SEARCH_ID_INDEX), "no index, no INDEXED BY:\n{without}");
+
+        conn.execute_batch(&format!(
+            "CREATE INDEX {SEARCH_ID_INDEX} ON interactions(log_id, session_uuid);"
+        ))
+        .expect("index");
+        let plan = plan_for(&conn, &text_args("parkeren", "user"));
+        assert!(
+            plan.contains(&format!("COVERING INDEX {SEARCH_ID_INDEX}")),
+            "a match must find its conversation through the narrow index:\n{plan}"
+        );
+        assert_eq!(found(&conn, &text_args("parkeren", "user")), vec!["a"]);
+    }
+
     /// A plain search must compile to the SQL this file emitted before
     /// expressions existed — statement-cache key and query plan included.
     ///
@@ -19447,3 +19725,152 @@ mod search_perf {
     }
 }
 
+
+/// What a conversations search costs on a large database, with and without a
+/// date range — the real page query and the feedback share it is followed by.
+///   CAI_TEST_DB=/path/to/copy.db cargo test --release range_perf -- --nocapture --ignored
+#[cfg(test)]
+mod range_perf {
+    use super::*;
+
+    fn time_page(conn: &Connection, args: &GetSessionsArgs) -> (u128, i64) {
+        let started = Instant::now();
+        let mut fq = build_session_filter_query(conn, args).expect("build");
+        fq.param_values.push(Box::new(50i64));
+        fq.param_values.push(Box::new(0i64));
+        let p_limit = format!("?{}", fq.param_values.len() - 1);
+        let p_offset = format!("?{}", fq.param_values.len());
+        let sql = sessions_page_sql(&fq, &p_limit, &p_offset);
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).expect("prepare");
+        let mut rows = stmt.query(params.as_slice()).expect("run");
+        let mut total = 0i64;
+        while let Some(r) = rows.next().expect("row") {
+            total = r.get::<_, i64>(10).unwrap_or(0);
+        }
+        (started.elapsed().as_millis(), total)
+    }
+
+    fn plan(conn: &Connection, args: &GetSessionsArgs) {
+        let mut fq = build_session_filter_query(conn, args).expect("build");
+        fq.param_values.push(Box::new(50i64));
+        fq.param_values.push(Box::new(0i64));
+        let p_limit = format!("?{}", fq.param_values.len() - 1);
+        let p_offset = format!("?{}", fq.param_values.len());
+        let sql = format!("EXPLAIN QUERY PLAN {}", sessions_page_sql(&fq, &p_limit, &p_offset));
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).expect("prepare plan");
+        let mut rows = stmt.query(params.as_slice()).expect("plan");
+        while let Some(r) = rows.next().expect("row") {
+            println!("      {}", r.get::<_, String>(3).unwrap_or_default());
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn range_cost() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            println!("set CAI_TEST_DB");
+            return;
+        };
+        let conn = open_db(&path).expect("open");
+        let (n, lo, hi): (i64, String, String) = conn
+            .query_row(
+                "SELECT COUNT(*), MIN(timestamp_start), MAX(timestamp_start) FROM interactions",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        println!("{n} interactions, {lo} → {hi}\n");
+        let week = (
+            Some("2026-09-13T22:00:00".to_string()),
+            Some("2026-09-20T21:59:59".to_string()),
+        );
+        let old_week = (
+            Some("2026-07-05T22:00:00".to_string()),
+            Some("2026-07-12T21:59:59".to_string()),
+        );
+        let only_plans = std::env::var("CAI_PLANS").ok();
+        let cases: Vec<(&str, &str, Option<&str>, &str)> = vec![
+            ("no query", "all", None, "user"),
+            ("text, U", "all", Some("openingstijden"), "user"),
+            ("text, B", "all", Some("openingstijden"), "bot"),
+            ("common word, U", "all", Some("ik"), "user"),
+            ("prefix, U", "all", Some("park"), "user"),
+            ("punctuation, both", "all", Some("www.efteling.nl"), "both"),
+            ("entity", "all", Some("entity:wijn"), "user"),
+            ("two terms AND", "all", Some("openingstijden AND parkeren"), "user"),
+            ("term AND NOT", "all", Some("openingstijden AND NOT parkeren"), "user"),
+            ("NOT term", "all", Some("NOT openingstijden"), "user"),
+            ("genai pill", "genai", None, "user"),
+            ("genai + text", "genai", Some("openingstijden"), "user"),
+            ("neg pill", "neg_feedback", None, "user"),
+            ("neg + text", "neg_feedback", Some("openingstijden"), "user"),
+            ("low recog pill", "low_recog", None, "user"),
+            ("zero recog + text", "zero_recog", Some("park"), "user"),
+        ];
+        println!(
+            "{:<22} {:>14} {:>14} {:>14} {:>10}",
+            "case", "all days", "newest week", "old week", "feedback(wk)"
+        );
+        for (label, filter, q, scope) in &cases {
+            let mk = |r: &(Option<String>, Option<String>)| GetSessionsArgs {
+                filter: Some(filter.to_string()),
+                query: q.map(|s| s.to_string()),
+                query_scope: Some(scope.to_string()),
+                date_from: r.0.clone(),
+                date_to: r.1.clone(),
+                ..Default::default()
+            };
+            // Each run twice and the second kept: the first pays for the page
+            // cache, which is a property of the machine rather than the query.
+            // `CAI_EVICT` names a file larger than RAM to read first instead,
+            // which empties the OS cache without `sudo purge`: that run is the
+            // first search after launch, which is the one people notice.
+            let evict = std::env::var("CAI_EVICT").ok();
+            let warm = |a: &GetSessionsArgs| {
+                if let Some(f) = &evict {
+                    let _ = std::process::Command::new("cat")
+                        .arg(f)
+                        .stdout(std::process::Stdio::null())
+                        .status();
+                    return time_page(&conn, a);
+                }
+                time_page(&conn, a);
+                time_page(&conn, a)
+            };
+            let all = warm(&mk(&(None, None)));
+            let wk = warm(&mk(&week));
+            let ow = warm(&mk(&old_week));
+            if let Some(f) = &evict {
+                let _ = std::process::Command::new("cat")
+                    .arg(f)
+                    .stdout(std::process::Stdio::null())
+                    .status();
+            } else {
+                let _ = search_feedback_into(&conn, &mk(&week));
+            }
+            let t = Instant::now();
+            let _ = search_feedback_into(&conn, &mk(&week));
+            let fb = t.elapsed().as_millis();
+            println!(
+                "{label:<22} {:>6}ms {:>6} {:>6}ms {:>6} {:>6}ms {:>6} {:>8}ms",
+                all.0, all.1, wk.0, wk.1, ow.0, ow.1, fb
+            );
+            if only_plans.as_deref().map_or(false, |p| label.contains(p)) {
+                println!("    all days:");
+                plan(&conn, &mk(&(None, None)));
+                println!("    week:");
+                plan(&conn, &mk(&week));
+                println!("    feedback:");
+                let (sql, ps) = search_feedback_sql(&conn, &mk(&week)).unwrap();
+                let ps: Vec<&dyn ToSql> = ps.iter().map(|b| b.as_ref()).collect();
+                let mut st = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+                let mut rows = st.query(ps.as_slice()).unwrap();
+                while let Some(r) = rows.next().unwrap() {
+                    println!("      {}", r.get::<_, String>(3).unwrap_or_default());
+                }
+            }
+        }
+    }
+}

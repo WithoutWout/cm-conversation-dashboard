@@ -580,6 +580,80 @@ would kill the index. See `docs/insights.md` → "Reading this in your own
 timezone". A change of timezone therefore changes `date_from`/`date_to`, which
 *is* a different result set, and the session list is re-run.
 
+### A date range bounds the ids
+
+A date range used to narrow the **conversations** and nothing else. Every leaf
+still found its matches across the whole database — the FTS doclist, the
+entity table, the rating rows — and only the join to `base_sessions` threw away
+the ones outside the range. One week of a 90-day database therefore cost what
+searching all 90 days cost, and most of that cost was one random read into
+`interactions` per match, to learn its conversation.
+
+`date_span` now turns the range into the interaction ids it can reach, and
+every leaf carries them: `interactions_fts.rowid BETWEEN` on an FTS leaf (FTS5
+seeks its doclists on a rowid range), `e.log_id BETWEEN` on an entity leaf
+(the primary key leads with it), `i.log_id BETWEEN` on a LIKE or regex leaf,
+`fb.log_id BETWEEN` in `feedback_origins`.
+
+- **The span is taken from the admitted conversations, not from the range.** A
+  conversation is in range when it overlaps it, and conversations run for days
+  — the longest on a real database ran for 5½. Its turns before `date_from`
+  are part of it, and a word said there still finds it, as it did before the
+  bound. So the span is `[MIN(first_ts), MAX(last_ts)]` of the conversations
+  the range admits, and the ids are the smallest and largest stamped inside
+  that. Every turn of an admitted conversation lies in it whatever order the
+  ids were imported in; CM.com's ids growing with time only makes it tight.
+  `a_date_range_still_finds_what_a_conversation_said_before_it` pins it.
+- `idx_summary_last_first (last_ts, first_ts)` serves the span's first half —
+  being in range is decided by `last_ts`, which no other index leads with.
+- **`MIN(first_ts)` also goes into `base_where`** as `s.first_ts >= ?`. It is
+  redundant with `last_ts >= from`, but it is the side `idx_summary_real_first`
+  can seek on, so the newest week stops walking every older summary row —
+  which, at 1.6 KB a row, was 2.5 s cold on its own.
+- **`base_where` names the two id parameters too** (`?a <= ?b`, true exactly
+  when some conversation is in range). Insights, Segments and the AI export
+  run `base_where` with no leaf at all, and rusqlite refuses a statement handed
+  more parameters than it names.
+
+**A match finds its conversation through `idx_log_session (log_id,
+session_uuid)`, named with `INDEXED BY`.** The FTS index is contentless, so a
+match is only an id; reading its conversation from the table is one page per
+match, and the rows are wide. Through the 77 MB index — walked in id order,
+because FTS returns ids in order — 139k matches of a common word map in 0.13 s
+instead of 5.6 s cold. The planner never picks it on its own (a rowid lookup
+always wins its cost model), so it is named; and `INDEXED BY` a missing index
+is an error, so `fts_from` names it only when `index_exists` says it is there.
+`open_db` builds it once on an older database (9 s on 1.37M rows), under the
+`searchIndex` migration phase. `a_text_search_reads_conversations_through_the_id_index`.
+
+**The rating rows have a partial index, `idx_feedback_rows (session_uuid,
+log_id) WHERE feedback_info != ''`** — 2% of the rows. The rating lives past
+the widest columns, so finding a conversation's ratings read every one of its
+rows to the end. A partial index is used only by a query whose WHERE repeats
+its condition, which is why `feedback_origins` and `feedback_counts_tail` state
+`feedback_info != ''` although their `LIKE`s imply it, and why `open_db`
+analyzes it at once: without statistics the planner has no reason to prefer
+it. `feedback_origins` pins its order with a `CROSS JOIN` from the
+conversations the pill admits: left free, the planner walked every rating row
+in the database, both thumbs, and was slower than before the index.
+
+Measured on 1.37M interactions over 91 days, one week picked (`range_perf`;
+`CAI_EVICT` names a file larger than RAM to read first, which is the first
+search after launch without `sudo purge`):
+
+| One week, cold | before | after |
+| --- | --- | --- |
+| common word, user side (6,281 results) | 8.5 s | 0.67 s |
+| warm, the same | 548 ms | 47 ms |
+| entity, warm | 291 ms | 23 ms |
+| thumbs-down pill, warm | 197 ms | 24 ms |
+
+What is still slow cold is not bounded by the range: a feedback pill with
+**no** range (6.7 s cold — `feedback_origins` resolves each rating's origin by
+reading its conversation's rows), and the positive share of a very broad
+search (about 2 s cold, reading the answer rows of every rated conversation).
+Both would need an index on `(session_uuid, interaction_uuid)`.
+
 ## Metadata filtering (Context · Metadata)
 
 Both filter popovers — the Content one (`#contentCtxModalOverlay`) and the Conversations one (`#ctxModalOverlay`) — carry **two tabs**: Context and Metadata. Context says what the user's session was in; metadata (`OutputMetaData` / the `OutputMetadata` column) says what the bot's answer was *marked with* — `entryType`, `nochat`, `transaction`, `attractionIdentifier`, `restaurantName`. On the real export that is **40 distinct keys and 196 chips**.
@@ -928,6 +1002,12 @@ the page on screen, the share whose latest rating was a thumbs up
   unfiltered, 24 ms for "parkeren", with a warm connection. The first query on
   a brand-new connection paid about 2 s, which the app's long-lived connection
   doesn't.
+- **The match relation is its own `MATERIALIZED` CTE (`fb_match`).** Inlined
+  as a subquery, the planner drove from the rated conversations and re-ran the
+  leaf once per conversation — for an entity search, a range scan of every
+  interaction in the date range each time: 2 s on one week, 21 ms
+  materialized. It holds the database lock, so a chat opened meanwhile waited
+  for it.
 - **Read after the list paints, once per search.** It is keyed by the search
   arguments without the page, so paging reuses it. `insDropPayloadCache`, which
   runs wherever rows arrive or go, forgets it.
