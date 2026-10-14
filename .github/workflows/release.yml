@@ -91,30 +91,22 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Imports you can trust
-            - A day only turns green in the Data calendar once every hour of
-              it was fully downloaded. Importing "today" no longer marks the
-              rest of the day as done, so it gets finished on a later import.
-              Days wrongly marked green before are fixed automatically the
-              first time the app opens.
-            - Once a day, if your Analytics API is set up, the app checks for
-              days that are missing or only partly imported and offers to
-              import them in one click.
-            - Old conversations are now removed when the app starts instead of
-              at the end of every import, so imports finish sooner. The header
-              shows "Removing old data…" while it runs.
-            - The Data button is now on every screen, always on the far right.
+            ### Much faster conversation search on large databases
+            - Searching a date range now only reads that range. On a database
+              holding three months of conversations, searching one week went
+              from about 8 seconds to under a second the first time, and is
+              near-instant after that.
+            - Entity searches, the feedback filters and the "% positive" figure
+              beside the results are faster too, with or without a date range.
 
-            ### Conversations
-            - Beside the number of results you now see how positively the
-              matching answers were rated, across all results — for example
-              "77.4% positive" when searching for parking. Only ratings on the
-              answers your search matched count.
-            - Article and Dialog buttons in a message's details open the item
-              in CM.com.
-            - Shift-click a user's message to copy all of it.
-            - An opened conversation now highlights the side (User or Bot) the
-              list was actually searched on.
+            ### A one-time update when you first open your database
+            - The first time you open a conversations database with this
+              version, the app builds new search indexes for it. A card in the
+              top right explains what is happening and shows its progress. On
+              a large database it can take a minute or two; keep the app open
+              until it says "Database updated".
+            - It runs once for each database. After that, the database opens
+              straight away. The database file grows by about 4%.
 
             ---
 
