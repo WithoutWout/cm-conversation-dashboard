@@ -1596,8 +1596,10 @@ const META_ANSWER_INDEX_BUILT: &str = "answer_index_built";
 
 const META_SESSION_SUMMARY_RULES: &str = "session_summary_rules";
 /// Set once `repair_unsettled_coverage` has cleared the hours the old
-/// `h0..=h1` recording claimed before they were complete.
-const META_COVERAGE_SETTLED: &str = "coverage_settled";
+/// `h0..=h1` recording claimed before they were complete. Renamed from
+/// `coverage_settled` so the per-hour repair runs again on databases the
+/// per-day one had already passed.
+const META_COVERAGE_SETTLED: &str = "coverage_settled_hourly";
 
 /// Which *rules* the stored `session_summary` rows were derived with. The
 /// summary is a cache, so a change to [`session_summary_insert_sql`] that
@@ -11122,11 +11124,18 @@ fn insert_window_mask(conn: &Connection, day: &str, mask: i64) -> Result<(), Str
 ///
 /// Those records claimed hours that were unfinished — or had not started —
 /// when they were fetched. The fetch time was never stored, but every row
-/// carries `imported_at`, and the latest of a day's rows is when that day was
-/// last fetched with something new in it. An hour that had not ended
-/// [`COVERAGE_SETTLE_SECS`] before that moment cannot have been complete, so
-/// its bit goes and the next import fetches it again. A day with no rows is
-/// left alone: there is nothing to date it by.
+/// carries `imported_at`. An hour that had not ended [`COVERAGE_SETTLE_SECS`]
+/// before it was fetched cannot have been complete, so its bit goes and the
+/// next import fetches it again. A day with no rows is left alone: there is
+/// nothing to date it by.
+///
+/// **Each hour is dated by its own rows**, or an empty hour by the nearest hour
+/// before it that has any (after it, for the empty hours a day opens with). The
+/// first version dated the whole UTC day by its newest row, and the next local
+/// day's import always supplies one: its first window is 22:00–23:59 of this
+/// UTC day. So a day fetched "up to now" at 14:20 and recorded whole kept every
+/// bit, and stayed green with 14:20–22:00 missing.
+/// `the_repair_dates_each_hour_not_the_day` pins it.
 fn repair_unsettled_coverage(conn: &Connection) -> Result<usize, String> {
     let days: Vec<(String, i64)> = conn
         .prepare("SELECT day, hours FROM imported_windows")
@@ -11138,23 +11147,43 @@ fn repair_unsettled_coverage(conn: &Connection) -> Result<usize, String> {
     let mut changed = 0;
     for (day, hours) in days {
         // 'T' < 'U', so this is every timestamp of the day, as an index range.
-        let latest: Option<i64> = conn
-            .query_row(
-                "SELECT MAX(imported_at) FROM interactions \
-                 WHERE timestamp_start >= ?1 AND timestamp_start < ?1 || 'U'",
-                params![day],
-                |r| r.get(0),
-            )
-            .map_err(|e| format!("Cannot date {day}: {e}"))?;
-        let (Some(latest), Some(day_start)) =
-            (latest, analytics_api::parse_utc_iso(&format!("{day}T00:00:00")))
-        else {
+        let mut latest: [Option<i64>; 24] = [None; 24];
+        conn.prepare_cached(
+            "SELECT CAST(substr(timestamp_start, 12, 2) AS INTEGER), MAX(imported_at) \
+             FROM interactions \
+             WHERE timestamp_start >= ?1 AND timestamp_start < ?1 || 'U' \
+             GROUP BY 1",
+        )
+        .and_then(|mut st| {
+            for r in st.query_map(params![day], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?))
+            })? {
+                let (h, at) = r?;
+                if (0..24).contains(&h) {
+                    latest[h as usize] = at;
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| format!("Cannot date {day}: {e}"))?;
+        let Some(day_start) = analytics_api::parse_utc_iso(&format!("{day}T00:00:00")) else {
             continue;
         };
+        if latest.iter().all(Option::is_none) {
+            continue;
+        }
         let mut keep: i64 = 0;
         for h in 0..24 {
-            if day_start + (h + 1) * 3600 + COVERAGE_SETTLE_SECS <= latest {
-                keep |= 1 << h;
+            let dated = latest[..=h]
+                .iter()
+                .rev()
+                .flatten()
+                .next()
+                .or_else(|| latest[h..].iter().flatten().next());
+            if let Some(&at) = dated {
+                if day_start + (h as i64 + 1) * 3600 + COVERAGE_SETTLE_SECS <= at {
+                    keep |= 1 << h;
+                }
             }
         }
         if hours & keep != hours {
@@ -13892,6 +13921,41 @@ mod tests {
         assert_eq!(coverage_of(&conn, "2026-07-20").unwrap().hours, ALL_HOURS_MASK);
         assert_eq!(coverage_of(&conn, "2026-07-21").unwrap().hours, ALL_HOURS_MASK);
         assert_eq!(repair_unsettled_coverage(&conn).unwrap(), 0, "idempotent");
+    }
+
+    /// A day fetched "up to now" at 14:20 and recorded whole, whose UTC day
+    /// then got its 22:00–23:59 from the next local day's import. Dating the
+    /// day by its newest row kept every hour; 14:20–22:00 was never fetched.
+    #[test]
+    fn the_repair_dates_each_hour_not_the_day() {
+        let conn = test_conn();
+        let early = epoch("2026-07-24T14:20:00");
+        let next_day = epoch("2026-07-25T09:00:00");
+        let mut id = 0;
+        let mut row = |ts: &str, at: i64| {
+            id += 1;
+            conn.execute(
+                "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, \
+                 timestamp_start, imported_at) VALUES (?1, 'u', 's', ?2, ?3)",
+                params![id, ts, at],
+            )
+            .unwrap();
+        };
+        // A quiet 02:00 between rows fetched the next day stays covered.
+        row("2026-07-23T01:30:00", next_day);
+        row("2026-07-23T03:30:00", next_day);
+        for h in [0, 3, 9, 14] {
+            row(&format!("2026-07-24T{h:02}:10:00"), early);
+        }
+        row("2026-07-24T22:30:00", next_day);
+        insert_window_mask(&conn, "2026-07-23", ALL_HOURS_MASK).unwrap();
+        insert_window_mask(&conn, "2026-07-24", ALL_HOURS_MASK).unwrap();
+
+        repair_unsettled_coverage(&conn).unwrap();
+        let mut want: Vec<i64> = (0..12).collect();
+        want.extend([22, 23]);
+        assert_eq!(hours_of(coverage_of(&conn, "2026-07-24").unwrap().hours), want);
+        assert_eq!(coverage_of(&conn, "2026-07-23").unwrap().hours, ALL_HOURS_MASK);
     }
 
     fn coverage_of(conn: &Connection, day: &str) -> Option<DayCoverage> {

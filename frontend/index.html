@@ -39252,8 +39252,11 @@
             const count = _mdbDayCounts.get(key) || 0
             let cls = "cal-day"
             if (count) {
+              // Green only when every hour is covered. A day holding rows with
+              // no covered hour — a fetch too recent to settle, or coverage
+              // that failed to load — used to fall through to green.
               const c = zoneDayCoverage(key, _mdbDayHours, insZone())
-              cls += c.covered && c.covered < c.total ? " partial-data" : " has-data"
+              cls += c.total && c.covered === c.total ? " has-data" : " partial-data"
             }
             // Future days can hold no data, so there is nothing to select there.
             if (key > today) {
