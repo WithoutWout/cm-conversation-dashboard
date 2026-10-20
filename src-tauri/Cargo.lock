@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "CAIDashboard"
-version = "0.27.2"
+version = "0.27.3"
 dependencies = [
  "block2",
  "core-foundation",
