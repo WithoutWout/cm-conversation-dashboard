@@ -91,6 +91,15 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
+            ### "Finishing up…" no longer hangs after an import
+            - In 0.27.2, an import right after starting the app could sit on
+              "Finishing up…" for a long time on a large database. It now
+              finishes in under a second.
+            - **Compact database** (Conversation data → Database) now also
+              refreshes the database's internal statistics. Run it once if
+              your database has grown a lot, for example from one week to
+              three months of conversations.
+
             ### Faster with a full database
             - Opening a large conversations database is much faster. On a
               database holding 90 days of conversations it went from about
@@ -99,9 +108,8 @@ jobs:
               three times faster.
             - "Finishing up…" at the end of an import now takes a fraction of
               a second instead of several seconds.
-            - **Compact database** (Conversation data → Database) now also
-              tidies the search index. You don't need to run it regularly;
-              searches stay just as fast without it.
+            - **Compact database** also tidies the search index. You don't
+              need to run it regularly; searches stay just as fast without it.
 
             ---
 
