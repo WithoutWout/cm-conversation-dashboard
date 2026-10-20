@@ -37791,13 +37791,13 @@
           // imported before the stop still need their summary rebuilt, and
           // _impAfterImport reloads the list as soon as this returns.
           try {
-            _impSetOp("Finishing up…", "Updating summaries and search index")
+            _impSetOp("Finishing up…", "Updating conversation summaries")
             const f = await window.backend.finalizeImportRun()
             insDropPayloadCache() // rows arrived; every aggregate is now stale
             const t = f && f.timings
             if (t)
               _impLogLine(
-                `Finalize: summaries ${t.summaryMs}ms, stats ${t.pragmaOptimizeMs}ms, total ${t.totalMs}ms`,
+                `Finalize: summaries ${t.summaryMs}ms, total ${t.totalMs}ms`,
               )
           } catch (_) {}
           convImporting = false

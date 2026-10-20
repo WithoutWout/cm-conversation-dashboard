@@ -344,7 +344,6 @@ struct ImportTimings {
     /// CSV parse plus the row loop, including its per-batch commits.
     rows_ms: u64,
     summary_ms: u64,
-    pragma_optimize_ms: u64,
     total_ms: u64,
 }
 
@@ -2598,9 +2597,11 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
         clear_meta_flag(&conn, META_VERIFY_ON_OPEN);
     }
     // One-time ANALYZE so the query planner has statistics for the
-    // session_summary/context_index indexes; "PRAGMA optimize" after imports
-    // keeps them fresh. The sampling bound comes from apply_perf_pragmas, which
-    // sets analysis_limit for the whole connection.
+    // session_summary/context_index indexes. Nothing refreshes them on its own
+    // after that: a day in or out of a 90-day database does not change the
+    // proportions the planner reads, and **Compact database** re-analyzes for
+    // anyone whose database has changed shape. The sampling bound comes from
+    // apply_perf_pragmas, which sets analysis_limit for the whole connection.
     let has_stats = conn
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_stat1'",
@@ -3669,14 +3670,12 @@ fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, Str
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
 
-        // Refresh planner statistics for the tables this run touched. No FTS
-        // 'optimize': it rewrites the whole index (6.5 s on a full 90-day
-        // database) and search measured no faster for it — the index's own
-        // automerge keeps it in shape as rows are written. See
-        // docs/import.md → "The search index is not optimized after a run".
-        let t = Instant::now();
-        let _ = conn.execute_batch("PRAGMA optimize;");
-        timings.pragma_optimize_ms = t.elapsed().as_millis() as u64;
+        // Nothing else. No FTS 'optimize': it rewrites the whole index
+        // (6.5 s on a full 90-day database) and search measured no faster for
+        // it. No `PRAGMA optimize` either: whenever it decides a table's
+        // statistics are stale it ANALYZEs that table in full, and on a large
+        // database that held "Finishing up…" for 8–15 s and more. See
+        // docs/import.md → "No maintenance at the end of a run".
     }
     drop_touched_sessions(conn);
 
@@ -3690,8 +3689,8 @@ fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, Str
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "finalize: summary {}ms, pragma optimize {}ms, total {}ms",
-        timings.summary_ms, timings.pragma_optimize_ms, timings.total_ms
+        "finalize: summary {}ms, total {}ms",
+        timings.summary_ms, timings.total_ms
     );
     Ok(FinalizeResult { timings })
 }
@@ -4717,11 +4716,8 @@ fn import_csv_into(
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
 
-        // Refresh planner statistics for the tables this import touched — no
-        // FTS 'optimize', for the reason `finalize_import_run_into` gives.
-        let t = Instant::now();
-        let _ = conn.execute_batch("PRAGMA optimize;");
-        timings.pragma_optimize_ms = t.elapsed().as_millis() as u64;
+        // No optimize of either kind, for the reasons
+        // `finalize_import_run_into` gives.
     }
     drop_touched_sessions(conn);
     rebuild?;
@@ -4729,8 +4725,8 @@ fn import_csv_into(
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "{file_path}: {inserted} new, {skipped} duplicate — rows {}ms, summary {}ms, pragma optimize {}ms, total {}ms",
-        timings.rows_ms, timings.summary_ms, timings.pragma_optimize_ms, timings.total_ms
+        "{file_path}: {inserted} new, {skipped} duplicate — rows {}ms, summary {}ms, total {}ms",
+        timings.rows_ms, timings.summary_ms, timings.total_ms
     );
     Ok(ImportResult { inserted, skipped, errors, timings })
 }
@@ -11321,6 +11317,8 @@ async fn compact_database(db_state: State<'_, SharedDbState>) -> Result<CompactR
         // rewrites the whole index, which is right for a deliberate "make it
         // tidy" action and wrong for every import and purge.
         let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
+        // And the one place planner statistics are refreshed — see `open_db`.
+        let _ = conn.execute_batch("ANALYZE;");
         conn.execute_batch("VACUUM;")
             .map_err(|e| format!("Could not compact the database: {e}"))?;
         // VACUUM leaves journal_mode intact in WAL, but checkpoint again so the
@@ -15970,8 +15968,12 @@ mod perf {
         drop(conn);
 
         // ── an import of today's rows, and the run's finish ──
+        // On the connection the purge just used, as at a real launch: a
+        // `PRAGMA optimize` in the finish analyzed every table the purge had
+        // touched, and held "Finishing up…" for 8–15 s.
         fresh();
         let mut conn = open_db(work.to_str().unwrap()).expect("open");
+        purge_expired_into(&conn, 90).expect("purge");
         let csv = dir.join("today.csv");
         write_day_csv(&csv, today, days * per_day, per_day);
         reset_touched_sessions(&conn).unwrap();
@@ -15979,9 +15981,8 @@ mod perf {
         let r = import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', false).expect("import");
         let f = finalize_import_run_into(&mut conn).expect("finalize");
         println!(
-            "\nimport of {} rows: rows {}ms\nfinish: summary {}ms, PRAGMA optimize {}ms, total {}ms",
-            r.inserted, r.timings.rows_ms, f.timings.summary_ms,
-            f.timings.pragma_optimize_ms, f.timings.total_ms
+            "\nimport of {} rows: rows {}ms\nfinish: summary {}ms, total {}ms",
+            r.inserted, r.timings.rows_ms, f.timings.summary_ms, f.timings.total_ms
         );
         let t = Instant::now();
         let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
