@@ -344,7 +344,6 @@ struct ImportTimings {
     /// CSV parse plus the row loop, including its per-batch commits.
     rows_ms: u64,
     summary_ms: u64,
-    fts_optimize_ms: u64,
     pragma_optimize_ms: u64,
     total_ms: u64,
 }
@@ -1600,6 +1599,10 @@ const META_SESSION_SUMMARY_RULES: &str = "session_summary_rules";
 /// `coverage_settled` so the per-hour repair runs again on databases the
 /// per-day one had already passed.
 const META_COVERAGE_SETTLED: &str = "coverage_settled_hourly";
+/// Set when an imported row could not be written to the search index, so the
+/// next open counts both tables instead of comparing their ends — see
+/// [`repair_fts_index`]. Cleared once that full check has run.
+const META_VERIFY_ON_OPEN: &str = "verify_on_open";
 
 /// Which *rules* the stored `session_summary` rows were derived with. The
 /// summary is a cache, so a change to [`session_summary_insert_sql`] that
@@ -2055,41 +2058,66 @@ fn rebuild_session_summary_touched(conn: &Connection) -> Result<(), String> {
     .map_err(|e| format!("Session summary rebuild error: {e}"))
 }
 
-/// Cheap consistency check run on every database open, rebuilding the summary
-/// in full when it is obviously out of step with `interactions`.
+/// Consistency check run on every database open, rebuilding the summary in
+/// full when it is out of step with `interactions`.
 ///
-/// Deliberately cheap rather than exhaustive: it catches sessions that appeared
-/// or vanished, and rows appended past the highest known `log_id`. It does *not*
-/// catch rows added to already-known sessions below that high-water mark — an
-/// abandoned import run backfilling an older window can do exactly that. The
-/// [`META_PENDING_FINALIZE`] flag covers that case; see [`open_db`].
-fn ensure_session_summary(conn: &Connection) -> Result<(), String> {
-    let interaction_sessions: i64 = conn
-        .query_row(
-            "SELECT COUNT(DISTINCT session_uuid) FROM interactions WHERE session_uuid IS NOT NULL AND session_uuid != ''",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    let summary_sessions: i64 = conn
-        .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
-        .unwrap_or(0);
+/// **Ordinarily it compares ends, not counts:** the newest interaction's
+/// session must have a summary that ends on that very row. That is a handful
+/// of index seeks; `COUNT(DISTINCT session_uuid)` over every row was 1.5 s of
+/// each open on a full 90-day database. The only writers that can leave the
+/// summary behind — an import run and the purge — set
+/// [`META_PENDING_FINALIZE`] while they work, and `open_db` rebuilds in full
+/// when it finds that still set; it passes `full` then, and the counts run too.
+///
+/// Neither form catches rows added to already-known sessions below the
+/// high-water mark — the flag is what covers that; see [`open_db`].
+fn ensure_session_summary(conn: &Connection, full: bool) -> Result<(), String> {
     let max_interaction_log: i64 = conn
+        .query_row("SELECT COALESCE(MAX(log_id), 0) FROM interactions", [], |r| r.get(0))
+        .unwrap_or(0);
+    // The summary of the session holding the newest row. A session_uuid of ''
+    // has no summary at all, so the newest row that has one is the probe.
+    let newest_summary_log: i64 = conn
         .query_row(
-            "SELECT COALESCE(MAX(log_id), 0) FROM interactions",
+            "SELECT COALESCE(( \
+               SELECT s.last_log_id FROM session_summary s \
+               WHERE s.session_uuid = ( \
+                 SELECT session_uuid FROM interactions \
+                 WHERE session_uuid IS NOT NULL AND session_uuid != '' \
+                 ORDER BY log_id DESC LIMIT 1)), 0)",
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
-    let max_summary_log: i64 = conn
+    let newest_session_log: i64 = conn
         .query_row(
-            "SELECT COALESCE(MAX(last_log_id), 0) FROM session_summary",
+            "SELECT COALESCE(MAX(log_id), 0) FROM interactions \
+             WHERE session_uuid IS NOT NULL AND session_uuid != ''",
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
-
-    if interaction_sessions != summary_sessions || max_interaction_log != max_summary_log {
+    let mut stale = newest_summary_log != newest_session_log;
+    // An emptied database must not keep summaries of what it no longer holds.
+    if max_interaction_log == 0 {
+        stale |= conn
+            .query_row("SELECT EXISTS(SELECT 1 FROM session_summary)", [], |r| r.get::<_, bool>(0))
+            .unwrap_or(false);
+    }
+    if full && !stale {
+        let interaction_sessions: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT session_uuid) FROM interactions WHERE session_uuid IS NOT NULL AND session_uuid != ''",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        let summary_sessions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+            .unwrap_or(0);
+        stale = interaction_sessions != summary_sessions;
+    }
+    if stale {
         rebuild_session_summary(conn)?;
     }
     Ok(())
@@ -2114,15 +2142,18 @@ fn cleanup_orphan_contexts(conn: &Connection) {
 /// Only deletions can orphan such a row, so a purge is the only thing in the
 /// import path that needs this — an import on its own strictly adds sessions and
 /// can never orphan anything.
+///
+/// The emptiness test runs once per *session*, inside the subquery, not once
+/// per tag row — a session carries dozens of context and metadata rows, and
+/// the outer-correlated form asked the same question for each of them.
 fn cleanup_orphan_contexts_touched(conn: &Connection) {
     for table in TAG_TABLES {
         let _ = conn.execute(
             &format!(
-                "DELETE FROM {table} \
-                 WHERE session_uuid IN (SELECT session_uuid FROM {TOUCHED_TABLE}) \
-                   AND NOT EXISTS ( \
-                       SELECT 1 FROM interactions i \
-                       WHERE i.session_uuid = {table}.session_uuid)"
+                "DELETE FROM {table} WHERE session_uuid IN ( \
+                   SELECT t.session_uuid FROM {TOUCHED_TABLE} t \
+                   WHERE NOT EXISTS ( \
+                       SELECT 1 FROM interactions i WHERE i.session_uuid = t.session_uuid))"
             ),
             [],
         );
@@ -2134,7 +2165,15 @@ fn cleanup_orphan_contexts_touched(conn: &Connection) {
 ///
 /// Returns true when it actually reindexed, so the caller can tell the user why
 /// opening took a while.
-fn repair_fts_index(conn: &Connection) -> bool {
+///
+/// Without `full` it compares the lowest and highest ids of the two tables
+/// instead of counting them — milliseconds against ~2.6 s on a full 90-day
+/// database. Imports, the purge and every deletion write both tables in one
+/// transaction, so they can only part at the ends: a missing or legacy index,
+/// rows appended without it, or a purge whose index delete did not land. A row
+/// refused in the middle of an import sets [`META_VERIFY_ON_OPEN`], and the
+/// next open passes `full`.
+fn repair_fts_index(conn: &Connection, full: bool) -> bool {
     // A database written before the contentless migration carries a table that
     // duplicates every indexed column. Drop it and let the count check below
     // rebuild from `interactions`, which is the authoritative copy either way.
@@ -2155,6 +2194,17 @@ fn repair_fts_index(conn: &Connection) -> bool {
     }
     if conn.execute_batch(FTS_SCHEMA).is_err() {
         return false;
+    }
+    if !full {
+        let ends = |sql: &str| {
+            conn.query_row(sql, [], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)))
+                .ok()
+        };
+        let rows = ends("SELECT MIN(log_id), MAX(log_id) FROM interactions");
+        let index = ends("SELECT MIN(rowid), MAX(rowid) FROM interactions_fts");
+        if rows.is_some() && rows == index {
+            return false;
+        }
     }
     let interaction_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0))
@@ -2260,10 +2310,12 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
     let _ = conn.execute_batch("ALTER TABLE interactions ADD COLUMN recognition_details TEXT");
     // Backfill context_index from existing interactions (one-time migration).
     // Uses json_each, but only runs once — subsequent imports maintain the index incrementally.
-    let ctx_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM context_index", [], |r| r.get(0))
-        .unwrap_or(0);
-    if ctx_count == 0 {
+    // EXISTS, not COUNT(*): only emptiness matters, and counting walked the
+    // whole index on every open.
+    let ctx_empty = !conn
+        .query_row("SELECT EXISTS(SELECT 1 FROM context_index)", [], |r| r.get::<_, bool>(0))
+        .unwrap_or(false);
+    if ctx_empty {
         conn.execute_batch(
             "INSERT OR IGNORE INTO context_index(name, value, session_uuid) \
              SELECT json_extract(c.value, '$.name'), \
@@ -2512,8 +2564,13 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
         }
     }
 
-    // Optional FTS5 and materialized summaries are repairable caches.
-    repair_fts_index(&conn);
+    // Optional FTS5 and materialized summaries are repairable caches. Checked
+    // by their ends on an ordinary open, and counted in full only when
+    // something says they may have drifted: a run or purge that never
+    // finished, or a row the search index refused. The counts were ~5 s of a
+    // 6 s open on a full 90-day database.
+    let verify = meta_flag_set(&conn, META_PENDING_FINALIZE) || meta_flag_set(&conn, META_VERIFY_ON_OPEN);
+    repair_fts_index(&conn, verify);
     // An import run that never reached its finalize step left session_summary
     // stale. Only a full rebuild can fix it: the touched-session table was
     // per-connection and died with the process that abandoned the run.
@@ -2536,7 +2593,10 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
             started.elapsed().as_millis()
         );
     }
-    ensure_session_summary(&conn)?;
+    ensure_session_summary(&conn, verify)?;
+    if verify {
+        clear_meta_flag(&conn, META_VERIFY_ON_OPEN);
+    }
     // One-time ANALYZE so the query planner has statistics for the
     // session_summary/context_index indexes; "PRAGMA optimize" after imports
     // keeps them fresh. The sampling bound comes from apply_perf_pragmas, which
@@ -2740,12 +2800,17 @@ fn purge_old(conn: &Connection, max_days: u64) -> i64 {
         )
     };
     // Record the sessions about to lose rows *before* they are deleted, so the
-    // caller's scoped rebuild covers them.
+    // caller's scoped rebuild covers them. Read from the summary: a session
+    // has a row before the cutoff exactly when its `first_ts` — the MIN of
+    // its rows' timestamps — is, and `idx_summary_first_ts` answers that in
+    // milliseconds. Collecting it from `interactions` fetched every purged
+    // row in full for one column: 2 s a day on a full 90-day database. The
+    // summary is current here: `open_db` rebuilds it in full when a run or
+    // purge was left unfinished, and the purge runs after the open.
     let _ = conn.execute(
         &format!(
             "INSERT OR IGNORE INTO {TOUCHED_TABLE}(session_uuid) \
-             SELECT DISTINCT session_uuid FROM interactions \
-             WHERE timestamp_start < ?1 AND session_uuid != ''"
+             SELECT session_uuid FROM session_summary WHERE first_ts < ?1"
         ),
         params![cutoff_dt],
     );
@@ -3604,12 +3669,11 @@ fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, Str
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
 
-        // Merge FTS5 b-tree segments so MATCH queries read fewer pages, and
-        // refresh planner statistics for the tables this run touched.
-        let t = Instant::now();
-        let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
-        timings.fts_optimize_ms = t.elapsed().as_millis() as u64;
-
+        // Refresh planner statistics for the tables this run touched. No FTS
+        // 'optimize': it rewrites the whole index (6.5 s on a full 90-day
+        // database) and search measured no faster for it — the index's own
+        // automerge keeps it in shape as rows are written. See
+        // docs/import.md → "The search index is not optimized after a run".
         let t = Instant::now();
         let _ = conn.execute_batch("PRAGMA optimize;");
         timings.pragma_optimize_ms = t.elapsed().as_millis() as u64;
@@ -3626,8 +3690,8 @@ fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, Str
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "finalize: summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
-        timings.summary_ms, timings.fts_optimize_ms, timings.pragma_optimize_ms, timings.total_ms
+        "finalize: summary {}ms, pragma optimize {}ms, total {}ms",
+        timings.summary_ms, timings.pragma_optimize_ms, timings.total_ms
     );
     Ok(FinalizeResult { timings })
 }
@@ -3667,20 +3731,33 @@ async fn purge_expired_data(
 /// connection. Bracketed by the same crash marker an import run uses: rows
 /// deleted with the summary not yet rebuilt is exactly what `open_db` repairs
 /// when it finds `pending_finalize` still set.
+///
+/// **One transaction.** Its dozen statements each committed on their own, and
+/// every commit is a WAL append that the autocheckpoint folds back in now and
+/// then — which is how one day's purge measured anywhere from 2 to 19 s.
+///
+/// **No FTS 'optimize' and no `PRAGMA optimize`**, which were 13 s and 15 s of
+/// a 45 s purge on a full 90-day database. The search index merges its
+/// tombstones away as later imports write to it, and one day out of ninety
+/// does not move the planner statistics. See docs/import.md → "The retention
+/// purge runs at launch".
 fn purge_expired_into(conn: &Connection, max_age_days: i64) -> Result<PurgeResult, String> {
     let started = Instant::now();
     reset_touched_sessions(conn)?;
     set_meta_flag(conn, META_PENDING_FINALIZE);
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(|e| format!("Cannot start the purge: {e}"))?;
     let purged = purge_old(conn, max_age_days.max(1) as u64);
-    let mut rebuild = Ok(());
-    if purged > 0 {
-        rebuild = rebuild_session_summary_touched(conn);
-        // A purge leaves FTS tombstones that only go away on merge.
-        let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
-        let _ = conn.execute_batch("PRAGMA optimize;");
-    }
+    let rebuild = if purged > 0 { rebuild_session_summary_touched(conn) } else { Ok(()) };
+    let done = match rebuild {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(|e| format!("Cannot commit the purge: {e}")),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    };
     drop_touched_sessions(conn);
-    rebuild?;
+    done?;
     clear_meta_flag(conn, META_PENDING_FINALIZE);
     let duration_ms = started.elapsed().as_millis() as u64;
     log::info!(target: "import", "retention purge: {purged} removed in {duration_ms}ms");
@@ -4481,14 +4558,21 @@ fn import_csv_into(
             );
             match result {
                 Ok(1) => {
-                    // Also index in FTS5
-                    let _ = fts_stmt.execute(params![
-                        log_id,
-                        get_r(c_value),
-                        get_r(c_output),
-                        get_r(c_article_ids),
-                        get_r(c_dialog_paths),
-                    ]);
+                    // Also index in FTS5. A refusal leaves a hole the next
+                    // open's cheap end-to-end check cannot see, so it asks
+                    // for the full count instead.
+                    if fts_stmt
+                        .execute(params![
+                            log_id,
+                            get_r(c_value),
+                            get_r(c_output),
+                            get_r(c_article_ids),
+                            get_r(c_dialog_paths),
+                        ])
+                        .is_err()
+                    {
+                        set_meta_flag(&tx, META_VERIFY_ON_OPEN);
+                    }
                     // This session's summary is now stale — mark it for recompute.
                     // Duplicates are deliberately not marked: an ignored row
                     // changes nothing the summary is derived from.
@@ -4633,14 +4717,8 @@ fn import_csv_into(
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
 
-        // Merge FTS5 b-tree segments so MATCH queries read fewer pages, and
-        // refresh planner statistics for the tables this import touched.
-        let t = Instant::now();
-        let _ = conn.execute_batch(
-            "INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');",
-        );
-        timings.fts_optimize_ms = t.elapsed().as_millis() as u64;
-
+        // Refresh planner statistics for the tables this import touched — no
+        // FTS 'optimize', for the reason `finalize_import_run_into` gives.
         let t = Instant::now();
         let _ = conn.execute_batch("PRAGMA optimize;");
         timings.pragma_optimize_ms = t.elapsed().as_millis() as u64;
@@ -4651,9 +4729,8 @@ fn import_csv_into(
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "{file_path}: {inserted} new, {skipped} duplicate — rows {}ms, summary {}ms, fts optimize {}ms, pragma optimize {}ms, total {}ms",
-        timings.rows_ms, timings.summary_ms,
-        timings.fts_optimize_ms, timings.pragma_optimize_ms, timings.total_ms
+        "{file_path}: {inserted} new, {skipped} duplicate — rows {}ms, summary {}ms, pragma optimize {}ms, total {}ms",
+        timings.rows_ms, timings.summary_ms, timings.pragma_optimize_ms, timings.total_ms
     );
     Ok(ImportResult { inserted, skipped, errors, timings })
 }
@@ -11240,6 +11317,10 @@ async fn compact_database(db_state: State<'_, SharedDbState>) -> Result<CompactR
         let bytes_before = size_of(&path);
 
         let started = Instant::now();
+        // The one place the search index is merged into a single segment: it
+        // rewrites the whole index, which is right for a deliberate "make it
+        // tidy" action and wrong for every import and purge.
+        let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
         conn.execute_batch("VACUUM;")
             .map_err(|e| format!("Could not compact the database: {e}"))?;
         // VACUUM leaves journal_mode intact in WAL, but checkpoint again so the
@@ -13299,7 +13380,7 @@ mod tests {
         // Opening again is a no-op — it must not reindex on every launch.
         drop(conn);
         let conn = open_db(db_str).expect("reopen");
-        assert!(!repair_fts_index(&conn), "a migrated database must not reindex again");
+        assert!(!repair_fts_index(&conn, true), "a migrated database must not reindex again");
 
         drop(conn);
         let _ = fs::remove_dir_all(&dir);
@@ -14468,12 +14549,51 @@ mod tests {
         )
         .expect("insert");
 
-        ensure_session_summary(&conn).expect("ensure summary");
+        ensure_session_summary(&conn, false).expect("ensure summary");
 
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
             .expect("summary count");
         assert_eq!(count, 1);
+    }
+
+    /// The open no longer counts both tables; comparing their ends must still
+    /// catch every drift that can reach the ends, and the flag the rest.
+    #[test]
+    fn the_cheap_open_checks_still_catch_drift() {
+        let conn = test_conn();
+        let fts_count = |c: &Connection| -> i64 {
+            c.query_row("SELECT COUNT(*) FROM interactions_fts", [], |r| r.get(0)).unwrap()
+        };
+        for id in 1..=3 {
+            insert_interaction(&conn, id, &format!("2026-01-0{id}T10:00:00"));
+        }
+        // Rows with no search entries at all are indexed.
+        assert!(repair_fts_index(&conn, false), "an empty index is caught");
+        // Rows appended without their search entries: the top end differs.
+        conn.execute("DELETE FROM interactions_fts WHERE rowid = 3", []).unwrap();
+        assert!(repair_fts_index(&conn, false), "a missing newest entry is caught");
+        assert_eq!(fts_count(&conn), 3);
+        assert!(!repair_fts_index(&conn, false), "and once repaired, left alone");
+
+        // A hole in the middle is invisible to the ends; only the full count sees it.
+        conn.execute("DELETE FROM interactions_fts WHERE rowid = 2", []).unwrap();
+        assert!(!repair_fts_index(&conn, false));
+        assert!(repair_fts_index(&conn, true));
+
+        // A summary that missed the newest row is caught without the counts.
+        rebuild_session_summary(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, imported_at) \
+             VALUES (9, 'u9', 's-new', '2026-01-09T10:00:00', 1)",
+            [],
+        )
+        .unwrap();
+        ensure_session_summary(&conn, false).unwrap();
+        let newest: i64 = conn
+            .query_row("SELECT last_log_id FROM session_summary WHERE session_uuid = 's-new'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(newest, 9);
     }
 
     #[test]
@@ -15700,6 +15820,173 @@ mod perf {
             println!();
         }
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── opening, purging and finishing a full database ──
+
+    /// One UTC day of realistic rows as a portal CSV: sessions of ~9 turns,
+    /// four contexts, four metadata pairs and an entity per row, and a daily
+    /// curve so the hours are not uniform.
+    fn write_day_csv(path: &Path, day_secs: i64, first_id: i64, rows: i64) {
+        let header = "LogId|InteractionUuid|SessionUuid|TimestampStart|TimestampEnd|Culture|\
+                      MainInteractionType|AllInteractionTypes|InteractionValue|OutputText|\
+                      ArticleIds|DialogPaths|RecognitionType|RecognitionQuality|\
+                      RecognitionDetails|Contexts|FeedbackInfo|OutputMetadata";
+        let mut s = String::with_capacity((rows as usize) * 900 + header.len());
+        s.push_str(header);
+        for k in 0..rows {
+            let id = first_id + k;
+            let sess = id / 9;
+            // Most rows between 07:00 and 21:00.
+            let secs = day_secs + 7 * 3600 + (k * 50_400 / rows.max(1)) + (id % 7) * 60;
+            let (y, mo, d, h, mi, se) = civil(secs);
+            let stamp = format!("{mo:02}/{d:02}/{y} {h:02}:{mi:02}:{se:02}");
+            let feedback = if id % 40 == 39 {
+                format!("{{\"score\": {}, \"originatingInteractionId\": \"u{}\"}}", if id % 80 == 39 { -1 } else { 1 }, id - 1)
+            } else {
+                String::new()
+            };
+            let contexts = (0..4)
+                .map(|j| format!("{{\"name\":\"ctx{}\",\"value\":\"v{}\"}}", (sess + j) % 30, (sess + j) % 8))
+                .collect::<Vec<_>>()
+                .join(",");
+            let metadata = (0..4)
+                .map(|j| format!("{{\"key\":\"meta{}\",\"value\":\"m{}\"}}", (id + j) % 30, (id + j) % 8))
+                .collect::<Vec<_>>()
+                .join(",");
+            // Feedback rows carry no recognition details, as in real logs —
+            // without any such row the import's backfill probe scans the
+            // whole table, which no real database makes it do.
+            let recog = if feedback.is_empty() {
+                format!(
+                    "{{\"entityMatches\":[{{\"entityId\":{0},\"displayName\":\"ENT_{0}\",\"name\":\"ENT_{0}\",\"match\":\"openingstijden\"}}]}}",
+                    id % 200
+                )
+            } else {
+                String::new()
+            };
+            s.push('\n');
+            s.push_str(&format!(
+                "{id}|u{id}|s{sess}|{stamp}|{stamp}|nl|Question|Question|\
+                 wat zijn de openingstijden van het park op dag {id} met kinderen|\
+                 Het park is open van 10 tot 18 uur, kijk op de website voor de actuele tijden {id}|\
+                 [\"qa-{}\",\"dn-{}-{}\"]|{{\"EndedOrInProgress\":\"{}:1/{}\"}}|Faq|{}|\
+                 {recog}|[{contexts}]|{feedback}|[{metadata}]",
+                id % 400, id % 60, id % 12, id % 60, id % 12, if id % 11 == 0 { 0 } else { 88 },
+            ));
+        }
+        fs::write(path, s).expect("write csv");
+    }
+
+    /// Seconds since the epoch → (year, month, day, hour, minute, second), UTC.
+    fn civil(secs: i64) -> (i64, i64, i64, i64, i64, i64) {
+        let days = secs.div_euclid(86400);
+        let rem = secs.rem_euclid(86400);
+        // Howard Hinnant's days_from_civil, inverted.
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+        (y, m, d, rem / 3600, rem / 60 % 60, rem % 60)
+    }
+
+    fn ms(t: Instant) -> u128 {
+        t.elapsed().as_millis()
+    }
+
+    /// What opening a full database, the launch purge and an import's finish
+    /// each cost, step by step.
+    ///
+    ///   cargo test --release perf::open_purge_cost -- --nocapture --ignored
+    ///
+    /// Seeds `CAI_BENCH_DAYS` (92) UTC days ending yesterday at
+    /// `CAI_BENCH_ROWS_PER_DAY` (18,000) — a full 90-day database, with two
+    /// days past retention for the purge. The seed is kept in the temp dir and
+    /// reused, since it takes minutes; every run works on a copy of it.
+    #[test]
+    #[ignore]
+    fn open_purge_cost() {
+        let env = |k: &str, d: i64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+        let days = env("CAI_BENCH_DAYS", 92);
+        let per_day = env("CAI_BENCH_ROWS_PER_DAY", 18_000);
+        let dir = std::env::temp_dir().join(format!("cai-open-bench-v2-{days}x{per_day}"));
+        let _ = fs::create_dir_all(&dir);
+        let seed = dir.join("seed.db");
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as i64;
+        let today = now - now % 86400;
+        if !seed.exists() {
+            let t = Instant::now();
+            let mut conn = open_db(seed.to_str().unwrap()).expect("open");
+            reset_touched_sessions(&conn).unwrap();
+            for d in 0..days {
+                let csv = dir.join("day.csv");
+                write_day_csv(&csv, today - (days - d) * 86400, d * per_day, per_day);
+                import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', false).expect("import");
+            }
+            finalize_import_run_into(&mut conn).expect("finalize");
+            drop(conn);
+            println!("seeded {} rows in {}s", days * per_day, t.elapsed().as_secs());
+        }
+        let work = dir.join("work.db");
+        let fresh = || {
+            for ext in ["", "-wal", "-shm"] {
+                let _ = fs::remove_file(format!("{}{ext}", work.display()));
+            }
+            fs::copy(&seed, &work).unwrap();
+        };
+        fresh();
+        println!(
+            "database {} MB, {} rows\n",
+            fs::metadata(&work).unwrap().len() / 1_048_576,
+            days * per_day
+        );
+
+        // ── open, warm, twice: the second is what every launch pays ──
+        for i in 0..2 {
+            let t = Instant::now();
+            let conn = open_db(work.to_str().unwrap()).expect("open");
+            println!("open_db #{i}: {}ms", ms(t));
+            drop(conn);
+        }
+        // The same open after a run that never finished: the full counts.
+        {
+            let conn = open_db(work.to_str().unwrap()).expect("open");
+            set_meta_flag(&conn, META_VERIFY_ON_OPEN);
+        }
+        let t = Instant::now();
+        drop(open_db(work.to_str().unwrap()).expect("open"));
+        println!("open_db, verifying in full: {}ms", ms(t));
+
+        // ── the launch purge: two days past a 90-day retention ──
+        fresh();
+        let conn = open_db(work.to_str().unwrap()).expect("open");
+        let r = purge_expired_into(&conn, 90).expect("purge");
+        println!("\npurge of {} rows: {}ms", r.purged, r.duration_ms);
+        drop(conn);
+
+        // ── an import of today's rows, and the run's finish ──
+        fresh();
+        let mut conn = open_db(work.to_str().unwrap()).expect("open");
+        let csv = dir.join("today.csv");
+        write_day_csv(&csv, today, days * per_day, per_day);
+        reset_touched_sessions(&conn).unwrap();
+        let _ = conn.query_row("PRAGMA wal_autocheckpoint = 20000", [], |_| Ok(()));
+        let r = import_csv_into(&mut conn, csv.to_str().unwrap(), b'|', false).expect("import");
+        let f = finalize_import_run_into(&mut conn).expect("finalize");
+        println!(
+            "\nimport of {} rows: rows {}ms\nfinish: summary {}ms, PRAGMA optimize {}ms, total {}ms",
+            r.inserted, r.timings.rows_ms, f.timings.summary_ms,
+            f.timings.pragma_optimize_ms, f.timings.total_ms
+        );
+        let t = Instant::now();
+        let _ = conn.execute_batch("INSERT INTO interactions_fts(interactions_fts) VALUES('optimize');");
+        println!("(the FTS optimize the finish used to add: {}ms)", ms(t));
+        drop(conn);
     }
 
     // ── the whole thing, end to end ──
