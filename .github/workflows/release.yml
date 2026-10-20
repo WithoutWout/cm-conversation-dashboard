@@ -91,22 +91,17 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Much faster conversation search on large databases
-            - Searching a date range now only reads that range. On a database
-              holding three months of conversations, searching one week went
-              from about 8 seconds to under a second the first time, and is
-              near-instant after that.
-            - Entity searches, the feedback filters and the "% positive" figure
-              beside the results are faster too, with or without a date range.
-
-            ### A one-time update when you first open your database
-            - The first time you open a conversations database with this
-              version, the app builds new search indexes for it. A card in the
-              top right explains what is happening and shows its progress. On
-              a large database it can take a minute or two; keep the app open
-              until it says "Database updated".
-            - It runs once for each database. After that, the database opens
-              straight away. The database file grows by about 4%.
+            ### Days marked as fully imported that weren't
+            - Some days in the Conversation data calendar showed green
+              (fully imported) while part of the day was missing, usually the
+              afternoon and evening. Those days were then skipped by every
+              later import, so the gap never filled.
+            - The first time you open your database with this version, those
+              days turn orange. Your next import, or the daily "missing days"
+              prompt, downloads what is missing. A few hours that were in fact
+              complete may be downloaded once more.
+            - The Stored data calendar no longer shows a day green when none of
+              its hours have been fully imported.
 
             ---
 
