@@ -91,17 +91,17 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Days marked as fully imported that weren't
-            - Some days in the Conversation data calendar showed green
-              (fully imported) while part of the day was missing, usually the
-              afternoon and evening. Those days were then skipped by every
-              later import, so the gap never filled.
-            - The first time you open your database with this version, those
-              days turn orange. Your next import, or the daily "missing days"
-              prompt, downloads what is missing. A few hours that were in fact
-              complete may be downloaded once more.
-            - The Stored data calendar no longer shows a day green when none of
-              its hours have been fully imported.
+            ### Faster with a full database
+            - Opening a large conversations database is much faster. On a
+              database holding 90 days of conversations it went from about
+              6 seconds to well under one.
+            - Removing old data at launch ("Removing old data…") is about
+              three times faster.
+            - "Finishing up…" at the end of an import now takes a fraction of
+              a second instead of several seconds.
+            - **Compact database** (Conversation data → Database) now also
+              tidies the search index. You don't need to run it regularly;
+              searches stay just as fast without it.
 
             ---
 
