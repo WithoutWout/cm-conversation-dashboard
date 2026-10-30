@@ -68,6 +68,7 @@ vm.runInContext(
   let allArticles = []
   let allDialogsCombined = []
   let entityOptions = []
+  let entityOptionsLoaded = false
   let entityMap = new Map()
   let dialogMap = new Map()
   let contextOptions = []
@@ -103,6 +104,7 @@ vm.runInContext(
     allDialogsCombined = o.dialogs || []
     dialogMap = new Map(allDialogsCombined.map((d) => [d.id, d]))
     entityOptions = o.entities || []
+    entityOptionsLoaded = !!o.entities
     entityMap = new Map(
       (o.exported || []).map((e) => [e.name.toUpperCase(), e]),
     )
@@ -548,6 +550,38 @@ ok(
 ctx.setUp({ entities: CAMPER_ENTITIES })
 eq("with no content export loaded, names still match", ctx.labelsFor("camper"), ["camper", "camperplaats"])
 eq("…and a word-only query finds nothing rather than erroring", ctx.labelsFor("caravan"), [])
+
+// An entity in the content export that no conversation has triggered. Content
+// listed PLAYMOBIL and this list did not, which read as a missing entity.
+console.log("\nEntities no conversation has triggered:")
+const WITH_PLAYMOBIL = EXPORTED.concat([
+  { name: "PLAYMOBIL", words: [{ text: "Playmobil" }, { text: "playmobiel" }] },
+])
+ctx.setUp({ entities: CAMPER_ENTITIES, exported: WITH_PLAYMOBIL })
+eq(
+  "an untriggered export entity is offered, spelled as entity_index spells names",
+  ctx.convSuggestFor("playmo").map((c) => c.value + (c.untriggered ? " (untriggered)" : "")),
+  ["playmobil (untriggered)"],
+)
+eq("…and found by its words too", ctx.labelsFor("playmobiel"), ["playmobil"])
+ok(
+  "a triggered entity is never offered twice, nor marked untriggered",
+  ctx.convSuggestFor("camper").filter((c) => c.value === "camper").length === 1 &&
+    !ctx.convSuggestFor("camper")[0].untriggered,
+)
+eq(
+  "triggered entities rank above untriggered ones of the same match",
+  (ctx.setUp({
+    entities: [{ name: "Entities", value: "parkeren", count: 3 }],
+    exported: EXPORTED.concat([{ name: "PARKEREN_HOTEL", words: [] }]),
+  }),
+  ctx.labelsFor("parkeren")),
+  ["parkeren", "parkeren_hotel"],
+)
+// Before the database's list has loaded, every export entity would look
+// untriggered — so none is offered as one.
+ctx.setUp({ exported: WITH_PLAYMOBIL })
+eq("nothing is offered as untriggered before the entity list loads", ctx.labelsFor("playmo"), [])
 
 // ── Regex mode ───────────────────────────────────────────────────────────────
 // `a(b|c)` is a group the *user* wrote, and reading it as ours would silently

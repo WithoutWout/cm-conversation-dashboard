@@ -495,6 +495,17 @@ matching nearly everything, so it runs synchronously on `input` with no debounce
   showed as *nothing*, indistinguishable from "this database has no entities". It
   now re-runs the suggestion once the options arrive, if the field still holds
   what was typed while waiting.
+- **Entities no conversation has triggered are offered too**, marked "no
+  conversations yet" and greyed (`untriggered` in `convEntityIndex`). Content
+  listed PLAYMOBIL and this list did not, which read as a bug: `entity_index`
+  holds only what the recognizer *matched*, and the five users who typed
+  "playmobil" had it logged under `missingWords`. On the real Efteling data
+  that is 752 of the export's 2,317 entities. They are added only once
+  `entityOptions` has loaded (before that every entity would look untriggered),
+  spelled lower-case as `entity_index` stores names so the chip is the one a
+  triggered entity would make, and rank below triggered entities of the same
+  match through their weight of 0. The chip is a real search that finds
+  nothing until a conversation triggers it — that is the answer, not an error.
 - **The field's hover tooltip is suppressed while the list is open**
   (`.conv-search-wrap.is-suggesting`). It hangs below the field, which is exactly
   where the list opens, and it landed on the first row.

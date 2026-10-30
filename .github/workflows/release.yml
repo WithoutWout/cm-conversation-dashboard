@@ -91,25 +91,21 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### "Finishing up…" no longer hangs after an import
-            - In 0.27.2, an import right after starting the app could sit on
-              "Finishing up…" for a long time on a large database. It now
-              finishes in under a second.
-            - **Compact database** (Conversation data → Database) now also
-              refreshes the database's internal statistics. Run it once if
-              your database has grown a lot, for example from one week to
-              three months of conversations.
+            ### Every entity in the conversation search
+            - Typing in the Conversations search bar now also offers entities
+              that no conversation has triggered yet, greyed out with "no
+              conversations yet". Before, an entity such as PLAYMOBIL showed
+              on the Content tab but seemed to be missing from the
+              conversation search.
 
-            ### Faster with a full database
-            - Opening a large conversations database is much faster. On a
-              database holding 90 days of conversations it went from about
-              6 seconds to well under one.
-            - Removing old data at launch ("Removing old data…") is about
-              three times faster.
-            - "Finishing up…" at the end of an import now takes a fraction of
-              a second instead of several seconds.
-            - **Compact database** also tidies the search index. You don't
-              need to run it regularly; searches stay just as fast without it.
+            ### Faster conversation searches
+            - Searching for an entity, Article or Dialog over a date range no
+              longer takes minutes on a large database; it now takes well
+              under a second.
+            - Searching while the app starts no longer waits for old data to
+              be removed ("Removing old data…"). Results show straight away.
+            - The search suggestions show up to 100 matches in a scrolling
+              list instead of 8, and say how many more there are.
 
             ---
 
