@@ -5832,6 +5832,14 @@
       .conv-suggest-row.active .conv-suggest-meta {
         color: rgba(255, 255, 255, 0.75);
       }
+      /* An entity from the content export that no conversation has triggered:
+         offered, so it is not mistaken for missing, but quieter. */
+      .conv-suggest-row.is-untriggered:not(.active) .conv-suggest-name {
+        color: var(--muted);
+      }
+      .conv-suggest-row.is-untriggered .conv-suggest-meta {
+        font-style: italic;
+      }
       .conv-suggest-empty {
         color: var(--muted);
         font-size: 0.72rem;
@@ -41811,14 +41819,17 @@
       /// bridges the two spellings: `entity_index` stores the lower-cased
       /// *display* name and the export carries the internal one). With no
       /// export loaded this degrades to name-only.
+      ///
+      /// The export's entities that no conversation has triggered are offered
+      /// too, as `untriggered` rows. Content listed PLAYMOBIL and this list did
+      /// not, which read as a missing entity rather than as "nobody's question
+      /// was recognised as it yet". Only once `entityOptions` has loaded: before
+      /// that, every entity would look untriggered.
       function convEntityIndex() {
         if (_convEntityIndex && _convEntityIndexSrc === entityOptions)
           return _convEntityIndex
         const out = []
-        for (const o of entityOptions || []) {
-          const name = String(o.value || "")
-          if (!name) continue
-          const ent = entityMap ? entityMap.get(name.toUpperCase()) : null
+        const row = (name, ent, count, untriggered) => {
           const words = []
           if (ent && ent.words) {
             for (const w of ent.words) {
@@ -41833,10 +41844,25 @@
             label: name,
             num: "",
             idText: "",
-            weight: o.count || 0,
+            weight: count,
+            untriggered,
             words,
             hay: (name + " " + words.join(" ")).toLowerCase(),
           })
+        }
+        const triggered = new Set()
+        for (const o of entityOptions || []) {
+          const name = String(o.value || "")
+          if (!name) continue
+          triggered.add(name.toUpperCase())
+          row(name, entityMap ? entityMap.get(name.toUpperCase()) : null, o.count || 0, false)
+        }
+        if (entityOptionsLoaded && entityMap) {
+          // Lower-cased, as `entity_index` stores names, so the chip is
+          // spelled the way a triggered entity's would be.
+          for (const [upper, ent] of entityMap) {
+            if (!triggered.has(upper)) row(String(ent.name).toLowerCase(), ent, 0, true)
+          }
         }
         _convEntityIndex = out
         _convEntityIndexSrc = entityOptions
@@ -42236,12 +42262,13 @@
             const badge = CONV_SUGGEST_BADGES[c.kind] || c.kind
             // A row with no title of its own already *is* its id, so repeating
             // it on the right would be the same string twice.
-            const meta =
-              c.kind === "entity" || c.kind === "ctxtag" || c.kind === "metatag"
-                ? insPlural(c.weight, c.unit || "conversations")
-                : c.label
-                ? c.idText
-                : "by id"
+            const meta = c.untriggered
+              ? "no conversations yet"
+              : c.kind === "entity" || c.kind === "ctxtag" || c.kind === "metatag"
+              ? insPlural(c.weight, c.unit || "conversations")
+              : c.label
+              ? c.idText
+              : "by id"
             const via = c.kind === "entity" ? _convSuggestVia(c, raw) : ""
             const viaHtml = via
               ? '<span class="conv-suggest-via">via ' +
@@ -42251,10 +42278,16 @@
             const curHtml = c.isCurrent
               ? '<span class="conv-suggest-cur">current</span>'
               : ""
+            const title = c.untriggered
+              ? ' title="In the content export, but no imported conversation has triggered this entity. Searching for it finds nothing until one does."'
+              : ""
             return (
               '<div class="conv-suggest-row' +
               (i === _convSuggestIdx ? " active" : "") +
-              '" role="option" onmousemove="_convSuggestHover(' +
+              (c.untriggered ? " is-untriggered" : "") +
+              '"' +
+              title +
+              ' role="option" onmousemove="_convSuggestHover(' +
               i +
               ')" onclick="_convSuggestTake(' +
               i +
