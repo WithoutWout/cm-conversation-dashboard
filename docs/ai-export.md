@@ -67,5 +67,16 @@ no query to run and nothing for Rust to do beyond the save dialog
 - **A reference node says `shows_article: "qa-N — title"` and is not
   inlined** — the same rule as the search: the Article is not the Dialog's
   content, and it is its own record when it is in the set.
+- **`links_to` gathers an item's links in one list** beside its url, when
+  Share Content's *Linked content* is on: the same `item.links` the rows and
+  copies show — `to`, `kind`, `name`, `contextual`, `from_nodes`. The routes
+  and `shows_article` lines still say it node by node; `links_to` is the
+  answer to "where does this lead" without reading every node. Markdown
+  writes it as a **Links to** list. With *Complete overview* the same place holds
+  `linked_from` instead — `from` (`qa-N` or a node's `dn-D-N`), `kind`
+  (`article` · `dialog_node`), `name`, `contextual` — written as **Linked
+  from**. `search_context.linked_content` says which ("matching only" ·
+  "complete overview"). Adding the key did not bump `CONTENT_AI_SCHEMA_VERSION`: absent keys
+  already mean "no value".
 - `_aiPrune` drops empty values, so an absent key means "no value" and the
   legend says so.

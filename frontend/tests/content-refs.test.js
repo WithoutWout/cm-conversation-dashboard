@@ -55,8 +55,9 @@ const DIALOGS = [
   { id: 642, name: "Contact", description: "", _kind: "dialog", nodes: [node(1, "Telefoonnummer", { kbaIdReference: 1764 })] },
   // Says it itself.
   { id: 700, name: "Bellen", description: "", _kind: "dialog", nodes: [node(2, "Nummer", { items: [answer("Ons telefoonnummer is 0416 288 111.")] })] },
-  // Reaches the reference through what the user says — the Dialog's own — and
-  // through a GoTo named after it, which is part of the reference.
+  // Reaches the reference through what the user says and through a GoTo named
+  // after it — both part of the reference — and a node of its own through
+  // another phrasing.
   {
     id: 900,
     name: "Contact menu",
@@ -139,9 +140,15 @@ test("a node of the Dialog's own still matches by name", () => {
   assert.deepStrictEqual(search("vragen"), [800])
 })
 
-test("what the user says counts, even when it routes to a reference", () => {
-  assert.deepStrictEqual(search("klantenservice"), [900])
-  assert.deepStrictEqual(search("telefoonnummer"), [700, 800, 900])
+test("what the user says to reach a reference is part of the reference", () => {
+  // "Telefoonnummer klantenservice" is the button into node 2, which only
+  // shows Article 1764: the Article is the place, not this Dialog.
+  assert.deepStrictEqual(search("klantenservice"), [])
+  assert.deepStrictEqual(search("telefoonnummer"), [700, 800])
+  assert.deepStrictEqual(search("klantenservice", { searchIncludeRefs: true }), [900])
+})
+
+test("what the user says to reach a node of the Dialog's own still counts", () => {
   assert.deepStrictEqual(search("kantoor"), [900])
 })
 

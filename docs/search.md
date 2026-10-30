@@ -18,6 +18,7 @@ _Split out of `CLAUDE.md`. Read this before changing anything it covers._
 - `¬T` means **Responses only**. When enabled, search excludes IDs, titles/names, descriptions, node names, and entity enrichment.
 - `ND` means **Exclude non-default responses from search**. It only affects matching when a text query is active and must not hide items for an empty query.
 - A response is user-facing unreachable only when it is not the default response and it has no context condition. Non-default responses with context are reachable for users in that context and should not be labeled "non-default" or "unreachable" in result cards.
+- **Unreachable content is ignored by the whole app, by default.** An output that is not the default and has no context condition (a value of `any` is none) is never shown — CM.com marks it "A non-default output requires context variables in order to be triggered". It is not content the bot has, so `pruneUnreachable` takes it out of the export **as it loads**, in `loadData`, before the maps, the cards, the search worker, Share Content, Export for AI, Collections and the Dialog flow see it. Doing it once at the source is the point: a rule repeated in each view (it was first written into the worker alone) is a rule some view forgets. Settings › Content › *Show unreachable content* (`cm-show-unreachable`) reloads the export unpruned, as the app always used to work, with its Unreachable badges. On the 2026-08-15 export it leaves out 1,028 outputs — 690 Article Responses, 88 Article routes, 250 Dialog outputs — "albert heijn" goes from 57 results to 55, and 87 Articles whose only Answers were unreachable become what CM.com says they are, a Dialog Link. This is not ND, which drops *every* non-default Response, reachable ones included. Every real Article and node flags exactly one default; with none flagged the export does not say which one it is, so nothing is pruned. `unreachable-search.test.js` runs the pruned data through the real worker, on the Oud & Nieuw Article's shape.
 - Contextual/non-default query hits should show a compact snippet or reason on result cards so users can see why an item matched without opening the modal.
 - The info modals' **Matches only** toggle (`modalMatchFilter`, `toggleModalMatchFilter`) must use the same answer/node sections that caused worker result inclusion — for an item in the results it now reads them from the worker (see "A card says how much of it matched" below). It is hidden entirely when no query is active — it can do nothing then, and a permanently greyed-out control reads as broken rather than inapplicable.
 - **A result card says how much of it matched** — "3 of 40 nodes match", "2 of 5 responses match · 1 contextual", "4 of 20 entities match". See below.
@@ -1010,6 +1011,16 @@ phone number; it only points at the Article that does.
   the Dialog match** (`isRef` / `nodeNameCounts` / `nodeAnswerItems` in the
   worker). A node with a Response of its own is never a reference, whatever its
   name. On the real export `telefoonnummer` goes 155 → 152 Dialogs.
+- **Nor does the button that leads to it.** A phrasing on a link that lands
+  on a reference node (GoTo jumps followed — `leadsToRef` in the worker,
+  `_nodeLandsOn` in the renderer) is part of the reference: worker
+  `_refPhrases` / `refPhraseParts`, read only under Ref. It used to count as
+  the Dialog's own recognition, on the reasoning that the phrasing is written
+  in this Dialog; but for a worklist of places to edit it put the Dialog — and
+  the node before the reference — beside the Article it only points at, the
+  same place twice. A phrasing that is also on a link to a node of the
+  Dialog's own stays the Dialog's own. On the 2026-08-15 export: "zwembad"
+  16 → 9 Dialogs, "albert heijn" 21 → 18, "parkeren" 36 → 31.
 - **The Ref toggle (`searchIncludeRefs`) turns both back on**, the Article's
   Responses included — the Dialog then matches on everything its card shows.
   `telefoonnummer` → 234. Not persisted, like the other toggles.
@@ -1102,3 +1113,35 @@ the page on screen, the share whose latest rating was a thumbs up
 - **Nothing rated reads "no ratings"**, never `0%`, for the same reason as
   everywhere else in Insights.
 
+
+## Saved searches
+
+A star at the end of each bar — Content and Conversations — saves what the bar
+holds and brings it back in one click (`toggleSavedSearches`,
+`applySavedSearch`, stored in `cm-saved-searches`).
+
+- **A saved search is the whole bar, not the text.** The chips with their
+  operators and brackets, and every control that changes what the bar
+  matches: on Content Aa, \b, .*, ¬T, ND, Ref and the Context · Metadata
+  filters; on Conversations .*, U / B, the pill and the tag filters. The query
+  string alone would come back as a different search.
+- **Never the dates.** A saved Conversations search runs over whatever range
+  the bar has when it is applied — the same rule as an Insights Segments
+  preset. "Thumbs down on parking" is wanted for this week, then next week.
+  Content has no dates. Nor does it keep the active tab or its filter pill:
+  those are where you look, not what you searched for.
+- **Saving commits what is typed first**, so the text in the box becomes a
+  chip and what is saved is exactly what the star will run. Saving under a
+  name already in use replaces that entry, which is how one is updated.
+- **Applying runs it.** Content searches on every change anyway; a
+  Conversations search runs at once rather than waiting for Enter, because
+  picking a saved search is the explicit request that Enter otherwise is.
+- **The star lights while the bar holds a saved search**
+  (`syncSavedSearchBtn`, called from `triggerSearch`, `_afterConvExprChange`
+  and `syncConvSearchStale`). States are compared through `_savedKey`, which
+  keeps only the chip fields that change a search — a label filled in later
+  must not make one search look like two.
+- **Read entry by entry** (`loadSavedSearches`): an unknown view, chip type or
+  pill is dropped rather than applied, as for every other stored list. The
+  key is in the settings backup — a set of searches is built up over months.
+  `saved-searches.test.js` pins the reading and the comparison.

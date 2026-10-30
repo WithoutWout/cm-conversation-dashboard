@@ -27,12 +27,12 @@ vm.runInContext(
     return new Map([["BETEKENEN", { articles: [articleMap.get(1203), articleMap.get(4410)], dialogs: [] }]])
   }
   function entityIdFor(name) { return { moed: 77 }[String(name).toLowerCase()] ?? null }
-  ${["aFaqQ", "parseJsonSafe", "gapIsZero", "gapContentRef", "gapFixModel", "gapClosestEntities"].map(extract).join("\n")}
-  globalThis.api = { gapContentRef, gapFixModel, gapClosestEntities }
+  ${["aFaqQ", "parseJsonSafe", "gapIsZero", "gapContentRef", "gapTypedWord", "gapFixModel", "gapClosestEntities"].map(extract).join("\n")}
+  globalThis.api = { gapContentRef, gapTypedWord, gapFixModel, gapClosestEntities }
   `,
   ctx,
 )
-const { gapContentRef, gapFixModel, gapClosestEntities } = ctx.api
+const { gapContentRef, gapTypedWord, gapFixModel, gapClosestEntities } = ctx.api
 const plain = (v) => JSON.parse(JSON.stringify(v))
 
 let failed = 0
@@ -113,6 +113,34 @@ test("a turn with no recognition details says so rather than inventing a diagnos
   const m = plain(gapFixModel({ logId: 31, recognition: 0 }, [{ logId: 31 }]))
   assert.strictEqual(m.hasDetails, false)
   assert.deepStrictEqual([m.unknown, m.recognised, m.candidates], [[], [], []])
+})
+
+// Pairs from the real Interaction Log: CM.com's missingWords beside the
+// question as typed. The recognizer corrects spelling, lemmatises and splits on
+// punctuation before it reports a word.
+test("an unknown word is traced back to the word that was typed", () => {
+  const typed = (w, q) => plain(gapTypedWord(w, q))
+  assert.deepStrictEqual(typed("aeronaut", "Zou je gratis naar binnen mogen met de Argonaut begeleiderskaart?"), { typed: "Argonaut" })
+  assert.deepStrictEqual(typed("passen", "Hey ik heb een boeking gereserveerd voor december maar kan pas begin"), { typed: "pas" })
+  assert.deepStrictEqual(typed("doen", "hoe doe ik dat"), { typed: "doe" })
+  assert.deepStrictEqual(typed("lang", "als ik langs loop?"), { typed: "langs" })
+  assert.deepStrictEqual(typed("begeleiderkaart", "Begeleiderkaart"), { same: true }, "only the case differs")
+  assert.deepStrictEqual(typed("m", "ik heb me in m’n verjaardagsmaand aangemeld"), { same: true })
+  assert.deepStrictEqual(typed("#euro#", "zonder die #euro# te betalen?"), { same: true })
+  assert.strictEqual(gapTypedWord("ه", "هل توفر فنادقكم"), null, "a letter of a script the recognizer does not read")
+})
+
+test("the model carries the typed form only for words that differ", () => {
+  const rows = [
+    {
+      logId: 41,
+      interactionValue: "Zou je gratis naar binnen mogen met de Argonaut begeleiderskaart?",
+      recognitionDetails: details({ missingWords: "aeronaut,gratis", entityMatches: [] }),
+    },
+  ]
+  const m = plain(gapFixModel({ logId: 41, recognition: 0 }, rows))
+  assert.deepStrictEqual(m.unknown, ["aeronaut", "gratis"])
+  assert.deepStrictEqual(m.typed, { aeronaut: "Argonaut" })
 })
 
 test("the closest entity to an unknown word shares its stem", () => {
