@@ -91,21 +91,34 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Every entity in the conversation search
-            - Typing in the Conversations search bar now also offers entities
-              that no conversation has triggered yet, greyed out with "no
-              conversations yet". Before, an entity such as PLAYMOBIL showed
-              on the Content tab but seemed to be missing from the
-              conversation search.
+            ### Saved searches
+            - A star at the end of the Content and Conversations search bars
+              saves the whole search: its words, entities, filters and
+              toggles. Click it again to bring a saved search back in one go.
+              Dates are never saved, so a saved Conversations search runs over
+              whatever range is set when you use it.
 
-            ### Faster conversation searches
-            - Searching for an entity, Article or Dialog over a date range no
-              longer takes minutes on a large database; it now takes well
-              under a second.
-            - Searching while the app starts no longer waits for old data to
-              be removed ("Removing old data…"). Results show straight away.
-            - The search suggestions show up to 100 matches in a scrolling
-              list instead of 8, and say how many more there are.
+            ### Linked content in Share Content
+            - Share Content has a new **Linked content** choice. *Matching
+              only* (the default) shows what each item links to: Dialog Links,
+              Transactional Dialogs and Articles. *Complete overview* shows
+              what links to it instead. *Off* hides both. The copies and the
+              AI export include the same links.
+
+            ### Unreachable content is hidden
+            - Responses that are not the default and have no context
+              condition can never be shown to a user, so the app now ignores
+              them everywhere. Turn on **Show unreachable content** in
+              Settings → Content to see them again.
+
+            ### Smaller improvements
+            - The Conversations search suggestions now also list entities that
+              no conversation has triggered yet, marked "no conversations yet".
+            - In Analysis, an unknown word now shows the word the user actually
+              typed. CM.com reports its corrected base form, which often
+              differs.
+            - With **Ref** off, a Dialog no longer matches on the buttons that
+              only lead to a referenced Article.
 
             ---
 
