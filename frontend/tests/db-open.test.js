@@ -15,10 +15,9 @@ vm.runInContext(
   let _convDbOpening = null
   let convDbOpenedPath = ""
   let convDbPhaseLabel = ""
-  let convDbPhaseTip = ""
   const log = []
-  // The retention purge that runs as part of every open: logged, and held
-  // only when a test asks for it.
+  // The retention purge that every open starts: logged, and held only when a
+  // test asks for it.
   let holdPurge = false
   const purges = []
   function _convDbPurgeExpired() {
@@ -107,16 +106,15 @@ test("a failed open rejects its callers, releases its readers, and is not 'open'
   assert.strictEqual(api.opened(), "/db/d", "still the last database that did open")
 })
 
-test("the update card hears how each open ended — after the purge, not before", async () => {
+test("the update card hears how each open ended — without waiting for the purge", async () => {
   api.finishes.length = 0
   api.holdPurge(true)
   const ok = api.convDbOpen("/db/up")
   await tick()
   api.pending.shift().resolve()
-  await tick()
-  assert.deepStrictEqual([...api.finishes], [], "still purging, so not done yet")
-  api.purges.shift()()
   await ok
+  assert.deepStrictEqual([...api.finishes], [true], "the open is done while the purge still runs")
+  api.purges.shift()()
   api.holdPurge(false)
   const bad = api.convDbOpen("/db/broken")
   await tick()
@@ -125,23 +123,26 @@ test("the update card hears how each open ended — after the purge, not before"
   assert.deepStrictEqual([...api.finishes], [true, false])
 })
 
-test("a read waits for the retention purge too, which runs after the open", async () => {
+// The purge runs beside the reads on a connection of its own (`purge_beside`),
+// so a search at launch no longer queues behind 9–16 s of deletes. It used to
+// be part of the open, and every read waited for it. Writes still wait — the
+// backend makes them (`lock_for_write`).
+test("a read does not wait for the retention purge, which starts after the open", async () => {
   api.log.length = 0
   api.holdPurge(true)
   const p = api.convDbOpen("/db/e")
   let read = false
   const r = api.convDbWhenReady().then(() => (read = true))
   await tick()
+  assert.strictEqual(read, false, "the read went out before the database was open")
   api.pending.shift().resolve()
-  await tick()
-  assert.deepStrictEqual([...api.log], ["open /db/e", "purge"])
-  assert.strictEqual(read, false, "the read went out while the purge held the database")
-  assert.ok(api.convDbIsOpening(), "the pill must stay up through the purge")
-  api.purges.shift()()
   await p
   await r
-  assert.strictEqual(read, true)
+  assert.deepStrictEqual([...api.log], ["open /db/e", "purge"])
+  assert.strictEqual(read, true, "the read waited for the purge")
+  assert.ok(!api.convDbIsOpening(), "the open is over; the purge is not an open")
   assert.strictEqual(api.opened(), "/db/e")
+  api.purges.shift()()
   api.holdPurge(false)
 })
 

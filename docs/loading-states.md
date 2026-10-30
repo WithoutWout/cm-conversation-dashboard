@@ -72,11 +72,16 @@ open of the same file alongside the first.
   database…" while it is, and keeps its own words in `data-label` for
   `convDbOpeningChanged` to put back the moment it opens. A search queued
   behind the open says so on the sessions overlay the same way.
-- **The retention purge is part of the open** (`_convDbPurgeExpired`, after
-  `set_db_path` returns). It holds the same lock, so reads wait for it as they
-  wait for the open. The pill reads "Removing old data…" and has a tooltip of
-  its own (`convDbPhaseTip`), because "This runs once, after an update" is
-  false of it. See `docs/import.md` → "The retention purge runs at launch".
+- **The retention purge is not part of the open.** `convDbOpen` starts it
+  (`_convDbPurgeExpired`) once `set_db_path` returns and does not wait for it:
+  it runs on a connection of its own, so reads go ahead. The pill stays up
+  while it runs (`convDbPurging`) and reads "Removing old data…", with a
+  tooltip saying searches work meanwhile and imports and deletions wait —
+  but pane spinners and the search overlay do not say "Opening the
+  database…" for it, because nothing they show waits. If it removed
+  anything, the caches that may hold the removed rows are dropped and the
+  list is read again (unless the bar has changed since). See `docs/import.md`
+  → "The retention purge runs at launch, beside the reads".
 - `frontend/tests/db-open.test.js` pins joining, queueing, waiting and a failed
   open against a scripted `set_db_path`.
 
@@ -97,14 +102,14 @@ having become slow, with nothing saying it was once, or why, or when it ended.
   second). A step label alone sits still for the whole of an index build; the
   clock is the only thing that visibly moves.
 - **The open tells it how it ended** (`dbUpgradeFinish`, chained in
-  `convDbOpen` after the retention purge, so "done" means the database is
-  really usable). Success turns it green — "Database updated · Done in 0:21.
+  `convDbOpen` once `set_db_path` returns — the purge that follows does not
+  stop the database being usable, so the card does not wait for it). Success turns it green — "Database updated · Done in 0:21.
   You won't see this again for this database." — and it fades after 6 s.
   Failure just hides it: the open's own error explains that, and the card
   would contradict it.
 - **✕ hides it, and the update carries on**; the header pill still says it is
-  running. `db-open.test.js` pins that the card hears success only after the
-  purge, and failure as failure.
+  running. `db-open.test.js` pins that the card hears success without waiting
+  for the purge, and failure as failure.
 
 **`yieldToPaint()` is a race, and the timeout half is the point.** WebKit will not repaint between a class change and a Tauri `invoke` that occupies the IPC channel, so the loading state needs two frames before the call goes out. But `requestAnimationFrame` **does not fire in a window that isn't being composited** — minimised, occluded, or on another space — so awaiting it bare parks the caller forever behind a spinner that never resolves. On screen the frames win and the paint happens; off screen the timer wins after `PAINT_YIELD_MS` and the work proceeds without one, which is correct: nobody is watching. `loadSessions` awaited the bare frames before this, so a minimised window could hang it indefinitely.
 

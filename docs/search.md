@@ -188,9 +188,15 @@ and the panel stays as it was beside it.
 The type-ahead offers Articles, Dialogs (with Transactional Dialogs and nodes),
 entities, context and metadata values in one ranked list, and a bar above it
 narrows to one type — clicked, or **Alt ←/→**. The counts beside each type are
-taken before the list is cut to its eight rows (`exprSuggestNarrow`), so
-"Metadata 23" is true while none of them is on screen, and a type with no hit
-is not offered. A value already inside a chip — including one of several in a
+taken before the list is cut (`exprSuggestNarrow`), so "Metadata 230" is true
+while most of them are not drawn, and a type with no hit is not offered.
+
+- **The list scrolls, and draws up to `CONV_SUGGEST_MAX` (100) rows.** It used
+  to stop at eight with no way past them: a common word, or a context key with
+  thirty values, offered eight and gave no sign there were more. A cut list
+  ends in a line saying how many it left out (`exprSuggestCutHtml`,
+  `counts.cut`); typing more or picking a type reaches them. The arrow keys
+  scroll the selected row into view. Both bars share it. A value already inside a chip — including one of several in a
 multi-value tag chip — is not suggested again (`_exprTakenKeys`).
 - `TagLeaf::parse` and `_exprParseTagToken` are the two halves of one token;
   `a_tag_token_reads_its_name_and_value` and `search-bubbles.test.js` quote the
@@ -668,6 +674,62 @@ Reading every answer of every rated conversation and testing it against the
 ratings gave the same sums — an answer nobody rated adds 0 to both — while
 spending nearly all its time on those answers. Checked against the previous
 query on 16 searches over 91 days, for one week and for everything: identical.
+
+### A leaf drives its own search
+
+Every leaf reads its own index first — the FTS match, `entity_index`, a range
+of ids — and only then looks up each match's conversation in `base_sessions`.
+`fts_from` and `entity_from` pin that order with `CROSS JOIN`, the rating rows
+are named `INDEXED BY idx_feedback_rows` (`feedback_rows_hint`), and nothing
+about it depends on the planner's statistics any more.
+
+It did. With statistics, SQLite already chose this order; without them, and
+with a date range, it drove from the conversations in range and re-ran the
+leaf for each one. For an entity that is a range scan of every entity row in
+the span **per conversation** (`entity_index` has no index on
+`session_uuid`); for an id or a word, the FTS match per conversation. And a
+database created since v0.27.2 had no statistics at all — see
+`docs/import.md` → "Statistics follow the database's size". So "searching
+with entities is unusable since recent updates" was exactly this: every
+entity chip, alone or combined, every `qa-` / `dn-` chip, and entity plus a
+recognition pill, on any date range.
+
+Measured with `expr_perf::expr_cost`, which times the page query and the
+positive share that follows it for 27 leaf combinations, each cut off at
+`CAI_TIMEOUT` seconds:
+
+| Three days, no statistics | before | after |
+| --- | --- | --- |
+| entity, 105k-row real database | > 10 s (cut off) | 24 ms |
+| entity AND text, same | > 10 s | 19 ms |
+| Dialog id, same | > 10 s | 30 ms |
+| word, same | 849 ms | 12 ms |
+| positive share after an entity search, same | > 10 s | 40 ms |
+| entity, 1.65M-row 92-day synthetic database, 3 days | 9.5 s | 13 ms |
+| same, 10 days | 110 s | 28 ms |
+| same, 30 days | ~16 min (extrapolated) | 91 ms |
+
+**The cost was quadratic in the range** — conversations in range × entity
+rows in range — which is why a week looked merely slow and a month never came
+back: 3 → 10 days is (10/3)² = 11×, and measured 11.5×. The positive share
+(`get_search_feedback`) holds the same leaf in `fb_match`, so it paid it a
+second time right after the list painted, with the database locked: whatever
+was clicked next waited behind it.
+
+- **Statistics still matter for the rest.** Without them the slowest fixed
+  cases are an all-days search plus a feedback pill (up to ~5 s on 1.65M rows);
+  with them, 0.7 s. That is the other half of this fix, in `docs/import.md`.
+
+- **With statistics nothing changed**, which is the point of pinning the order
+  the planner already picked: every case is within noise of its old time and
+  returns the same count.
+- `interactions_from` (LIKE, regex, a metadata leaf under a feedback pill) is
+  left free: either order reads each admitted conversation's rows once, so
+  there is no product to prevent.
+- `a_leaf_drives_its_search_even_without_statistics` asserts it on the plan of
+  a test database, which has no statistics either: the leaf's table before the
+  conversations, for an entity, an id, a word and an OR of them, with and
+  without the GenAI and recognition pills. Undoing either pin fails it.
 
 ## Metadata filtering (Context · Metadata)
 
