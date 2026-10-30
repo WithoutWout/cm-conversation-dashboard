@@ -136,6 +136,22 @@ the row shows the database's time, not the renderer's.
   turn's own `recognitionDetails` and the turns after it — the chat rows the
   panel already loaded, so the backend sends nothing extra. `gapFixModel` is the
   data, `gapFixHtml` the drawing; `gap-fix.test.js` pins the model.
+  - **Unknown words are CM.com's reading of the question, not its spelling.**
+    `missingWords` comes after the recognizer has lower-cased the input,
+    corrected its spelling and put each word in its base form, and split it on
+    punctuation. Pairs from the real Interaction Log: "Argonaut" → `aeronaut`,
+    "pas" → `passen`, "doe" → `doen`, "langs" → `lang`, "m’n" → `m`, "t/m" →
+    `t`, `m`, and a question in Arabic or Cyrillic comes back as single
+    letters. So the word on the panel is often not one in the chat beside it.
+    `gapTypedWord` finds the word that was typed — the same word ignoring
+    case, else one sharing its stem give or take a letter, else a near
+    spelling — and the row says *typed “Argonaut”* (click to copy it); one
+    that matches nothing says *not spelt so in the question* (mostly irregular
+    base forms: "geef" → `geven`). On 1,881 unknown words of the real
+    database: 1,495 as typed, 296 traced to a typed word, 90 not. A note
+    above the list says why whenever a word differs. The recognizer's form is
+    still the one *Copy* and *Add to entity…* use: entities are matched
+    against that reading (its own matches say `ik hebben een boeking`).
   - **Unknown words** — `missingWords`: words no entity knows. *Add to entity…*
     copies the word and turns the search box into a picker: the closest
     entities first (`gapClosestEntities` — a shared stem, or one word inside

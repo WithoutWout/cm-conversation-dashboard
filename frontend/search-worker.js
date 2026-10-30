@@ -672,8 +672,8 @@ function precomputeDialog(item) {
     !(n.output.items || []).some((i) => i.type === "Answer")
   // Where a node leads once GoTo jumps are followed. A GoTo named after a
   // reference node ("GoTo - D-3A3BLC") is part of the reference: 31 Dialogs
-  // matched their referenced Article's title through one. A *phrasing* that
-  // routes to a reference is not — see `_phrases` below.
+  // matched their referenced Article's title through one. So is a phrasing
+  // that routes to a reference — see `_phrases` below.
   const leadsToRef = (id) => {
     const seen = new Set()
     let n = byId.get(id)
@@ -762,20 +762,28 @@ function precomputeDialog(item) {
   // entities, so 1500 of 2532 distinct phrasings on the real export did not
   // find the Dialog they belong to. A reference node's name is kept apart:
   // it counts only under the Ref toggle.
+  //
+  // So is a phrasing whose link lands on a reference node, GoTo jumps
+  // followed: the button leading to an Article is part of the reference, and
+  // a search for that Article's subject listed the Dialog — and the node
+  // before it — beside the Article, the same place twice. It used to count
+  // ("which Dialogs handle zwembad?" went 16 → 9 Dialogs without it); the
+  // worklist reading won. Under Ref it counts again. A phrasing also on a
+  // link to a node of the Dialog's own stays the Dialog's own.
   const _phrases = []
+  const _refPhrases = []
   const _refNames = []
+  const linkToRef = (link) => leadsToRef(link.childNodeId)
   for (const n of nodes) {
     for (const link of n.links || []) {
       const c = link.condition || {}
       if (c.type !== "Recognition" || !c.data || c.data.isFallback) continue
-      // Counted even when the link lands on a reference node. The phrasing
-      // is written in this Dialog, and a user who types it here takes this
-      // route — "which Dialogs handle zwembad?" has this one as an answer
-      // (9 → 16 Dialogs when it was left out). The card says the route ends
-      // in an Article, which is what keeps it from reading as a match on
-      // the Article's content.
-      for (const qo of c.data.questions || [])
-        if (qo.text && !_phrases.includes(qo.text)) _phrases.push(qo.text)
+      const toRef = linkToRef(link)
+      for (const qo of c.data.questions || []) {
+        if (!qo.text) continue
+        if (!toRef && !_phrases.includes(qo.text)) _phrases.push(qo.text)
+        if (toRef && !_refPhrases.includes(qo.text)) _refPhrases.push(qo.text)
+      }
     }
   }
   // Parts, not one bucket: every word of a condition has to be found in the
@@ -795,21 +803,31 @@ function precomputeDialog(item) {
     phrasePart.set(t, p)
     item._ncParts.push(p)
   }
+  for (const t of _refPhrases) {
+    if (phrasePart.has(t)) continue
+    const p = part([t], [t.toUpperCase()])
+    phrasePart.set(t, p)
+    item._refParts.push(p)
+  }
   for (const t of _refNames) item._refParts.push(part([t]))
   // The same phrasing parts, by the node whose links carry them — the node
   // `nodeMatchReasons` credits a phrasing to — so a match can be counted per
   // node (`explainMatch`). Shared objects, deduplicated per node.
+  // A phrasing into a reference is kept apart, as `refPhraseParts`.
   nodes.forEach((n, i) => {
     const own = []
+    const ref = []
     for (const link of n.links || []) {
       const c = link.condition || {}
       if (c.type !== "Recognition" || !c.data || c.data.isFallback) continue
+      const into = linkToRef(link) ? ref : own
       for (const qo of c.data.questions || []) {
         const p = qo.text && phrasePart.get(qo.text)
-        if (p && !own.includes(p)) own.push(p)
+        if (p && !into.includes(p)) into.push(p)
       }
     }
     item._searchNodes[i].phraseParts = own
+    item._searchNodes[i].refPhraseParts = ref
   })
 
   // Pre-compute entity question texts for entity-word enrichment
@@ -1513,6 +1531,7 @@ function explainMatch(item, ex) {
       if (textOk) {
         if (!sn.isRef || searchIncludeRefs) parts.push(sn.namePart)
         parts.push(...sn.phraseParts)
+        if (searchIncludeRefs) parts.push(...sn.refPhraseParts)
       }
       if (m({ parts, ctxSets: sn.ctxSets, metaSets: sn.metaSets })) out.push(i)
     })
@@ -1837,6 +1856,14 @@ self.onmessage = function (e) {
     for (let i = 0; i < filteredDialogs.length; i++) filteredDialogsIdx[i] = filteredDialogs[i]._widx
     const filteredEntitiesIdx = new Int32Array(filteredEntities.length)
     for (let i = 0; i < filteredEntities.length; i++) filteredEntitiesIdx[i] = filteredEntities[i]._widx
+    // Every item the search matched, before any tab's pill narrows it — what
+    // Share Content keeps a link to. Null when nothing narrows: all match.
+    let matchedIdx = null
+    if (needsMatch) {
+      const hits = []
+      for (const item of allItems) if (item._mc) hits.push(item._gidx)
+      matchedIdx = Int32Array.from(hits)
+    }
     self.postMessage(
       {
         type: "results",
@@ -1847,12 +1874,14 @@ self.onmessage = function (e) {
         filteredEntitiesIdx,
         matchingEntityNames: Array.from(matchingEntityNames),
         matchInfo,
+        matchedIdx,
       },
       [
         filteredAllIdx.buffer,
         filteredArticlesIdx.buffer,
         filteredDialogsIdx.buffer,
         filteredEntitiesIdx.buffer,
+        ...(matchedIdx ? [matchedIdx.buffer] : []),
       ],
     )
   }

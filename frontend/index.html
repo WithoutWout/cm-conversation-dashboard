@@ -2786,6 +2786,29 @@
       .gap-fix-word {
         font-weight: 600;
       }
+      /* The word as typed, beside the recognizer's reading of it. */
+      .gap-fix-typed {
+        font-weight: 400;
+        color: var(--muted);
+        font-size: 0.72rem;
+        margin-left: 8px;
+      }
+      .gap-fix-typed-word {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--text);
+        font: inherit;
+        font-style: italic;
+        cursor: pointer;
+      }
+      .gap-fix-typed-word:hover {
+        text-decoration: underline;
+      }
+      .gap-fix-note {
+        margin-bottom: 4px;
+        line-height: 1.45;
+      }
       .gap-fix-quiet {
         color: var(--muted);
         font-size: 0.74rem;
@@ -3561,11 +3584,6 @@
       .export-row:hover {
         background: var(--surface2);
       }
-      .export-row.has-relations {
-        grid-template-columns:
-          auto auto minmax(160px, 1fr) minmax(220px, 1.3fr)
-          auto auto;
-      }
       /* `dn-` prefixes both Dialogs and Transactional Dialogs, so in the flat
          List view the ID alone cannot tell them apart — hence a type badge. */
       .export-kind {
@@ -3701,32 +3719,100 @@
         padding-left: 22px;
         white-space: nowrap;
       }
-      .export-row-relations {
+      /* What a row links to — an Article's Dialog Links, a Dialog's nodes that
+         show an Article or start another Dialog. One line per kind, the
+         targets as chips, under the row like its matched nodes. */
+      .export-row-links {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: -2px;
+        padding-left: 14px;
+      }
+      .export-link-line {
         display: flex;
         align-items: center;
-        gap: 6px;
-        min-width: 0;
         flex-wrap: wrap;
+        gap: 5px;
+        min-width: 0;
       }
-      .export-relation-arrow {
+      .export-link-label {
         color: var(--muted);
-        font-size: 0.72rem;
+        font-size: 0.71rem;
         white-space: nowrap;
       }
-      .export-relation-chip {
+      .export-link-listed {
+        opacity: 0.75;
+        font-style: italic;
+        cursor: help;
+      }
+      .export-link-chip {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 5px;
+        max-width: 34em;
         background: rgba(96, 165, 250, 0.09);
         border: 1px solid rgba(96, 165, 250, 0.22);
         border-radius: 5px;
         color: var(--blue);
         cursor: pointer;
-        font-family: monospace;
         font-size: 0.7rem;
-        padding: 2px 6px;
+        padding: 1px 6px;
         white-space: nowrap;
+        overflow: hidden;
+        font-family: inherit;
       }
-      .export-relation-chip:hover {
-        border-color: var(--blue);
+      .export-link-chip.article {
+        background: rgba(74, 222, 128, 0.08);
+        border-color: rgba(74, 222, 128, 0.22);
+        color: var(--green);
+      }
+      .export-link-chip.tdialog {
+        background: rgba(45, 212, 191, 0.09);
+        border-color: rgba(45, 212, 191, 0.24);
+        color: var(--teal);
+      }
+      /* Reached only under a context condition, not by default. */
+      .export-link-chip.contextual {
+        border-style: dashed;
+      }
+      .export-link-chip:hover {
+        border-color: currentColor;
+      }
+      .export-link-chip .export-link-id {
+        font-family: monospace;
+        flex-shrink: 0;
+      }
+      .export-link-chip .export-link-name {
         color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        min-width: 0;
+      }
+      .export-link-chip .export-link-ctx {
+        color: var(--muted);
+        font-style: italic;
+        flex-shrink: 0;
+      }
+      .export-links-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+        cursor: pointer;
+        user-select: none;
+      }
+      .export-links-toggle select {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+        padding: 3px 6px;
+        cursor: pointer;
       }
       .export-row-copy {
         background: none;
@@ -6544,6 +6630,130 @@
         border-color: var(--accent);
         color: var(--accent);
         background: rgba(124, 106, 247, 0.06);
+      }
+      /* Saved searches: quiet until the bar holds one of them. */
+      .saved-search-btn .ui-icon {
+        font-size: 0.85rem;
+      }
+      .saved-search-btn.is-saved {
+        color: var(--accent);
+      }
+      .saved-search-btn.is-saved .ui-icon {
+        fill: currentColor;
+      }
+      .saved-search-pop {
+        position: fixed;
+        z-index: 2000;
+        width: 340px;
+        max-height: min(440px, 70vh);
+        display: flex;
+        flex-direction: column;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        font-size: 0.78rem;
+      }
+      .saved-search-pop[hidden] {
+        display: none;
+      }
+      .saved-search-head {
+        padding: 10px 12px 8px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .saved-search-title {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .saved-search-save {
+        display: flex;
+        gap: 6px;
+      }
+      .saved-search-save input {
+        flex: 1;
+        min-width: 0;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 5px 8px;
+        font: inherit;
+        outline: none;
+      }
+      .saved-search-save input:focus {
+        border-color: var(--accent);
+      }
+      .saved-search-current {
+        color: var(--muted);
+        font-size: 0.72rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .saved-search-list {
+        overflow-y: auto;
+        padding: 4px 0;
+      }
+      .saved-search-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px 6px 12px;
+        cursor: pointer;
+      }
+      .saved-search-row:hover,
+      .saved-search-row:focus-visible {
+        background: var(--surface2);
+        outline: none;
+      }
+      .saved-search-row.is-current .saved-search-name {
+        color: var(--accent);
+      }
+      .saved-search-text {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .saved-search-name {
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .saved-search-sum {
+        color: var(--muted);
+        font-size: 0.7rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .saved-search-del {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 2px 5px;
+        border-radius: 4px;
+        opacity: 0;
+      }
+      .saved-search-row:hover .saved-search-del,
+      .saved-search-del:focus-visible {
+        opacity: 0.7;
+      }
+      .saved-search-del:hover {
+        opacity: 1;
+        color: var(--red);
+      }
+      .saved-search-empty {
+        color: var(--muted);
+        padding: 12px;
+        line-height: 1.5;
       }
       .ctx-filter-badge {
         background: var(--accent);
@@ -10965,6 +11175,10 @@
         <symbol id="i-bookmark" viewBox="0 0 16 16">
           <path d="M4.3 2.6h7.4v10.8L8 10.8l-3.7 2.6V2.6Z" />
         </symbol>
+        <!-- Saved searches. A star, not the bookmark: that one is an entity. -->
+        <symbol id="i-star" viewBox="0 0 16 16">
+          <path d="M8 2.3l1.75 3.55 3.9.57-2.83 2.76.67 3.9L8 11.24l-3.49 1.84.67-3.9L2.35 6.42l3.9-.57L8 2.3Z" />
+        </symbol>
         <symbol id="i-clipboard" viewBox="0 0 16 16">
           <rect x="3.6" y="3.4" width="8.8" height="10" rx="1.3" />
           <path d="M6 3.4V2.7c0-.3.2-.6.5-.6h3c.3 0 .5.3.5.6v.7" />
@@ -11379,6 +11593,15 @@
                 style="display: none"
                 >0</span
               >
+            </button>
+            <button
+              class="conv-ctx-btn saved-search-btn"
+              id="contentSavedBtn"
+              onclick="toggleSavedSearches('content', this)"
+              title="Saved searches"
+              data-tooltip="Saved searches — keep this search, or bring one back"
+            >
+              <svg class=ui-icon><use href=#i-star /></svg>
             </button>
             <button
               class="conv-ctx-btn"
@@ -11916,6 +12139,15 @@
                   style="display: none"
                   >0</span
                 >
+              </button>
+              <button
+                class="conv-ctx-btn saved-search-btn"
+                id="conversationsSavedBtn"
+                onclick="toggleSavedSearches('conversations', this)"
+                title="Saved searches"
+                data-tooltip="Saved searches — keep this search, or bring one back"
+              >
+                <svg class=ui-icon><use href=#i-star /></svg>
               </button>
             </div>
             <div class="conv-filter-pills">
@@ -12485,6 +12717,24 @@
                 words no Entity claims are kept. The Collections export writes
                 its triggers in its own style, set in Collections → Smart
                 filters.
+              </p>
+            </div>
+            <div style="margin-top: 14px">
+              <label>Unreachable content</label>
+              <label class="radio-option" style="display: flex">
+                <input
+                  type="checkbox"
+                  id="showUnreachableToggle"
+                  onchange="setShowUnreachable(this.checked)"
+                />
+                Show unreachable content
+              </label>
+              <p class="hint">
+                A Response or Dialog Link that is not the default and has no
+                context condition is never shown — CM.com warns that it
+                “requires context variables in order to be triggered”. Off, the
+                whole app ignores it: search, cards, Share Content, Export for
+                AI and Collections. <span id="showUnreachableCount"></span>
               </p>
             </div>
             <div
@@ -13519,6 +13769,17 @@
             oninput="_onExportFilter(this.value)"
           />
           <span class="export-toolbar-count" id="exportCount"></span>
+          <label
+            class="export-links-toggle"
+            title="Matching only: where each item links to, when that place matches the search too. Complete overview: every Article and Dialog node that links into each item, matching or not — everything that depends on it, to change or to remove it. On screen, in every copy and in Export for AI."
+          >
+            Linked content
+            <select id="exportLinkMode" onchange="setExportLinkMode(this.value)">
+              <option value="matching">Matching only</option>
+              <option value="complete">Complete overview</option>
+              <option value="off">Off</option>
+            </select>
+          </label>
           <button
             class="btn-link export-restore"
             id="exportRestoreBtn"
@@ -14599,6 +14860,10 @@
       // Answer indexes), {n, h} for a Dialog (node indexes, name/description).
       // Feeds the cards' match counts and the modals' "Matches only".
       let contentMatchInfo = new Map()
+      /// The `_matchKey`s of every item the search matched, whatever the tab
+      /// and its pill; null when nothing narrows the content. Share Content
+      /// keeps a link only to one of these.
+      let contentMatched = null
       let eFilter = "all"
       let eSort = "name-asc"
       let ePage = 1
@@ -15674,6 +15939,72 @@
             .filter(Boolean)
           return vals.length > 0 && !vals.includes("any")
         })
+      }
+
+      // ── Unreachable content ──────────────────────────────────────────
+      //
+      // An output that is not the default and has no context condition — CM.com:
+      // "A non-default output requires context variables in order to be
+      // triggered" — is never shown to anyone. It is not content the bot has,
+      // so the app ignores it everywhere: it is taken out of the export as it
+      // is loaded (`pruneUnreachable`, in `loadData`), before the maps, the
+      // cards, the search worker, Share Content, Export for AI, Collections or
+      // the Dialog flow see it. One place, so no view can disagree. Settings ›
+      // Content › "Show unreachable content" (`cm-show-unreachable` = "1")
+      // loads it unpruned, as the app always used to. See docs/search.md.
+      let contentShowUnreachable = localStorage.getItem("cm-show-unreachable") === "1"
+      /// How many outputs the last load left out, for the setting's hint.
+      let unreachableHidden = 0
+
+      /// Drop the unreachable outputs of every Article and Dialog node, in
+      /// place, and say how many. Only where a default is flagged — every real
+      /// export flags exactly one; without one there is no telling which
+      /// output is the default, so nothing is called unreachable.
+      function pruneUnreachable(articles, dialogs) {
+        let n = 0
+        for (const a of articles || []) {
+          const outs = a.Outputs || []
+          if (!outs.some((o) => o.IsDefault)) continue
+          const keep = outs.filter((o) => o.IsDefault || articleAnswerHasContext(o))
+          if (keep.length === outs.length) continue
+          n += outs.length - keep.length
+          a.Outputs = keep
+        }
+        for (const d of dialogs || []) {
+          for (const node of d.nodes || []) {
+            const items = node.output && node.output.items
+            if (!items || !items.some((i) => i.isDefault)) continue
+            const keep = items.filter((i) => i.isDefault || dialogAnswerHasContext(i))
+            if (keep.length === items.length) continue
+            n += items.length - keep.length
+            node.output.items = keep
+          }
+        }
+        return n
+      }
+
+      function setShowUnreachable(on) {
+        contentShowUnreachable = !!on
+        try {
+          if (contentShowUnreachable) localStorage.setItem("cm-show-unreachable", "1")
+          else localStorage.removeItem("cm-show-unreachable")
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the change */
+        }
+        // The export is pruned as it loads, so the change is a reload.
+        loadData("manual")
+      }
+
+      function _syncUnreachableSetting() {
+        const cb = document.getElementById("showUnreachableToggle")
+        if (cb) cb.checked = contentShowUnreachable
+        const hint = document.getElementById("showUnreachableCount")
+        if (hint)
+          hint.textContent = contentShowUnreachable
+            ? "Shown now, marked Unreachable where the app lists them."
+            : unreachableHidden
+            ? unreachableHidden + " unreachable output" + (unreachableHidden !== 1 ? "s" : "") + " in this export are ignored."
+            : "This export has none."
       }
 
       // Returns true if the contextVars satisfy ALL active content context filters.
@@ -18063,12 +18394,17 @@
           }
         }
         if (!namesCount) return out
-        // Recognition links (+ entity enrichment) — including one that lands
-        // on a reference: the phrasing is written in this Dialog. The reason
-        // carries the Article, so the card can say the route ends there.
+        // Recognition links (+ entity enrichment). One that lands on a
+        // reference is part of the reference, as in the worker: it counts only
+        // under Ref, and then the reason carries the Article, so the card can
+        // say the route ends there.
         for (const link of n.links || []) {
           const cd = (link.condition && link.condition.data) || {}
           if (cd.isFallback) continue
+          if (!searchIncludeRefs) {
+            const to = _nodeLandsOn(dialog, link.childNodeId)
+            if (to && nodeIsRef(to)) continue
+          }
           for (const qo of cd.questions || []) {
             if (
               qo.text &&
@@ -21020,6 +21356,7 @@
       }
       function triggerSearch() {
         updateRegexIndicator()
+        syncSavedSearchBtn("content")
         if (gQuery) showSearchLoading(true)
         searchWorker.postMessage({
           type: "search",
@@ -21107,6 +21444,14 @@
         for (const [gidx, info] of msg.matchInfo || []) {
           const it = allCombinedItems[gidx]
           if (it) contentMatchInfo.set(_matchKey(it), info)
+        }
+        contentMatched = null
+        if (msg.matchedIdx) {
+          contentMatched = new Set()
+          for (const gidx of msg.matchedIdx) {
+            const it = allCombinedItems[gidx]
+            if (it) contentMatched.add(_matchKey(it))
+          }
         }
         allPage = 1
         aPage = 1
@@ -21839,16 +22184,213 @@
       // Per open, like `_exportDropped`.
       let _exportDroppedNodes = new Set()
 
-      // What each view actually produces, said out loud. "Grouped" in
-      // particular does three things at once — sections, id order, and Dialog →
-      // Article relations replacing the response column — which no user is
-      // going to infer from the word.
+      // What each view actually produces, said out loud — the word alone
+      // does not say what lands on the clipboard.
       const EXPORT_VIEW_HINTS = {
         list: "Every item in one flat list — Articles, then Dialogs, then Transactional Dialogs, each by number. A Dialog lists the nodes the search matched, each linking straight to that node.",
         grouped:
-          "Split into Articles, Dialogs and Transactional Dialogs, each by number. Dialog rows show the Articles that route into them instead of their response text, and the nodes the search matched, each with its own link.",
+          "Split into Articles, Dialogs and Transactional Dialogs, each by number, under a heading each. A Dialog lists the nodes the search matched, each with its own link.",
         table:
           "ID, title and matched responses as a table, by number — pastes into a spreadsheet or a ticket with its columns intact. A Dialog's matched nodes are rows of their own beneath it, each with its own link.",
+      }
+
+      /// Linked content. "matching": each row also names where it links
+      /// *out* to, when that place matches the search too — the next place to
+      /// check. "complete": each row names everything that links *into* it —
+      /// the Article whose Dialog Link opens it, the Dialog node that starts it
+      /// or shows it — matching or not, because each one depends on it, to
+      /// change it or to take it out. "off": neither. `cm-share-linked` holds
+      /// "0" for off and "complete"; absent is "matching". See CLAUDE.md →
+      /// "Share Content modal".
+      const EXPORT_LINK_MODES = ["off", "matching", "complete"]
+      let _exportLinkMode = (() => {
+        const v = localStorage.getItem("cm-share-linked")
+        return v === "0" ? "off" : v === "complete" ? "complete" : "matching"
+      })()
+      const EXPORT_LINK_HINTS = {
+        off: "",
+        matching: " Linked content: where a row links to, when that place matches the search too.",
+        complete: " Linked content: everything that links into each row — every Article and Dialog node that depends on it, matching or not.",
+      }
+      function setExportLinkMode(mode) {
+        _exportLinkMode = EXPORT_LINK_MODES.includes(mode) ? mode : "matching"
+        try {
+          if (_exportLinkMode === "matching") localStorage.removeItem("cm-share-linked")
+          else localStorage.setItem("cm-share-linked", _exportLinkMode === "off" ? "0" : "complete")
+        } catch (e) {
+          /* a full or disabled store is not a reason to refuse the change */
+        }
+        _renderExportBody()
+      }
+
+      /// What links into each item, keyed `kind:id`: the Articles whose
+      /// DialogStart / TDialogStart opens it, and the Dialog nodes that start
+      /// it or show it (`kbaIdReference`) — a node, not its Dialog, because
+      /// the node is what has to change. Built from `_exportItemLinks` turned
+      /// round, once per export and Context URL.
+      function _exportIncomingIndex() {
+        const hit = _exportIncomingCache
+        if (hit && hit.src === allCombinedItems && hit.base === cmBaseUrl) return hit.map
+        const map = new Map()
+        const push = (key, link) => {
+          if (!map.has(key)) map.set(key, [])
+          map.get(key).push(link)
+        }
+        for (const a of allArticles) {
+          for (const l of _exportItemLinks(a, "article"))
+            push(l.kind + ":" + l.id, {
+              kind: "article",
+              id: a.Id,
+              token: "qa-" + a.Id,
+              title: aFaqQ(a) || "",
+              url: buildItemUrl("article", a.Id),
+              contextual: l.contextual,
+              key: "article:" + a.Id,
+              dir: "in",
+            })
+        }
+        for (const d of allDialogsCombined) {
+          if (d._kind === "tdialog") continue
+          for (const l of _exportItemLinks(d, "dialog"))
+            for (const f of l.from || [])
+              push(l.kind + ":" + l.id, {
+                kind: "node",
+                id: f.id,
+                token: "dn-" + d.id + "-" + f.id,
+                title: (d.name || "") + " › " + f.name,
+                url: buildNodeUrl(d.id, f.id),
+                contextual: f.contextual,
+                key: "dialog:" + d.id,
+                dialogId: d.id,
+                node: f.id,
+                dir: "in",
+              })
+        }
+        for (const list of map.values())
+          list.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "article" ? -1 : 1) || a.contextual - b.contextual || a.token.localeCompare(b.token, undefined, { numeric: true }))
+        _exportIncomingCache = { src: allCombinedItems, base: cmBaseUrl, map }
+        return map
+      }
+      let _exportIncomingCache = null
+
+      /// The links a row carries in the current mode.
+      function _exportWithLinkMode(item) {
+        if (_exportLinkMode === "off") return item.links && item.links.length ? { ...item, links: [] } : item
+        if (_exportLinkMode === "complete")
+          return { ...item, links: _exportIncomingIndex().get(item.kind + ":" + item.id) || [] }
+        return _exportLinksOfMatchedNodes(item)
+      }
+
+      const _EXPORT_LINK_ORDER = { dialog: 0, tdialog: 1, article: 2 }
+
+      /// Where an item links to, as `{kind, id, token, title, url, contextual,
+      /// via, from}`: an Article's DialogStart / TDialogStart outputs, and a
+      /// Dialog's nodes that show an Article (`kbaIdReference`) or start a
+      /// Dialog or a Transactional Dialog. `contextual` is a link reached only
+      /// under a context condition, never by default; `from` the nodes it is
+      /// reached from (`{id, name, contextual}`), `via` their names. A Dialog
+      /// starting itself is not a link anyone needs told about.
+      function _exportItemLinks(raw, kind) {
+        const hit = _exportLinksCache.get(raw)
+        if (hit && hit.base === cmBaseUrl) return hit.links
+        const links = []
+        const seen = new Map()
+        const add = (k, id, contextual, node) => {
+          if (id == null || id === "") return
+          id = Number(id)
+          if (k === kind && id === raw.id) return
+          const key = k + ":" + id
+          let link = seen.get(key)
+          if (!link) {
+            const ref = k === "article" ? articleMap.get(id) : k === "tdialog" ? tDialogMap.get(id) : dialogMap.get(id)
+            link = {
+              kind: k,
+              id,
+              token: (k === "article" ? "qa-" : "dn-") + id,
+              title: ref ? (k === "article" ? aFaqQ(ref) || "" : ref.name || "") : "",
+              url: buildItemUrl(k, id),
+              contextual: true,
+              via: [],
+              from: [],
+            }
+            seen.set(key, link)
+            links.push(link)
+          }
+          if (!contextual) link.contextual = false
+          if (node) {
+            const f = link.from.find((x) => x.id === node.id)
+            if (f) f.contextual = f.contextual && contextual
+            else {
+              link.from.push({ id: node.id, name: node.name, contextual })
+              if (!link.via.includes(node.name)) link.via.push(node.name)
+            }
+          }
+        }
+        // The default output is the flagged one, or the first when none is.
+        // Unreachable outputs are not here unless Settings shows them — see
+        // `pruneUnreachable`.
+        if (kind === "article") {
+          const outs = raw.Outputs || []
+          const flagged = outs.some((o) => o.IsDefault)
+          outs.forEach((o, i) => {
+            if (o.Type !== "DialogStart" && o.Type !== "TDialogStart") return
+            const def = !!o.IsDefault || (!flagged && i === 0)
+            if (o.Type === "DialogStart") add("dialog", o.DialogId, !def)
+            else add("tdialog", o.TDialogId || o.DialogId, !def)
+          })
+        } else if (kind === "dialog") {
+          for (const n of raw.nodes || []) {
+            const via = { id: n.id, name: (n.name || "").trim() || "node " + n.id }
+            const ref = n.output && n.output.kbaIdReference
+            if (ref != null) add("article", ref, false, via)
+            const items = (n.output && n.output.items) || []
+            const flagged = items.some((i) => i.isDefault)
+            items.forEach((i, k) => {
+              if (i.type !== "DialogStart" && i.type !== "TDialogStart") return
+              const def = !!i.isDefault || (!flagged && k === 0)
+              const d = i.data || {}
+              if (i.type === "DialogStart") add("dialog", d.dialogId, !def, via)
+              else add("tdialog", d.tDialogId, !def, via)
+            })
+          }
+        }
+        links.sort(
+          (a, b) =>
+            a.contextual - b.contextual ||
+            _EXPORT_LINK_ORDER[a.kind] - _EXPORT_LINK_ORDER[b.kind] ||
+            a.id - b.id,
+        )
+        _exportLinksCache.set(raw, { base: cmBaseUrl, links })
+        return links
+      }
+      const _exportLinksCache = new WeakMap()
+
+      /// What a link is called, in the CM.com terms the UI uses everywhere.
+      function _exportLinkLabel(kind) {
+        return kind === "article" ? "Article" : kind === "tdialog" ? "Transactional Dialog" : kind === "node" ? "Dialog node" : "Dialog Link"
+      }
+
+      /// What the screen says about a link beside its id and title —
+      /// contextual, and the nodes it is reached from (a Dialog's only). Never
+      /// copied: a copied link is its id and title, as compact as a row.
+      function _exportLinkNote(l) {
+        const via = l.via || []
+        return [
+          l.contextual ? "contextual" : "",
+          via.length ? "from " + via.slice(0, 3).join(", ") + (via.length > 3 ? " +" + (via.length - 3) : "") : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      }
+
+      /// → for where a row links to, ← for what links into it.
+      function _exportLinkArrow(l) {
+        return l.dir === "in" ? "\u2190" : "\u2192"
+      }
+
+      /// How many links a share carries.
+      function _exportLinkTotal(items) {
+        return items.reduce((sum, it) => sum + ((it.links && it.links.length) || 0), 0)
       }
 
       function _exportKey(item) {
@@ -22006,6 +22548,7 @@
               title: aFaqQ(item) || "(no question)",
               responses: _getMatchedResponses(item),
               nodes: [],
+              links: _exportItemLinks(item, "article"),
               _raw: item,
             }
           }
@@ -22015,6 +22558,7 @@
             title: item.name || "",
             responses: _getMatchedResponses(item),
             nodes: _exportMatchedNodes(item),
+            links: _exportItemLinks(item, item._kind),
             _raw: item,
           }
         }
@@ -22058,12 +22602,71 @@
         const q = _exportFilter.trim().toLowerCase()
         const items = getActiveExportItems()
           .map(_exportWithoutDroppedNodes)
+          .map(_exportWithLinkMode)
           .filter(
             (item) =>
               !_exportDropped.has(_exportKey(item)) &&
               _exportItemMatches(item, q),
           )
-        return groupedExportItems(items)
+        return groupedExportItems(_exportWithoutListedLinks(items))
+      }
+
+      /// A Dialog the search matched node by node brings the links of those
+      /// nodes only — the rest of the Dialog is not what was searched for, and
+      /// a node removed by hand takes its links with it. A Dialog matched as a
+      /// whole (its name, its id, no search) has no matched nodes and keeps
+      /// every link; an Article's links are its own outputs and always stay.
+      function _exportLinksOfMatchedNodes(item) {
+        if (item.kind !== "dialog" || !item.links || !item.links.length) return item
+        const nodes = item.nodes || []
+        if (!nodes.length && !item.nodesRemoved) return item
+        const ids = new Set(nodes.map((n) => n.id))
+        const links = []
+        for (const l of item.links) {
+          const from = (l.from || []).filter((f) => ids.has(f.id))
+          if (!from.length) continue
+          links.push({
+            ...l,
+            from,
+            via: [...new Set(from.map((f) => f.name))],
+            contextual: from.every((f) => f.contextual),
+          })
+        }
+        return { ...item, links }
+      }
+
+      /// The share is a worklist — every place that mentions what was
+      /// searched for, once. So a link stays only when its target is such a
+      /// place too (`contentMatched`: the search matched it, whatever tab it
+      /// is on) and is not a row of this share already. A Dialog that never
+      /// mentions the search is nothing to edit; one listed as a row would be
+      /// listed twice. The second kind is counted in `linksInShare` for a
+      /// quiet note on screen. Decided after the filter and the removals, so
+      /// a row taken out brings its link back.
+      ///
+      /// In the complete overview every link into a row stays, matching or
+      /// not — a node is "already in this share" only when its Dialog's row
+      /// lists that node (or the whole Dialog, matched as a whole).
+      function _exportWithoutListedLinks(items) {
+        // Per row: the matched nodes it lists, or null for the whole item.
+        const rows = new Map(
+          items.map((it) => [_exportKey(it), it.kind === "dialog" && (it.nodes || []).length ? new Set(it.nodes.map((n) => n.id)) : null]),
+        )
+        const listed = (l) => {
+          const key = l.key || l.kind + ":" + l.id
+          if (!rows.has(key)) return false
+          const nodes = rows.get(key)
+          return l.node == null || !nodes || nodes.has(l.node)
+        }
+        const matches = (l) => l.dir === "in" || !contentMatched || contentMatched.has(l.kind + ":" + l.id)
+        return items.map((item) => {
+          const links = item.links || []
+          if (!links.length) return item
+          const kept = links.filter((l) => matches(l) && !listed(l))
+          if (kept.length === links.length) return item
+          const inShare = links.filter(listed)
+          return { ...item, links: kept, ...(inShare.length ? { linksInShare: inShare } : {}) }
+        })
       }
 
       /// The item with the nodes removed by hand left out, and how many were.
@@ -22234,17 +22837,82 @@
           )
           .join("")
       }
+      /// What a link chip's tooltip says: the target's title, the nodes it is
+      /// reached from, and whether only a context condition reaches it.
+      function _exportLinkTip(l) {
+        const via = l.via || []
+        return [
+          l.title || l.token,
+          via.length ? "from " + via.slice(0, 3).join(", ") + (via.length > 3 ? " and " + (via.length - 3) + " more" : "") : "",
+          l.contextual ? "only under a context condition, not by default" : "",
+        ]
+          .filter(Boolean)
+          .join(" — ")
+      }
+
+      /// The row's links, one line per kind with the targets as chips. A
+      /// chip opens the target in CM.com, or in this app without a Context URL.
+      function _exportLinksHtml(item) {
+        const inShare = item.linksInShare || []
+        const note = inShare.length
+          ? '<div class="export-link-line"><span class="export-link-label export-link-listed" title="' +
+            esc(inShare.map((l) => l.token + (l.title ? " " + l.title : "")).join("\n")) +
+            '">+' + inShare.length + " linked item" + (inShare.length !== 1 ? "s" : "") +
+            " already in this share</span></div>"
+          : ""
+        if (!item.links || !item.links.length)
+          return note ? '<div class="export-row-links">' + note + "</div>" : ""
+        const groups = []
+        for (const l of item.links) {
+          let g = groups.find((x) => x.kind === l.kind)
+          if (!g) groups.push((g = { kind: l.kind, links: [] }))
+          g.links.push(l)
+        }
+        return (
+          '<div class="export-row-links">' +
+          groups
+            .map((g) => {
+              const chips = g.links
+                .map((l) => {
+                  const open = l.url
+                    ? "openLink('" + esc(l.url) + "')"
+                    : l.kind === "article"
+                    ? "goToArticle(" + l.id + ")"
+                    : l.kind === "node"
+                    ? "jumpToDialog(" + l.dialogId + ",false)"
+                    : "jumpToDialog(" + l.id + "," + (l.kind === "tdialog") + ")"
+                  return (
+                    '<button class="export-link-chip ' + l.kind + (l.contextual ? " contextual" : "") +
+                    '" onclick="' + open + '" title="' + esc(_exportLinkTip(l)) + '">' +
+                    '<span class="export-link-id">' + esc(l.token) + "</span>" +
+                    (l.title ? '<span class="export-link-name">' + esc(l.title) + "</span>" : "") +
+                    (l.contextual ? '<span class="export-link-ctx">contextual</span>' : "") +
+                    "</button>"
+                  )
+                })
+                .join("")
+              const n = g.links.length
+              const into = g.links[0].dir === "in"
+              const label = (into ? "Linked from " : "") + _exportLinkLabel(g.kind) + (n > 1 ? "s" : "")
+              return (
+                '<div class="export-link-line"><span class="export-link-label">' + (into ? "&#8592; " : "&#8594; ") +
+                esc(label) + "</span>" + chips + "</div>"
+              )
+            })
+            .join("") +
+          note +
+          "</div>"
+        )
+      }
+
       // One row builder for both List and Grouped — they were near-identical
       // copies, which is how Grouped's relation column drifted out of List.
-      function _exportRowHtml(item, opts) {
+      function _exportRowHtml(item) {
         const idToken = _itemIdToken(item)
         const url = buildItemUrl(item.kind, item.id)
         const safeTitle = esc(JSON.stringify(item.title))
         const safeIdText = esc(JSON.stringify(idToken))
-        const relationHtml =
-          opts && opts.relations ? _exportRelationHtml(item) : ""
-        const bodyHtml = relationHtml || _exportResponsesHtml(item)
-        return `<div class="export-row${relationHtml ? " has-relations" : ""}">
+        return `<div class="export-row">
               ${_exportIdSpanHtml(item)}
               <span class="export-kind ${item.kind}">${esc(
           _exportKindLabel(item.kind),
@@ -22252,9 +22920,7 @@
               <span class="export-row-title" title="${esc(item.title)}">${esc(
           item.title,
         )}</span>
-              <span class="${
-                relationHtml ? "export-row-relations" : "export-row-responses"
-              }">${bodyHtml}</span>
+              <span class="export-row-responses">${_exportResponsesHtml(item)}</span>
               <button class="export-row-copy" title="Copy as link"
                 onclick="copyJiraLink('${esc(
                   url,
@@ -22263,6 +22929,7 @@
                 onclick="_exportDropItem('${esc(
                   _exportKey(item),
                 )}')">&#x2715;</button>
+              ${_exportLinksHtml(item)}
               ${_exportNodesHtml(item)}
             </div>`
       }
@@ -22321,11 +22988,23 @@
                 )}')">&#x2715;</button></td></tr>`
               })
               .join("")
+            const linkRows = (item.links || [])
+              .map((l) => {
+                const linkId = l.url
+                  ? `<td class="td-id td-node"><span class="export-node-arrow">${_exportLinkArrow(l)}</span><span class="td-id-link" onclick="openLink('${esc(
+                      l.url,
+                    )}')" title="Open in CM.com">${esc(l.token)}</span></td>`
+                  : `<td class="td-id-plain td-node"><span class="export-node-arrow">${_exportLinkArrow(l)}</span>${esc(l.token)}</td>`
+                return `<tr class="export-node-tr">${linkId}<td>${esc(
+                  l.title,
+                )}</td><td class="td-response">${esc(_exportLinkNote(l)) || "—"}</td><td></td></tr>`
+              })
+              .join("")
             return `<tr>${idCell}<td>${esc(
               item.title,
             )}</td>${responseCell}<td class="td-drop"><button class="export-row-drop" title="Remove from this share" onclick="_exportDropItem('${esc(
               _exportKey(item),
-            )}')">&#x2715;</button></td></tr>${nodeRows}`
+            )}')">&#x2715;</button></td></tr>${linkRows}${nodeRows}`
           })
           .join("")
         list.innerHTML = `<table class="export-table">
@@ -22334,46 +23013,6 @@
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>`
-      }
-
-      function _exportDialogArticleRelations(item) {
-        if (item.kind !== "dialog" || !item._raw) return []
-        return dialogLinkedArticles(item._raw)
-      }
-
-      function _exportRelationText(item) {
-        const refs = _exportDialogArticleRelations(item)
-        if (!refs.length) return ""
-        return (
-          _itemIdToken(item) +
-          " -> " +
-          refs.map((ref) => "qa-" + ref.id).join(", ")
-        )
-      }
-
-      function _exportRelationHtml(item) {
-        const refs = _exportDialogArticleRelations(item)
-        if (!refs.length) return ""
-        return (
-          '<span class="export-relation-arrow">&#8594; Articles</span>' +
-          refs
-            .map((ref) => {
-              const url = buildItemUrl("article", ref.id)
-              const open = url
-                ? "openLink('" + esc(url) + "')"
-                : "goToArticle(" + ref.id + ")"
-              return (
-                '<button class="export-relation-chip" onclick="' +
-                open +
-                '" title="' +
-                esc(ref.title) +
-                '">qa-' +
-                ref.id +
-                "</button>"
-              )
-            })
-            .join("")
-        )
       }
 
       function _renderExportGrouped(items) {
@@ -22389,7 +23028,7 @@
           const groupItems = grouped.filter((item) => item.kind === kind)
           if (!groupItems.length) continue
           const rows = groupItems
-            .map((item) => _exportRowHtml(item, { relations: true }))
+            .map((item) => _exportRowHtml(item))
             .join("")
           sections.push(
             '<div class="export-group"><div class="export-group-title">' +
@@ -22444,6 +23083,7 @@
         const shown = getExportItemsForCurrentView()
         const n = shown.length
         const nodeCount = _exportNodeTotal(shown)
+        const linkCount = _exportLinkTotal(shown)
         const dis = n ? "" : " disabled"
         const plain =
           `<button class="btn-secondary" onclick="_copyExportPlain(this)"${dis}><svg class=ui-icon><use href=#i-clipboard /></svg> Copy as plain text</button>` +
@@ -22451,13 +23091,13 @@
         if (_exportView === "table") {
           actions.innerHTML =
             `<button class="btn-primary" onclick="_copyExportTable(this)"${dis}><svg class=ui-icon><use href=#i-table /></svg> Copy table (${
-              n + nodeCount
-            } row${n + nodeCount !== 1 ? "s" : ""})</button>` + plain
+              n + nodeCount + linkCount
+            } row${n + nodeCount + linkCount !== 1 ? "s" : ""})</button>` + plain
         } else {
           actions.innerHTML =
             `<button class="btn-primary" onclick="_copyExportLinks(this)"${dis}><svg class=ui-icon><use href=#i-link /></svg> Copy ${n} link${
               n !== 1 ? "s" : ""
-            }${
+            }${linkCount ? " + " + linkCount + " linked" : ""}${
               nodeCount
                 ? " + " + nodeCount + " node" + (nodeCount !== 1 ? "s" : "")
                 : ""
@@ -22650,9 +23290,43 @@
 
       function contentAiRecord(item) {
         const raw = item._raw
-        if (item.kind === "article") return _aiArticleRecord(raw)
-        if (item.kind === "tdialog") return _aiTDialogRecord(raw)
-        return _aiDialogRecord(raw)
+        const rec =
+          item.kind === "article"
+            ? _aiArticleRecord(raw)
+            : item.kind === "tdialog"
+            ? _aiTDialogRecord(raw)
+            : _aiDialogRecord(raw)
+        // Linked content, gathered in one place beside the item's url — the
+        // same list the Share row shows: `links_to` for matching only,
+        // `linked_from` for the complete overview. The routes and `shows_article` lines still say it node by
+        // node.
+        const into = (item.links || []).some((l) => l.dir === "in")
+        const links = (item.links || []).map((l) =>
+          into
+            ? _aiPrune({
+                from: l.token,
+                kind: l.kind === "node" ? "dialog_node" : l.kind,
+                name: l.title,
+                contextual: l.contextual || undefined,
+              })
+            : _aiPrune({
+                to: l.token,
+                kind: l.kind === "tdialog" ? "transactional_dialog" : l.kind,
+                name: l.title,
+                contextual: l.contextual || undefined,
+                from_nodes: l.via,
+              }),
+        )
+        if (!links.length) return rec
+        const field = into ? "linked_from" : "links_to"
+        const after = "url" in rec ? "url" : "title"
+        const out = {}
+        for (const [k, v] of Object.entries(rec)) {
+          out[k] = v
+          if (k === after) out[field] = links
+        }
+        if (!out[field]) out[field] = links
+        return out
       }
 
       /// What produced this set, stated once — the reader cannot see the app.
@@ -22675,6 +23349,7 @@
           context_filters: contentContextFilters,
           metadata_filters: contentMetadataFilters,
           share_filter: _exportFilter.trim(),
+          linked_content: _exportLinkMode !== "off" ? (_exportLinkMode === "complete" ? "complete overview" : "matching only") : undefined,
           removed_by_hand: _exportDropped.size || undefined,
           nodes_removed_by_hand: _exportDroppedNodes.size || undefined,
         })
@@ -22688,6 +23363,8 @@
         routes: "Outputs that hand the conversation to a Dialog or Transactional Dialog instead of answering, under the same default/context rules.",
         nodes: "A Dialog's steps. type: Recognition (waits for the user), Output (answers), GoTo (jumps), Conditional, CaptureInput, ApiCallout. shows_article: the node answers with that Article. next: where it goes — user_says (any of these phrasings), fallback (anything else), jump, always, or a variable check.",
         linked_from_articles: "Articles whose route leads into this Dialog.",
+        links_to: "Where this item hands the conversation on to, when that place matches the selection too: an Article's Dialog Links, a Dialog's matched nodes that show an Article or start another Dialog. contextual: reached only under a context condition, not by default. from_nodes: the Dialog nodes it is reached from.",
+        linked_from: "Everything that links into this item, matching or not — what depends on it: Articles whose Dialog Link opens it, Dialog nodes (dn-<dialog>-<node>) that start it or show it. contextual: only under a context condition.",
         missing_keys: "A key that is absent had no value.",
       }
 
@@ -22759,6 +23436,7 @@
           (sc.context_filters ? " · context " + sc.context_filters.map((f) => f.name + "=" + f.value).join(", ") : "") +
           (sc.metadata_filters ? " · metadata " + sc.metadata_filters.map((f) => f.name + "=" + f.value).join(", ") : "") +
           (sc.share_filter ? " · narrowed to “" + sc.share_filter + "”" : "") +
+          (sc.linked_content ? " · linked content " + sc.linked_content : "") +
           (sc.removed_by_hand ? " · " + sc.removed_by_hand + " removed by hand" : ""))
         out.push("", "## How to read this", "")
         for (const [k, v] of Object.entries(CONTENT_AI_LEGEND)) out.push("- **" + k.replace(/_/g, " ") + "** — " + v)
@@ -22775,6 +23453,30 @@
           if (r.url) meta.push(r.url)
           if (r.linked_from_articles) meta.push("Linked from: " + r.linked_from_articles.join(", "))
           if (meta.length) out.push(meta.join(" · "), "")
+          if (r.links_to) {
+            out.push("**Links to**", "")
+            for (const l of r.links_to)
+              out.push(
+                "- → " +
+                  (l.kind === "transactional_dialog" ? "Transactional Dialog" : l.kind === "article" ? "Article" : "Dialog") +
+                  " `" + l.to + "`" +
+                  (l.name ? " “" + l.name + "”" : "") +
+                  (l.contextual ? " _(contextual)_" : "") +
+                  (l.from_nodes ? " — from " + l.from_nodes.join(", ") : ""),
+              )
+            out.push("")
+          }
+          if (r.linked_from) {
+            out.push("**Linked from**", "")
+            for (const l of r.linked_from)
+              out.push(
+                "- ← " + (l.kind === "dialog_node" ? "Dialog node" : "Article") +
+                  " `" + l.from + "`" +
+                  (l.name ? " “" + l.name + "”" : "") +
+                  (l.contextual ? " _(contextual)_" : ""),
+              )
+            out.push("")
+          }
           if (r.description) out.push(r.description, "")
           if (r.questions) out.push("**Questions:** " + r.questions.map((q) => "“" + q + "”").join(", "), "")
           if (r.entities) out.push("**Entities:** " + r.entities.join(", "), "")
@@ -22889,6 +23591,8 @@
         _renderExportBody()
       }
       function _renderExportToolbar() {
+        const linksMode = document.getElementById("exportLinkMode")
+        if (linksMode) linksMode.value = _exportLinkMode
         const total = getActiveExportItems().length
         const shown = getExportItemsForCurrentView().length
         const countEl = document.getElementById("exportCount")
@@ -22917,7 +23621,7 @@
       function _renderExportBody() {
         const items = getExportItemsForCurrentView()
         const hint = document.getElementById("exportViewHint")
-        if (hint) hint.textContent = EXPORT_VIEW_HINTS[_exportView] || ""
+        if (hint) hint.textContent = (EXPORT_VIEW_HINTS[_exportView] || "") + EXPORT_LINK_HINTS[_exportLinkMode]
         if (_exportView === "list") _renderExportList(items)
         else if (_exportView === "table") _renderExportTable(items)
         else _renderExportGrouped(items)
@@ -22946,10 +23650,15 @@
           const label = url
             ? `<a href="${esc(url)}">${esc(idToken)}</a> → ${esc(item.title)}`
             : `${esc(idToken)} → ${esc(item.title)}`
-          const relation = _exportView === "grouped" ? _exportRelationText(item) : ""
-          const line = relation ? label + " <span style=\"color:#64738b\">(" + esc(relation) + ")</span>" : label
-          // Each matched node on its own indented line with its own link. Real
+          // Each link and each matched node on its own indented line with its
+          // own link — a link as its id and title, the shape of a row. Real
           // no-break spaces, not `&nbsp;`: the plain-text half strips tags only.
+          const linkLines = (item.links || []).map(
+            (l) =>
+              "\u00a0\u00a0\u00a0\u00a0" + _exportLinkArrow(l) + " " +
+              (l.url ? `<a href="${esc(l.url)}">${esc(l.token)}</a>` : esc(l.token)) +
+              (l.title ? " → " + esc(l.title) : ""),
+          )
           const nodeLines = (item.nodes || []).map(
             (n) =>
               "\u00a0\u00a0\u00a0\u00a0\u21b3 " +
@@ -22959,7 +23668,7 @@
               " → " +
               esc(n.name),
           )
-          return [line, ...nodeLines].join("<br>")
+          return [label, ...linkLines, ...nodeLines].join("<br>")
         }
         let htmlStr
         if (_exportView === "grouped") {
@@ -22982,8 +23691,10 @@
         copyRichHtml(htmlStr)
         _setBtnCopied(btn, "Copied!")
         const nodeCount = _exportNodeTotal(items)
+        const linkCount = _exportLinkTotal(items)
         _showCopyFeedback(
           "✓ " + items.length + " links" +
+            (linkCount ? " + " + linkCount + " linked" : "") +
             (nodeCount ? " + " + nodeCount + " node links" : "") +
             " copied",
         )
@@ -22995,15 +23706,16 @@
           const idToken = _itemIdToken(item)
           const url = buildItemUrl(item.kind, item.id)
           const parts = [idToken, item.title]
-          const relation = _exportView === "grouped" ? _exportRelationText(item) : ""
-          if (relation) parts.push(relation)
           if (item.responses.length) parts.push(item.responses.join(" | "))
           if (url) parts.push(url)
+          // Every column kept, empty or not, so the url stays in its column.
+          const linkLines = (item.links || []).map((l) =>
+            ["    " + _exportLinkArrow(l) + " " + l.token, l.title, "", l.url].join("\t"),
+          )
           const nodeLines = (item.nodes || []).map((n) =>
-            // Every column kept, empty or not, so the url stays in its column.
             ["    \u21b3 " + n.token, n.name, n.text, n.url].join("\t"),
           )
-          return [parts.join("\t"), ...nodeLines].join("\n")
+          return [parts.join("\t"), ...linkLines, ...nodeLines].join("\n")
         }
         let text
         if (_exportView === "grouped") {
@@ -23036,8 +23748,9 @@
       function _copyExportTable(btn) {
         const items = getExportItemsForCurrentView()
         const header = ["ID", "Title / Question", "Matched Response(s)"]
-        // A Dialog's matched nodes are rows of their own beneath it, each with
-        // its own link, so the table keeps its three columns.
+        // A row's links and a Dialog's matched nodes are rows of their own
+        // beneath it, each with its own link, so the table keeps its three
+        // columns.
         const rows = items.flatMap((item) => [
           {
             idToken: _itemIdToken(item),
@@ -23047,6 +23760,12 @@
               (item.nodes && (item.nodes.length || item.nodesRemoved) ? _exportNodeCountText(item) : ""),
             url: buildItemUrl(item.kind, item.id),
           },
+          ...(item.links || []).map((l) => ({
+            idToken: _exportLinkArrow(l) + " " + l.token,
+            title: l.title,
+            responses: "",
+            url: l.url,
+          })),
           ...(item.nodes || []).map((n) => ({
             idToken: "\u21b3 " + n.token,
             title: n.name,
@@ -24117,7 +24836,13 @@
         // The reachability rule sits above the pattern list, not in it: it is not a
         // pattern, it applies to every collection, and it was invisible until now —
         // rows it drops were simply absent, with nothing to say why.
-        const reachRule =
+        const reachRule = !contentShowUnreachable
+          ? '<div class="col-rule-row"><span class="col-rule-main"><span><b>Responses a user can never reach are left out</b>' +
+            '<span class="col-rule-desc">The whole app ignores them (Settings › Content › Show unreachable content), so they never reach a collection. ' +
+            "Turn that setting on to decide here whether the export keeps them.</span></span></span></div>" +
+            _triggerStyleRuleRowHtml(triggerLengths) +
+            _dialogContextRuleRowHtml(contextRows, contextCapped)
+          :
           '<div class="col-rule-row">' +
           '<label class="col-rule-main"><input type="checkbox" ' +
           (cmExportKeepUnreachable ? "" : "checked") +
@@ -24679,6 +25404,7 @@
           `input[name="chat-copy-format"][value="${chatCopyFormat}"]`,
         )
         if (_cfRadio) _cfRadio.checked = true
+        _syncUnreachableSetting()
         document.getElementById("condenseEntitiesToggle").checked =
           cmCondenseEntities
         renderDataFolderState()
@@ -24845,6 +25571,9 @@
         { key: "cm-collections" },
         { key: "cm-export-filters" },
         { key: "cm-export-keep-unreachable" },
+        { key: "cm-share-linked" },
+        { key: "cm-saved-searches" },
+        { key: "cm-show-unreachable" },
         { key: "cm-condense-entities" },
         { key: "cm-trigger-style" },
         { key: "cm-dialog-context" },
@@ -25351,6 +26080,8 @@
         try {
           await yieldToPaint()
           const data = await window.backend.getData(dataFolderPath || null)
+          unreachableHidden = contentShowUnreachable ? 0 : pruneUnreachable(data.articles, data.dialogs)
+          _syncUnreachableSetting()
           dataSourceInfo = data.dataSource || null
           dialogMap = new Map((data.dialogs || []).map((d) => [d.id, d]))
           tDialogMap = new Map((data.tDialogs || []).map((d) => [d.id, d]))
@@ -27676,6 +28407,57 @@
         return null // e-1 and friends: nothing to open
       }
 
+      /// The word in `question` that CM.com's unknown `word` was read from.
+      ///
+      /// `missingWords` is the recognizer's reading, not the user's spelling:
+      /// lower-cased, spelling-corrected ("Argonaut" → aeronaut), put in its
+      /// base form ("pas" → passen, "doe" → doen, "attracties" → attractie)
+      /// and split on punctuation ("m’n" → m). So the word on the panel is
+      /// often not one in the chat. `{same: true}` when it is, `{typed}` for
+      /// the closest word that shares its stem or nearly its spelling, `null`
+      /// when nothing in the question resembles it — script the recognizer
+      /// does not read comes back as single letters. See docs/gap.md.
+      function gapTypedWord(word, question) {
+        const w = String(word || "").toLowerCase()
+        // A RegExp from a string: `tests/extract.js` cannot read braces in a
+        // regex literal.
+        const tokens = String(question || "").match(new RegExp("[\\p{L}\\p{N}#_]+", "gu")) || []
+        if (!w || tokens.some((t) => t.toLowerCase() === w)) return { same: true }
+        // Too short to guess from: a lone letter matches half the question.
+        if (w.length < 3) return null
+        const dist = (a, b) => {
+          let prev = Array.from({ length: b.length + 1 }, (_, j) => j)
+          for (let i = 1; i <= a.length; i++) {
+            const cur = [i]
+            for (let j = 1; j <= b.length; j++)
+              cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+            prev = cur
+          }
+          return prev[b.length]
+        }
+        let best = null
+        let bestScore = 0
+        for (const t of tokens) {
+          const l = t.toLowerCase()
+          if (l.length < 2) continue
+          const max = Math.max(l.length, w.length)
+          let p = 0
+          while (p < l.length && p < w.length && l[p] === w[p]) p++
+          // One is the other's stem, give or take its last letter: pas →
+          // passen, langs → lang, ligt → liggen.
+          const stem = p >= 3 && p >= Math.min(l.length, w.length) - 1 ? 0.5 + p / max : 0
+          // Or a near spelling: Argonaut → aeronaut.
+          const d = dist(l, w)
+          const near = d <= Math.max(1, Math.floor(max / 3)) ? 1 - d / max : 0
+          const score = Math.max(stem, near)
+          if (score > bestScore) {
+            bestScore = score
+            best = t
+          }
+        }
+        return best ? { typed: best } : null
+      }
+
       /// Everything the panel shows for one GAP row, as data.
       ///
       /// `chatRows` is the conversation the row came from, in order — the turn
@@ -27694,6 +28476,14 @@
               .filter(Boolean),
           ),
         ]
+        // How each unknown word was typed, when the recognizer's reading of it
+        // is not a word of the question.
+        const question = turn.interactionValue != null ? turn.interactionValue : row.question
+        const typed = {}
+        for (const w of unknown) {
+          const t = gapTypedWord(w, question)
+          if (!t || !t.same) typed[w] = t ? t.typed : null
+        }
         const recognised = []
         for (const m of Array.isArray(det.entityMatches) ? det.entityMatches : []) {
           const name = String(m.displayName || m.name || "")
@@ -27742,7 +28532,7 @@
           next = { question: String(r.interactionValue || ""), quality: Number(r.recognitionQuality), refs }
           break
         }
-        return { hasDetails: !!turn.recognitionDetails, zero, unknown, recognised, answered, missingArticle, candidates, next }
+        return { hasDetails: !!turn.recognitionDetails, zero, unknown, typed, recognised, answered, missingArticle, candidates, next }
       }
 
       /// An "Edit ↗" link plus a copy-link button, or one disabled button that
@@ -27780,20 +28570,35 @@
           '<div class="gap-fix-sec"><div class="gap-fix-label">' + esc(label) + "</div>" + body + "</div>"
         let html = ""
 
+        const typed = m.typed || {}
+        const read = Object.keys(typed).length
+        const typedHtml = (w) => {
+          if (!(w in typed)) return ""
+          if (typed[w] == null)
+            return '<span class="gap-fix-typed" title="No word of the question is spelt like this one. It is usually an irregular base form (geef → geven, neemt → nemen), a heavy spelling correction, or a script the recognizer reads as single letters.">not spelt so in the question</span>'
+          return (
+            '<span class="gap-fix-typed" title="Typed as “' + esc(typed[w]) + '” — the recognizer reports the word spelling-corrected and in its base form. Click to copy what was typed.">' +
+            'typed <button class="gap-fix-typed-word" data-word="' + esc(typed[w]) + '" onclick="gapCopyText(this.dataset.word)">' +
+            esc(typed[w]) + "</button></span>"
+          )
+        }
         html += sec(
           "Unknown words",
-          m.unknown.length
+          (read
+            ? '<div class="gap-fix-quiet gap-fix-note">As CM.com\u2019s recognizer read them — lower-cased, spelling-corrected and in their base form, so a word can differ from the chat.</div>'
+            : "") +
+          (m.unknown.length
             ? m.unknown
                 .map(
                   (w) =>
-                    '<div class="gap-fix-row"><span class="gap-fix-what gap-fix-word">' + esc(w) + "</span>" +
+                    '<div class="gap-fix-row"><span class="gap-fix-what gap-fix-word">' + esc(w) + typedHtml(w) + "</span>" +
                     '<button class="gap-fix-copy" data-word="' + esc(w) + '" onclick="gapCopyText(this.dataset.word)">Copy</button>' +
                     '<button class="btn-secondary gap-fix-add" data-word="' + esc(w) +
                     '" onclick="gapAddToEntity(this.dataset.word)" title="Pick the entity that should know this word">Add to entity…</button></div>',
                 )
                 .join("")
             : '<div class="gap-fix-quiet">Every word was known to an entity' +
-              (m.zero ? " — it is the combination that nothing answers." : ".") + "</div>",
+              (m.zero ? " — it is the combination that nothing answers." : ".") + "</div>"),
         )
 
         if (m.recognised.length) {
@@ -43232,6 +44037,7 @@
         renderConvTokens()
         syncConvGroupBtn()
         convPage = 1
+        syncSavedSearchBtn("conversations")
         if (run) loadSessions()
         else syncConvSearchStale()
       }
@@ -43240,6 +44046,7 @@
       /// list shows. Compared as the args a search would send, page aside, so
       /// every control that feeds them counts.
       function syncConvSearchStale() {
+        syncSavedSearchBtn("conversations")
         const btn = document.getElementById("convSearchSubmit")
         if (!btn) return
         const strip = (a) => {
@@ -46314,6 +47121,324 @@
           // The mirrored search is gone, so is the side it was limited to.
           setChatSearchScope("both")
         })
+
+      // ── Saved searches ───────────────────────────────────────────────
+      //
+      // A search worth coming back to is a combination — chips, operators,
+      // toggles, tag filters, a pill — and rebuilding it by hand is the work
+      // this removes. One star per bar: what it saves is that bar's whole
+      // state, never the date range (a saved search is run over the dates the
+      // bar already has, as an Insights preset is). See docs/search.md →
+      // "Saved searches". Stored in `cm-saved-searches`.
+      const SAVED_SEARCH_KEY = "cm-saved-searches"
+      const SAVED_SEARCH_VIEWS = ["content", "conversations"]
+      const SAVED_EXPR_TYPES = new Set(["text", "id", "entity", "tag", "op", "(", ")"])
+      const CONV_FILTERS = ["all", "genai", "any_feedback", "pos_feedback", "neg_feedback", "low_recog", "zero_recog"]
+      let savedSearches = loadSavedSearches()
+      let _savedPopView = ""
+
+      /// Read entry by entry, so a hand-edited or older file cannot introduce
+      /// a view, a chip type or a filter this build does not know.
+      function loadSavedSearches(raw) {
+        let list
+        try {
+          list = JSON.parse(raw !== undefined ? raw : localStorage.getItem(SAVED_SEARCH_KEY) || "[]")
+        } catch (e) {
+          return []
+        }
+        if (!Array.isArray(list)) return []
+        const out = []
+        for (const e of list) {
+          if (!e || typeof e !== "object" || !SAVED_SEARCH_VIEWS.includes(e.view)) continue
+          const name = String(e.name || "").trim()
+          const state = _savedCleanState(e.view, e.state)
+          if (!name || !state) continue
+          out.push({ id: String(e.id || "s" + out.length), view: e.view, name, state, savedAt: String(e.savedAt || "") })
+        }
+        return out
+      }
+
+      function _savedCleanTags(list) {
+        return (Array.isArray(list) ? list : [])
+          .filter((f) => f && typeof f.name === "string" && typeof f.value === "string")
+          .map((f) => ({ name: f.name, value: f.value }))
+      }
+
+      function _savedCleanState(view, st) {
+        if (!st || typeof st !== "object" || !Array.isArray(st.expr)) return null
+        const expr = st.expr.filter((it) => it && typeof it === "object" && SAVED_EXPR_TYPES.has(it.t))
+        const base = { expr, context: _savedCleanTags(st.context), metadata: _savedCleanTags(st.metadata), regex: !!st.regex }
+        if (view === "content")
+          return { ...base, case: !!st.case, word: !!st.word, responsesOnly: !!st.responsesOnly, nonDefault: !!st.nonDefault, refs: !!st.refs }
+        return {
+          ...base,
+          scope: ["user", "bot", "both"].includes(st.scope) ? st.scope : "user",
+          filter: CONV_FILTERS.includes(st.filter) ? st.filter : "all",
+        }
+      }
+
+      function _storeSavedSearches() {
+        try {
+          if (savedSearches.length) localStorage.setItem(SAVED_SEARCH_KEY, JSON.stringify(savedSearches))
+          else localStorage.removeItem(SAVED_SEARCH_KEY)
+        } catch (e) {
+          showImportToast("error", "Could not store the saved searches")
+        }
+      }
+
+      /// The bar as it stands — chips and pending text aside, which a save
+      /// commits first.
+      function savedSearchCurrent(view) {
+        const clone = (v) => JSON.parse(JSON.stringify(v))
+        if (view === "content")
+          return _savedCleanState("content", {
+            expr: clone(contentExpr),
+            regex: searchRegex,
+            case: searchCase,
+            word: searchWord,
+            responsesOnly: searchContent,
+            nonDefault: searchExcludeNonDefault,
+            refs: searchIncludeRefs,
+            context: contentContextFilters,
+            metadata: contentMetadataFilters,
+          })
+        return _savedCleanState("conversations", {
+          expr: clone(convExpr),
+          regex: convSearchRegex,
+          scope: convSearchScope,
+          filter: convSessionFilter,
+          context: convContextFilters,
+          metadata: convMetadataFilters,
+        })
+      }
+
+      function savedSearchIsEmpty(state) {
+        return !state.expr.length && !state.context.length && !state.metadata.length && (!state.filter || state.filter === "all")
+      }
+
+      /// Compared as the saved shape, so a chip's transient fields (a label
+      /// read later, say) cannot make one search look like two.
+      function _savedKey(state) {
+        const chip = (it) => ({ t: it.t, op: it.op, value: it.value, idText: it.idText, kind: it.kind, name: it.name })
+        return JSON.stringify({ ...state, expr: state.expr.map(chip) })
+      }
+
+      function savedSearchMatching(view) {
+        const key = _savedKey(savedSearchCurrent(view))
+        return savedSearches.find((e) => e.view === view && _savedKey(e.state) === key) || null
+      }
+
+      /// The search in one line, as the bar would write it.
+      function savedSearchSummary(view, st) {
+        const parts = []
+        const q = exprToQuery(st.expr)
+        if (q) parts.push(q)
+        const flags = []
+        if (st.case) flags.push("Aa")
+        if (st.word) flags.push("\\b")
+        if (st.regex) flags.push(".*")
+        if (st.responsesOnly) flags.push("¬T")
+        if (st.nonDefault) flags.push("ND")
+        if (st.refs) flags.push("Ref")
+        if (view === "conversations" && st.scope !== "user") flags.push(st.scope === "bot" ? "B" : "U+B")
+        if (flags.length) parts.push(flags.join(" "))
+        if (st.filter && st.filter !== "all") {
+          const pill = document.querySelector('[data-conv-filter="' + st.filter + '"]')
+          parts.push((pill && (pill.getAttribute("aria-label") || pill.textContent.trim())) || st.filter)
+        }
+        const tags = st.context.length + st.metadata.length
+        if (tags) parts.push(tags + " tag filter" + (tags !== 1 ? "s" : ""))
+        return parts.join(" · ")
+      }
+
+      /// The star lights while the bar holds a saved search.
+      function syncSavedSearchBtn(view) {
+        const btn = document.getElementById(view + "SavedBtn")
+        if (!btn) return
+        const hit = savedSearches.some((e) => e.view === view) ? savedSearchMatching(view) : null
+        btn.classList.toggle("is-saved", !!hit)
+        btn.title = hit ? "Saved search: " + hit.name : "Saved searches"
+      }
+
+      function toggleSavedSearches(view, btn) {
+        const pop = _savedSearchPop()
+        if (!pop.hidden && _savedPopView === view) return closeSavedSearches()
+        _savedPopView = view
+        renderSavedSearches()
+        pop.hidden = false
+        const r = btn.getBoundingClientRect()
+        const w = pop.offsetWidth || 340
+        pop.style.top = Math.round(r.bottom + 6) + "px"
+        pop.style.left = Math.round(Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))) + "px"
+        const input = pop.querySelector("input")
+        if (input && !input.disabled) input.focus()
+      }
+
+      function closeSavedSearches() {
+        const pop = document.getElementById("savedSearchPop")
+        if (pop) pop.hidden = true
+        _savedPopView = ""
+      }
+
+      function _savedSearchPop() {
+        let pop = document.getElementById("savedSearchPop")
+        if (pop) return pop
+        pop = document.createElement("div")
+        pop.id = "savedSearchPop"
+        pop.className = "saved-search-pop"
+        pop.hidden = true
+        document.body.appendChild(pop)
+        document.addEventListener("mousedown", (e) => {
+          if (pop.hidden || pop.contains(e.target) || e.target.closest(".saved-search-btn")) return
+          closeSavedSearches()
+        })
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && !pop.hidden) {
+            e.stopPropagation()
+            closeSavedSearches()
+          }
+        }, true)
+        return pop
+      }
+
+      function renderSavedSearches() {
+        const view = _savedPopView
+        const pop = _savedSearchPop()
+        const cur = savedSearchCurrent(view)
+        // What is typed but not yet a chip is part of what would be saved.
+        const pending = (document.getElementById(view === "content" ? "g-search" : "convSearch") || {}).value || ""
+        const empty = savedSearchIsEmpty(cur) && !pending.trim()
+        const hit = savedSearchMatching(view)
+        const list = savedSearches.filter((e) => e.view === view)
+        const summary = savedSearchSummary(view, cur) + (pending.trim() ? (cur.expr.length ? " AND " : "") + pending.trim() : "")
+        let head = '<div class="saved-search-title">Saved ' + (view === "content" ? "content" : "conversation") + " searches</div>"
+        if (hit) {
+          head += '<div class="saved-search-current">The bar holds “' + esc(hit.name) + "”.</div>"
+        } else {
+          head +=
+            '<div class="saved-search-save"><input type="text" id="savedSearchName" maxlength="80" placeholder="' +
+            (empty ? "Search for something first" : "Name this search") + '"' + (empty ? " disabled" : "") +
+            ' value="' + esc(empty ? "" : summary.slice(0, 60)) + '" onkeydown="if(event.key===\'Enter\')saveCurrentSearch()">' +
+            '<button class="btn-primary" onclick="saveCurrentSearch()"' + (empty ? " disabled" : "") + ">Save</button></div>" +
+            (empty ? "" : '<div class="saved-search-current" title="' + esc(summary) + '">' + esc(summary) + "</div>")
+        }
+        const rows = list.length
+          ? list
+              .map(
+                (e) =>
+                  '<div class="saved-search-row' + (hit && hit.id === e.id ? " is-current" : "") +
+                  '" tabindex="0" data-saved-id="' + esc(e.id) + '" title="Run this search">' +
+                  '<span class="saved-search-text"><span class="saved-search-name">' + esc(e.name) + "</span>" +
+                  '<span class="saved-search-sum">' + esc(savedSearchSummary(e.view, e.state)) + "</span></span>" +
+                  '<button class="saved-search-del" data-saved-del="' + esc(e.id) + '" title="Forget this saved search">&#x2715;</button></div>',
+              )
+              .join("")
+          : '<div class="saved-search-empty">Nothing saved yet. Build a search in the bar, then save it here to bring it back in one click' +
+            (view === "conversations" ? " — over whatever dates the bar has then." : ".") + "</div>"
+        pop.innerHTML = '<div class="saved-search-head">' + head + '</div><div class="saved-search-list">' + rows + "</div>"
+        pop.onclick = (ev) => {
+          const del = ev.target.closest("[data-saved-del]")
+          if (del) {
+            ev.stopPropagation()
+            deleteSavedSearch(del.dataset.savedDel)
+            return
+          }
+          const row = ev.target.closest("[data-saved-id]")
+          if (row) applySavedSearch(row.dataset.savedId)
+        }
+        pop.onkeydown = (ev) => {
+          const row = ev.target.closest && ev.target.closest("[data-saved-id]")
+          if (row && ev.key === "Enter") applySavedSearch(row.dataset.savedId)
+        }
+      }
+
+      function saveCurrentSearch() {
+        const view = _savedPopView
+        if (!view) return
+        const input = document.getElementById("savedSearchName")
+        const name = ((input && input.value) || "").trim()
+        // Typed text becomes a chip first, so what is saved is what is run.
+        if (view === "content") {
+          if (commitContentPendingText()) _contentExprChanged()
+        } else if (commitConvPendingText()) _afterConvExprChange(false)
+        const state = savedSearchCurrent(view)
+        if (savedSearchIsEmpty(state)) return
+        const label = name || savedSearchSummary(view, state).slice(0, 60)
+        // The same name replaces the older one: saving again is how a saved
+        // search is updated.
+        const old = savedSearches.findIndex((e) => e.view === view && e.name.toLowerCase() === label.toLowerCase())
+        const entry = { id: "s" + Date.now().toString(36), view, name: label, state, savedAt: new Date().toISOString() }
+        if (old >= 0) savedSearches.splice(old, 1, entry)
+        else savedSearches.push(entry)
+        _storeSavedSearches()
+        syncSavedSearchBtn(view)
+        renderSavedSearches()
+        showImportToast("success", "Saved “" + label + "”")
+      }
+
+      function deleteSavedSearch(id) {
+        const i = savedSearches.findIndex((e) => e.id === id)
+        if (i < 0) return
+        const view = savedSearches[i].view
+        savedSearches.splice(i, 1)
+        _storeSavedSearches()
+        syncSavedSearchBtn(view)
+        if (_savedPopView) renderSavedSearches()
+      }
+
+      /// Put a saved search back in its bar and run it.
+      function applySavedSearch(id) {
+        const e = savedSearches.find((x) => x.id === id)
+        if (!e) return
+        const st = JSON.parse(JSON.stringify(e.state))
+        closeSavedSearches()
+        if (e.view === "content") {
+          const inp = document.getElementById("g-search")
+          if (inp) inp.value = ""
+          closeContentSuggest()
+          searchCase = st.case
+          searchWord = st.word
+          searchRegex = st.regex
+          searchContent = st.responsesOnly
+          searchExcludeNonDefault = st.nonDefault
+          searchIncludeRefs = st.refs
+          for (const [btnId, on] of [
+            ["opt-case", searchCase],
+            ["opt-word", searchWord],
+            ["opt-regex", searchRegex],
+            ["opt-content", searchContent],
+            ["opt-nondefault", searchExcludeNonDefault],
+            ["opt-refs", searchIncludeRefs],
+          ])
+            document.getElementById(btnId).classList.toggle("on", on)
+          contentContextFilters = st.context
+          contentMetadataFilters = st.metadata
+          _updateContentCtxBadge()
+          contentExpr = st.expr
+          document.getElementById("clearSearch").classList.toggle("visible", contentExpr.length > 0)
+          _contentExprChanged()
+          return
+        }
+        const inp = document.getElementById("convSearch")
+        if (inp) inp.value = ""
+        closeConvSuggest()
+        convSearchRegex = st.regex
+        document.getElementById("convOptRegex").classList.toggle("on", convSearchRegex)
+        setConvSearchScope(st.scope !== "bot", st.scope !== "user")
+        convSessionFilter = st.filter
+        document.querySelectorAll("[data-conv-filter]").forEach((b) =>
+          b.classList.toggle("active", b.dataset.convFilter === st.filter),
+        )
+        convContextFilters = st.context
+        convMetadataFilters = st.metadata
+        _updateCtxFilterBadge()
+        convExpr = st.expr
+        normalizeConvExpr()
+        convHasSearched = true
+        _afterConvExprChange(true)
+      }
+
+      SAVED_SEARCH_VIEWS.forEach(syncSavedSearchBtn)
 
       // ── Init DB on load if path is stored ───────────────────────────
       // The migration phases, wherever the open came from — the launch's own

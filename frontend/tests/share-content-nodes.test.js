@@ -24,7 +24,6 @@ vm.runInContext(
   function execCommandCopy(h) { copied = h }
   function _setBtnCopied() {}
   function _showCopyFeedback() {}
-  function _exportRelationText() { return "" }
   function _buildModalTermRegexes() { return [/korting/i] }
   function _nodeReasonText(n) { return "says korting in " + n.name }
   function stripDisplay(t) { return t }
@@ -39,7 +38,8 @@ vm.runInContext(
     "_matchKey", "contentMatchFor", "_matchCountText", "_matchTotalsText",
     "_defaultAnswerAmong", "defaultArticleAnswer", "buildItemUrl", "buildNodeUrl",
     "_itemIdToken", "exportGroupLabel", "_exportMatchedNodes", "_getMatchedResponses",
-    "_exportNodeTotal", "_exportNodeCountText", "_exportWithoutDroppedNodes", "_copyExportLinks", "_copyExportPlain",
+    "_exportNodeTotal", "_exportNodeCountText", "_exportLinkTotal", "_exportLinkLabel",
+    "_exportLinkNote", "_exportWithoutDroppedNodes", "_copyExportLinks", "_copyExportPlain",
     "_copyExportTable",
   ].map(extract).join("\n")}
   globalThis.T = {

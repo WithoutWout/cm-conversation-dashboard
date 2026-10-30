@@ -11,12 +11,14 @@ vm.runInContext(
   `
   let _exportFilter = ""
   let _exportView = "list"
+  let _exportLinkMode = "matching"
+  let contentMatched = null
   const _exportDropped = new Set()
   const _exportDroppedNodes = new Set()
   let ITEMS = []
   function getActiveExportItems() { return ITEMS }
   function _exportItemMatches() { return true }
-  ${["_exportKey", "exportGroupOrder", "groupedExportItems", "_exportWithoutDroppedNodes", "getExportItemsForCurrentView"].map(extract).join("\n")}
+  ${["_exportKey", "exportGroupOrder", "groupedExportItems", "_exportWithoutDroppedNodes", "_exportLinksOfMatchedNodes", "_exportWithLinkMode", "_exportWithoutListedLinks", "getExportItemsForCurrentView"].map(extract).join("\n")}
   globalThis.run = (items, view) => { ITEMS = items; _exportView = view; return getExportItemsForCurrentView() }
   `,
   ctx,

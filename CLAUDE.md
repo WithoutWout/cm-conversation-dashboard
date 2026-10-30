@@ -74,7 +74,9 @@ frontend/
     db-migration-progress.test.js, db-open.test.js, search-bubbles.test.js,
     share-content-order.test.js, gap-sort.test.js, gap-fix.test.js, gap-fb.test.js,
     gap-session-cache.test.js, content-refs.test.js, dialog-search.test.js,
-    search-match-count.test.js, share-content-nodes.test.js, modal-tags.test.js,
+    search-match-count.test.js, share-content-nodes.test.js,
+    share-content-links.test.js, saved-searches.test.js,
+    unreachable-search.test.js, modal-tags.test.js,
     dialog-flow.test.js, expr-group.test.js, entity-condense.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
@@ -313,6 +315,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 
 | Function                          | Purpose |
 | --------------------------------- | ------- |
+| `pruneUnreachable(articles, dialogs)` | Drops every output that is not the default and has no context condition, as the export loads — the one place the app ignores unreachable content. Skipped when `cm-show-unreachable` is on |
 | `buildSearchRegex(q)`             | Renderer highlight regex builder; worker has the authoritative search compiler |
 | `hl(text, q)`                     | HTML-escapes text and wraps matches in `<mark>` |
 | `esc(s)`                          | HTML-escapes a string (use for all dynamic content inserted into innerHTML) |
@@ -336,7 +339,8 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 | `openExportModal()`               | Opens Share Content using the current active tab's filtered items; resets the per-open filter/removals |
 | `getExportItemsForCurrentView()`  | The set that is rendered **and** copied — tab results minus removals, minus the modal's filter |
 | `_renderExportBody()`             | Single entry point for re-rendering Share Content: list/table/grouped + counts + footer |
-| `_renderExportGrouped(items)`     | Groups Share Content by Articles, Dialogs, Transactional Dialogs, sorted by id, with dialog → article refs |
+| `_renderExportGrouped(items)`     | Groups Share Content by Articles, Dialogs, Transactional Dialogs, sorted by id |
+| `_exportItemLinks(raw, kind)`     | Share Content's linked content: an Article's Dialog Links, a Dialog's nodes that show an Article or start a Dialog — `{kind, id, token, title, url, contextual, via}` |
 | `buildItemUrl(kind, id)`          | Returns full CM.com URL for an item |
 | `toggleContentSelectMode()`       | Toggles Collections multi-select on the Content tab, re-rendering the active panel with/without checkboxes |
 | `buildCollectionExportRows(collection)` | Walks a collection's items, applies reachability + smart-filter exclusion, returns `{ rows, excludedCount, totalCandidates }` |
@@ -388,10 +392,11 @@ The orientation map for the whole window. It says what is on screen and where;
 
 <div.global-search-bar>
   chip field (#contentTokens + input, #contentSuggest type-ahead) |
-  [( )] [Aa] [\b] [.*] [¬T] [ND] [Ref] | tag filter button (Context · Metadata)
+  [( )] [Aa] [\b] [.*] [¬T] [ND] [Ref] | tag filter button (Context · Metadata) |
+  ☆ saved searches (docs/search.md → "Saved searches")
     Ref off (default): a Dialog matches on its own content, never on the
-    Articles its nodes reference — docs/search.md → "References are not a
-    Dialog's content"
+    Articles its nodes reference nor the buttons that lead to them —
+    docs/search.md → "References are not a Dialog's content"
 
 <div.tab-bar>
   All Results (sub-stats: art · dlg · t.dlg)
@@ -526,13 +531,14 @@ The orientation map for the whole window. It says what is on screen and where;
     next is added after the selection (inside a group, if that is where it is);
     Alt+←/→ moves the selection, into and out of groups — clicking a bracket
     removes its group, keeping the chips
-  date range button | tag filter button (Context · Metadata)
+  date range button | tag filter button (Context · Metadata) | ☆ saved searches
   filter pills (GenAI / Feedback · thumbs up · thumbs down / Low % / Zero %) |
     N results · thumbs up N% positive (the matching answers' ratings, all results)
 
 <div#settingsModal>
   header: Settings | Backup… (opens #settingsBackupModal) | ✕
-  Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser)
+  Content tab: CM.com Context URL input, Open CM.com links radio (popup / browser),
+               Show unreachable content (off: the whole app ignores them, with the count)
   Conversations tab: connected database + "Manage database…",
                      Halo Studio URL, low recognition threshold, hidden metadata
                      rules, chat copy format,
@@ -583,7 +589,10 @@ The orientation map for the whole window. It says what is on screen and where;
   header: "N items from <tab>" | query chip | amber chip when no CM.com URL set
   List / Grouped / Table tabs | one-line description of what the view produces
   toolbar: filter input | "N of M" | Restore N removed items
-  rows: id · type badge · title · matched responses (or dialog → article chips)
+  toolbar: … | Linked content: Matching only (default) · Complete overview · Off
+  rows: id · type badge · title · matched responses
+        · Matching only: → links out (Dialog Links / Transactional Dialogs / Articles, as chips)
+        · Complete overview: ← linked from (Articles / Dialog nodes, as chips)
         · Copy link · remove (✕ on hover)
   footer: Copy N links / Copy table (N rows) | Copy as plain text |
           Export for AI… (#contentAiModal: Markdown or JSON Lines, the same
@@ -616,7 +625,7 @@ Content result relationship displays:
 
 - Article cards show clickable Dialog Link / Transactional Dialog chips inline; avoid separate "Directs to ..." text when the target can be part of the chip.
 - Dialog cards can show "Uses articles" relationship rows with clickable `qa-...` chips.
-- Share Content `Grouped` view always groups by Articles, Dialogs, Transactional Dialogs, then sorts by id. Dialog rows that reference articles should visibly read as dialog → article relationships, e.g. `dn-123 -> qa-456`, with clickable chips in the UI.
+- Share Content `Grouped` view always groups by Articles, Dialogs, Transactional Dialogs, then sorts by id. What an item links to is shown in every view by Linked content (below), not by Grouped.
 
 ### Share Content modal
 
@@ -625,13 +634,14 @@ Mirrors the active tab's current result set, then lets you refine *what gets sha
 - **`getExportItemsForCurrentView()` is the only set that matters.** Rendering and all three copy actions read it, so the list on screen and the text on the clipboard cannot disagree. It applies `_exportDropped` (per-row ✕) and `_exportFilter` (the modal's own filter box) on top of `getActiveExportItems()`. Both reset on every open — the modal always *starts* as an honest mirror of the tab.
 - **The primary button names its own count** (`Copy 5 links`, `Copy table (5 rows)`). Once a filter or a removal can shrink the set, "Copy all as links" is a claim the button can't back up.
 - **Every view is in number order**: Articles, then Dialogs, then Transactional Dialogs, each by id (`groupedExportItems`, applied in `getExportItemsForCurrentView`, so the clipboard follows). A shared list is looked up by its numbers, not by search rank.
-- **Each view gets a one-line description** (`EXPORT_VIEW_HINTS`). "Grouped" does two things beyond the order — sections, and Dialog → Article relations *replacing* the response column — and neither is inferable from the word.
+- **Each view gets a one-line description** (`EXPORT_VIEW_HINTS`): what lands on the clipboard is not inferable from the word.
+- **Linked content is a choice in the toolbar — Matching only (default), Complete overview, Off** (`_exportLinkMode`, `cm-share-linked`; `_exportWithLinkMode` sets each row's `links`). *Matching only*, below: where each row links **out** to, when that place matches the search too — the worklist of places to edit. *Complete overview*: everything that links **into** each row (`_exportIncomingIndex`, `_exportItemLinks` turned round, built once per export in ~15 ms) — every Article whose Dialog Link opens it, every Dialog **node** that starts it or shows it, with that node's own `dn-D-N` link, because the node is what has to change. It keeps them **whether or not they match the search**: an Article routing into a Dialog depends on it even if it never names the subject, so to change that Dialog or to take it out, every one of them has to be looked at. It was first called "To remove"; that is one use of it, not the only one. It leaves out only what is a row already — an Article row, a Dialog row listed whole, or a Dialog row that lists that very node; a Dialog row listing other nodes still gets the node named. Copies write `← id → title`; Export for AI a `linked_from` list. Matching only: Every item carries `links` (`_exportItemLinks`): an Article's DialogStart / TDialogStart outputs, a Dialog's nodes that show an Article (`kbaIdReference`) or start a Dialog or a Transactional Dialog — once per target, the nodes it is reached from in `via`, a Dialog starting itself left out. An unreachable route is no link: unless Settings shows them, unreachable outputs are pruned as the export loads and never reach this (docs/search.md). `contextual` marks a link no default output reaches, which is what tells "this Article *is* a Dialog Link" apart from "this Article starts that Dialog for one context": 1,201 Articles of the real export link by default, 83 only by context. Off, `getExportItemsForCurrentView` empties `links`, so no copy can carry one. On screen it is a line per kind under the row, the targets as chips (dashed when contextual, the nodes in the tooltip). **A copy writes a link as its id and title and nothing else**, the shape of a row — an indented `→ dn-N → name` line in Copy links; `→ dn-N` · name · (empty) · url in plain text, the columns of a node line; a row in the table, so it keeps three columns. "Dialog Link", "contextual" and "from <node>" are for the screen: in a pasted overview they were noise around the two things the reader acts on. Export for AI keeps them, in a `links_to` list (docs/ai-export.md). **A Dialog matched node by node brings the links of its matched nodes only** (`_exportLinksOfMatchedNodes`, through each link's `from`): the rest of the Dialog is not what was searched for, and a node removed by hand takes its links with it. A Dialog matched as a whole — by its name, its id, or with no search — has no matched nodes and keeps every link. An Article's links are its own outputs, like its Responses, and always stay. **The share is a worklist, so a link has to be a place to edit too** (`_exportWithoutListedLinks`, after the filter and the removals). The use: something about Albert Heijn changes, and every Article and Dialog that mentions it has to be checked — once each. So a link stays only when its target **matches the search itself** (`contentMatched`, every item the worker's `_mc` passed, sent as `matchedIdx` before any tab's pill narrows it; null with no search, when everything matches) **and is not a row of the share already**. A Dialog that never mentions the search is nothing to edit; one listed as a row would be listed twice. On the real export, "albert heijn" in All Results is 57 rows and no link line at all; in the Articles tab, 16 Articles each name the Albert Heijn Dialog they route into. The listed-already kind is noted on screen ("+N linked items already in this share", targets in the tooltip), never copied; removing the row brings its link back. An earlier rule kept every link and only de-duplicated; on "parkeren" that still listed "Werken bij de Efteling", "Klacht - Schade" and "Essent", which is what made the copy useless as a worklist. This replaced Grouped's Dialog → Article relation column, which showed one of the three link kinds, in one view, instead of the Response.
 - **A type badge sits on every row** because `dn-` prefixes both Dialogs and Transactional Dialogs: in the flat List view the ID alone could not tell them apart. In the Table view the badge rides inside the ID cell rather than taking a fourth column, so `_copyExportTable`'s clipboard output keeps its original three columns.
 - **An unset `cmBaseUrl` is stated, not implied.** Without it every "link" copy silently degrades to plain IDs; the header shows an amber chip that opens Settings.
-- `_exportRowHtml` is shared by List and Grouped. They were near-identical copies before, which is how Grouped's relation column drifted out of List.
+- `_exportRowHtml` is shared by List and Grouped. They were near-identical copies before, which is how a relation column once drifted into one and not the other.
 - **A Dialog carries the nodes the search matched, each with its own link** (`item.nodes`, from `_exportMatchedNodes`): `dn-D-N` → `…/dialogs/D?currentNode=N` (`buildNodeUrl`). A shared Dialog is dozens of nodes; the person it is sent to needs the one to open. On screen they are lines under the row; in Copy links an indented `↳` line each; in plain text a line each with every column kept; in the table a row each, so it keeps three columns. The footer counts them (`Copy 36 links + 72 nodes`, `Copy table (221 rows)`). **A node has its own ✕** (`_exportDroppedNodes`, by `dn-D-N` token, per open like `_exportDropped`), applied in `getExportItemsForCurrentView` by `_exportWithoutDroppedNodes` — a copy, since the node list is shared with `_exportNodesCache`. A Dialog whose every matched node is removed stays a result ("all 2 matched nodes removed"); Restore brings back items and nodes together. Only the nodes the worker counted — by words, `ctx:` / `meta:` chips or the panel; a node found by a tag says which value it carries — see `docs/search.md` → "A card says how much of it matched".
 - **An Article's "matched responses" are the ones the search counted**, contextual ones marked `(contextual)`, else the entities it matched on. `_getMatchedResponses` used to read `_answerItems` / `_searchNodes`, which exist only inside the worker, so it had always shown the default Response plus "(matched on: entity)".
-- The copy formats themselves are otherwise untouched: rich-HTML links (with grouped `<strong>` section headers), TSV plain text (with `dn-9 -> qa-101, qa-102` relation text in grouped view), and the HTML+TSV table.
+- The copy formats themselves are otherwise untouched: rich-HTML links (with grouped `<strong>` section headers), TSV plain text, and the HTML+TSV table.
 
 ---
 
@@ -677,6 +687,9 @@ Always use these terms in the UI:
 | `cm-missing-days-checked`  | The display-timezone day (`YYYY-MM-DD`) the launch check for missing import days last ran. It runs once a day, whatever the answer |
 | `chat-copy-format`         | Chat copy format preference |
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
+| `cm-show-unreachable`      | `"1"` to load the content export with its unreachable outputs (not the default, no context condition); anything else, including absent, prunes them as it loads, so the whole app ignores them (`pruneUnreachable`). See `docs/search.md` → "Unreachable content is ignored by the whole app" |
+| `cm-share-linked`          | Share Content's Linked content: `"0"` off, `"complete"` everything that links into each row (Complete overview), anything else including absent what each row links out to that matches (Matching only) |
+| `cm-saved-searches`        | JSON array of `{id, view, name, state, savedAt}` — saved searches, `view` `"content"` or `"conversations"`. `state` is that bar's chips, toggles, tag filters and (Conversations) U/B and pill — never dates. Read entry by entry; see `docs/search.md` → "Saved searches" |
 | `cm-export-keep-unreachable` | `"1"` to export non-default responses that have no context (or context `"any"`); anything else, including absent, keeps the default reachability rule on |
 | `cm-insights-unit`         | `"interactions"` to open Insights counting matching interactions; anything else, including absent, counts conversations |
 | `cm-insights-export-caption` | `"0"` to leave the caption off an exported chart image; anything else, including absent, includes it |
