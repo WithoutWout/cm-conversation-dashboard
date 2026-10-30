@@ -51,6 +51,7 @@ const NAMES = [
   "_exprTagValues",
   "_exprTakenKeys",
   "exprSuggestNarrow",
+  "exprSuggestCutHtml",
 ]
 
 const ctx = vm.createContext({ console })
@@ -74,7 +75,7 @@ vm.runInContext(
   let metadataOptions = []
   let metadataOptionsLoaded = false
   function metaHidden(name) { return name === "sessionToken" }
-  const CONV_SUGGEST_MAX = 8
+  const CONV_SUGGEST_MAX = 100
   const EXPR_SUGGEST_TYPES = [
     { key: "article", label: "Articles", kinds: ["article"] },
     { key: "dialog", label: "Dialogs", kinds: ["dialog", "tdialog", "node"] },
@@ -628,6 +629,19 @@ ctx.setUp({ context: [], metadata: [{ name: "nochat", value: "true", count: 4 }]
 eq("narrowed to one type it shows only that type", (ctx.setType("metadata"), ctx.labelsFor("true")), ["nochat = true"])
 ctx.setType("all")
 eq("…and metadata as well as context", ctx.labelsFor("nochat"), ["nochat = true"])
+// The list used to stop at eight with no way past them: a key with 30 values
+// offered eight and nothing said there were more. It draws up to
+// CONV_SUGGEST_MAX now, in a scrolling list, and says what it left out.
+ctx.setUp({
+  context: Array.from({ length: 130 }, (_, i) => ({ name: "Zone", value: "z" + i, count: 200 - i })),
+  metadata: [],
+})
+eq("more than eight values are all offered", ctx.labelsFor("zone").length, 100)
+eq("…the type count is every hit", ctx.counts().context, 130)
+eq("…and the cut is counted", ctx.counts().cut, 30)
+eq("…and said", /30 more/.test(vm.runInContext("exprSuggestCutHtml(counts())", ctx)), true)
+ctx.setUp({ context: [{ name: "Zone", value: "a", count: 1 }], metadata: [] })
+eq("an uncut list says nothing", (ctx.labelsFor("zone"), vm.runInContext("exprSuggestCutHtml(counts())", ctx)), "")
 eq(
   "a tag chip already placed is not offered again",
   (ctx.setUp({

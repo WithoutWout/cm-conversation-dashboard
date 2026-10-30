@@ -79,6 +79,8 @@ enum MigrationPhase {
     Summary,
     /// Building `idx_log_session`, the id → conversation index search reads.
     SearchIndex,
+    /// `ANALYZE`, because the database has outgrown its planner statistics.
+    Statistics,
 }
 
 impl MigrationPhase {
@@ -89,6 +91,7 @@ impl MigrationPhase {
             Self::Compacting => serde_json::json!({ "phase": "compacting" }),
             Self::Summary => serde_json::json!({ "phase": "summary" }),
             Self::SearchIndex => serde_json::json!({ "phase": "searchIndex" }),
+            Self::Statistics => serde_json::json!({ "phase": "statistics" }),
         }
     }
 }
@@ -344,6 +347,8 @@ struct ImportTimings {
     /// CSV parse plus the row loop, including its per-batch commits.
     rows_ms: u64,
     summary_ms: u64,
+    /// The planner statistics, on the rare finish that retakes them.
+    stats_ms: u64,
     total_ms: u64,
 }
 
@@ -2596,23 +2601,70 @@ fn open_db_reporting(path: &str, report: MigrationReporter) -> Result<Connection
     if verify {
         clear_meta_flag(&conn, META_VERIFY_ON_OPEN);
     }
-    // One-time ANALYZE so the query planner has statistics for the
-    // session_summary/context_index indexes. Nothing refreshes them on its own
-    // after that: a day in or out of a 90-day database does not change the
-    // proportions the planner reads, and **Compact database** re-analyzes for
-    // anyone whose database has changed shape. The sampling bound comes from
-    // apply_perf_pragmas, which sets analysis_limit for the whole connection.
-    let has_stats = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sqlite_stat1'",
-            [],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
-    if !has_stats {
-        let _ = conn.execute_batch("ANALYZE;");
-    }
+    refresh_planner_stats(&conn, report);
     Ok(conn)
+}
+
+/// Take the planner statistics again when the database has outgrown them.
+///
+/// The gate used to be "does `sqlite_stat1` exist?", and a database created
+/// fresh is opened empty: that `ANALYZE` measured nothing, created the table,
+/// and so never ran again. `PRAGMA optimize` after each import used to cover
+/// for it until v0.27.2 took it out (it re-analyzed whole tables on every
+/// import after a launch). A database created since then searched with no
+/// statistics at all, and without them SQLite drove the search from the
+/// conversations in range — see docs/search.md → "A leaf drives its own
+/// search" for what that cost, and docs/import.md → "Statistics follow the
+/// database's size" for this rule.
+///
+/// Now: whenever the conversations have grown fourfold since they were last
+/// measured, or never were. A day in or out of 90 does not move that, so it
+/// runs a handful of times in a database's life — at its first import, and
+/// at each 4× after — and the last one dominates: 12–14 s on 1.65M rows,
+/// nearly all I/O, because `analysis_limit` samples the comparisons but every
+/// index entry is still counted. Counting `session_summary`
+/// to decide is milliseconds. Shrinking never triggers it; proportions,
+/// which is what the planner reads, do not change with a purge.
+fn refresh_planner_stats(conn: &Connection, report: MigrationReporter<'_>) -> bool {
+    // The perf harnesses measure a database *without* statistics this way.
+    #[cfg(test)]
+    if std::env::var("CAI_NO_ANALYZE").is_ok() {
+        return false;
+    }
+    let sessions: i64 = conn
+        .query_row("SELECT COUNT(*) FROM session_summary", [], |r| r.get(0))
+        .unwrap_or(0);
+    // Nothing to measure yet; analyzing an empty table records nothing.
+    if sessions == 0 {
+        return false;
+    }
+    let measured: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(CAST(stat AS INTEGER)) FROM sqlite_stat1 WHERE tbl = 'session_summary'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    if measured.map_or(false, |n| sessions <= n.saturating_mul(4)) {
+        return false;
+    }
+    let started = Instant::now();
+    report(MigrationPhase::Statistics);
+    match conn.execute_batch("ANALYZE;") {
+        Ok(()) => {
+            log::info!(
+                target: "import",
+                "planner statistics taken at {sessions} conversations (were {measured:?}) in {}ms",
+                started.elapsed().as_millis()
+            );
+            true
+        }
+        Err(e) => {
+            log::warn!(target: "import", "ANALYZE failed: {e}");
+            false
+        }
+    }
 }
 
 /// Convert MM/DD/YYYY HH:MM:SS to ISO-8601 (YYYY-MM-DDTHH:MM:SS)
@@ -3670,6 +3722,16 @@ fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, Str
         rebuild = rebuild_session_summary_touched(conn);
         timings.summary_ms = t.elapsed().as_millis() as u64;
 
+        // The one exception to "nothing else" below, and it rarely does
+        // anything: statistics are taken again only when the conversations
+        // have grown fourfold since they were measured. A first 90-day import
+        // into a new database is that case, and without it every search until
+        // the next launch ran with no statistics at all.
+        let t = Instant::now();
+        if refresh_planner_stats(conn, NO_MIGRATION_PROGRESS) {
+            timings.stats_ms = t.elapsed().as_millis() as u64;
+        }
+
         // Nothing else. No FTS 'optimize': it rewrites the whole index
         // (6.5 s on a full 90-day database) and search measured no faster for
         // it. No `PRAGMA optimize` either: whenever it decides a table's
@@ -3689,8 +3751,8 @@ fn finalize_import_run_into(conn: &mut Connection) -> Result<FinalizeResult, Str
     timings.total_ms = started.elapsed().as_millis() as u64;
     log::info!(
         target: "import",
-        "finalize: summary {}ms, total {}ms",
-        timings.summary_ms, timings.total_ms
+        "finalize: summary {}ms, statistics {}ms, total {}ms",
+        timings.summary_ms, timings.stats_ms, timings.total_ms
     );
     Ok(FinalizeResult { timings })
 }
@@ -5448,6 +5510,19 @@ const SEARCH_ID_INDEX: &str = "idx_log_session";
 /// `feedback_info != ''` although their `LIKE`s already imply it.
 const FEEDBACK_ROWS_INDEX: &str = "idx_feedback_rows";
 
+/// ` INDEXED BY idx_feedback_rows` where that index exists, for a join into
+/// `interactions` whose WHERE states `feedback_info != ''` — the partial
+/// index's own condition, without which `INDEXED BY` is an error. Named rather
+/// than left to the planner, which only finds it when the database has
+/// statistics.
+fn feedback_rows_hint(conn: &Connection) -> String {
+    if index_exists(conn, FEEDBACK_ROWS_INDEX) {
+        format!(" INDEXED BY {FEEDBACK_ROWS_INDEX}")
+    } else {
+        String::new()
+    }
+}
+
 /// `(session_uuid, interaction_uuid)` — the row a rating is about, found
 /// without reading every row of its conversation. `feedback_origins` gets it
 /// unaided; the positive share names it, because a date range made
@@ -6391,6 +6466,7 @@ fn build_session_filter_query(
     // (`idx_feedback_rows`). Left free, the planner preferred to walk every
     // rating row in the database, both thumbs, and look each conversation up:
     // 6.7 s → 10.5 s cold for the thumbs-down pill on 90 days.
+    let by_rating = feedback_rows_hint(conn);
     let feedback_origins_cte = if is_feedback_filter {
         format!(
             ", feedback_origins AS MATERIALIZED (\
@@ -6407,7 +6483,7 @@ fn build_session_filter_query(
                         LIMIT 1\
                     ), fb.log_id) AS match_log_id \
                 FROM base_sessions b \
-                CROSS JOIN interactions fb ON fb.session_uuid = b.session_uuid \
+                CROSS JOIN interactions fb{by_rating} ON fb.session_uuid = b.session_uuid \
                 LEFT JOIN interactions origin \
                   ON origin.session_uuid = fb.session_uuid \
                  AND origin.interaction_uuid = feedback_origin(fb.feedback_info) \
@@ -6461,26 +6537,39 @@ fn build_session_filter_query(
     };
     // Through `SEARCH_ID_INDEX` where it exists — see there for why it has to
     // be named.
+    //
+    // Every leaf's join order is pinned with `CROSS JOIN`: the leaf's own
+    // index first, then its conversation, then `base_sessions`. That is the
+    // order SQLite picks unaided when the database has statistics, so with
+    // them nothing changes. Without them — a database first opened empty kept
+    // none at all, see `refresh_planner_stats` — it drove from the
+    // conversations in range instead and re-ran the leaf for each one: every
+    // entity row in the date span, or the whole FTS match, once per
+    // conversation. Seconds on a week, 20 minutes and more on 90 days. See
+    // docs/search.md → "A leaf drives its own search".
     let fts_join = if index_exists(conn, SEARCH_ID_INDEX) {
-        format!("interactions_fts JOIN interactions i INDEXED BY {SEARCH_ID_INDEX} ON i.log_id = interactions_fts.rowid")
+        format!("interactions_fts CROSS JOIN interactions i INDEXED BY {SEARCH_ID_INDEX} ON i.log_id = interactions_fts.rowid")
     } else {
-        "interactions_fts JOIN interactions i ON i.log_id = interactions_fts.rowid".to_string()
+        "interactions_fts CROSS JOIN interactions i ON i.log_id = interactions_fts.rowid".to_string()
     };
     let fts_from = if is_feedback_filter {
         fts_join
     } else {
-        format!("{fts_join} JOIN base_sessions b ON b.session_uuid = i.session_uuid")
+        format!("{fts_join} CROSS JOIN base_sessions b ON b.session_uuid = i.session_uuid")
     };
     let fts_from = fts_from.as_str();
     // The entity table only carries a log_id, so a row-level filter (GenAI, low
     // recognition) needs the interaction row joined back in to be applied.
+    // Pinned like `fts_from`, and this is the leaf it mattered most for:
+    // `entity_index` has no index on `session_uuid`, so driven from the
+    // conversations it was a range scan of the whole span per conversation.
     let entity_from = if is_feedback_filter {
         "entity_index e".to_string()
     } else if row_filter.is_empty() {
-        "entity_index e JOIN base_sessions b ON b.session_uuid = e.session_uuid".to_string()
+        "entity_index e CROSS JOIN base_sessions b ON b.session_uuid = e.session_uuid".to_string()
     } else {
-        "entity_index e JOIN interactions i ON i.log_id = e.log_id \
-         JOIN base_sessions b ON b.session_uuid = e.session_uuid"
+        "entity_index e CROSS JOIN interactions i ON i.log_id = e.log_id \
+         CROSS JOIN base_sessions b ON b.session_uuid = e.session_uuid"
             .to_string()
     };
     let entity_row_filter = if is_feedback_filter {
@@ -8370,9 +8459,13 @@ fn search_feedback_sql(
          JOIN interactions i{by_origin} ON i.session_uuid = o.session_uuid AND i.interaction_uuid = o.origin_uuid \
          WHERE {IS_ANSWER_ROW}{scope}{in_match}"
     );
+    // The rating rows through their partial index, named: with statistics the
+    // planner takes it unaided, without them it read every row of each rated
+    // conversation through `idx_session_interaction` — 1.3 s against 55 ms.
+    let by_rating = feedback_rows_hint(conn);
     let origins = format!(
         "SELECT DISTINCT i.session_uuid, {FEEDBACK_ORIGIN_UUID} AS origin_uuid \
-         FROM fb_sessions s CROSS JOIN interactions i ON i.session_uuid = s.session_uuid \
+         FROM fb_sessions s CROSS JOIN interactions i{by_rating} ON i.session_uuid = s.session_uuid \
          WHERE i.feedback_info != '' AND {FEEDBACK_ROW}"
     );
     let sql = format!(
@@ -8403,7 +8496,7 @@ fb_answers AS MATERIALIZED ({matched}),
         // whole table for the rating rows — 945 MB read cold on a real
         // database, for 2,148 ratings.
         tail = feedback_counts_tail(
-            "fb_sessions s CROSS JOIN interactions i ON i.session_uuid = s.session_uuid",
+            &format!("fb_sessions s CROSS JOIN interactions i{by_rating} ON i.session_uuid = s.session_uuid"),
             "fb_answers i"
         ),
     );
@@ -13088,6 +13181,12 @@ mod tests {
             !meta_flag_set(&conn, META_PENDING_FINALIZE),
             "finalize must clear the crash marker"
         );
+        // A first import into a database that had none takes the planner
+        // statistics — see `refresh_planner_stats`.
+        let stats: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'session_summary'", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert!(stats > 0, "the run's finish took no planner statistics");
 
         let after_run = summary_snapshot(&conn);
         rebuild_session_summary(&conn).expect("full rebuild");
@@ -18540,6 +18639,96 @@ mod conv_search {
         );
     }
 
+    /// Statistics are taken once there is something to measure, and again
+    /// only when the conversations have grown fourfold.
+    ///
+    /// The old gate was "does `sqlite_stat1` exist?", and the `ANALYZE` that
+    /// created it ran on the empty database a fresh file opens as — so a new
+    /// database never had statistics at all.
+    #[test]
+    fn planner_statistics_follow_the_databases_size() {
+        let conn = search_conn();
+        let stat_rows = |conn: &Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM sqlite_stat1 WHERE tbl = 'session_summary'", [], |r| r.get(0))
+                .unwrap_or(0)
+        };
+        // Empty: nothing to measure, and nothing that would stop a later run.
+        assert!(!refresh_planner_stats(&conn, NO_MIGRATION_PROGRESS));
+        let mut log_id = 0;
+        let mut sessions = |conn: &Connection, n: usize| {
+            for _ in 0..n {
+                log_id += 1;
+                add(conn, Turn { log_id, session: &format!("s{log_id}"), user: "hallo", ..Default::default() });
+            }
+            rebuild_session_summary(conn).expect("summary");
+        };
+        sessions(&conn, 10);
+        assert!(refresh_planner_stats(&conn, NO_MIGRATION_PROGRESS), "first rows: measured");
+        assert!(stat_rows(&conn) > 0, "and the statistics are really there");
+        assert!(!refresh_planner_stats(&conn, NO_MIGRATION_PROGRESS), "unchanged: not again");
+        sessions(&conn, 25);
+        assert!(!refresh_planner_stats(&conn, NO_MIGRATION_PROGRESS), "3.5×: not yet");
+        sessions(&conn, 10);
+        assert!(refresh_planner_stats(&conn, NO_MIGRATION_PROGRESS), "4.5×: again");
+    }
+
+    /// Every leaf drives its own search, and only then looks up the
+    /// conversations — on a database without planner statistics too.
+    ///
+    /// Without statistics, and with a date range, SQLite drove from the
+    /// conversations in range and re-ran the leaf for each: every entity row
+    /// in the span, or the whole FTS match, once per conversation. A test
+    /// database has no statistics, which is exactly the state a database
+    /// created since v0.27.2 searched in. Asserted on the plan, as the other
+    /// plan tests are: the leaf's table must come before the conversations'.
+    #[test]
+    fn a_leaf_drives_its_search_even_without_statistics() {
+        let conn = search_conn();
+        let wine = r#"{"entityMatches": [{"name": "WIJN_1", "match": "rood", "entityId": 1, "displayName": "WIJN"}]}"#;
+        add(&conn, Turn { log_id: 1, session: "a", user: "een fles rood", recognition_details: wine, dialog_paths: r#"{"Started" : "6391:2"}"#, ..Default::default() });
+        add(&conn, Turn { log_id: 2, session: "b", user: "parkeren", ..Default::default() });
+        rebuild_session_summary(&conn).expect("summary");
+        let has_stats: bool = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = 'sqlite_stat1'", [], |r| r.get::<_, i64>(0))
+            .map(|n| n > 0)
+            .unwrap();
+        assert!(!has_stats, "this test is about a database without statistics");
+
+        for (q, leaf_table, want) in [
+            ("entity:wijn", "SEARCH e ", vec!["a"]),
+            ("dn-6391", "interactions_fts", vec!["a"]),
+            ("parkeren", "interactions_fts", vec!["b"]),
+            ("entity:wijn OR parkeren", "SEARCH e ", vec!["a", "b"]),
+        ] {
+            for filter in ["all", "genai", "zero_recog"] {
+                let args = GetSessionsArgs {
+                    query: Some(q.to_string()),
+                    filter: Some(filter.to_string()),
+                    query_scope: Some("user".to_string()),
+                    date_from: Some("2026-05-31T22:00:00".to_string()),
+                    date_to: Some("2026-06-01T21:59:59".to_string()),
+                    ..Default::default()
+                };
+                if filter == "all" {
+                    assert_eq!(found(&conn, &args), want, "{q}");
+                }
+                let plan = plan_for(&conn, &args);
+                let lines: Vec<&str> = plan.lines().map(str::trim).collect();
+                let leaf = lines.iter().position(|l| l.contains(leaf_table));
+                let session = lines
+                    .iter()
+                    .position(|l| l.starts_with("SEARCH s ") || l.starts_with("SCAN s"));
+                let (Some(leaf), Some(session)) = (leaf, session) else {
+                    panic!("{q} / {filter}: expected both the leaf and the conversations in:\n{plan}");
+                };
+                assert!(
+                    leaf < session,
+                    "{q} / {filter}: the conversations drive the leaf, so it runs once per conversation:\n{plan}"
+                );
+            }
+        }
+    }
+
     /// An id token spells its own kind, so one query can name an Article and a
     /// Dialog at once — which the old "Search by:" pill could not express.
     #[test]
@@ -20313,6 +20502,213 @@ mod range_perf {
                 while let Some(r) = rows.next().unwrap() {
                     println!("      {}", r.get::<_, String>(3).unwrap_or_default());
                 }
+            }
+        }
+    }
+}
+
+/// Every kind of leaf, alone and combined, timed as the app runs it: the page
+/// query, then the positive share that follows it on the same connection.
+/// Each statement is interrupted after `CAI_TIMEOUT` seconds (default 20), so
+/// a plan that went n × m reads as a timeout instead of a hung harness.
+///   CAI_TEST_DB=/path/to/copy.db cargo test --release --lib expr_perf -- --nocapture --ignored
+/// `CAI_ONLY` keeps the cases whose label contains it; `CAI_PLANS` prints the
+/// plans of those whose label contains it.
+#[cfg(test)]
+mod expr_perf {
+    use super::*;
+
+    fn run_timed<T>(
+        conn: &Connection,
+        f: impl FnOnce(&Connection) -> Result<T, String>,
+    ) -> (u128, Result<T, String>) {
+        let secs: u64 = std::env::var("CAI_TIMEOUT").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+        let handle = conn.get_interrupt_handle();
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let d2 = done.clone();
+        let watchdog = std::thread::spawn(move || {
+            let until = Instant::now() + std::time::Duration::from_secs(secs);
+            while Instant::now() < until {
+                if d2.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            handle.interrupt();
+        });
+        let started = Instant::now();
+        let out = f(conn);
+        let ms = started.elapsed().as_millis();
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = watchdog.join();
+        (ms, out)
+    }
+
+    fn page(conn: &Connection, args: &GetSessionsArgs) -> Result<i64, String> {
+        let mut fq = build_session_filter_query(conn, args)?;
+        fq.param_values.push(Box::new(50i64));
+        fq.param_values.push(Box::new(0i64));
+        let p_limit = format!("?{}", fq.param_values.len() - 1);
+        let p_offset = format!("?{}", fq.param_values.len());
+        let sql = sessions_page_sql(&fq, &p_limit, &p_offset);
+        let params: Vec<&dyn ToSql> = fq.param_values.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query(params.as_slice()).map_err(|e| e.to_string())?;
+        let mut total = 0i64;
+        while let Some(r) = rows.next().map_err(|e| e.to_string())? {
+            total = r.get::<_, i64>(10).unwrap_or(0);
+        }
+        Ok(total)
+    }
+
+    fn print_plan(conn: &Connection, sql: &str, params: &[Box<dyn ToSql>]) {
+        let ps: Vec<&dyn ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let mut st = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let mut rows = st.query(ps.as_slice()).unwrap();
+        while let Some(r) = rows.next().unwrap() {
+            println!("      {}", r.get::<_, String>(3).unwrap_or_default());
+        }
+    }
+
+    fn fmt(r: &(u128, Result<i64, String>)) -> String {
+        match &r.1 {
+            Ok(n) => format!("{:>7}ms {:>6}", r.0, n),
+            Err(e) if e.contains("interrupt") => format!("{:>7}ms TIMEOUT", r.0),
+            Err(e) => format!("ERR {e}"),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn expr_cost() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else {
+            println!("set CAI_TEST_DB");
+            return;
+        };
+        let conn = open_db(&path).expect("open");
+        let (n, lo, hi): (i64, String, String) = conn
+            .query_row(
+                "SELECT COUNT(*), MIN(timestamp_start), MAX(timestamp_start) FROM interactions",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        println!("{n} interactions, {lo} → {hi}");
+        // `CAI_RANGE_DAYS` (3) days in the middle of whatever the database holds.
+        let half: f64 = std::env::var("CAI_RANGE_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(3.0) / 2.0;
+        let range: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT datetime(julianday(?1) + (julianday(?2) - julianday(?1)) / 2 - ?3), \
+                        datetime(julianday(?1) + (julianday(?2) - julianday(?1)) / 2 + ?3)",
+                params![lo, hi, half],
+                |r| Ok((r.get::<_, String>(0)?.replace(' ', "T").into(), r.get::<_, String>(1)?.replace(' ', "T").into())),
+            )
+            .unwrap();
+        println!("range {:?} → {:?}\n", range.0, range.1);
+        let top_entity: Vec<String> = {
+            let mut st = conn
+                .prepare("SELECT name FROM entity_index GROUP BY name ORDER BY COUNT(*) DESC LIMIT 40")
+                .unwrap();
+            let v: Vec<String> = st.query_map([], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect();
+            v
+        };
+        let common = top_entity.first().cloned().unwrap_or_default();
+        let mid = top_entity.get(10).cloned().unwrap_or_default();
+        let rare = top_entity.last().cloned().unwrap_or_default();
+        let (ctx_name, ctx_val): (String, String) = conn
+            .query_row(
+                "SELECT name, value FROM context_index GROUP BY 1, 2 ORDER BY COUNT(*) DESC LIMIT 1 OFFSET 3",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or_default();
+        let (meta_name, meta_val): (String, String) = conn
+            .query_row(
+                "SELECT name, value FROM metadata_index GROUP BY 1, 2 ORDER BY COUNT(*) DESC LIMIT 1 OFFSET 4",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or_default();
+        let dialog: String = conn
+            .query_row(
+                "SELECT SUBSTR(dialog_paths, INSTR(dialog_paths, ': \"') + 3, \
+                        INSTR(SUBSTR(dialog_paths, INSTR(dialog_paths, ': \"') + 3), ':') - 1) \
+                 FROM interactions WHERE dialog_paths LIKE '%:%' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        let e = |s: &str| format!("entity:\"{s}\"");
+        let ctx = format!("ctx:\"{ctx_name}\"=\"{ctx_val}\"");
+        let meta = format!("meta:\"{meta_name}\"=\"{meta_val}\"");
+        let cases: Vec<(String, &str, String)> = vec![
+            ("entity common".into(), "all", e(&common)),
+            ("entity mid".into(), "all", e(&mid)),
+            ("entity rare".into(), "all", e(&rare)),
+            ("entity OR entity".into(), "all", format!("{} OR {}", e(&mid), e(&rare))),
+            ("entity AND entity".into(), "all", format!("{} AND {}", e(&common), e(&mid))),
+            ("3 entities OR".into(), "all", format!("{} OR {} OR {}", e(&common), e(&mid), e(&rare))),
+            ("entity AND text".into(), "all", format!("{} AND parkeren", e(&mid))),
+            ("entity AND NOT text".into(), "all", format!("{} AND NOT parkeren", e(&mid))),
+            ("NOT entity".into(), "all", format!("NOT {}", e(&common))),
+            ("entity AND ctx".into(), "all", format!("{} AND {ctx}", e(&mid))),
+            ("entity AND meta".into(), "all", format!("{} AND {meta}", e(&mid))),
+            ("entity AND dialog".into(), "all", format!("{} AND dn-{dialog}", e(&mid))),
+            ("entity + genai".into(), "genai", e(&mid)),
+            ("entity + neg".into(), "neg_feedback", e(&mid)),
+            ("entity + any fb".into(), "any_feedback", e(&common)),
+            ("entity + low recog".into(), "low_recog", e(&mid)),
+            ("entity + zero recog".into(), "zero_recog", e(&mid)),
+            ("text".into(), "all", "parkeren".into()),
+            ("text AND text".into(), "all", "openingstijden AND parkeren".into()),
+            ("dialog".into(), "all", format!("dn-{dialog}")),
+            ("dialog OR text".into(), "all", format!("dn-{dialog} OR parkeren")),
+            ("ctx".into(), "all", ctx.clone()),
+            ("meta".into(), "all", meta.clone()),
+            ("ctx AND text".into(), "all", format!("{ctx} AND parkeren")),
+            ("meta OR text".into(), "all", format!("{meta} OR parkeren")),
+            ("NOT ctx".into(), "all", format!("NOT {ctx}")),
+            ("meta + neg".into(), "neg_feedback", meta.clone()),
+        ];
+        let only = std::env::var("CAI_ONLY").ok();
+        let plans = std::env::var("CAI_PLANS").ok();
+        println!(
+            "{:<22} {:>22} {:>12} | {:>22} {:>12}",
+            "case", "all: list", "share", "range: list", "share"
+        );
+        for (label, filter, q) in &cases {
+            if only.as_deref().map_or(false, |o| !label.contains(o)) {
+                continue;
+            }
+            let mk = |r: &(Option<String>, Option<String>)| GetSessionsArgs {
+                filter: Some(filter.to_string()),
+                query: Some(q.clone()),
+                query_scope: Some("user".to_string()),
+                date_from: r.0.clone(),
+                date_to: r.1.clone(),
+                ..Default::default()
+            };
+            let mut cols = Vec::new();
+            for r in [(None, None), range.clone()] {
+                let a = mk(&r);
+                let _ = run_timed(&conn, |c| page(c, &a)); // warm the cache
+                let p = run_timed(&conn, |c| page(c, &a));
+                let s = run_timed(&conn, |c| search_feedback_into(c, &a).map(|x| x.0));
+                cols.push(format!("{} {:>12}", fmt(&p), fmt(&s)));
+            }
+            println!("{label:<22} {} | {}", cols[0], cols[1]);
+            if plans.as_deref().map_or(false, |p| label.contains(p)) {
+                let a = if std::env::var("CAI_PLAN_RANGE").is_ok() { mk(&range) } else { mk(&(None, None)) };
+                let mut fq = build_session_filter_query(&conn, &a).unwrap();
+                fq.param_values.push(Box::new(50i64));
+                fq.param_values.push(Box::new(0i64));
+                let p_limit = format!("?{}", fq.param_values.len() - 1);
+                let p_offset = format!("?{}", fq.param_values.len());
+                println!("    list:");
+                print_plan(&conn, &sessions_page_sql(&fq, &p_limit, &p_offset), &fq.param_values);
+                println!("    share:");
+                let (sql, ps) = search_feedback_sql(&conn, &a).unwrap();
+                print_plan(&conn, &sql, &ps);
             }
         }
     }

@@ -5561,7 +5561,7 @@
         z-index: 60;
         display: flex;
         flex-direction: column;
-        max-height: 292px;
+        max-height: min(420px, 60vh);
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 9px;
@@ -21519,7 +21519,7 @@
               "</span></div>"
             )
           })
-          .join("") ||
+          .join("") + exprSuggestCutHtml(counts) ||
           '<div class="conv-suggest-none">Nothing of this type — pick another above.</div>'
         pop.hidden = false
         const wrap = document.querySelector(".search-wrap-global")
@@ -29375,6 +29375,7 @@
         compacting: "Reclaiming disk space…",
         summary: "Recounting interactions per conversation…",
         searchIndex: "Indexing conversations for faster search…",
+        statistics: "Measuring the database so searches stay fast…",
       }
 
       /**
@@ -41619,7 +41620,10 @@
       let _convEntityIndex = null
       let _convEntityIndexSrc = null
 
-      const CONV_SUGGEST_MAX = 8
+      // How many rows the list draws; the rest are reached by typing more or
+      // by a type above. It scrolls — at eight, with no way past them, a
+      // common word showed eight of its 200 hits and nothing said so.
+      const CONV_SUGGEST_MAX = 100
 
       function _convIsOperand(it) {
         return (
@@ -42129,8 +42133,9 @@
       ]
 
       /// Narrow ranked hits to one type, and count every type — the counts are
-      /// what the bar shows, taken before the list is cut to its eight rows,
-      /// so "Metadata 23" is true even while none of them is on screen.
+      /// what the bar shows, taken before the list is cut to its first
+      /// `CONV_SUGGEST_MAX` rows, so "Metadata 230" is true even while most of
+      /// them are not drawn. `counts.cut` is how many of this type were not.
       function exprSuggestNarrow(hits, type) {
         const counts = { all: hits.length }
         for (const t of EXPR_SUGGEST_TYPES) counts[t.key] = 0
@@ -42140,10 +42145,21 @@
           if (k) counts[k]++
         }
         const want = EXPR_SUGGEST_TYPES.find((t) => t.key === type)
-        const rows = (want ? hits.filter((h) => want.kinds.includes(h.c.kind)) : hits)
-          .slice(0, CONV_SUGGEST_MAX)
-          .map((h) => h.c)
+        const narrowed = want ? hits.filter((h) => want.kinds.includes(h.c.kind)) : hits
+        const rows = narrowed.slice(0, CONV_SUGGEST_MAX).map((h) => h.c)
+        counts.cut = narrowed.length - rows.length
         return { rows, counts }
+      }
+
+      /// The last line of a list that was cut, saying so.
+      function exprSuggestCutHtml(counts) {
+        const n = counts && counts.cut
+        if (!n) return ""
+        return (
+          '<div class="conv-suggest-none">' +
+          n.toLocaleString() +
+          " more — type more, or pick a type above, to narrow.</div>"
+        )
       }
 
       /// The type bar above a suggestion list. Only types that have a hit are
@@ -42250,7 +42266,7 @@
               "</span></div>"
             )
           })
-          .join("") ||
+          .join("") + exprSuggestCutHtml(counts) ||
           '<div class="conv-suggest-none">Nothing of this type — pick another above.</div>'
         const wrap = document.querySelector(".conv-search-wrap")
         if (anchor && wrap) {
@@ -46301,7 +46317,10 @@
           const p = (ev && ev.payload) || {}
           const label = DB_MIGRATION_LABELS[p.phase]
           if (!label || !convDbIsOpening()) return
-          dbUpgradeStep(label)
+          // Statistics are retaken whenever the database has grown fourfold —
+          // a few seconds, and not once per database, so not the card that
+          // says "you won't see this again". The opening pill says it.
+          if (p.phase !== "statistics") dbUpgradeStep(label)
           convDbPhaseLabel =
             label +
             (p.phase === "contexts" && p.done > 0
