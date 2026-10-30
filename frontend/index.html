@@ -14302,7 +14302,7 @@
       let _convDbOpening = null // {path, promise} while an open is in flight
       let convDbOpenedPath = "" // what the backend has open, as far as we know
       let convDbPhaseLabel = "" // the migration phase being run, if one is
-      let convDbPhaseTip = "" // the header pill's tooltip for that phase, if it has its own
+      let convDbPurging = false // the retention purge, running beside the reads
       const _rawSetDbPath = window.backend.setDbPath
 
       function convDbIsOpening() {
@@ -14321,9 +14321,9 @@
           .then(
             () => {
               convDbOpenedPath = path
-              // Part of the open, so every read waits for it the way it waits
-              // for the open itself — see `_convDbPurgeExpired`.
-              return _convDbPurgeExpired()
+              // Not awaited: the purge runs beside the reads, on its own
+              // connection — see `_convDbPurgeExpired`.
+              _convDbPurgeExpired()
             },
             (e) => {
               if (convDbOpenedPath === path) convDbOpenedPath = ""
@@ -14344,7 +14344,6 @@
             if (_convDbOpening === entry) {
               _convDbOpening = null
               convDbPhaseLabel = ""
-              convDbPhaseTip = ""
               convDbOpeningChanged()
             }
           })
@@ -14355,28 +14354,31 @@
 
       /// Apply the retention setting, once per open — at launch, in practice.
       ///
-      /// It used to run at the end of every import, where on a day the cutoff
-      /// crossed a busy stretch it was most of "Finishing up…". It cannot run
-      /// in the background: the backend has one connection behind one lock, so
-      /// a search or a chart would only queue behind it while the screen said
-      /// it was ready. Folded into the open instead, every read waits for it
-      /// honestly and the header pill says why. A failure is logged and the
-      /// open still succeeds — old rows are untidy, not wrong.
+      /// It runs in the background. The backend gives it a connection of its
+      /// own (`purge_beside`), so searches, chats and charts read while it
+      /// deletes — they used to wait for it, 9–16 s on a large database. Only
+      /// writes wait (imports, deletions, fixed marks), and the backend makes
+      /// them. The header pill stays up meanwhile and says so. A failure is
+      /// logged and changes nothing — old rows are untidy, not wrong.
       async function _convDbPurgeExpired() {
-        convDbPhaseLabel = "Removing old data…"
-        if (_dbUpgrade && !_dbUpgrade.finished) dbUpgradeStep("Finishing up…")
-        convDbPhaseTip =
-          `Removing conversations older than ${dataRetentionDays} days, as the retention setting asks. ` +
-          "Searches, charts and imports wait until it finishes."
+        convDbPurging = true
         convDbOpeningChanged()
         try {
           const r = await window.backend.purgeExpiredData(dataRetentionDays)
           if (r && r.purged > 0) {
             insDropPayloadCache()
             gapCoverageInvalidate()
+            // A list read before the purge committed may hold conversations
+            // that are gone now. Read it again — unless the bar has changed
+            // since, when running it would search something nobody submitted.
+            const stale = document.getElementById("convSearchSubmit")?.classList.contains("stale")
+            if (lastConvSearchArgs && !stale) loadSessions()
           }
         } catch (e) {
           console.warn("Retention purge failed:", e)
+        } finally {
+          convDbPurging = false
+          convDbOpeningChanged()
         }
       }
 
@@ -14489,17 +14491,21 @@
       /// once the database is open, and says them from now on.
       function convDbOpeningChanged() {
         const on = convDbIsOpening()
+        // The purge only labels the pill: nothing that reads waits for it.
+        const purgingOnly = !on && convDbPurging
         const text = document.getElementById("dbOpeningLabel")
-        if (text) text.textContent = convDbPhaseLabel || "Opening database…"
+        if (text)
+          text.textContent = purgingOnly ? "Removing old data…" : convDbPhaseLabel || "Opening database…"
         const pill = document.getElementById("dbOpeningPill")
         if (pill) {
-          pill.title = convDbPhaseTip
-            ? convDbPhaseTip
+          pill.title = purgingOnly
+            ? `Removing conversations older than ${dataRetentionDays} days, as the retention setting asks. ` +
+              "Searches and charts work meanwhile; imports and deletions wait until it finishes."
             : convDbPhaseLabel
             ? convDbPhaseLabel + " This runs once, after an update."
             : "Opening the conversations database. Anything that reads it waits until it is ready."
         }
-        gateLoading("dbOpening", on, (v) => fadeIndicator(pill, v, "visible"))
+        gateLoading("dbOpening", on || convDbPurging, (v) => fadeIndicator(pill, v, "visible"))
         for (const el of document.querySelectorAll(".pane-loading[data-label]")) {
           const t = convDbWaitText(el.dataset.label, el.dataset.note || "", on, convDbPhaseLabel)
           const l = el.querySelector(".pane-loading-label")

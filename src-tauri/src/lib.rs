@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_updater::UpdaterExt;
@@ -2928,6 +2928,9 @@ async fn set_db_path(
     let db = db_state.inner().clone();
     let interrupt_state = search_interrupt.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        // Reopening the file a purge is running on would run the open's
+        // migrations against its write lock — see `PurgeGate`.
+        PURGE_GATE.wait_for(&path);
         // A first open of an unmigrated database is not the sub-second
         // operation the overlay's "Opening database…" implies — see
         // `DB_MIGRATION_EVENT`. Emitting from inside `spawn_blocking` is fine:
@@ -3615,7 +3618,7 @@ async fn set_gap_fixed(
 ) -> Result<String, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let state = db.lock().map_err(|e| e.to_string())?;
+        let state = lock_for_write(&db)?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
         set_gap_fixed_rows(conn, &log_ids, fixed, note.as_deref())
     })
@@ -3673,7 +3676,7 @@ async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
 async fn begin_import_run(db_state: State<'_, SharedDbState>) -> Result<(), String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let mut state = lock_for_write(&db)?;
         let conn = state
             .conn
             .as_mut()
@@ -3699,7 +3702,7 @@ async fn begin_import_run(db_state: State<'_, SharedDbState>) -> Result<(), Stri
 async fn finalize_import_run(db_state: State<'_, SharedDbState>) -> Result<FinalizeResult, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let mut state = lock_for_write(&db)?;
         let conn = state
             .conn
             .as_mut()
@@ -3779,13 +3782,126 @@ async fn purge_expired_data(
     max_age_days: i64,
 ) -> Result<PurgeResult, String> {
     let db = db_state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || purge_beside(&db, max_age_days))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Which database file a retention purge is running on, if any.
+///
+/// The purge runs on a connection of its own (`purge_beside`), so the shared
+/// one stays free for reads: a search, a chat or a chart at launch no longer
+/// queues behind 9–16 s of deletes. Writes are another matter. SQLite allows
+/// one writer per file, and the shared connection's 5 s busy timeout is
+/// shorter than a purge, so a write meeting it would fail with "database is
+/// locked". Every write command therefore takes the lock through
+/// [`lock_for_write`], which waits here first.
+///
+/// Per file: a purge of one database never holds up writes to another.
+struct PurgeGate {
+    running: Mutex<Vec<String>>,
+    done: Condvar,
+}
+
+static PURGE_GATE: PurgeGate = PurgeGate {
+    running: Mutex::new(Vec::new()),
+    done: Condvar::new(),
+};
+
+impl PurgeGate {
+    fn is_running(&self, path: &str) -> bool {
+        self.running
+            .lock()
+            .map(|r| r.iter().any(|p| p == path))
+            .unwrap_or(false)
+    }
+
+    /// Block until no purge of `path` is running.
+    fn wait_for(&self, path: &str) {
+        let Ok(mut running) = self.running.lock() else { return };
+        while running.iter().any(|p| p == path) {
+            running = match self.done.wait(running) {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+        }
+    }
+}
+
+/// Takes `path` off the gate however the purge ends — an error or a panic
+/// included — so a failed purge can never leave its writes waiting for good.
+struct PurgeRunning(String);
+
+impl Drop for PurgeRunning {
+    fn drop(&mut self) {
+        if let Ok(mut running) = PURGE_GATE.running.lock() {
+            running.retain(|p| p != &self.0);
+        }
+        PURGE_GATE.done.notify_all();
+    }
+}
+
+/// The database lock, for a command that writes: first waiting out a
+/// retention purge of the same file — see [`PurgeGate`].
+///
+/// The gate is read *under* the database lock, and `purge_beside` raises it
+/// under that same lock. So a write either finishes before the purge starts,
+/// or sees it running and waits; it can never slip in between and meet the
+/// purge's write lock instead. It waits with the database lock released, so
+/// reads carry on meanwhile.
+fn lock_for_write(db: &SharedDbState) -> Result<std::sync::MutexGuard<'_, DbState>, String> {
+    loop {
         let state = db.lock().map_err(|e| e.to_string())?;
-        let conn = state.conn.as_ref().ok_or("No database open.")?;
-        purge_expired_into(conn, max_age_days)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+        let Some(path) = state.path.clone() else { return Ok(state) };
+        if !PURGE_GATE.is_running(&path) {
+            return Ok(state);
+        }
+        drop(state);
+        PURGE_GATE.wait_for(&path);
+    }
+}
+
+/// The retention purge, on a connection of its own beside the shared one.
+///
+/// It used to hold the shared connection, so every read at launch waited for
+/// it — 9 s for one day off a full 90-day database, 16 s for a week. WAL lets
+/// readers carry on while one connection writes, and they see the rows as
+/// they were until the purge commits, then as they are. Only writes wait, in
+/// [`lock_for_write`]. See docs/import.md → "The retention purge runs at
+/// launch, beside the reads".
+fn purge_beside(db: &SharedDbState, max_age_days: i64) -> Result<PurgeResult, String> {
+    let path = {
+        let state = db.lock().map_err(|e| e.to_string())?;
+        let path = state.path.clone().ok_or("No database open.")?;
+        let mut running = PURGE_GATE.running.lock().map_err(|e| e.to_string())?;
+        if running.contains(&path) {
+            return Err("A retention purge is already running.".to_string());
+        }
+        running.push(path.clone());
+        path
+    };
+    let _running = PurgeRunning(path.clone());
+    let conn = Connection::open(&path).map_err(|e| format!("Cannot open DB: {e}"))?;
+    let _ = conn.query_row("PRAGMA journal_mode=WAL", [], |_| Ok(()));
+    let _ = conn.execute_batch("PRAGMA synchronous=NORMAL;");
+    apply_perf_pragmas(&conn);
+    // Long, because the one thing it can meet is a write that took the lock
+    // just before the gate went up, and waiting it out beats failing.
+    let _ = conn.busy_timeout(Duration::from_secs(120));
+    let result = purge_expired_into(&conn, max_age_days)?;
+    drop(conn);
+    // The Insights temp tables may hold conversations that are gone now.
+    if result.purged > 0 {
+        let mut state = db.lock().map_err(|e| e.to_string())?;
+        if state.path.as_deref() == Some(path.as_str()) {
+            let DbState { conn, insight_scope, .. } = &mut *state;
+            if let Some(conn) = conn.as_ref() {
+                let _ = conn.execute_batch(INSIGHT_DROP_TEMP);
+            }
+            insight_scope.clear();
+        }
+    }
+    Ok(result)
 }
 
 /// The purge, its scoped summary rebuild and the FTS merge, against an open
@@ -3801,7 +3917,7 @@ async fn purge_expired_data(
 /// a 45 s purge on a full 90-day database. The search index merges its
 /// tombstones away as later imports write to it, and one day out of ninety
 /// does not move the planner statistics. See docs/import.md → "The retention
-/// purge runs at launch".
+/// purge runs at launch, beside the reads".
 fn purge_expired_into(conn: &Connection, max_age_days: i64) -> Result<PurgeResult, String> {
     let started = Instant::now();
     reset_touched_sessions(conn)?;
@@ -3849,7 +3965,7 @@ async fn import_interactions_csv(
     let finalize = !defer_finalize.unwrap_or(false);
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let mut state = lock_for_write(&db)?;
         let conn = state
             .conn
             .as_mut()
@@ -11268,7 +11384,7 @@ async fn record_imported_window(
     let (day, mask) = settled_window_mask(&start_utc, &end_utc, now_secs)?;
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let state = db.lock().map_err(|e| e.to_string())?;
+        let state = lock_for_write(&db)?;
         let conn = state.conn.as_ref().ok_or("No database open.")?;
         insert_window_mask(conn, &day, mask)
     })
@@ -11395,7 +11511,7 @@ struct CompactResult {
 async fn compact_database(db_state: State<'_, SharedDbState>) -> Result<CompactResult, String> {
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let mut state = lock_for_write(&db)?;
         let path = state.path.clone().ok_or("No database open.")?;
         let conn = state.conn.as_mut().ok_or("No database open.")?;
         let size_of = |p: &str| fs::metadata(p).map(|m| m.len()).unwrap_or(0);
@@ -11537,7 +11653,7 @@ async fn delete_interactions_between(
     }
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let mut state = lock_for_write(&db)?;
         let conn = state.conn.as_mut().ok_or("No database open.")?;
         let deleted = delete_between_rows(conn, &args.ranges)?;
         Ok(DeleteResult { deleted })
@@ -11562,7 +11678,7 @@ async fn delete_interactions_by_dates(
     }
     let db = db_state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut state = db.lock().map_err(|e| e.to_string())?;
+        let mut state = lock_for_write(&db)?;
         let conn = state.conn.as_mut().ok_or("No database open.")?;
 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -13945,6 +14061,120 @@ mod tests {
         assert!(!meta_flag_set(&conn, META_PENDING_FINALIZE));
         // Nothing left to remove: a no-op, not an error.
         assert_eq!(purge_expired_into(&conn, 30).expect("purge again").purged, 0);
+    }
+
+    /// The launch purge runs on its own connection: reads on the shared one
+    /// carry on while it holds the write lock, and writes wait for it.
+    ///
+    /// It used to hold the shared connection, so every search at launch
+    /// queued behind it — 9 s for one day off a full 90-day database.
+    #[test]
+    fn the_purge_runs_beside_the_reads_and_writes_wait_for_it() {
+        let dir = std::env::temp_dir().join(format!("cai-purge-beside-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.db").to_str().unwrap().to_string();
+        let conn = open_db(&path).expect("open");
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, imported_at) \
+             VALUES (1,'u','old','1971-01-01T09:00:00',0), (2,'u','new','2999-01-01T09:00:00',0)",
+            [],
+        )
+        .unwrap();
+        rebuild_session_summary(&conn).expect("summary");
+        let db: SharedDbState = Arc::new(Mutex::new(DbState {
+            conn: Some(conn),
+            path: Some(path.clone()),
+            insight_scope: InsightScopeCache::default(),
+        }));
+
+        // A purge in flight: the gate up and the file's write lock held, as
+        // `purge_beside` holds them between its BEGIN and COMMIT.
+        PURGE_GATE.running.lock().unwrap().push(path.clone());
+        let running = PurgeRunning(path.clone());
+        let purger = Connection::open(&path).unwrap();
+        purger.execute_batch("BEGIN IMMEDIATE; DELETE FROM interactions WHERE log_id = 1;").unwrap();
+
+        // A read goes straight through, and sees the rows as they were.
+        let seen: i64 = {
+            let state = db.lock().unwrap();
+            state.conn.as_ref().unwrap().query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(seen, 2, "a read during the purge sees the rows as they were");
+
+        // A write waits — with the database lock released, so reads still go.
+        let wrote = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let (db, wrote) = (db.clone(), wrote.clone());
+            std::thread::spawn(move || {
+                let state = lock_for_write(&db).expect("lock");
+                set_gap_fixed_rows(state.conn.as_ref().unwrap(), &[2], true, None).expect("write");
+                wrote.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+        };
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!wrote.load(std::sync::atomic::Ordering::SeqCst), "the write went in during the purge");
+        assert!(db.try_lock().is_ok(), "a waiting write must not hold the database lock");
+
+        purger.execute_batch("COMMIT").unwrap();
+        drop(running);
+        writer.join().unwrap();
+        assert!(wrote.load(std::sync::atomic::Ordering::SeqCst));
+        let state = db.lock().unwrap();
+        let c = state.conn.as_ref().unwrap();
+        let left: i64 = c.query_row("SELECT COUNT(*) FROM interactions", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 1, "and once it commits, reads see the purge");
+        drop(state);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `purge_beside` end to end: the purge on its own connection leaves the
+    /// shared one with exactly what `purge_expired_into` would, and takes the
+    /// gate down however it ends.
+    #[test]
+    fn a_purge_beside_matches_a_purge_in_place() {
+        let dir = std::env::temp_dir().join(format!("cai-purge-beside-e2e-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.db").to_str().unwrap().to_string();
+        let conn = open_db(&path).expect("open");
+        conn.execute(
+            "INSERT INTO interactions (log_id, interaction_uuid, session_uuid, timestamp_start, imported_at) \
+             VALUES (1,'u','old','1971-01-01T09:00:00',0), (2,'u','new','2999-01-01T09:00:00',0)",
+            [],
+        )
+        .unwrap();
+        rebuild_session_summary(&conn).expect("summary");
+        let db: SharedDbState = Arc::new(Mutex::new(DbState {
+            conn: Some(conn),
+            path: Some(path.clone()),
+            insight_scope: InsightScopeCache::default(),
+        }));
+        let res = purge_beside(&db, 30).expect("purge");
+        assert_eq!(res.purged, 1);
+        assert!(!PURGE_GATE.is_running(&path), "the gate came down");
+        let state = db.lock().unwrap();
+        let c = state.conn.as_ref().unwrap();
+        let left: Vec<String> = c
+            .prepare("SELECT session_uuid FROM session_summary ORDER BY 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["new".to_string()]);
+        let scoped = summary_snapshot(c);
+        rebuild_session_summary(c).expect("full rebuild");
+        assert_eq!(scoped, summary_snapshot(c));
+        assert!(!meta_flag_set(c, META_PENDING_FINALIZE));
+        drop(state);
+        assert_eq!(purge_beside(&db, 30).expect("again").purged, 0);
+        // A database that is gone still takes the gate down.
+        let missing = dir.join("missing/x.db").to_str().unwrap().to_string();
+        db.lock().unwrap().path = Some(missing.clone());
+        assert!(purge_beside(&db, 30).is_err());
+        assert!(!PURGE_GATE.is_running(&missing));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Dropping the orphan-context sweep from the import path is only safe if an
@@ -20576,6 +20806,54 @@ mod expr_perf {
             Err(e) if e.contains("interrupt") => format!("{:>7}ms TIMEOUT", r.0),
             Err(e) => format!("ERR {e}"),
         }
+    }
+
+    /// Searches while the launch purge runs beside them: each one's latency,
+    /// against the purge's own duration. `CAI_NO_SEARCH` times the purge alone.
+    ///   CAI_TEST_DB=copy.db CAI_RETENTION=90 cargo test --release --lib expr_perf::purge_beside_cost -- --nocapture --ignored
+    #[test]
+    #[ignore]
+    fn purge_beside_cost() {
+        let Ok(path) = std::env::var("CAI_TEST_DB") else { return };
+        let days: i64 = std::env::var("CAI_RETENTION").ok().and_then(|s| s.parse().ok()).unwrap_or(90);
+        let conn = open_db(&path).expect("open");
+        let entity: String = conn
+            .query_row("SELECT name FROM entity_index LIMIT 1", [], |r| r.get(0))
+            .unwrap_or_default();
+        let db: SharedDbState = Arc::new(Mutex::new(DbState {
+            conn: Some(conn),
+            path: Some(path.clone()),
+            insight_scope: InsightScopeCache::default(),
+        }));
+        let args = GetSessionsArgs {
+            query: Some(format!("entity:\"{entity}\"")),
+            query_scope: Some("user".to_string()),
+            ..Default::default()
+        };
+        let purger = {
+            let db = db.clone();
+            std::thread::spawn(move || {
+                let t = Instant::now();
+                let r = purge_beside(&db, days);
+                (t.elapsed().as_millis(), r.map(|r| r.purged))
+            })
+        };
+        let mut lat = Vec::new();
+        while !purger.is_finished() && std::env::var("CAI_NO_SEARCH").is_err() {
+            let t = Instant::now();
+            let state = db.lock().unwrap();
+            let _ = page(state.conn.as_ref().unwrap(), &args);
+            drop(state);
+            lat.push(t.elapsed().as_millis());
+        }
+        let (ms, purged) = purger.join().unwrap();
+        lat.sort();
+        println!(
+            "purge: {purged:?} rows in {ms} ms; {} searches meanwhile, median {} ms, slowest {} ms",
+            lat.len(),
+            lat.get(lat.len() / 2).copied().unwrap_or(0),
+            lat.last().copied().unwrap_or(0),
+        );
     }
 
     #[test]
