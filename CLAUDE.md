@@ -77,7 +77,8 @@ frontend/
     search-match-count.test.js, share-content-nodes.test.js,
     share-content-links.test.js, saved-searches.test.js,
     unreachable-search.test.js, modal-tags.test.js,
-    dialog-flow.test.js, expr-group.test.js, entity-condense.test.js
+    dialog-flow.test.js, expr-group.test.js, entity-condense.test.js,
+    link-search.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`

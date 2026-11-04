@@ -15435,7 +15435,9 @@
       // Single-pass replacement prevents double-wrapping when (URL) follows a [Label].
       function hlVar(html) {
         return html.replace(
-          /\[([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g,
+          // `<mark>` may open at the URL's first character: searching a whole
+          // URL marks it from `https`, and that is still a link.
+          /\[([^\]]+)\](?:\(((?:<mark>)?https?:\/\/[^\s)]+)\))?/g,
           (_, inner, url) => {
             if (url) {
               // Strip <mark> tags injected by hl() before using URL in onclick
@@ -17758,6 +17760,20 @@
         )
       }
 
+      /// A Response's text, plus the image and video URLs the search hit. The
+      /// worker searches those (`responseUrls`) and the text shows `[Image]`, so
+      /// a card found by one had nothing on it saying why. Unchanged unless one
+      /// matched; link URLs need none of this, `stripDisplay` already shows them.
+      function _withMatchedMediaUrls(text, images, videos, termRes) {
+        let out = text
+        const add = (label, url) => {
+          if (url && _anyTermMatches(termRes, url)) out += " [" + label + "](" + url + ")"
+        }
+        for (const m of images || []) add("Image", m.Name || m.name)
+        for (const m of videos || []) add("Video", m.Url || m.url)
+        return out
+      }
+
       function answerTextMatchesTermRes(termRes, displayText, rawText) {
         return (
           _anyTermMatches(termRes, displayText) ||
@@ -17985,7 +18001,12 @@
         const def = defaultArticleAnswer(art)
         for (const o of art.Outputs || []) {
           if (o.Type !== "Answer" || o === def) continue
-          const displayText = stripDisplay(o.Text || "", o.Links || [])
+          const displayText = _withMatchedMediaUrls(
+            stripDisplay(o.Text || "", o.Links || []),
+            o.Images,
+            o.Videos,
+            termRes,
+          )
           if (!answerTextMatchesTermRes(termRes, displayText, o.Text || ""))
             continue
           if (!_snippetHasAllTerms(termRes, displayText, o.Text || "")) continue
@@ -18030,7 +18051,15 @@
         if (def && mi.r.includes(answers.indexOf(def)))
           return {
             label: "Response",
-            text: _snippetAround(stripDisplay(def.Text || "", def.Links || []), termRes),
+            text: _snippetAround(
+              _withMatchedMediaUrls(
+                stripDisplay(def.Text || "", def.Links || []),
+                def.Images,
+                def.Videos,
+                termRes,
+              ),
+              termRes,
+            ),
           }
         const qs = mi.q.map((i) => art.Questions[i].Text).filter((t) => t !== title)
         if (!qs.length) return null
@@ -18368,7 +18397,12 @@
           const art = articleMap.get(n.output.kbaIdReference)
           for (const o of (art && art.Outputs) || []) {
             if (o.Type !== "Answer") continue
-            const t = stripDisplay(o.Text || "", o.Links || [])
+            const t = _withMatchedMediaUrls(
+              stripDisplay(o.Text || "", o.Links || []),
+              o.Images,
+              o.Videos,
+              termRes,
+            )
             if (
               answerTextMatchesTermRes(termRes, t, o.Text || "") &&
               answerPassesContextFilters(
@@ -18386,9 +18420,14 @@
           const defaultAnsItem = defaultDialogAnswerItem(ansItems)
           for (const i of ansItems) {
             if (searchExcludeNonDefault && i !== defaultAnsItem) continue
-            const t = stripDisplay(
-              (i.data && i.data.text) || "",
-              (i.data && i.data.hyperlinks) || [],
+            const t = _withMatchedMediaUrls(
+              stripDisplay(
+                (i.data && i.data.text) || "",
+                (i.data && i.data.hyperlinks) || [],
+              ),
+              i.data && i.data.images,
+              i.data && i.data.videos,
+              termRes,
             )
             if (
               answerTextMatchesTermRes(termRes, t, (i.data && i.data.text) || "") &&
@@ -20441,19 +20480,27 @@
       /// The map rides along with the conversation-search entity options, but
       /// the Content tab wants the ids too and may never open that picker.
       /// Guarded so the scan happens once per database either way.
-      let _entityIdsLoading = false
-      async function ensureEntityIdMap() {
-        if (entityOptionsLoaded || _entityIdsLoading || !convDbPath) return
-        _entityIdsLoading = true
-        try {
-          entityOptions = await _loadEntityOptions()
-          entityOptionsLoaded = true
-        } catch (e) {
-          // No database, or one imported before `entity_index` existed. The
-          // list-page fallback is already what is rendered.
-        } finally {
-          _entityIdsLoading = false
-        }
+      ///
+      /// Every caller gets the one load in flight: returning early instead told
+      /// the type-ahead the list had arrived while the Entities tab's scan was
+      /// still running, so it re-offered too soon and never again.
+      let _entityIdsLoad = null
+      function ensureEntityIdMap() {
+        if (entityOptionsLoaded || !convDbPath) return Promise.resolve()
+        if (_entityIdsLoad) return _entityIdsLoad
+        _entityIdsLoad = _loadEntityOptions()
+          .then((rows) => {
+            entityOptions = rows
+            entityOptionsLoaded = true
+          })
+          .catch(() => {
+            // No database, or one imported before `entity_index` existed. The
+            // list-page fallback is already what is rendered.
+          })
+          .finally(() => {
+            _entityIdsLoad = null
+          })
+        return _entityIdsLoad
       }
 
       /// "Open in CM.com" for one entity, deep-linked where we have an id.
@@ -42628,13 +42675,15 @@
       /// The export's entities that no conversation has triggered are offered
       /// too, as `untriggered` rows. Content listed PLAYMOBIL and this list did
       /// not, which read as a missing entity rather than as "nobody's question
-      /// was recognised as it yet". Only once `entityOptions` has loaded: before
-      /// that, every entity would look untriggered.
+      /// was recognised as it yet". Before `entityOptions` has loaded they are
+      /// offered too, as `countPending` rows with no count: the export already
+      /// holds every name, so the list need not wait for the database to open
+      /// and be scanned, and calling them untriggered then would be untrue.
       function convEntityIndex() {
         if (_convEntityIndex && _convEntityIndexSrc === entityOptions)
           return _convEntityIndex
         const out = []
-        const row = (name, ent, count, untriggered) => {
+        const row = (name, ent, count, untriggered, countPending) => {
           const words = []
           if (ent && ent.words) {
             for (const w of ent.words) {
@@ -42651,6 +42700,7 @@
             idText: "",
             weight: count,
             untriggered,
+            countPending,
             words,
             hay: (name + " " + words.join(" ")).toLowerCase(),
           })
@@ -42660,13 +42710,14 @@
           const name = String(o.value || "")
           if (!name) continue
           triggered.add(name.toUpperCase())
-          row(name, entityMap ? entityMap.get(name.toUpperCase()) : null, o.count || 0, false)
+          row(name, entityMap ? entityMap.get(name.toUpperCase()) : null, o.count || 0, false, false)
         }
-        if (entityOptionsLoaded && entityMap) {
+        if (entityMap) {
           // Lower-cased, as `entity_index` stores names, so the chip is
           // spelled the way a triggered entity's would be.
           for (const [upper, ent] of entityMap) {
-            if (!triggered.has(upper)) row(String(ent.name).toLowerCase(), ent, 0, true)
+            if (!triggered.has(upper))
+              row(String(ent.name).toLowerCase(), ent, 0, entityOptionsLoaded, !entityOptionsLoaded)
           }
         }
         _convEntityIndex = out
@@ -43067,7 +43118,9 @@
             const badge = CONV_SUGGEST_BADGES[c.kind] || c.kind
             // A row with no title of its own already *is* its id, so repeating
             // it on the right would be the same string twice.
-            const meta = c.untriggered
+            const meta = c.countPending
+              ? ""
+              : c.untriggered
               ? "no conversations yet"
               : c.kind === "entity" || c.kind === "ctxtag" || c.kind === "metatag"
               ? insPlural(c.weight, c.unit || "conversations")
@@ -44661,7 +44714,16 @@
       /// Warm the entity list so the first keystroke has something to offer.
       /// `ensureEntityIdMap` is idempotent and already guarded on the database,
       /// so this needs no flag of its own.
-      function _convWarmSuggestSources() {
+      ///
+      /// Entities first, the tag lists after. All three are full scans behind
+      /// the one database lock; the tag scans are the slow ones (cold, on a real
+      /// database: 1 s and 0.4 s, entities 0.12 s) and started first, so the
+      /// list people type into most waited for the two they use least.
+      async function _convWarmSuggestSources() {
+        if (!entityOptionsLoaded) {
+          await ensureEntityIdMap()
+          _convSuggestReoffer()
+        }
         // The tag lists back the context and metadata suggestions. Loaded
         // once, the same lists the tag popover reads.
         for (const k of ["context", "metadata"]) {
@@ -44671,21 +44733,23 @@
             .then((rows) => {
               kind.setOptions(rows || [])
               kind.setLoaded(true)
+              _convSuggestReoffer()
             })
             .catch(() => {})
         }
-        if (entityOptionsLoaded) return
-        // `get_entity_options` is one full scan of `entity_index`, which on a
-        // real database is not instant — and the first keystroke of a cold
-        // open beats it. Silence there reads as "this database has no
-        // entities", so re-offer once the scan lands if the field still holds
-        // what was typed while waiting.
-        Promise.resolve(ensureEntityIdMap()).then(() => {
-          const input = document.getElementById("convSearch")
-          if (!input || document.activeElement !== input) return
-          if (!input.value.trim()) return
-          openConvSuggest(input.value)
-        })
+      }
+
+      /// A list landed: redraw the type-ahead for what is typed. The first
+      /// keystroke of a cold open beats every scan, and silence would read as
+      /// "this database has none". The selected row stays selected as the
+      /// counts reorder the list, so Enter still means what it meant.
+      function _convSuggestReoffer() {
+        const input = document.getElementById("convSearch")
+        if (!input || document.activeElement !== input) return
+        if (!input.value.trim() || _convSuggestEditIdx >= 0) return
+        const sel = _convSuggestRows[_convSuggestIdx]
+        const rows = convSuggestFor(input.value)
+        _convSuggestShow(rows, input.value, sel ? rows.findIndex((r) => r.key === sel.key) : -1, null)
       }
 
       // Clicking the field's padding focuses the input, so the token field

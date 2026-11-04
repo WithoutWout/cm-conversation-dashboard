@@ -491,17 +491,23 @@ matching nearly everything, so it runs synchronously on `input` with no debounce
   export loaded those guesses rank below every row that has a real title behind
   it: a nameless "Dialog 1418" outranking the Article actually called *Waar kan
   ik parkeren?* is exactly backwards.
-- **The warm re-offers when the scan lands.** `get_entity_options` is a full
-  scan, and on a real database the first keystroke of a cold open beat it — which
-  showed as *nothing*, indistinguishable from "this database has no entities". It
-  now re-runs the suggestion once the options arrive, if the field still holds
-  what was typed while waiting.
+- **Entities do not wait for the database.** `get_entity_options` is a full scan
+  behind the one database lock and, before that, behind the open — and the first
+  keystroke of a cold open beat it, which showed as *nothing*. With an export
+  loaded the names are already in memory, so they are offered at once as
+  `countPending` rows, no count and not called untriggered, and take their counts
+  when the scan lands. **The warm scans entities first**: the context and metadata
+  scans are slower (cold, 7-day database: 1 s and 0.4 s against 0.12 s) and used to
+  go ahead of it. Each list that lands redraws the type-ahead
+  (`_convSuggestReoffer`), keeping the selected row selected. `ensureEntityIdMap`
+  hands every caller the load in flight: returning early told the type-ahead the
+  list had arrived while the Entities tab's scan was still running.
 - **Entities no conversation has triggered are offered too**, marked "no
   conversations yet" and greyed (`untriggered` in `convEntityIndex`). Content
   listed PLAYMOBIL and this list did not, which read as a bug: `entity_index`
   holds only what the recognizer *matched*, and the five users who typed
   "playmobil" had it logged under `missingWords`. On the real Efteling data
-  that is 752 of the export's 2,317 entities. They are added only once
+  that is 752 of the export's 2,317 entities. They are marked only once
   `entityOptions` has loaded (before that every entity would look untriggered),
   spelled lower-case as `entity_index` stores names so the chip is the one a
   triggered entity would make, and rank below triggered entities of the same
@@ -835,6 +841,19 @@ each pinned by `frontend/tests/dialog-search.test.js`.
   renderer drops both spellings (`%{…()}` and the `[…()]` that `stripDisplay`
   makes of them) inside `_anyTermMatches`, which every modal and card check
   goes through. Variable names carry no parentheses and stay searchable.
+- **A Response's URLs are searched, whole or in part** (`responseUrls`, the
+  `u` field beside `s` / `r` / `e`): an Article's `Links[].URL`, `Images[].Name`,
+  `Videos[].Url`, a node's `hyperlinks[].urlTemplate`, `images[].name`,
+  `videos[].url`. The text holds only `%{Link(1)}` and the label, so a URL was
+  found only where it was spelled out: **666 of 3557** places on the 2026-10-30
+  export, which is what "it finds some of them" was. Now all of them. They are
+  part of the Response, so ¬T keeps them and the one-part rule holds. The flip
+  side is deliberate: a word in a URL finds it — `park` 1241 → 1557 results
+  (`/nl/park/…`), `tickets` 540 → 582, `hotel` 1059 → 1087, `parkeren` unchanged.
+  A link's URL already shows on the card (`stripDisplay`); an image or video
+  shows `[Image]`, so `_withMatchedMediaUrls` adds the URL the search hit to the
+  snippet. A node's HTTP call URL (`action.data.url`, 27) is not a Response and is
+  not searched.
 - **Accents are ignored in a case-insensitive search**, as the Conversations
   search does: `oke` 27 → 159, `krumel` 0 → 12, both now equal to the accented
   spelling. The worker compares folded strings (`fold`, and the pre-lowered
