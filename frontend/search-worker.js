@@ -174,6 +174,14 @@ function dropPlaceholders(t) {
   return (t || "").replace(/%\{[A-Za-z]+\([^}]*\)\}/g, " ")
 }
 
+/// Where a Response points: its links, images and videos. The text holds only
+/// `%{Link(1)}` and the label, so without this a URL was found only where it
+/// happened to be spelled out — 666 of the 3557 places a URL sits in the real
+/// export. Variables in a URL read as their names, as in the text.
+function responseUrls(values) {
+  return dropPlaceholders(expandVarNames(values.filter(Boolean).join(" ")))
+}
+
 // ── Phrases ──────────────────────────────────────────────────────────────────
 //
 // A term of several words matches however the words are joined. The export
@@ -642,15 +650,22 @@ function precomputeArticle(a) {
     const _as = strip(_aExp)
     const _ar = dropPlaceholders(_arT)
     const _ae = dropPlaceholders(expandVarNames(_aExp))
+    const _au = responseUrls([
+      ...(_ao.Links || []).map((l) => l.URL),
+      ...(_ao.Images || []).map((i) => i.Name),
+      ...(_ao.Videos || []).map((v) => v.Url),
+    ])
     a._answerItems.push({
       s: _as,
       r: _ar,
       e: _ae,
+      u: _au,
       sl: fold(_as),
       rl: fold(_ar),
       el: fold(_ae),
-      f: [_as, _ar, _ae],
-      l: [fold(_as), fold(_ar), fold(_ae)],
+      ul: fold(_au),
+      f: [_as, _ar, _ae, _au],
+      l: [fold(_as), fold(_ar), fold(_ae), fold(_au)],
       ctxSet: _aCtx,
       isNonDefault: _ao !== o && !_ao.IsDefault,
     })
@@ -719,15 +734,23 @@ function precomputeDialog(item) {
       const _ns = strip(_nExp)
       const _nr = dropPlaceholders(_nrT)
       const _ne = dropPlaceholders(expandVarNames(_nExp))
+      const _nd = _nai.data || {}
+      const _nu = responseUrls([
+        ...(_nd.hyperlinks || []).map((h) => h.urlTemplate),
+        ...(_nd.images || []).map((i) => i.name),
+        ...(_nd.videos || []).map((v) => v.url),
+      ])
       _nodeAnsItems.push({
         s: _ns,
         r: _nr,
         e: _ne,
+        u: _nu,
         sl: fold(_ns),
         rl: fold(_nr),
         el: fold(_ne),
-        f: [_ns, _nr, _ne],
-        l: [fold(_ns), fold(_nr), fold(_ne)],
+        ul: fold(_nu),
+        f: [_ns, _nr, _ne, _nu],
+        l: [fold(_ns), fold(_nr), fold(_ne), fold(_nu)],
         ctxSet: _nCtx,
         isNonDefault: _nai !== ans && !_nai.isDefault,
       })
@@ -1016,10 +1039,10 @@ function ctxSetMatchesFilters(ctxSet) {
 }
 
 // Check if a single answer item matches ALL terms in a single AND-group.
-// The AND terms can be spread across the s/r/e fields of the same answer item.
+// The AND terms can be spread across the s/r/e/u fields of the same answer item.
 function answerMatchesAndGroup(ai, andGroup) {
-  const fields = [ai.s, ai.r, ai.e]
-  const fieldsLower = [ai.sl, ai.rl, ai.el]
+  const fields = [ai.s, ai.r, ai.e, ai.u]
+  const fieldsLower = [ai.sl, ai.rl, ai.el, ai.ul]
   return andGroupMatchesFields(andGroup, fields, fieldsLower)
 }
 

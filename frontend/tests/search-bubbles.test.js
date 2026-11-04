@@ -578,10 +578,15 @@ eq(
   ctx.labelsFor("parkeren")),
   ["parkeren", "parkeren_hotel"],
 )
-// Before the database's list has loaded, every export entity would look
-// untriggered — so none is offered as one.
+// Before the database's list has loaded the export's names are offered at once,
+// without a count: the list must not wait for the scan, and calling them
+// untriggered then would be untrue.
 ctx.setUp({ exported: WITH_PLAYMOBIL })
-eq("nothing is offered as untriggered before the entity list loads", ctx.labelsFor("playmo"), [])
+eq(
+  "an export entity is offered before the entity list loads, count pending",
+  ctx.convSuggestFor("playmo").map((c) => [c.value, !!c.untriggered, !!c.countPending]),
+  [["playmobil", false, true]],
+)
 
 // ── Regex mode ───────────────────────────────────────────────────────────────
 // `a(b|c)` is a group the *user* wrote, and reading it as ours would silently
