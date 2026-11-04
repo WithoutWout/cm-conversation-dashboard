@@ -104,6 +104,11 @@ jobs:
               you type, instead of waiting for the database. Their conversation
               counts fill in a moment later.
 
+            ### Finished imports look finished
+            - An import that has ended no longer keeps saying "Finishing up…".
+              It now shows only the result, so it can't be mistaken for an import
+              that is still running.
+
             ---
 
             ## Download
