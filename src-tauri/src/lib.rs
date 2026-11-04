@@ -19,6 +19,21 @@ use tauri_plugin_updater::UpdaterExt;
 
 const WATCH_EVENT_NAME: &str = "data-folder-updated";
 
+/// How long the watcher ignores events about a file this app just moved to the
+/// Trash. Without it, accepting "delete the older exports" would be answered by
+/// "Export Files Updated — reload?", about a change the user made a second ago
+/// and that touches nothing they have loaded. Generous on purpose: it only
+/// applies to those exact file names.
+const OWN_REMOVAL_WINDOW: Duration = Duration::from_secs(10);
+
+/// Every kind of export file: label, the pattern in its name, its extension.
+/// The same three the loader reads, in the order the offer lists them.
+const EXPORT_KINDS: [(&str, &str, &str); 3] = [
+    ("Articles", "ArticlesExport", "json"),
+    ("Dialogs", "DialogsExport", "json"),
+    ("Entities", "EntitiesExport", "csv"),
+];
+
 /// How quiet the folder has to go before one change is reported.
 ///
 /// A CM.com export drop is two or three files, and every one of them reaches
@@ -151,6 +166,35 @@ struct DataSourceInfo {
     watched_folder: Option<String>,
     missing_sources: Vec<String>,
     statuses: Vec<SourceStatus>,
+    /// Superseded export files in this folder — what the renderer offers to
+    /// delete. See `docs/export-files.md`.
+    old_exports: Vec<OldExport>,
+}
+
+/// An export file a newer version of the same export has replaced.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OldExport {
+    kind: String,
+    filename: String,
+    /// The newer file that stays, and that is the one loaded.
+    kept_filename: String,
+    modified_ms: Option<u64>,
+    bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteOldExportsResult {
+    deleted: Vec<String>,
+    failed: Vec<DeleteOldExportFailure>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteOldExportFailure {
+    filename: String,
+    error: String,
 }
 
 #[derive(Serialize)]
@@ -496,6 +540,9 @@ struct WatchState {
     /// matches, so a thread left over from the previous folder cannot announce
     /// a change against the new one.
     generation: u64,
+    /// File names this app just moved to the Trash, and when — see
+    /// [`OWN_REMOVAL_WINDOW`].
+    own_removals: Vec<(String, Instant)>,
 }
 
 impl Default for WatchState {
@@ -505,6 +552,7 @@ impl Default for WatchState {
             watched_folder: None,
             pending: None,
             generation: 0,
+            own_removals: Vec::new(),
         }
     }
 }
@@ -592,6 +640,139 @@ fn newest_matching_file(dir: &Path, pattern: &str) -> Option<PathBuf> {
     let mut matches = list_matching_files(dir, pattern);
     matches.sort_by(|left, right| file_sort_key(right).cmp(&file_sort_key(left)));
     matches.into_iter().next()
+}
+
+fn file_name_of(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// The date in an export's name: `..._ArticlesExport_2026-03-20.json`. ISO, so
+/// two of them compare as strings.
+fn export_name_date(name: &str) -> Option<String> {
+    let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}").ok()?;
+    re.find(name).map(|found| found.as_str().to_string())
+}
+
+/// The file the loader reads for this kind, and the older versions of it.
+///
+/// Being older by modification time is what makes the loader skip a file, but
+/// it is not enough to offer it for deletion, because this ends in a delete:
+///
+/// - **Same export only.** A folder can hold `..._nl_ArticlesExport_...` and
+///   `..._de_ArticlesExport_...`. The text before the pattern names the project
+///   and culture, and a file with another one is not a version of this file.
+/// - **Never a file whose name says it is newer.** A download or a sync can give
+///   an old file a fresh modification time. The loader then reads the old one,
+///   and offering to delete the actually newer export would make that permanent.
+fn older_versions(dir: &Path, pattern: &str, ext: &str) -> Option<(PathBuf, Vec<PathBuf>)> {
+    let mut matches = list_matching_files_ext(dir, pattern, ext);
+    matches.sort_by(|left, right| file_sort_key(right).cmp(&file_sort_key(left)));
+    let mut files = matches.into_iter();
+    let kept = files.next()?;
+    let kept_name = file_name_of(&kept);
+    let kept_prefix = kept_name.split(pattern).next().unwrap_or_default().to_string();
+    let kept_date = export_name_date(&kept_name);
+    let older = files
+        .filter(|path| {
+            let name = file_name_of(path);
+            let same_export = name.split(pattern).next() == Some(kept_prefix.as_str());
+            let named_newer = matches!(
+                (export_name_date(&name), kept_date.as_ref()),
+                (Some(date), Some(kept)) if date.as_str() > kept.as_str()
+            );
+            same_export && !named_newer
+        })
+        .collect();
+    Some((kept, older))
+}
+
+/// What can be offered for deletion. `loaded` says whether a kind's newest file
+/// actually yielded content: a truncated or corrupt new export loads as empty,
+/// and that is the moment the previous version is the only good copy left.
+fn old_export_files(dir: &Path, loaded: impl Fn(&str) -> bool) -> Vec<OldExport> {
+    let mut out = Vec::new();
+    for (kind, pattern, ext) in EXPORT_KINDS {
+        if !loaded(kind) {
+            continue;
+        }
+        let Some((kept, older)) = older_versions(dir, pattern, ext) else {
+            continue;
+        };
+        for path in older {
+            let meta = fs::metadata(&path).ok();
+            out.push(OldExport {
+                kind: kind.to_string(),
+                filename: file_name_of(&path),
+                kept_filename: file_name_of(&kept),
+                modified_ms: meta
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64),
+                bytes: meta.map(|m| m.len()).unwrap_or(0),
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        let rank = |kind: &str| EXPORT_KINDS.iter().position(|k| k.0 == kind);
+        rank(&a.kind)
+            .cmp(&rank(&b.kind))
+            .then(b.modified_ms.cmp(&a.modified_ms))
+    });
+    out
+}
+
+/// Remove the named files, each only if it is an older version **right now**.
+///
+/// The names come from the renderer and are never turned into paths: a name is
+/// looked up among the older versions read from the folder at this moment, so
+/// nothing else can be reached, neither a path nor the file being loaded, and a
+/// file that became the newest since the offer was shown is refused.
+fn remove_older_exports(
+    dir: &Path,
+    filenames: &[String],
+    remove: impl Fn(&Path) -> Result<(), String>,
+) -> DeleteOldExportsResult {
+    let removable: HashMap<String, PathBuf> = EXPORT_KINDS
+        .iter()
+        .filter_map(|(_, pattern, ext)| older_versions(dir, pattern, ext))
+        .flat_map(|(_, older)| older)
+        .map(|path| (file_name_of(&path), path))
+        .collect();
+    let mut result = DeleteOldExportsResult {
+        deleted: Vec::new(),
+        failed: Vec::new(),
+    };
+    for filename in filenames {
+        let outcome = match removable.get(filename) {
+            Some(path) => remove(path),
+            None => Err("It is no longer an older version of an export.".to_string()),
+        };
+        match outcome {
+            Ok(()) => result.deleted.push(filename.clone()),
+            Err(error) => result.failed.push(DeleteOldExportFailure {
+                filename: filename.clone(),
+                error,
+            }),
+        }
+    }
+    result
+}
+
+/// To the Trash or Recycle Bin, not gone. On macOS through `NSFileManager`: the
+/// crate's default asks Finder through `osascript`, which prompts for permission
+/// to control Finder, for a button the user just pressed.
+fn move_to_trash(path: &Path) -> Result<(), String> {
+    #[allow(unused_mut)]
+    let mut trash = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        trash.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    trash.delete(path).map_err(|e| e.to_string())
 }
 
 fn find_source_files(dirs: &[PathBuf]) -> HashMap<&'static str, PathBuf> {
@@ -742,6 +923,26 @@ fn matches_any_source(path: &Path) -> bool {
     name.ends_with(".csv") && name.contains("EntitiesExport")
 }
 
+/// Is every export file this event mentions one this app just moved to the
+/// Trash? Matched on the file name: the watch is one folder, not recursive, and
+/// FSEvents may report the path by another spelling (`/tmp`, `/private/tmp`).
+fn event_is_own_removal(
+    event: &notify::Event,
+    own_removals: &[(String, Instant)],
+    now: Instant,
+) -> bool {
+    event
+        .paths
+        .iter()
+        .filter(|path| matches_any_source(path))
+        .all(|path| {
+            let name = file_name_of(path);
+            own_removals.iter().any(|(removed, at)| {
+                *removed == name && now.duration_since(*at) < OWN_REMOVAL_WINDOW
+            })
+        })
+}
+
 fn should_emit_for_event(event: &notify::Event) -> bool {
     if !matches!(
         event.kind,
@@ -781,6 +982,7 @@ fn configure_folder_watch(
     state.watcher = None;
     state.watched_folder = None;
     state.pending = None;
+    state.own_removals.clear();
     state.generation = state.generation.wrapping_add(1);
     let generation = state.generation;
 
@@ -805,6 +1007,9 @@ fn configure_folder_watch(
             let now = Instant::now();
             let mut state = state_handle.lock().expect("watch state lock poisoned");
             if state.generation != generation {
+                return;
+            }
+            if event_is_own_removal(&event, &state.own_removals, now) {
                 return;
             }
             match state.pending.as_mut() {
@@ -961,8 +1166,22 @@ fn load_app_data(
     let watched_folder = watch_state
         .lock()
         .ok()
-        .and_then(|state| state.watched_folder.clone())
-        .map(|path| path.to_string_lossy().into_owned());
+        .and_then(|state| state.watched_folder.clone());
+
+    // Deleting works on the watched folder, so nothing is offered without one.
+    let has_items = |value: &serde_json::Value| value.as_array().is_some_and(|a| !a.is_empty());
+    let old_exports = watched_folder
+        .as_deref()
+        .map(|folder| {
+            old_export_files(folder, |kind| match kind {
+                "Articles" => has_items(&articles),
+                "Dialogs" => has_items(&dialogs) || has_items(&t_dialogs),
+                _ => has_items(&entities),
+            })
+        })
+        .unwrap_or_default();
+
+    let watched_folder = watched_folder.map(|path| path.to_string_lossy().into_owned());
 
     let statuses = source_definitions()
         .iter()
@@ -1002,8 +1221,41 @@ fn load_app_data(
             watched_folder,
             missing_sources,
             statuses,
+            old_exports,
         },
     }
+}
+
+/// Move superseded export files to the Trash. Takes file names only; the folder
+/// is the one this app is watching, never one the renderer names. See
+/// `remove_older_exports` for why the names are safe.
+#[tauri::command]
+async fn delete_old_exports(
+    watch_state: State<'_, SharedWatchState>,
+    filenames: Vec<String>,
+) -> Result<DeleteOldExportsResult, String> {
+    let watch_state = watch_state.inner().clone();
+    let folder = watch_state
+        .lock()
+        .map_err(|e| e.to_string())?
+        .watched_folder
+        .clone()
+        .ok_or("No data folder is being watched.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_older_exports(&folder, &filenames, |path| {
+            // Marked before the move, or its events could beat the mark.
+            if let Ok(mut state) = watch_state.lock() {
+                let now = Instant::now();
+                state
+                    .own_removals
+                    .retain(|(_, at)| now.duration_since(*at) < OWN_REMOVAL_WINDOW);
+                state.own_removals.push((file_name_of(path), now));
+            }
+            move_to_trash(path)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -12589,6 +12841,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             resize_to_available_height,
             get_data,
+            delete_old_exports,
             open_url,
             open_preview_window,
             select_data_folder,
@@ -12892,6 +13145,199 @@ mod tests {
             .map(|ms| Duration::from_millis(*ms))
             .collect();
         assert_eq!(notifications_for(&drops), 2);
+    }
+
+    /// A folder of real file names with modification times `minutes` ago, for
+    /// the older-export tests. Each test removes the folder when it is done.
+    fn export_folder(tag: &str, files: &[(&str, u64)]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cai-old-exports-{}-{}", tag, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for (name, minutes) in files {
+            let path = dir.join(name);
+            fs::write(&path, "x").unwrap();
+            let file = fs::File::options().write(true).open(&path).unwrap();
+            file.set_modified(SystemTime::now() - Duration::from_secs(minutes * 60))
+                .unwrap();
+        }
+        dir
+    }
+
+    fn old_names(dir: &Path) -> Vec<String> {
+        old_export_files(dir, |_| true).into_iter().map(|f| f.filename).collect()
+    }
+
+    #[test]
+    fn older_versions_of_every_kind_are_found_and_the_newest_is_kept() {
+        let dir = export_folder("kinds", &[
+            ("E_nl_ArticlesExport_2026-03-20.json", 30),
+            ("E_nl_ArticlesExport_2026-03-26.json", 1),
+            ("E_nl_DialogsExport_2026-03-20.json", 30),
+            ("E_nl_DialogsExport_2026-03-26.json", 1),
+            ("E_nl_EntitiesExport_2026-03-20.csv", 30),
+            ("E_nl_EntitiesExport_2026-03-26.csv", 1),
+            ("notes.json", 90),
+            ("E_nl_InteractionLog_2026-03-20.csv", 90),
+        ]);
+        let found = old_export_files(&dir, |_| true);
+        let pairs: Vec<(&str, &str)> = found.iter().map(|f| (f.kind.as_str(), f.filename.as_str())).collect();
+        assert_eq!(pairs, vec![
+            ("Articles", "E_nl_ArticlesExport_2026-03-20.json"),
+            ("Dialogs", "E_nl_DialogsExport_2026-03-20.json"),
+            ("Entities", "E_nl_EntitiesExport_2026-03-20.csv"),
+        ]);
+        assert_eq!(found[0].kept_filename, "E_nl_ArticlesExport_2026-03-26.json");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The offer's "keep" and the loader's "read" must be the same file.
+    #[test]
+    fn the_kept_file_is_the_one_the_loader_reads() {
+        let dir = export_folder("loader", &[
+            ("E_nl_ArticlesExport_2026-03-20.json", 30),
+            ("E_nl_ArticlesExport_2026-03-20 (1).json", 1),
+        ]);
+        let (kept, _) = older_versions(&dir, "ArticlesExport", "json").unwrap();
+        assert_eq!(Some(kept), newest_matching_file(&dir, "ArticlesExport"));
+        assert_eq!(old_names(&dir), vec!["E_nl_ArticlesExport_2026-03-20.json"]);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn another_project_or_culture_is_not_an_older_version() {
+        let dir = export_folder("culture", &[
+            ("E_nl_ArticlesExport_2026-03-26.json", 1),
+            ("E_de_ArticlesExport_2026-03-20.json", 30),
+        ]);
+        assert!(old_names(&dir).is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// An old file with a fresh modification time gets loaded, and the export
+    /// whose name says it is newer must not be what we offer to throw away.
+    #[test]
+    fn a_file_named_newer_than_the_kept_one_is_never_offered() {
+        let dir = export_folder("named-newer", &[
+            ("E_nl_ArticlesExport_2026-03-20.json", 1),
+            ("E_nl_ArticlesExport_2026-03-26.json", 30),
+        ]);
+        assert!(old_names(&dir).is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A new export that failed to load leaves the old one as the only good copy.
+    #[test]
+    fn nothing_is_offered_for_a_kind_whose_newest_file_did_not_load() {
+        let dir = export_folder("corrupt", &[
+            ("E_nl_ArticlesExport_2026-03-20.json", 30),
+            ("E_nl_ArticlesExport_2026-03-26.json", 1),
+        ]);
+        assert!(old_export_files(&dir, |kind| kind != "Articles").is_empty());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The renderer's names are looked up, never joined onto a path. Neither the
+    /// newest file nor anything outside the older versions can be reached.
+    #[test]
+    fn only_a_current_older_version_can_be_removed() {
+        let dir = export_folder("remove", &[
+            ("E_nl_ArticlesExport_2026-03-20.json", 30),
+            ("E_nl_ArticlesExport_2026-03-26.json", 1),
+            ("notes.json", 90),
+        ]);
+        let outside = dir.with_extension("outside.json");
+        fs::write(&outside, "x").unwrap();
+        let names: Vec<String> = [
+            "E_nl_ArticlesExport_2026-03-20.json",
+            "E_nl_ArticlesExport_2026-03-26.json",
+            "notes.json",
+            "../cai-old-exports-outside.json",
+            outside.to_str().unwrap(),
+        ].iter().map(|s| s.to_string()).collect();
+        let result = remove_older_exports(&dir, &names, |path| fs::remove_file(path).map_err(|e| e.to_string()));
+        assert_eq!(result.deleted, vec!["E_nl_ArticlesExport_2026-03-20.json"]);
+        assert_eq!(result.failed.len(), 4);
+        assert!(!dir.join("E_nl_ArticlesExport_2026-03-20.json").exists());
+        assert!(dir.join("E_nl_ArticlesExport_2026-03-26.json").exists());
+        assert!(dir.join("notes.json").exists());
+        assert!(outside.exists());
+        fs::remove_file(&outside).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_removal_is_reported_for_that_file_only() {
+        let dir = export_folder("fail", &[
+            ("E_nl_ArticlesExport_2026-03-20.json", 30),
+            ("E_nl_ArticlesExport_2026-03-26.json", 1),
+            ("E_nl_DialogsExport_2026-03-20.json", 30),
+            ("E_nl_DialogsExport_2026-03-26.json", 1),
+        ]);
+        let names = vec![
+            "E_nl_ArticlesExport_2026-03-20.json".to_string(),
+            "E_nl_DialogsExport_2026-03-20.json".to_string(),
+        ];
+        let result = remove_older_exports(&dir, &names, |path| {
+            if file_name_of(path).contains("Articles") { Err("locked".to_string()) } else { Ok(()) }
+        });
+        assert_eq!(result.deleted, vec!["E_nl_DialogsExport_2026-03-20.json"]);
+        assert_eq!(result.failed[0].filename, "E_nl_ArticlesExport_2026-03-20.json");
+        assert_eq!(result.failed[0].error, "locked");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Accepting the offer must not earn an "Export Files Updated" dialog, while
+    /// a real change arriving alongside it, or later, must still report.
+    #[test]
+    fn the_watcher_ignores_only_its_own_recent_removals() {
+        let now = Instant::now();
+        let event = |names: &[&str]| notify::Event {
+            kind: EventKind::Any,
+            paths: names.iter().map(|n| PathBuf::from("/data").join(n)).collect(),
+            attrs: Default::default(),
+        };
+        let old = "E_nl_ArticlesExport_2026-03-20.json";
+        let new = "E_nl_ArticlesExport_2026-03-26.json";
+        let own = vec![(old.to_string(), now)];
+        assert!(event_is_own_removal(&event(&[old]), &own, now));
+        assert!(event_is_own_removal(&event(&[old, ".DS_Store"]), &own, now));
+        assert!(!event_is_own_removal(&event(&[new]), &own, now));
+        assert!(!event_is_own_removal(&event(&[old, new]), &own, now));
+        assert!(!event_is_own_removal(&event(&[old]), &own, now + OWN_REMOVAL_WINDOW));
+        assert!(!event_is_own_removal(&event(&[old]), &[], now));
+    }
+
+    /// One real file through the real watcher and the real Trash: what macOS
+    /// reports for the move must be something the filter recognises. Ignored
+    /// because it puts a file in the user's Trash.
+    #[test]
+    #[ignore]
+    fn a_real_move_to_trash_reports_only_the_file_it_moved() {
+        use notify::Watcher;
+        let dir = export_folder("real-trash", &[
+            ("CaiTest_nl_ArticlesExport_2020-01-01.json", 30),
+            ("CaiTest_nl_ArticlesExport_2020-01-02.json", 1),
+        ]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap();
+        watcher.watch(&dir, RecursiveMode::NonRecursive).unwrap();
+        std::thread::sleep(Duration::from_secs(2));
+        while rx.try_recv().is_ok() {}
+        let old = "CaiTest_nl_ArticlesExport_2020-01-01.json".to_string();
+        let result = remove_older_exports(&dir, &[old.clone()], move_to_trash);
+        assert_eq!(result.deleted, vec![old.clone()], "{:?}", result.failed.first().map(|f| &f.error));
+        let own = vec![(old.clone(), Instant::now())];
+        let mut seen = 0;
+        while let Ok(event) = rx.recv_timeout(Duration::from_secs(3)) {
+            let event = event.unwrap();
+            println!("{:?} {:?}", event.kind, event.paths);
+            if should_emit_for_event(&event) {
+                seen += 1;
+                assert!(event_is_own_removal(&event, &own, Instant::now()));
+            }
+        }
+        assert!(seen > 0, "the move should have been reported at all");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// A single event is the ordinary case — one file replaced by hand.

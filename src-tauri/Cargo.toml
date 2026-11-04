@@ -61,6 +61,10 @@ notify = "6.1"
 rusqlite = { version = "0.31", features = ["bundled", "functions"] }
 csv = "1.3"
 regex = "1"
+# "Delete" for older export files means the Trash or Recycle Bin, so a wrong
+# answer to the offer can be undone. No chrono: the crate only wants it to read
+# the Trash's contents back, which this app never does.
+trash = { version = "5", default-features = false, features = ["coinit_apartmentthreaded"] }
 # Only deflate: the portable zip is one deflated entry, and the default feature
 # set drags in bzip2/zstd/lzma for formats we will never produce. Pinned to the
 # same major as `tauri-plugin-updater`'s own zip so the build carries one copy.

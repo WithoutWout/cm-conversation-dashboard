@@ -3387,6 +3387,39 @@
         color: var(--muted);
         line-height: 1.55;
       }
+      .old-exports-list {
+        margin: 12px 0;
+        max-height: 280px;
+        overflow-y: auto;
+        font-size: 0.8rem;
+      }
+      .old-exports-kind {
+        margin: 10px 0 2px;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .old-exports-kind:first-child {
+        margin-top: 0;
+      }
+      .old-exports-kind strong {
+        color: var(--text);
+      }
+      .old-exports-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        padding: 4px 0;
+        border-top: 1px solid var(--border);
+      }
+      .old-exports-name {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .old-exports-meta {
+        flex-shrink: 0;
+        color: var(--muted);
+      }
       .hint code {
         font-family: monospace;
         color: #9a90f0;
@@ -13413,6 +13446,32 @@
       </div>
     </div>
 
+    <!-- OLDER EXPORTS: offered after a load — see `offerOldExports` -->
+    <div class="modal-overlay" id="oldExportsModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3 id="oldExportsTitle">Delete older export files?</h3>
+          <button class="close-btn" id="closeOldExports">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.85rem; line-height: 1.6">
+            A newer version of these files is in your data folder, and the
+            dashboard is using that one.
+          </p>
+          <div class="old-exports-list" id="oldExportsList"></div>
+          <p class="hint">
+            They go to the Trash or Recycle Bin. Your conversations database
+            and everything else in the folder stay as they are.
+          </p>
+          <p class="hint" id="oldExportsStatus" style="color: var(--red)" hidden></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" id="oldExportsLater">Not now</button>
+          <button class="btn-primary" id="oldExportsDelete">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <!-- MISSING DAYS: the once-a-day check — see `checkMissingDays` -->
     <div class="modal-overlay" id="missingDaysModal">
       <div class="modal-box">
@@ -14264,6 +14323,8 @@
           openUrl: (url) => invoke("open_url", { url }),
           openPreviewWindow: (url) => invoke("open_preview_window", { url }),
           selectDataFolder: () => invoke("select_data_folder"),
+          deleteOldExports: (filenames) =>
+            invoke("delete_old_exports", { filenames }),
           onDataFolderUpdated: (handler) =>
             listen
               ? listen("data-folder-updated", handler)
@@ -26373,6 +26434,7 @@
             }),
           })
           triggerSearch()
+          offerOldExports(data.dataSource && data.dataSource.oldExports)
         } catch (err) {
           setDataFolderFeedback(
             "Error loading data: " + String(err),
@@ -38803,6 +38865,129 @@
           timeZone: "UTC",
         })
       }
+
+      // ── Older export files ───────────────────────────────────────────
+      //
+      // Every load reports the versions the newest export has replaced, which
+      // makes this both the launch check and the answer to a new export: that
+      // one arrives as "Export Files Updated", and the reload it asks for lands
+      // here. Before that reload the app still shows the older file. See
+      // `docs/export-files.md`.
+      let _oldExports = []
+      // "Not now" holds until the app restarts or another file becomes old, so
+      // the Refresh button does not ask again.
+      const _oldExportsDeclined = new Set()
+      let _oldExportsOffer = 0
+
+      function oldExportsWorthOffering(files, declined) {
+        return files.some((f) => !declined.has(f.filename))
+      }
+
+      function oldExportsListHtml(files) {
+        let html = ""
+        let kind = null
+        for (const f of files) {
+          if (f.kind !== kind) {
+            kind = f.kind
+            html +=
+              '<div class="old-exports-kind"><strong>' +
+              esc(kind) +
+              "</strong> · keeping " +
+              esc(f.keptFilename) +
+              "</div>"
+          }
+          const when = f.modifiedMs ? zoneDayKey(f.modifiedMs, insZone()) + " · " : ""
+          html +=
+            '<div class="old-exports-row"><span class="old-exports-name">' +
+            esc(f.filename) +
+            '</span><span class="old-exports-meta">' +
+            esc(when + _fmtBytes(f.bytes)) +
+            "</span></div>"
+        }
+        return html
+      }
+
+      function renderOldExports() {
+        const n = _oldExports.length
+        document.getElementById("oldExportsTitle").textContent =
+          n === 1 ? "Delete an older export file?" : `Delete ${n} older export files?`
+        document.getElementById("oldExportsList").innerHTML = oldExportsListHtml(_oldExports)
+        const btn = document.getElementById("oldExportsDelete")
+        btn.disabled = false
+        btn.textContent = n === 1 ? "Delete 1 file" : `Delete ${n} files`
+      }
+
+      function setOldExportsStatus(text) {
+        const el = document.getElementById("oldExportsStatus")
+        el.textContent = text
+        el.hidden = !text
+      }
+
+      function closeOldExports() {
+        document.getElementById("oldExportsModal").classList.remove("open")
+      }
+
+      async function offerOldExports(files) {
+        _oldExports = files || []
+        // A later load replaces any wait below, whatever it found.
+        const offer = ++_oldExportsOffer
+        const modal = document.getElementById("oldExportsModal")
+        // A reload under an open offer: the list on screen has just gone stale.
+        if (modal.classList.contains("open")) {
+          if (_oldExports.length) renderOldExports()
+          else closeOldExports()
+          return
+        }
+        if (!oldExportsWorthOffering(_oldExports, _oldExportsDeclined)) return
+        // Never on top of another dialog.
+        for (let i = 0; i < 300 && document.querySelector(".modal-overlay.open"); i++) {
+          await new Promise((r) => setTimeout(r, 1000))
+          if (offer !== _oldExportsOffer) return
+        }
+        if (document.querySelector(".modal-overlay.open")) return
+        setOldExportsStatus("")
+        renderOldExports()
+        modal.classList.add("open")
+      }
+
+      function declineOldExports() {
+        for (const f of _oldExports) _oldExportsDeclined.add(f.filename)
+        closeOldExports()
+      }
+
+      async function deleteOldExportsConfirmed() {
+        const btn = document.getElementById("oldExportsDelete")
+        btn.disabled = true
+        btn.textContent = "Deleting…"
+        setOldExportsStatus("")
+        let res
+        try {
+          res = await window.backend.deleteOldExports(_oldExports.map((f) => f.filename))
+        } catch (err) {
+          renderOldExports()
+          setOldExportsStatus("Nothing was deleted: " + String(err))
+          return
+        }
+        const failed = new Map(res.failed.map((f) => [f.filename, f.error]))
+        _oldExports = _oldExports.filter((f) => failed.has(f.filename))
+        if (!_oldExports.length) {
+          closeOldExports()
+          return
+        }
+        // What could not be deleted stays listed, with the reason.
+        renderOldExports()
+        setOldExportsStatus(
+          "Could not delete " +
+            _oldExports.map((f) => f.filename + ": " + failed.get(f.filename)).join(" "),
+        )
+      }
+
+      document.getElementById("closeOldExports").addEventListener("click", declineOldExports)
+      document.getElementById("oldExportsLater").addEventListener("click", declineOldExports)
+      document.getElementById("oldExportsDelete").addEventListener("click", deleteOldExportsConfirmed)
+      document.getElementById("oldExportsModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) declineOldExports()
+      })
 
       async function checkMissingDays() {
         const today = zoneDayKey(Date.now(), insZone())

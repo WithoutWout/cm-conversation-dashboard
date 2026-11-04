@@ -38,6 +38,7 @@ implementation was tried first and was wrong.
 | `docs/settings-and-updates.md` | the settings backup file, and the portable-exe self-update |
 | `docs/ai-export.md` | `export_conversations_for_ai` and its `.jsonl` schema |
 | `docs/gap.md` | the GAP analysis view, fixed marks, `save_export_xlsx` and `xlsx.rs` |
+| `docs/export-files.md` | what counts as an older export file, and the offer to delete it |
 
 A rule that belongs to one feature belongs in that feature's doc. A rule that
 would change how you write *any* part of this app belongs here.
@@ -78,7 +79,7 @@ frontend/
     share-content-links.test.js, saved-searches.test.js,
     unreachable-search.test.js, modal-tags.test.js,
     dialog-flow.test.js, expr-group.test.js, entity-condense.test.js,
-    link-search.test.js, import-progress.test.js
+    link-search.test.js, import-progress.test.js, old-exports.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -110,6 +111,7 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `open_url`            | `openUrl(url)`                   | Opens a URL with `opener::open_url` (https/http only) |
 | `open_preview_window` | `openPreviewWindow(url)`         | Opens a validated URL in an in-app preview window |
 | `select_data_folder`  | `selectDataFolder()`             | Opens a native folder picker, returns `{ ok, canceled, path }` |
+| `delete_old_exports`  | `deleteOldExports(filenames)`    | Moves superseded export files in the watched folder to the Trash or Recycle Bin, returns `{ deleted, failed: [{filename, error}] }`. Takes names, never paths; only a name that is an older version right now is removed. `get_data` lists the candidates in `dataSource.oldExports`. See `docs/export-files.md` |
 | `check_for_updates`   | `checkForUpdates()`              | Reads the release's `latest.json` through `tauri-plugin-updater`, returns `{ status, version, message, notes, canSelfUpdate, mode, blockedReason }`. See `docs/settings-and-updates.md` → "Self-update" |
 | `install_update`      | `installUpdate()`                | Downloads the verified artifact, installs it, restarts. Portable Windows copies swap their own `.exe`; everything else uses the plugin's installer |
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
@@ -555,6 +557,10 @@ The orientation map for the whole window. It says what is on screen and where;
                       docs/loading-states.md → "The one-time update")
   what is happening and that it runs once per database | current step · elapsed |
   what waits meanwhile → "Database updated · Done in m:ss", fades after 6 s
+
+<div#oldExportsModal>   (after a load that finds older export files — docs/export-files.md)
+  per kind: what is kept | the older files, each with its date and size |
+  Not now | Delete N files
 
 <div#missingDaysModal>   (once a day at launch, Analytics API set up — docs/import.md
                          → "The daily missing-days check")
