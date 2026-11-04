@@ -2173,6 +2173,22 @@
       #view-gap[data-mode="genai"] .gap-fix-only {
         display: none !important;
       }
+      /* Feedback's list is either the grouped items or every rated answer. */
+      #view-gap[data-fb-group="rows"] .gap-fb-items-only,
+      #view-gap:not([data-fb-group="rows"]) .gap-fb-rows-only {
+        display: none !important;
+      }
+      .gap-fb-thumb {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .gap-fb-thumb.pos {
+        color: var(--green);
+      }
+      .gap-fb-thumb.neg {
+        color: var(--red);
+      }
       .gap-ai-grid,
       .gap-ai-row {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 124px;
@@ -2398,6 +2414,50 @@
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
         padding: 10px 12px 12px;
         animation: pop-in 0.12s ease-out;
+      }
+      #gapOptsBtn {
+        min-width: 0;
+      }
+      .gap-opts-pop {
+        width: auto;
+        min-width: 250px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .gap-opts-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .gap-opts-label {
+        flex: 0 0 84px;
+        white-space: nowrap;
+        color: var(--muted);
+        font-size: 0.74rem;
+      }
+      .gap-opts-pct {
+        width: 56px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 0.74rem;
+        padding: 3px 6px;
+      }
+      .gap-opts-count {
+        min-width: 16px;
+        padding: 0 4px;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 0.66rem;
+        font-weight: 600;
+        line-height: 16px;
+        text-align: center;
+      }
+      .gap-opts-count[hidden] {
+        display: none;
       }
       .gap-cal-pop[hidden] {
         display: none;
@@ -12591,7 +12651,7 @@
       list — question · response · recognition · fixed — with the chat each came
       from, the words to copy and the entities to change. See docs/gap.md.
     -->
-    <div id="view-gap" data-mode="recog">
+    <div id="view-gap" data-mode="recog" data-fb-group="answer">
       <div class="gap-toolbar">
         <div class="gap-pills gap-mode" id="gapModePills" title="What to look at: questions the bot did not recognise, answers people rated, or everything GenAI answered">
           <button class="conv-pill active" data-gap-mode="recog">Recognition</button>
@@ -12607,15 +12667,61 @@
           <div class="gap-cal-pop" id="gapCalPop" hidden></div>
         </div>
         <span class="gap-threshold gap-recog-only" id="gapThreshold"></span>
-        <div class="gap-pills gap-recog-only" id="gapKindPills">
-          <button class="conv-pill active" data-gap-kind="all">All</button>
-          <button class="conv-pill" data-gap-kind="low">Low</button>
-          <button class="conv-pill" data-gap-kind="zero">Zero</button>
-        </div>
-        <div class="gap-pills gap-fix-only" id="gapStatusPills">
-          <button class="conv-pill active" data-gap-status="all">Any</button>
-          <button class="conv-pill" data-gap-status="open">Open</button>
-          <button class="conv-pill" data-gap-status="fixed">Fixed</button>
+        <label class="gap-fb-min gap-fb-only" title="How to list what people rated">
+          View
+          <select id="gapFbGroup">
+            <option value="answer" selected title="Each Article and each Dialog node that answered">Per answer</option>
+            <option value="content" title="Dialog nodes added up into their Dialog">Per Article · Dialog</option>
+            <option value="rows" title="Every rated question with the answer it got, newest first">All ratings</option>
+          </select>
+        </label>
+        <div class="gap-range gap-fix-only" id="gapOptsWrap">
+          <button class="conv-date-range-btn gap-range-btn" id="gapOptsBtn" onclick="gapToggleOpts()">
+            <span>Filters</span>
+            <span class="gap-opts-count" id="gapOptsCount" hidden></span>
+            <span class="gap-range-caret">&#x25BE;</span>
+          </button>
+          <div class="gap-cal-pop gap-opts-pop" id="gapOptsPop" hidden>
+            <div class="gap-opts-row gap-recog-only">
+              <span class="gap-opts-label">Score</span>
+              <div class="gap-pills" id="gapKindPills">
+                <button class="conv-pill active" data-gap-kind="all">All</button>
+                <button class="conv-pill" data-gap-kind="low">Low</button>
+                <button class="conv-pill" data-gap-kind="zero">Zero</button>
+              </div>
+            </div>
+            <div class="gap-opts-row">
+              <span class="gap-opts-label">Status</span>
+              <div class="gap-pills" id="gapStatusPills">
+                <button class="conv-pill active" data-gap-status="all">Any</button>
+                <button class="conv-pill" data-gap-status="open">Open</button>
+                <button class="conv-pill" data-gap-status="fixed">Fixed</button>
+              </div>
+            </div>
+            <div class="gap-opts-row gap-fb-only gap-fb-rows-only">
+              <span class="gap-opts-label">Rating</span>
+              <div class="gap-pills" id="gapFbRatingPills">
+                <button class="conv-pill active" data-gap-fb-rating="all">All</button>
+                <button class="conv-pill" data-gap-fb-rating="up" title="Thumbs up"><svg class=ui-icon><use href=#i-thumb-up /></svg></button>
+                <button class="conv-pill" data-gap-fb-rating="down" title="Thumbs down"><svg class=ui-icon><use href=#i-thumb-down /></svg></button>
+              </div>
+            </div>
+            <label class="gap-opts-row gap-fb-min gap-fb-only gap-fb-items-only" title="Leave out what was rated too rarely for its share to mean much">
+              <span class="gap-opts-label">At least</span>
+              <select id="gapFbMin">
+                <option value="1">1 rating</option>
+                <option value="3" selected>3 ratings</option>
+                <option value="5">5 ratings</option>
+                <option value="10">10 ratings</option>
+              </select>
+            </label>
+            <label class="gap-opts-row gap-fb-min gap-fb-only gap-fb-items-only" title="Leave out what has a smaller share of thumbs down than this">
+              <span class="gap-opts-label">Thumbs down</span>
+              at least
+              <input type="number" id="gapFbNegPct" class="gap-opts-pct" min="0" max="100" step="5" value="0" />
+              %
+            </label>
+          </div>
         </div>
         <input
           type="search"
@@ -12626,19 +12732,6 @@
           spellcheck="false"
         />
         <span class="gap-count gap-recog-only" id="gapCount"></span>
-        <div class="gap-pills gap-fb-only" id="gapFbGroupPills">
-          <button class="conv-pill active" data-gap-fb-group="answer" title="Each Article and each Dialog node that answered">Per answer</button>
-          <button class="conv-pill" data-gap-fb-group="content" title="Dialog nodes added up into their Dialog">Per Article · Dialog</button>
-        </div>
-        <label class="gap-fb-min gap-fb-only" title="Leave out what was rated too rarely for its share to mean much">
-          At least
-          <select id="gapFbMin">
-            <option value="1">1 rating</option>
-            <option value="3" selected>3 ratings</option>
-            <option value="5">5 ratings</option>
-            <option value="10">10 ratings</option>
-          </select>
-        </label>
         <input
           type="search"
           id="gapFbFilter"
@@ -12675,7 +12768,14 @@
           </div>
         </div>
         <div class="gap-list-wrap gap-fb-only">
-          <div class="gap-head gap-fb-grid" id="gapFbHead">
+          <div class="gap-head gap-fb-rows-only" id="gapFbRowHead">
+            <button class="gap-col-q" data-gap-fb-row-sort="question">Question</button>
+            <button class="gap-col-r" data-gap-fb-row-sort="response">Response</button>
+            <button class="gap-col-s" data-gap-fb-row-sort="rating">Rating</button>
+            <button class="gap-col-t" data-gap-fb-row-sort="time">When</button>
+            <span class="gap-col-f" title="Fixed">✓</span>
+          </div>
+          <div class="gap-head gap-fb-grid gap-fb-items-only" id="gapFbHead">
             <button data-gap-fb-sort="name">Article / Dialog</button>
             <button class="gap-num" data-gap-fb-sort="rated">Rated</button>
             <button class="gap-num" data-gap-fb-sort="neg">Thumbs down</button>
@@ -12710,6 +12810,7 @@
             </div>
           </div>
           <div class="gap-fb-answers" id="gapFbAnswers" hidden></div>
+          <div class="gap-ai-answer" id="gapFbRowAnswer" hidden></div>
           <div class="chat-thread gap-thread" id="gapFbThread"></div>
         </div>
         <div class="gap-side gap-recog-only">
@@ -27938,7 +28039,7 @@
       // (and keeps) a scroll of 0.
       const GAP_SCROLL_PANES = {
         recog: [["gapList", "list"], ["gapChatThread", "chat"], ["gapEntityList", "entities"]],
-        feedback: [["gapFbList", "list"], ["gapFbAnswers", "answers"], ["gapFbThread", "chat"]],
+        feedback: [["gapFbList", "list"], ["gapFbAnswers", "answers"], ["gapFbRowAnswer", "answer"], ["gapFbThread", "chat"]],
         genai: [["gapAiList", "list"], ["gapAiAnswer", "answer"], ["gapAiThread", "chat"]],
       }
       const gapSavedScroll = { recog: null, feedback: null, genai: null }
@@ -29102,8 +29203,11 @@
       let gapFbTruncated = false
       let gapFbLoadedKey = ""
       let gapFbSeq = 0
-      let gapFbGroup = "answer" // answer | content
+      let gapFbGroup = "answer" // answer | content | rows (every rated answer)
+      let gapFbRating = "all" // all | up | down — the rows list only
+      let gapFbRowSort = { key: "time", dir: -1 }
       let gapFbMin = 3
+      let gapFbNegPct = 0 // leave out items with a smaller thumbs-down share
       let gapFbQuery = ""
       let gapFbSort = { key: "share", dir: 1 }
       let gapFbActive = null // the selected item's key
@@ -29165,15 +29269,23 @@
         return gapContentRef(key) || { kind: "none", label: key, title: "", url: "" }
       }
 
+      /// Whether an item's thumbs-down share reaches `pct`, in whole numbers, so
+      /// 1 of 4 is exactly 25% and stays at a filter of 25.
+      function gapFbNegShareReaches(it, pct) {
+        return it.neg * 100 >= pct * it.rated
+      }
+
       let _gapFbView = null
       let _gapFbViewKey = ""
       // Bumped by every fixed mark, so the memoized view is rebuilt.
       let gapFbFixStamp = 0
       function gapFbView() {
-        const vkey = JSON.stringify([gapFbLoadedKey, gapFbGroup, gapFbMin, gapFbQuery, gapFbSort, gapStatus, gapFbFixStamp])
+        const vkey = JSON.stringify([gapFbLoadedKey, gapFbGroup, gapFbMin, gapFbNegPct, gapFbQuery, gapFbSort, gapStatus, gapFbFixStamp])
         if (_gapFbView && _gapFbViewKey === vkey) return _gapFbView
         const q = gapFbQuery.trim().toLowerCase()
-        let list = gapFbItems(gapFbRows, gapFbGroup).filter((it) => it.rated >= gapFbMin)
+        let list = gapFbItems(gapFbRows, gapFbGroup).filter(
+          (it) => it.rated >= gapFbMin && gapFbNegShareReaches(it, gapFbNegPct),
+        )
         if (gapStatus === "open") list = list.filter((it) => it.neg > it.negFixed)
         if (gapStatus === "fixed") list = list.filter((it) => it.fixed)
         for (const it of list) it.ref = gapFbRef(it.key)
@@ -29197,14 +29309,98 @@
         return list
       }
 
+      /// Every rated answer, one line each: the All ratings list.
+      ///
+      /// Open and Fixed read as they do on the grouped items, where only a
+      /// thumbs down can be either — a thumbs up is nothing to fix, so it is
+      /// under Any alone. Pure, so `gap-fb.test.js` can hold it to that.
+      function gapFbRowList(rows, opts) {
+        const q = String(opts.query || "").trim().toLowerCase()
+        const list = (rows || []).filter((r) => {
+          if (opts.rating === "up" && r.score < 0) return false
+          if (opts.rating === "down" && r.score >= 0) return false
+          if (opts.status === "open" && !(r.score < 0 && !r.fixedAt)) return false
+          if (opts.status === "fixed" && !(r.score < 0 && r.fixedAt)) return false
+          if (q) {
+            if (r._hay == null) r._hay = (r.question + " " + gapPlain(r.response) + " " + r.articleIds).toLowerCase()
+            if (!r._hay.includes(q)) return false
+          }
+          return true
+        })
+        const newest = (a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : b.logId - a.logId)
+        const by = {
+          time: (a, b) => -newest(a, b),
+          rating: (a, b) => a.score - b.score,
+          question: (a, b) => String(a.question).localeCompare(String(b.question)),
+          response: (a, b) => gapPlain(a.response).localeCompare(gapPlain(b.response)),
+        }[opts.sort.key]
+        return list.sort((a, b) => opts.sort.dir * by(a, b) || newest(a, b))
+      }
+
+      let _gapFbRowView = null
+      let _gapFbRowViewKey = ""
+      function gapFbRowView() {
+        const vkey = JSON.stringify([gapFbLoadedKey, gapFbQuery, gapFbRating, gapFbRowSort, gapStatus, gapFbFixStamp])
+        if (_gapFbRowView && _gapFbRowViewKey === vkey) return _gapFbRowView
+        _gapFbRowView = gapFbRowList(gapFbRows, {
+          query: gapFbQuery,
+          rating: gapFbRating,
+          status: gapStatus,
+          sort: gapFbRowSort,
+        })
+        _gapFbRowViewKey = vkey
+        return _gapFbRowView
+      }
+
+      /// What the toolbar says depends on which Feedback list is on.
+      function gapFbApplyGroup() {
+        const rows = gapFbGroup === "rows"
+        document.getElementById("view-gap").dataset.fbGroup = gapFbGroup
+        document.getElementById("gapFbFilter").placeholder = rows
+          ? "Filter by question, response or id…"
+          : "Filter by id, title or question…"
+        gapApplyMode()
+      }
+
+      /// A filter in a closed bubble still narrows the list, so the button says
+      /// how many are off their default in the list on screen.
+      function gapOptsSync() {
+        const on =
+          gapMode === "recog"
+            ? [gapKind !== "all", gapStatus !== "all"]
+            : gapMode === "feedback"
+            ? gapFbGroup === "rows"
+              ? [gapStatus !== "all", gapFbRating !== "all"]
+              : [gapStatus !== "all", gapFbMin !== 3, gapFbNegPct > 0]
+            : []
+        const n = on.filter(Boolean).length
+        const el = document.getElementById("gapOptsCount")
+        el.hidden = !n
+        el.textContent = n || ""
+      }
+
+      function gapToggleOpts() {
+        const pop = document.getElementById("gapOptsPop")
+        pop.hidden = !pop.hidden
+        document.getElementById("gapOptsBtn").classList.toggle("active", !pop.hidden)
+      }
+
+      function gapCloseOpts() {
+        document.getElementById("gapOptsPop").hidden = true
+        document.getElementById("gapOptsBtn").classList.remove("active")
+      }
+
       function gapApplyMode() {
+        gapOptsSync()
         document.getElementById("view-gap").dataset.mode = gapMode
         document.querySelectorAll("[data-gap-mode]").forEach((b) =>
           b.classList.toggle("active", b.dataset.gapMode === gapMode),
         )
         document.getElementById("gapExportBtn").title =
           gapMode === "feedback"
-            ? "Save the Articles and Dialogs listed, as they are sorted, as an Excel workbook"
+            ? gapFbGroup === "rows"
+              ? "Save the rated questions and answers listed, as they are sorted, as an Excel workbook"
+              : "Save the Articles and Dialogs listed, as they are sorted, as an Excel workbook"
             : gapMode === "genai"
             ? "Save the GenAI questions and answers listed as an Excel workbook"
             : "Save what is listed, as it is sorted, as an Excel workbook"
@@ -29236,7 +29432,9 @@
 
       async function gapFbEnter() {
         if (gapFbLoadedKey && gapFbLoadedKey === gapFbStateKey()) {
+          if (gapFbGroup === "rows") gapFbRenderList(false)
           gapRestoreScroll("feedback")
+          gapFbPaintRows()
           return
         }
         gapSavedScroll.feedback = null
@@ -29266,6 +29464,7 @@
           gapFbTruncated = !!(res && res.truncated)
           gapFbLoadedKey = key
           _gapFbView = null
+          _gapFbRowView = null
         } catch (e) {
           if (seq !== gapFbSeq) return
           gapFbRows = []
@@ -29290,6 +29489,10 @@
       }
 
       function gapFbRenderList(resetScroll) {
+        if (gapFbGroup === "rows") {
+          gapFbRenderRows(resetScroll)
+          return
+        }
         const list = document.getElementById("gapFbList")
         const view = gapFbView()
         const all = gapFbItems(gapFbRows, gapFbGroup)
@@ -29311,7 +29514,7 @@
         if (!view.length) {
           list.innerHTML = gapFbRows.length
             ? '<div class="gap-empty">Nothing matches these filters' +
-              (gapFbMin > 1 ? " — try fewer ratings" : "") +
+              (gapFbNegPct > 0 ? " — try a lower thumbs-down share" : gapFbMin > 1 ? " — try fewer ratings" : "") +
               ".</div>"
             : '<div class="gap-empty">Nobody rated an answer in this range.</div>'
           return
@@ -29369,6 +29572,170 @@
         if (resetScroll) list.scrollTop = 0
       }
 
+      function gapFbRenderRows(resetScroll) {
+        const list = document.getElementById("gapFbList")
+        const view = gapFbRowView()
+        const neg = gapFbRows.filter((r) => r.score < 0).length
+        document.getElementById("gapFbCount").textContent =
+          view.length.toLocaleString() +
+          (view.length !== gapFbRows.length ? " of " + gapFbRows.length.toLocaleString() : "") +
+          " rated answers, " +
+          neg.toLocaleString() +
+          " thumbs down" +
+          (gapFbTruncated ? " · first 20,000 only — narrow the range" : "")
+        document.querySelectorAll("#gapFbRowHead [data-gap-fb-row-sort]").forEach((b) => {
+          const on = b.dataset.gapFbRowSort === gapFbRowSort.key
+          b.classList.toggle("sorted", on)
+          b.textContent = b.textContent.replace(/ [↑↓]$/, "") + (on ? (gapFbRowSort.dir > 0 ? " ↑" : " ↓") : "")
+        })
+        if (!view.length) {
+          list.innerHTML = gapFbRows.length
+            ? '<div class="gap-empty">Nothing matches these filters.</div>'
+            : '<div class="gap-empty">Nobody rated an answer in this range.</div>'
+          return
+        }
+        if (!list.querySelector("#gapFbSpacer")) {
+          list.innerHTML = '<div class="gap-spacer" id="gapFbSpacer"></div>'
+        }
+        document.getElementById("gapFbSpacer").style.height = view.length * GAP_ROW_H + "px"
+        if (resetScroll) list.scrollTop = 0
+        gapFbPaintRows()
+      }
+
+      function gapFbThumbHtml(score) {
+        const down = score < 0
+        return (
+          '<span class="gap-fb-thumb ' +
+          (down ? "neg" : "pos") +
+          '" title="' +
+          (down ? "Thumbs down" : "Thumbs up") +
+          '"><svg class=ui-icon><use href=#i-thumb-' +
+          (down ? "down" : "up") +
+          " /></svg></span>"
+        )
+      }
+
+      /// Windowed like the Recognition list, on its columns: a month of ratings
+      /// is thousands of rows, and only the ones in view exist.
+      function gapFbPaintRows() {
+        const list = document.getElementById("gapFbList")
+        const spacer = document.getElementById("gapFbSpacer")
+        if (gapFbGroup !== "rows" || !spacer) return
+        const view = gapFbRowView()
+        const first = Math.max(0, Math.floor(list.scrollTop / GAP_ROW_H) - 10)
+        const last = Math.min(view.length, Math.ceil((list.scrollTop + list.clientHeight) / GAP_ROW_H) + 10)
+        let html = ""
+        for (let i = first; i < last; i++) {
+          const r = view[i]
+          const response = gapPlain(r.response)
+          html +=
+            '<div class="gap-row' +
+            (r.score < 0 && r.fixedAt ? " fixed" : "") +
+            (r.logId === gapFbActiveAnswer ? " active" : "") +
+            '" style="top:' +
+            i * GAP_ROW_H +
+            'px" data-log-id="' +
+            r.logId +
+            '" onclick="gapFbRowSelect(' +
+            r.logId +
+            ')"><span class="gap-col-q" title="' +
+            esc(r.question) +
+            '">' +
+            esc(r.question || "(no question)") +
+            '</span><span class="gap-col-r" title="' +
+            esc(response) +
+            '">' +
+            esc(response || "—") +
+            '</span><span class="gap-col-s">' +
+            gapFbThumbHtml(r.score) +
+            '<button class="gap-copy" title="Copy the question" onclick="event.stopPropagation();gapFbRowCopy(' +
+            r.logId +
+            ')">⧉</button></span><span class="gap-col-t">' +
+            esc(fmtTs(r.timestamp)) +
+            '</span><span class="gap-col-f">' +
+            (r.score < 0
+              ? '<button class="gap-fix" title="' +
+                (r.fixedAt ? "Fixed " + esc(fmtTs(r.fixedAt)) + " — click to reopen" : "Mark this thumbs down fixed") +
+                '" onclick="event.stopPropagation();gapFbToggleFixed([' +
+                r.logId +
+                "], " +
+                !r.fixedAt +
+                ')">✓</button>'
+              : "") +
+            "</span></div>"
+        }
+        list.querySelectorAll(".gap-row").forEach((el) => el.remove())
+        spacer.insertAdjacentHTML("afterend", html)
+      }
+
+      function gapFbRowCopy(logId) {
+        const row = gapFbRows.find((r) => r.logId === logId)
+        if (row) gapCopyText(row.question)
+      }
+
+      function gapFbRowSelect(logId) {
+        // Not `gapFbRenderSide(false)`: moving through the rows of one
+        // conversation must not blank it. `gapShowThread` deals with a change.
+        gapFbActiveAnswer = logId
+        gapFbPaintRows()
+        gapFbRenderRowSide()
+        document.getElementById("gapFbRowAnswer").scrollTop = 0
+        gapFbOpenAnswer(logId)
+      }
+
+      /// The side of the All ratings list: what the GenAI list shows for a row,
+      /// with the rating and the fixed mark.
+      function gapFbRenderRowSide() {
+        const header = document.getElementById("gapFbHeader")
+        const answer = document.getElementById("gapFbRowAnswer")
+        document.getElementById("gapFbAnswers").hidden = true
+        const row = gapFbActiveAnswer == null ? null : gapFbRows.find((r) => r.logId === gapFbActiveAnswer)
+        if (!row) {
+          header.innerHTML =
+            '<div class="chat-empty" style="flex: none; padding: 0; font-size: 0.78rem">Select a rated question to read the answer and the conversation around it.</div>'
+          answer.hidden = true
+          answer.innerHTML = ""
+          return
+        }
+        const refs = (parseJsonSafe(row.articleIds || "") || []).map((id) => gapContentRef(String(id))).filter(Boolean)
+        header.innerHTML =
+          langBadgeHtml(row.culture, row.translationLanguage) +
+          '<span class="gap-chat-meta">' +
+          esc(fmtTs(row.timestamp)) +
+          " · " +
+          gapFbThumbHtml(row.score) +
+          " " +
+          (row.score < 0 ? "thumbs down" : "thumbs up") +
+          "</span>" +
+          (row.score < 0
+            ? '<button class="btn-secondary gap-fixed-btn' +
+              (row.fixedAt ? " on" : "") +
+              '" onclick="gapFbToggleFixed([' +
+              row.logId +
+              "], " +
+              !row.fixedAt +
+              ')">' +
+              (row.fixedAt ? "✓ Fixed" : "Mark fixed") +
+              "</button>"
+            : "") +
+          '<span class="gap-fb-halo" id="gapFbHalo"></span>' +
+          '<button class="btn-secondary" onclick="gapFbRowCopy(' +
+          row.logId +
+          ')">Copy question</button>' +
+          '<button class="btn-secondary" onclick="gapOpenInConversations(\'' +
+          esc(row.sessionUuid) +
+          "')\">Open in Conversations</button>"
+        answer.hidden = false
+        answer.innerHTML =
+          '<div class="gap-fix-label">Response</div>' +
+          parseCmOutput(row.response || "").body +
+          (refs.length
+            ? '<div class="gap-fix-label" style="margin-top:8px">Answered by</div>' +
+              refs.map((ref) => gapRefRowHtml(ref)).join("")
+            : "")
+        gapFbHaloFill()
+      }
+
       /// Mark answers fixed or reopen them — the same `gap_fixed` rows the
       /// Recognition list writes, so an answer on both lists changes on both.
       /// Optimistic, like `gapToggleFixed`: drawn at once, put back on failure.
@@ -29409,6 +29776,12 @@
       function gapFbRepaint() {
         gapFbFixStamp++
         gapFbRenderList(false)
+        if (gapFbGroup === "rows") {
+          const scroll = document.getElementById("gapFbRowAnswer").scrollTop
+          gapFbRenderRowSide()
+          document.getElementById("gapFbRowAnswer").scrollTop = scroll
+          return
+        }
         if (gapFbActive != null) {
           const answer = gapFbActiveAnswer
           const scroll = document.getElementById("gapFbAnswers").scrollTop
@@ -29453,6 +29826,17 @@
           exitGapSelectMode()
           gapShownSession.feedback = null
         }
+        if (gapFbGroup === "rows") {
+          gapFbRenderRowSide()
+          if (!keepThread) {
+            document.getElementById("gapFbThread").innerHTML = ""
+            selBubbleSync()
+          }
+          return
+        }
+        const rowAnswer = document.getElementById("gapFbRowAnswer")
+        rowAnswer.hidden = true
+        rowAnswer.innerHTML = ""
         const header = document.getElementById("gapFbHeader")
         const answers = document.getElementById("gapFbAnswers")
         const thread = document.getElementById("gapFbThread")
@@ -29599,7 +29983,50 @@
         searchConvsForId(m[2], m[1] === "qa" ? "article" : "dialog")
       }
 
+      async function gapFbRowExport() {
+        const view = gapFbRowView()
+        if (!view.length) {
+          showImportToast("error", "Nothing listed to export.")
+          return
+        }
+        const title = gapExportTitle("Feedback ratings", gapRange)
+        const sheet = {
+          name: title.sheet,
+          headers: ["Date / time", "Question", "Response", "Rating", "Articles / Dialogs", "Culture", "Fixed", "Fixed at", "Conversation"],
+          widths: [18, 50, 60, 13, 22, 8, 7, 18, 38],
+          rows: view.map((r) => {
+            const fixed = r.score < 0 && !!r.fixedAt
+            const ids = parseJsonSafe(r.articleIds || "")
+            return {
+              highlight: fixed,
+              cells: [
+                fmtTs(r.timestamp),
+                r.question,
+                gapPlain(r.response),
+                r.score < 0 ? "Thumbs down" : "Thumbs up",
+                Array.isArray(ids) ? ids.join(", ") : "",
+                r.culture || "",
+                fixed ? "Yes" : "",
+                fixed ? fmtTs(r.fixedAt) : "",
+                r.sessionUuid,
+              ],
+            }
+          }),
+        }
+        try {
+          const res = await window.backend.saveExportXlsx(title.file, sheet)
+          if (res && res.ok) showImportToast("success", "Saved " + view.length.toLocaleString() + " rows.")
+          else if (res && !res.canceled) showImportToast("error", "Could not save the workbook.")
+        } catch (e) {
+          showImportToast("error", "Could not save the workbook. " + String(e))
+        }
+      }
+
       async function gapFbExport() {
+        if (gapFbGroup === "rows") {
+          await gapFbRowExport()
+          return
+        }
         const view = gapFbView()
         if (!view.length) {
           showImportToast("error", "Nothing listed to export.")
@@ -30217,6 +30644,7 @@
         b.addEventListener("click", () => {
           gapKind = b.dataset.gapKind
           document.querySelectorAll("[data-gap-kind]").forEach((x) => x.classList.toggle("active", x === b))
+          gapOptsSync()
           gapInvalidate()
           gapRenderList(true)
         }),
@@ -30225,6 +30653,7 @@
         b.addEventListener("click", () => {
           gapStatus = b.dataset.gapStatus
           document.querySelectorAll("[data-gap-status]").forEach((x) => x.classList.toggle("active", x === b))
+          gapOptsSync()
           gapInvalidate()
           gapRenderList(true)
           gapFbRenderList(true)
@@ -30292,18 +30721,50 @@
       document.querySelectorAll("[data-gap-mode]").forEach((b) =>
         b.addEventListener("click", () => gapSetMode(b.dataset.gapMode)),
       )
-      document.querySelectorAll("[data-gap-fb-group]").forEach((b) =>
+      document.getElementById("gapFbGroup").addEventListener("change", (e) => {
+        gapFbGroup = e.target.value
+        gapFbApplyGroup()
+        // A key means something else under the other grouping.
+        gapFbActive = null
+        gapFbActiveAnswer = null
+        gapFbRenderSide()
+        gapFbRenderList(true)
+      })
+      document.addEventListener("mousedown", (e) => {
+        if (!e.target.closest("#gapOptsWrap")) gapCloseOpts()
+      })
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") gapCloseOpts()
+      })
+      document.querySelectorAll("[data-gap-fb-rating]").forEach((b) =>
         b.addEventListener("click", () => {
-          gapFbGroup = b.dataset.gapFbGroup
-          document.querySelectorAll("[data-gap-fb-group]").forEach((x) => x.classList.toggle("active", x === b))
-          // A key means something else under the other grouping.
-          gapFbActive = null
-          gapFbRenderSide()
+          gapFbRating = b.dataset.gapFbRating
+          document.querySelectorAll("[data-gap-fb-rating]").forEach((x) => x.classList.toggle("active", x === b))
+          gapOptsSync()
           gapFbRenderList(true)
         }),
       )
+      document.querySelectorAll("#gapFbRowHead [data-gap-fb-row-sort]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const key = b.dataset.gapFbRowSort
+          // Newest first, thumbs down first, A to Z.
+          const first = key === "time" ? -1 : 1
+          gapFbRowSort = gapFbRowSort.key === key ? { key, dir: -gapFbRowSort.dir } : { key, dir: first }
+          gapFbRenderList(true)
+        }),
+      )
+      document.getElementById("gapFbList").addEventListener("scroll", () => {
+        requestAnimationFrame(gapFbPaintRows)
+      })
       document.getElementById("gapFbMin").addEventListener("change", (e) => {
         gapFbMin = Number(e.target.value) || 1
+        gapOptsSync()
+        gapFbRenderList(true)
+      })
+      document.getElementById("gapFbNegPct").addEventListener("input", (e) => {
+        const n = Number(e.target.value)
+        gapFbNegPct = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0
+        gapOptsSync()
         gapFbRenderList(true)
       })
       let _gapFbFilterTimer = null
@@ -30324,6 +30785,27 @@
         }),
       )
       document.getElementById("gapFbList").addEventListener("keydown", (e) => {
+        if (gapFbGroup === "rows") {
+          const view = gapFbRowView()
+          if (!view.length) return
+          const at = view.findIndex((r) => r.logId === gapFbActiveAnswer)
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault()
+            const idx = Math.max(0, Math.min(view.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))
+            const list = document.getElementById("gapFbList")
+            const top = idx * GAP_ROW_H
+            if (top < list.scrollTop) list.scrollTop = top
+            else if (top + GAP_ROW_H > list.scrollTop + list.clientHeight)
+              list.scrollTop = top + GAP_ROW_H - list.clientHeight
+            gapFbRowSelect(view[idx].logId)
+          } else if ((e.key === "f" || e.key === " ") && at >= 0) {
+            e.preventDefault()
+            if (view[at].score < 0) gapFbToggleFixed([view[at].logId], !view[at].fixedAt)
+          } else if (e.key === "c" && at >= 0 && !e.metaKey && !e.ctrlKey) {
+            gapFbRowCopy(view[at].logId)
+          }
+          return
+        }
         if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey) {
           if (gapFbActive != null) {
             e.preventDefault()

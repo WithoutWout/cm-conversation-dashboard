@@ -10,12 +10,13 @@ const ctx = vm.createContext({})
 vm.runInContext(
   `
   const insTzFormatters = new Map()
-  ${["parseJsonSafe", "gapFbItems", "insOffsetAt", "insUtcDayKey", "insZoneStampToUtc", "insZoneDayBounds", "zoneDayCoverage", "gapRangeLabel", "gapExportTitle"].map(extract).join("\n")}
-  globalThis.api = { gapFbItems, zoneDayCoverage, gapRangeLabel, gapExportTitle }
+  const strip = (t) => t // its regexes are beyond extract.js; no markup in these rows
+  ${["parseJsonSafe", "gapPlain", "gapFbRowList", "gapFbNegShareReaches", "gapFbItems", "insOffsetAt", "insUtcDayKey", "insZoneStampToUtc", "insZoneDayBounds", "zoneDayCoverage", "gapRangeLabel", "gapExportTitle"].map(extract).join("\n")}
+  globalThis.api = { gapFbRowList, gapFbNegShareReaches, gapFbItems, zoneDayCoverage, gapRangeLabel, gapExportTitle }
   `,
   ctx,
 )
-const { gapFbItems, zoneDayCoverage, gapRangeLabel, gapExportTitle } = ctx.api
+const { gapFbRowList, gapFbNegShareReaches, gapFbItems, zoneDayCoverage, gapRangeLabel, gapExportTitle } = ctx.api
 
 let failed = 0
 const test = (name, fn) => {
@@ -53,6 +54,41 @@ test("an item is fixed once every thumbs down on it is", () => {
   // A new thumbs down after the fix reopens it.
   rows.push({ logId: 6, score: -1, articleIds: '["qa-7"]', fixedAt: null })
   assert.strictEqual(by(gapFbItems(rows, "answer"))["qa-7"].fixed, false)
+})
+
+test("the thumbs-down share filter keeps what reaches it", () => {
+  const reaches = gapFbNegShareReaches
+  assert.strictEqual(reaches({ neg: 1, rated: 4 }, 25), true, "exactly on the boundary stays")
+  assert.strictEqual(reaches({ neg: 1, rated: 4 }, 26), false)
+  assert.strictEqual(reaches({ neg: 1, rated: 3 }, 33), true)
+  assert.strictEqual(reaches({ neg: 1, rated: 3 }, 34), false)
+  // Off by default: nothing rated down still lists.
+  assert.strictEqual(reaches({ neg: 0, rated: 9 }, 0), true)
+  assert.strictEqual(reaches({ neg: 0, rated: 9 }, 1), false)
+  assert.strictEqual(reaches({ neg: 3, rated: 3 }, 100), true)
+})
+
+test("All ratings lists every rated answer once, whatever its ids", () => {
+  const rows = [
+    { logId: 1, score: -1, question: "a", response: "x", articleIds: '["qa-1","dn-2-3"]', timestamp: "2026-09-01T10:00:00", fixedAt: null },
+    { logId: 2, score: 1, question: "b", response: "y", articleIds: "", timestamp: "2026-09-03T10:00:00", fixedAt: null },
+    { logId: 3, score: -1, question: "c", response: "**Parkeren** kan", articleIds: '["qa-7"]', timestamp: "2026-09-02T10:00:00", fixedAt: "2026-09-04T10:00:00" },
+  ]
+  const ids = (opts) =>
+    [...gapFbRowList(rows, { query: "", rating: "all", status: "all", sort: { key: "time", dir: -1 }, ...opts })].map((r) => r.logId).join()
+  assert.strictEqual(ids({}), "2,3,1", "newest first")
+  assert.strictEqual(ids({ rating: "up" }), "2")
+  assert.strictEqual(ids({ rating: "down" }), "3,1")
+  // A thumbs up is nothing to fix: it is neither open nor fixed.
+  assert.strictEqual(ids({ status: "open" }), "1")
+  assert.strictEqual(ids({ status: "fixed" }), "3")
+  // Ties in a column fall back to newest first.
+  assert.strictEqual(ids({ sort: { key: "rating", dir: 1 } }), "3,1,2", "thumbs down first")
+  assert.strictEqual(ids({ sort: { key: "question", dir: -1 } }), "3,2,1")
+  // The filter reads the question, the plain response and the ids.
+  assert.strictEqual(ids({ query: "parkeren kan" }), "3")
+  assert.strictEqual(ids({ query: "qa-1" }), "1")
+  assert.strictEqual(ids({ query: "nothing" }), "")
 })
 
 test("an export is named for its analysis and its date range", () => {
