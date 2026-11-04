@@ -39280,8 +39280,16 @@
                 ? "cancelled"
                 : "done"
         }
-        const spinner =
-          _impPhase === "running" ? `<div class="import-spinner"></div>` : ""
+        // The current operation belongs to a run in progress. The last one set
+        // is "Finishing up…", so left on screen past the end of the run it reads
+        // as work still going on; the banner says how it ended instead.
+        const op =
+          _impPhase === "running"
+            ? `<div class="import-progress-op"><div class="import-spinner"></div><span>${esc(
+                _impOpText || "Preparing import…",
+              )}</span></div>
+               <div class="import-progress-sub">${esc(_impOpDetail || "")}</div>`
+            : ""
         let banner = ""
         if (_impOutcome && _impOutcome.type === "failed") {
           const item = _impQueue[_impOutcome.index]
@@ -39331,11 +39339,8 @@
 
         return (
           banner +
-          `<div class="import-progress-op">${spinner}<span>${esc(
-            _impOpText || "Preparing import…",
-          )}</span></div>
-           <div class="import-progress-sub">${esc(_impOpDetail || "")}</div>
-           <div class="import-progress-bar"><div class="import-progress-fill ${fillCls}" style="width:${pct}%"></div></div>
+          op +
+          `<div class="import-progress-bar"><div class="import-progress-fill ${fillCls}" style="width:${pct}%"></div></div>
            <div class="import-progress-sub" style="margin-bottom:8px"><strong>${_impDoneCount}</strong> of <strong>${total}</strong> day${
              total === 1 ? "" : "s"
            } completed${
