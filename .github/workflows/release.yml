@@ -91,34 +91,18 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Saved searches
-            - A star at the end of the Content and Conversations search bars
-              saves the whole search: its words, entities, filters and
-              toggles. Click it again to bring a saved search back in one go.
-              Dates are never saved, so a saved Conversations search runs over
-              whatever range is set when you use it.
+            ### Search finds content by its links
+            - Searching the Content tab for a link, or part of one, now finds
+              everything that uses it. Before, a link was only found where its
+              address was written out in the text, so most results were missing.
+              This covers links, images and videos in Articles and Dialogs.
+            - Because of this, a word that appears in a link now also finds that
+              content, so some searches return a few more results.
 
-            ### Linked content in Share Content
-            - Share Content has a new **Linked content** choice. *Matching
-              only* (the default) shows what each item links to: Dialog Links,
-              Transactional Dialogs and Articles. *Complete overview* shows
-              what links to it instead. *Off* hides both. The copies and the
-              AI export include the same links.
-
-            ### Unreachable content is hidden
-            - Responses that are not the default and have no context
-              condition can never be shown to a user, so the app now ignores
-              them everywhere. Turn on **Show unreachable content** in
-              Settings → Content to see them again.
-
-            ### Smaller improvements
-            - The Conversations search suggestions now also list entities that
-              no conversation has triggered yet, marked "no conversations yet".
-            - In Analysis, an unknown word now shows the word the user actually
-              typed. CM.com reports its corrected base form, which often
-              differs.
-            - With **Ref** off, a Dialog no longer matches on the buttons that
-              only lead to a referenced Article.
+            ### Entity suggestions appear straight away
+            - The Conversations search suggestions now list entities as soon as
+              you type, instead of waiting for the database. Their conversation
+              counts fill in a moment later.
 
             ---
 
