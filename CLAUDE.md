@@ -434,8 +434,9 @@ The orientation map for the whole window. It says what is on screen and where;
 <div#view-gap>   (header Analysis button — see docs/gap.md)
   toolbar: Recognition | Feedback | GenAI switch · range button → the shared two-month day calendar (display
            timezone) with Last 7 / Last 30 / This month / Last month ·
-           threshold (from Settings) · All/Low/Zero · Any/Open/Fixed ·
-           text filter · count · Export .xlsx
+           threshold (from Settings) · Filters bubble (All/Low/Zero ·
+           Any/Open/Fixed, with a count of those on) · text filter · count ·
+           Export .xlsx
   left:    windowed list — Question · Response · Recognition · When · ✓ fixed
            (sortable headers; ↑↓ move, F toggles fixed, C copies)
   right:   header (language badge — translation language, else culture ·
@@ -447,13 +448,18 @@ The orientation map for the whole window. It says what is on screen and where;
            (Edit entity) · answered by (Edit Article/Dialog) · Articles using
            these entities · what they asked next — every line with Edit ↗ and
            copy-link; typing in its search box finds entities instead
-  Feedback mode (same range): Any/Open/Fixed · Per answer / Per Article ·
-           Dialog · at least N ratings · filter · count · Export .xlsx
+  Feedback mode (same range): View dropdown (Per answer / Per Article · Dialog /
+           All ratings) · Filters bubble (Any/Open/Fixed · at least N ratings · thumbs
+           down at least N%; All ratings: All / thumbs up / thumbs down) · filter · count · Export .xlsx
   left:    Article / Dialog · rated · thumbs down · positive share (bar) ·
            ✓ fixed (every thumbs down fixed; F toggles), lowest first, sortable
   right:   the item (Mark fixed · Edit ↗ · Thumbs down in Conversations) ·
            its rated questions, thumbs down first, each thumbs down with its
            own ✓ · the conversation, rated answer marked
+  All ratings: left Question · Response · Rating · When · ✓ (windowed, sortable);
+           right header (language · when · rating · Mark fixed · Open in Halo
+           Studio · Copy question · Open in Conversations) · the Response
+           formatted + Answered by · the conversation, rated answer marked
   GenAI mode (same range): filter · count · Export .xlsx
   left:    Question · GenAI answer · When (windowed)
   right:   header (language · when · interaction type as logged · Open in

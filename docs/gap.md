@@ -15,6 +15,14 @@ Feedback | GenAI** switch at the start of the toolbar, sharing the range picker
 Everything below up to "Feedback" is the Recognition list. Exports are
 `Analysis {recognition|feedback|GenAI} {today} {Month}.xlsx`.
 
+The toolbar keeps what is used on every visit in view — the mode, the range, the
+text filter, the count, the export, and Feedback's **View** dropdown. The rest
+sits in a **Filters** bubble under one button: Score (All / Low / Zero) and Status
+(Any / Open / Fixed) on Recognition; on Feedback, Status with "At least N ratings"
+and "Thumbs down at least N%", or under All ratings with Rating. GenAI has none, so no button. **A closed bubble still narrows the list,
+so the button carries a count** of the filters off their default in the mode on
+screen (`gapOptsSync`). The toolbar had grown to two rows on a normal window.
+
 ---
 
 ## What a row is
@@ -209,6 +217,11 @@ was rated, how often down, and the positive share — lowest first.
   answer with no id (the fallback, GenAI) is one line of its own, not dropped.
 - **"At least N ratings"** (default 3) keeps a single thumbs-down from topping
   the list at 0%. The count line says how many items it left out.
+- **"Thumbs down at least N%"** (default 0, off) leaves out what has a smaller
+  thumbs-down share, so a long list narrows to what is really disliked. It reads
+  the same ratings as the Positive column, and the boundary stays in: 1 of 4 is
+  listed at 25 (`gapFbNegShareReaches`, in whole numbers, so no rounding decides
+  it). A percentage of one line means nothing, so All ratings does not have it.
 - Selecting an item lists its rated questions, thumbs down first, and opens the
   first; each opens its conversation with the rated answer marked, through the
   same cache and `renderFlaggedThread` the Recognition list uses. *Thumbs down
@@ -222,6 +235,30 @@ was rated, how often down, and the positive share — lowest first.
   on its next visit because its loaded key no longer matches.
 - Export writes the listed items as they are sorted:
   `GAP feedback {today} {Month}.xlsx`.
+
+### All ratings
+
+The third choice in Feedback's View dropdown, beside the two groupings and off
+by default: every
+rated answer on a line of its own — Question · Response · Rating · When · ✓, on
+the Recognition list's columns — for reading what was asked and said rather than
+ranking what answered. Nothing is read for it: these are the rows
+`get_gap_feedback` already returned, so switching is instant.
+
+- **A row is one rated answer with its latest rating**, the same rows the
+  groupings count. They add an answer under each of its ids; here it appears
+  once, so this list's total is the count line's "rated answers".
+- **`gapFbRowList` is the list** (pure, pinned by `gap-fb.test.js`); the rows,
+  the count, the keyboard and the export all read `gapFbRowView`.
+- **All / thumbs up / thumbs down** is this list's own row in the Filters bubble.
+  "At least N ratings" is hidden: a share needs several ratings, a line does not.
+- **Open and Fixed apply to a thumbs down only**, as on the items. A thumbs up is
+  nothing to fix, has no ✓, and is listed under *Any* alone.
+- The side panel is GenAI's shape: the Response formatted, *Answered by* with
+  Edit links, and the conversation with the rated answer marked. The active row
+  is `gapFbActiveAnswer`, the same state and `gapFbOpenAnswer` the groupings use.
+- Export: `Feedback ratings analysis {range}.xlsx`, one row per line, fixed rows
+  filled green.
 
 ## GenAI
 
