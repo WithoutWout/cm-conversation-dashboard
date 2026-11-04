@@ -39,6 +39,7 @@ implementation was tried first and was wrong.
 | `docs/ai-export.md` | `export_conversations_for_ai` and its `.jsonl` schema |
 | `docs/gap.md` | the GAP analysis view, fixed marks, `save_export_xlsx` and `xlsx.rs` |
 | `docs/export-files.md` | what counts as an older export file, and the offer to delete it |
+| `docs/tools.md` | the Advanced tools modal, and Convert IDs to links (`parseIdRefs`) |
 
 A rule that belongs to one feature belongs in that feature's doc. A rule that
 would change how you write *any* part of this app belongs here.
@@ -79,7 +80,8 @@ frontend/
     share-content-links.test.js, saved-searches.test.js,
     unreachable-search.test.js, modal-tags.test.js,
     dialog-flow.test.js, expr-group.test.js, entity-condense.test.js,
-    link-search.test.js, import-progress.test.js, old-exports.test.js
+    link-search.test.js, import-progress.test.js, old-exports.test.js,
+    id-links.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -389,7 +391,7 @@ The orientation map for the whole window. It says what is on screen and where;
 <header>
   brand | view switch: Content · Conversations · Flagged · Analysis (was GAP) |
   "Opening database…" pill while the conversations database opens | file tags |
-  Refresh | Settings (gear) | on Content only: Share Content · Collections |
+  Refresh | Advanced tools (wrench) | Settings (gear) | on Content only: Share Content · Collections |
   Data (opens #convDataModal), on every view and always rightmost. The Content
   pair's entrance plays and the rest slide aside (`headerSlide`)
 
@@ -561,6 +563,11 @@ The orientation map for the whole window. It says what is on screen and where;
 <div#oldExportsModal>   (after a load that finds older export files — docs/export-files.md)
   per kind: what is kept | the older files, each with its date and size |
   Not now | Delete N files
+
+<div#toolsModal>   (the header's wrench button — docs/tools.md)
+  a list of tools | the open tool
+  Convert IDs to links: text field | result, live, IDs as links |
+    Copy as Markdown · Copy with links | the IDs found, by type and title
 
 <div#missingDaysModal>   (once a day at launch, Analytics API set up — docs/import.md
                          → "The daily missing-days check")

@@ -1,0 +1,51 @@
+# Advanced tools
+
+The wrench in the header opens `#toolsModal`: a list of tools beside the open
+one. A new tool is a `.tools-nav-item` and a pane. It has one so far.
+
+## Convert IDs to links
+
+`parseIdRefs(text, known)` cuts free text into strings and references. It runs
+in the renderer on every keystroke and touches nothing outside the modal.
+`known` answers what the loaded export holds; the tests pass a fixture.
+
+**A word in front of a number decides what it is, and the export never overrules
+it.** On the real export 181 numbers are both an Article and a Dialog, so the type
+cannot be looked up. A prefixed ID always links, marked orange when the export does
+not have it, because a newer item than the export is a real case.
+
+| Written as | Links to |
+| --- | --- |
+| `D-1`, `D#1`, `DN-1`, `DN1`, `dialog(s)`, `dialoog`, `dialogen`, `dlg` | Dialog |
+| `Q-1`, `QA-1`, `artikel(s/en)`, `article(s)`, `art`, `faq`, `A-1` | Article |
+| `TD-1`, `T-1`, `T-dialoog 1`, `transactional dialog 1`, `transactionele dialoog 1` | Transactional Dialog |
+| `1234-123`, `D-1234-123`, `1234 node 123`, `D-1234, node 123` | Dialog node |
+| a bare number | Article |
+
+- **A Dialog number that exists only as a Transactional Dialog goes there.** Its
+  URL differs, and `dn-` names both.
+- **Articles and Transactional Dialogs have no nodes:** on `qa-1234-123` the Article
+  is linked and `-123` stays text.
+- **`node 123` alone is not linked.** Node ids repeat across Dialogs.
+- **Lists carry the type:** `dialogen 1, 2 en 3`, `D-6042, node 11602 en 11603`. An
+  inherited number must exist, or `dialog 42, 5 tickets` would link the 5.
+
+**A bare number or `N-N` has to earn it, since free text is full of numbers.** Real
+Article ids start at 1, so size cannot separate them.
+
+- It links only if the export has it. What was refused at three digits and up is
+  listed as left as text, with the way out: write a prefix.
+- One or two digits never link when bare, though 24 Articles have such ids: "3
+  tickets" is far commoner than a reference to Article 3. `qa-3` still links.
+- With no export loaded nothing can be checked, so three digits and up link, and a
+  bare `N-N` needs three in its first half: `10-12` is more likely a date.
+- Dates, times, decimals, amounts, percentages, phone numbers, leading zeros, URLs
+  and addresses never link. One letter on a small number (`Q4`, `A4`, `D3`) doesn't
+  either, without a separator.
+
+**Copying.** Teams, Jira and TinyMCE all paste the clipboard's `text/html`, so
+**Copy with links** writes that (`idLinksHtml`), with `* item` lines as a real list,
+and Markdown as its `text/plain` half (`idLinksMarkdown`), so a plain-text field
+still gets the links. **Copy as Markdown** writes only the Markdown, for a field
+that would otherwise take the HTML. A link reads as it was typed, the whole phrase:
+`D-4066, node 1340`. Without a CM.com Context URL both are disabled.

@@ -91,13 +91,16 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Clean up older export files
-            - When a folder holds older versions of your Articles, Dialogs or
-              Entities exports, the app now offers to delete them. It asks when
-              the app starts and after you reload for a new export.
-            - It lists what it keeps and what it would delete. Deleted files go
-              to the Trash or Recycle Bin, and "Not now" asks again at the next
-              start.
+            ### Advanced tools: Convert IDs to links
+            - A new wrench button in the header opens Advanced tools. Its first
+              tool turns the IDs in any text into links to CM.com.
+            - Paste a list or a message: Article numbers, D-1234, QA-1234,
+              "dialoog 1234", "1234 node 123" and 1234-123 are all recognised,
+              and everything else stays as you wrote it.
+            - Numbers without a prefix only link when that Article is in your
+              export, so "3 tickets" or "2024" stays plain text.
+            - Copy the result into Teams or Jira with the links intact, or copy
+              it as Markdown.
 
             ---
 

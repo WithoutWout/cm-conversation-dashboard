@@ -3387,6 +3387,131 @@
         color: var(--muted);
         line-height: 1.55;
       }
+      /* Advanced tools: a list of tools beside the open one — see docs/tools.md */
+      #toolsModal .modal-box {
+        width: 880px;
+        max-height: 86vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .tools-layout {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      .tools-nav {
+        flex: 0 0 170px;
+        padding: 10px;
+        border-right: 1px solid var(--border);
+      }
+      .tools-nav-item {
+        display: block;
+        width: 100%;
+        padding: 7px 10px;
+        border: none;
+        border-radius: 6px;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: 0.8rem;
+        text-align: left;
+        cursor: pointer;
+      }
+      .tools-nav-item.active {
+        background: var(--surface2);
+        color: var(--text);
+      }
+      .tools-pane {
+        flex: 1;
+        min-width: 0;
+        overflow-y: auto;
+        padding: 16px 18px;
+        font-size: 0.82rem;
+      }
+      .tools-pane h4 {
+        font-size: 0.88rem;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .tools-label {
+        margin: 14px 0 6px;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+      .id-links-input,
+      .id-links-output {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.82rem;
+        line-height: 1.55;
+      }
+      .id-links-input {
+        display: block;
+        min-height: 110px;
+        resize: vertical;
+      }
+      .id-links-output {
+        min-height: 60px;
+        max-height: 240px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .id-link {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+      .id-link.not-in-export {
+        color: var(--orange);
+      }
+      .id-link-nourl {
+        border-bottom: 1px dashed var(--muted);
+      }
+      .id-links-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .id-links-count {
+        margin-right: auto;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+      .id-links-found {
+        margin-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+      .id-links-row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 5px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+      }
+      .id-links-token {
+        flex: none;
+        font-family: var(--mono, monospace);
+      }
+      .id-links-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+      .id-links-missing {
+        flex: none;
+        margin-left: auto;
+        color: var(--orange);
+      }
       .old-exports-list {
         margin: 12px 0;
         max-height: 280px;
@@ -11424,6 +11549,25 @@
         </svg>
         Refresh
       </button>
+      <button
+        class="icon-btn"
+        id="toolsBtn"
+        title="Advanced tools"
+        aria-label="Advanced tools"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path
+            d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+          />
+        </svg>
+      </button>
       <button class="icon-btn" id="settingsBtn">
         <svg
           width="12"
@@ -13447,6 +13591,44 @@
     </div>
 
     <!-- OLDER EXPORTS: offered after a load — see `offerOldExports` -->
+    <!-- ADVANCED TOOLS: see docs/tools.md -->
+    <div class="modal-overlay" id="toolsModal">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>Advanced tools</h3>
+          <button class="close-btn" id="closeToolsModal" style="margin-left: auto">&#x2715;</button>
+        </div>
+        <div class="tools-layout">
+          <nav class="tools-nav">
+            <button class="tools-nav-item active" type="button">Convert IDs to links</button>
+          </nav>
+          <div class="tools-pane">
+            <h4>Convert IDs to links</h4>
+            <p class="hint">
+              Paste any text. Every Article, Dialog and Dialog node ID in it
+              becomes a link to CM.com; the rest stays as you wrote it.
+            </p>
+            <div class="tools-label">Your text</div>
+            <textarea
+              class="id-links-input"
+              id="idLinksInput"
+              spellcheck="false"
+              placeholder="Article 9102 and D-6055 still mention it, and so does dialog 42 node 7."
+            ></textarea>
+            <div class="tools-label">Result</div>
+            <div class="id-links-output" id="idLinksOutput"></div>
+            <div class="id-links-actions">
+              <span class="id-links-count" id="idLinksCount"></span>
+              <button class="btn-secondary" id="idLinksCopyMd" disabled>Copy as Markdown</button>
+              <button class="btn-primary" id="idLinksCopy" disabled>Copy with links</button>
+            </div>
+            <p class="hint" id="idLinksNote"></p>
+            <div class="id-links-found" id="idLinksFound"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay" id="oldExportsModal">
       <div class="modal-box">
         <div class="modal-header">
@@ -26173,7 +26355,7 @@
 
       // Open CM.com links in browser or popup based on setting
       document.addEventListener("click", (e) => {
-        const a = e.target.closest("a.action-link, a.btn-open-url")
+        const a = e.target.closest("a.action-link, a.btn-open-url, a.id-link")
         if (!a || !a.href) return
         e.preventDefault()
         if (a.classList.contains("btn-open-url")) {
@@ -38988,6 +39170,335 @@
       document.getElementById("oldExportsModal").addEventListener("click", (e) => {
         if (e.target === e.currentTarget) declineOldExports()
       })
+
+      // ── Advanced tools: Convert IDs to links — see docs/tools.md ──────
+
+      /// Reads the IDs in free text. Returns `parts`, the text cut into strings
+      /// and `{kind, id, node, text, inExport}` references, and `skipped`, the
+      /// numbers that looked like IDs but were left as text. `known` answers
+      /// what the loaded export holds; `known.hasData` false means nothing can
+      /// be checked. `inExport` is null then.
+      function parseIdRefs(text, known) {
+        const re =
+          /https?:\/\/\S+|www\.\S+|[\w.+-]+@[\w.-]+|(?:(transaction(?:al|ele)[ -]?dialo+g(?:s|en)?|t-?dialo+g(?:s|en)?|tdlg|td|t|dialo+g(?:en|s)?|dlg|dn|d|artikel(?:en|s)?|articles?|art|faq|qa|q|a)((?:[ \t]*(?:nr|nummer|number|no|id)\.?)?[ \t]*[-–—_:.#]{0,2}[ \t]*))?(\d+)(?:[-–](\d+)|[ \t]*[,-]?[ \t]*(?:node|knoop|knooppunt)s?[ \t:#-]*(\d+))?/gi
+        const parts = []
+        const skipped = []
+        let at = 0
+        let prev = null
+        let m
+        while ((m = re.exec(text))) {
+          if (m[3] === undefined) continue // a URL or an address, left alone
+          const start = m.index
+          const word = m[1] || ""
+          const digits = m[3]
+          const digitsEnd = start + word.length + (m[2] || "").length + digits.length
+          const retry = () => {
+            re.lastIndex = start + 1
+          }
+          // "and 12" reaches here as the prefix d; retrying finds the bare 12.
+          if (/[\p{L}\p{N}_-]/u.test(text[start - 1] || "")) {
+            retry()
+            continue
+          }
+          // Q4, A4, D3: one letter on a small number is rarely an ID.
+          if (word.length === 1 && !/[-–—_#:]/.test(m[2] || "")) {
+            if (digits.length < 3 || /a/i.test(word)) {
+              retry()
+              continue
+            }
+          }
+          const inherited =
+            !word &&
+            !!prev &&
+            /^\s*(?:[,;/&+]|en|and|of|or|,\s*(?:en|and|of|or))\s*$/i.test(text.slice(prev.end, start))
+          let kind
+          if (word) {
+            kind = /^t/i.test(word) ? "tdialog" : /^d/i.test(word) ? "dialog" : "article"
+          } else if (inherited) {
+            kind = prev.node != null ? "dialog" : prev.kind
+          } else {
+            kind = m[4] || m[5] ? "dialog" : "article"
+          }
+          // Only a Dialog has nodes: on anything else the tail stays text.
+          let nodeDigits = kind === "dialog" ? m[4] || m[5] || null : null
+          const end = nodeDigits ? start + m[0].length : digitsEnd
+          const after = text.slice(end, end + 14)
+          const before = text.slice(Math.max(0, start - 14), start)
+          if (
+            /^0/.test(digits) ||
+            digits.length > 9 ||
+            /^0/.test(nodeDigits || "") ||
+            (nodeDigits || "").length > 9 ||
+            /^[\p{L}\p{N}_]/u.test(after) ||
+            (kind === "dialog" && /^[-–]\d/.test(after))
+          ) {
+            retry()
+            continue
+          }
+          if (!word) {
+            const nextJoin = /^[,/](\d+)/.exec(after)
+            const prevJoin = /(\d+)[,/]$/.exec(before)
+            const shortJoin =
+              !inherited &&
+              ((nextJoin && (digits.length < 3 || nextJoin[1].length < 3)) ||
+                (prevJoin && (digits.length < 3 || prevJoin[1].length < 3)))
+            if (
+              shortJoin ||
+              /\d[.:]$/.test(before) ||
+              /^[.:]\d/.test(after) ||
+              /[€$£+]\s?$/.test(before) ||
+              /^\s?(?:%|€|°|euro\b|procent\b|percent\b)/i.test(after)
+            ) {
+              retry()
+              continue
+            }
+          }
+          let id = Number(digits)
+          let node = nodeDigits ? Number(nodeDigits) : null
+          // "1234 node 123, 124": the second is a node of the same Dialog.
+          if (inherited && prev.node != null && node == null) {
+            node = id
+            id = prev.id
+          }
+          // Article and Dialog numbers overlap, so only a Dialog number that
+          // exists solely as a Transactional Dialog can be redirected.
+          if (kind === "dialog" && node == null && known.hasData && !known.dialog(id) && known.tdialog(id)) {
+            kind = "tdialog"
+          }
+          const exists =
+            kind === "article"
+              ? known.article(id)
+              : kind === "tdialog"
+              ? known.tdialog(id)
+              : node != null
+              ? known.dialog(id) && known.node(id, node)
+              : known.dialog(id)
+          const inExport = known.hasData ? !!exists : null
+          // A word in front of it, or "node" inside it, says it is an ID. A
+          // bare number or N-N has to earn that: see docs/tools.md.
+          if (!word && !m[5]) {
+            const skipSilently = !inherited && digits.length < 3 && !m[4]
+            const smallPair = m[4] && !inherited && !known.hasData && digits.length < 3
+            if (skipSilently || smallPair) {
+              retry()
+              continue
+            }
+            if (inExport === false) {
+              skipped.push(text.slice(start, end))
+              if (inherited) prev.end = end
+              re.lastIndex = end
+              continue
+            }
+          }
+          if (start > at) parts.push(text.slice(at, start))
+          parts.push({ kind, id, node, text: text.slice(start, end), inExport })
+          at = end
+          re.lastIndex = end
+          prev = { kind, id, node, end }
+        }
+        if (at < text.length) parts.push(text.slice(at))
+        return { parts, skipped }
+      }
+
+      /// The reference's page in CM.com, or "" without a Context URL.
+      function idRefUrl(ref) {
+        if (ref.node != null) return buildNodeUrl(ref.id, ref.node)
+        return buildItemUrl(ref.kind, ref.id)
+      }
+
+      /// The same ID however it was typed: the app's own qa- / dn- spelling.
+      function idRefToken(ref) {
+        if (ref.kind === "article") return "qa-" + ref.id
+        return "dn-" + ref.id + (ref.node != null ? "-" + ref.node : "")
+      }
+
+      /// The result as HTML for the clipboard, which is what Teams, Jira and
+      /// TinyMCE paste: every line kept, every reference a plain <a>, and lines
+      /// typed as "* item" or "- item" a real list, not literal asterisks.
+      function idLinksHtml(parts) {
+        const lines = parts
+          .map((part) => {
+            if (typeof part === "string") return esc(part)
+            const url = idRefUrl(part)
+            return url ? '<a href="' + esc(url) + '">' + esc(part.text) + "</a>" : esc(part.text)
+          })
+          .join("")
+          .split(/\r?\n/)
+        let html = ""
+        let inList = false
+        lines.forEach((line, i) => {
+          const item = /^\s*[*•-]\s+(.*)$/.exec(line)
+          if (item) {
+            html += (inList ? "" : "<ul>") + "<li>" + item[1] + "</li>"
+          } else {
+            html += (inList ? "</ul>" : "") + line + (i < lines.length - 1 ? "<br>" : "")
+          }
+          inList = !!item
+        })
+        return html + (inList ? "</ul>" : "")
+      }
+
+      /// The result as Markdown: also the clipboard's plain-text half, so a
+      /// field that takes only plain text still receives the links.
+      function idLinksMarkdown(parts) {
+        return parts
+          .map((part) => {
+            if (typeof part === "string") return part
+            const url = idRefUrl(part)
+            return url ? "[" + part.text.replace(/([\[\]])/g, "\\$1") + "](" + url + ")" : part.text
+          })
+          .join("")
+      }
+
+      function _idLinksKnown() {
+        return {
+          hasData: allCombinedItems.length > 0,
+          article: (id) => articleMap.has(id),
+          dialog: (id) => dialogMap.has(id),
+          tdialog: (id) => tDialogMap.has(id),
+          node: (d, n) => ((dialogMap.get(d) || {}).nodes || []).some((x) => x.id === n),
+        }
+      }
+
+      function _idRefTitle(ref) {
+        if (ref.kind === "article") {
+          const a = articleMap.get(ref.id)
+          return a ? aFaqQ(a) || "" : ""
+        }
+        const d = ref.kind === "tdialog" ? tDialogMap.get(ref.id) : dialogMap.get(ref.id)
+        if (!d) return ""
+        const n = ref.node != null ? (d.nodes || []).find((x) => x.id === ref.node) : null
+        return [d.name, n && n.name].filter(Boolean).join(" · ")
+      }
+
+      let _idLinksParts = []
+
+      function renderIdLinks() {
+        const text = document.getElementById("idLinksInput").value
+        const { parts, skipped } = parseIdRefs(text, _idLinksKnown())
+        _idLinksParts = parts
+        const refs = parts.filter((p) => typeof p !== "string")
+        document.getElementById("idLinksOutput").innerHTML = parts
+          .map((part) => {
+            if (typeof part === "string") return esc(part)
+            const url = idRefUrl(part)
+            const title = idRefToken(part) + (_idRefTitle(part) ? " · " + _idRefTitle(part) : "")
+            if (!url) return '<span class="id-link-nourl" title="' + esc(title) + '">' + esc(part.text) + "</span>"
+            return (
+              '<a class="id-link' +
+              (part.inExport === false ? " not-in-export" : "") +
+              '" href="' +
+              esc(url) +
+              '" title="' +
+              esc(title) +
+              '">' +
+              esc(part.text) +
+              "</a>"
+            )
+          })
+          .join("")
+
+        const missing = refs.filter((r) => r.inExport === false).length
+        document.getElementById("idLinksCount").textContent = text.trim()
+          ? refs.length + (refs.length === 1 ? " ID" : " IDs") + (missing ? " · " + missing + " not in the export" : "")
+          : ""
+
+        const canCopy = !!cmBaseUrl && refs.length > 0
+        document.getElementById("idLinksCopy").disabled = !canCopy
+        document.getElementById("idLinksCopyMd").disabled = !canCopy
+
+        const note = document.getElementById("idLinksNote")
+        const left = [...new Set(skipped)]
+        note.innerHTML = !cmBaseUrl
+          ? '<button class="export-meta-warn" onclick="closeToolsModal();document.getElementById(\'settingsBtn\').click()" title="Open Settings">No CM.com Context URL — set it to get links</button>'
+          : left.length
+          ? "Left as text, not in the export: " +
+            esc(left.join(", ")) +
+            ". Write a prefix in front of it (q-, d-) to link it anyway."
+          : ""
+
+        const seen = new Set()
+        document.getElementById("idLinksFound").innerHTML = refs
+          .filter((r) => {
+            const key = r.kind + idRefToken(r)
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+          .map((r) => {
+            const label =
+              r.kind === "article" ? "Article" : r.kind === "tdialog" ? "Transactional Dialog" : r.node != null ? "Dialog node" : "Dialog"
+            const cls = r.kind === "article" ? "b-article" : r.kind === "tdialog" ? "b-tdialog" : "b-dialog"
+            return (
+              '<div class="id-links-row"><span class="badge ' +
+              cls +
+              '">' +
+              label +
+              '</span><span class="id-links-token">' +
+              esc(idRefToken(r)) +
+              '</span><span class="id-links-title">' +
+              esc(_idRefTitle(r)) +
+              "</span>" +
+              (r.inExport === false
+                ? '<span class="id-links-missing">' +
+                  (r.node != null && dialogMap.has(r.id) ? "node not in this Dialog" : "not in the export") +
+                  "</span>"
+                : "") +
+              "</div>"
+            )
+          })
+          .join("")
+      }
+
+      function _idLinksCopied(btn) {
+        const label = btn.textContent
+        btn.textContent = "✓ Copied"
+        setTimeout(() => {
+          btn.textContent = label
+        }, 1500)
+      }
+
+      function copyIdLinks(btn) {
+        const html = idLinksHtml(_idLinksParts)
+        const wrapped = "<html><body><!--StartFragment-->" + html + "<!--EndFragment--></body></html>"
+        const write =
+          typeof ClipboardItem !== "undefined"
+            ? navigator.clipboard.write([
+                new ClipboardItem({
+                  "text/html": new Blob([wrapped], { type: "text/html" }),
+                  "text/plain": new Blob([idLinksMarkdown(_idLinksParts)], { type: "text/plain" }),
+                }),
+              ])
+            : Promise.reject()
+        write.catch(() => execCommandCopy(html))
+        _idLinksCopied(btn)
+      }
+
+      function copyIdLinksMarkdown(btn) {
+        navigator.clipboard.writeText(idLinksMarkdown(_idLinksParts))
+        _idLinksCopied(btn)
+      }
+
+      function closeToolsModal() {
+        document.getElementById("toolsModal").classList.remove("open")
+      }
+
+      document.getElementById("toolsBtn").addEventListener("click", () => {
+        document.getElementById("toolsModal").classList.add("open")
+        // The export or the Context URL may have changed since the last open.
+        renderIdLinks()
+        document.getElementById("idLinksInput").focus()
+      })
+      document.getElementById("closeToolsModal").addEventListener("click", closeToolsModal)
+      document.getElementById("toolsModal").addEventListener("click", (e) => {
+        if (e.target === e.currentTarget) closeToolsModal()
+      })
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeToolsModal()
+      })
+      document.getElementById("idLinksInput").addEventListener("input", renderIdLinks)
+      document.getElementById("idLinksCopy").addEventListener("click", (e) => copyIdLinks(e.currentTarget))
+      document.getElementById("idLinksCopyMd").addEventListener("click", (e) => copyIdLinksMarkdown(e.currentTarget))
 
       async function checkMissingDays() {
         const today = zoneDayKey(Date.now(), insZone())
