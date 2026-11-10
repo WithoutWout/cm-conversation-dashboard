@@ -43,6 +43,32 @@ Article ids start at 1, so size cannot separate them.
   and addresses never link. One letter on a small number (`Q4`, `A4`, `D3`) doesn't
   either, without a separator.
 
+**Formatted input.** The input is an editable box, not a textarea, so a paste
+from TinyMCE, Teams, Word or a web page keeps its formatting and the result
+keeps it too, IDs linked inside it.
+
+- **A paste is cleaned before it lands** (`sanitizeIdLinksHtml`): structure,
+  emphasis, lists, tables, images and `http(s)`/`mailto` links stay, with a few
+  inline styles (colour, weight, alignment, indent). Scripts, handlers, classes,
+  Word's `mso-` and TinyMCE's `data-mce-` go; an unknown tag keeps its content.
+  A drop is refused, since it would bypass the cleaning.
+- **Typed text stays plain.** The box writes its own `<div>`/`<br>` lines, and
+  those are read back as lines (`_idLinksPlainText`) through the old path, `* item`
+  lists included. Any formatting (`_idLinksIsRich`) switches to the rich path and
+  the label says "formatting kept".
+- **The rich path reads all text nodes as one text** (`idRefsInChunks`), so
+  `dialog <b>42</b>` still links, then cuts each reference back at the node
+  boundaries: a reference split by a tag becomes one `<a>` per piece, with the
+  same URL. Block elements and `<br>` break the text into lines, as a newline
+  does in plain text. Any whitespace reads as a space (`&nbsp;`, source newlines).
+- **A link already in the paste is kept and never linked inside**; its text is
+  not counted as an ID.
+- Copy with links writes the formatted HTML; its plain-text half and Copy as
+  Markdown are the text with links, without the formatting.
+
+The modal takes most of the window, input and result side by side, stacked
+below 900 px.
+
 **Copying.** Teams, Jira and TinyMCE all paste the clipboard's `text/html`, so
 **Copy with links** writes that (`idLinksHtml`), with `* item` lines as a real list,
 and Markdown as its `text/plain` half (`idLinksMarkdown`), so a plain-text field

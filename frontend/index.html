@@ -3449,8 +3449,9 @@
       }
       /* Advanced tools: a list of tools beside the open one — see docs/tools.md */
       #toolsModal .modal-box {
-        width: 880px;
-        max-height: 86vh;
+        width: min(1480px, 96vw);
+        max-width: 96vw;
+        height: 92vh;
         display: flex;
         flex-direction: column;
       }
@@ -3484,6 +3485,8 @@
       .tools-pane {
         flex: 1;
         min-width: 0;
+        display: flex;
+        flex-direction: column;
         overflow-y: auto;
         padding: 16px 18px;
         font-size: 0.82rem;
@@ -3510,17 +3513,88 @@
         font-size: 0.82rem;
         line-height: 1.55;
       }
-      .id-links-input {
-        display: block;
-        min-height: 110px;
-        resize: vertical;
+      /* Input beside the result, both as tall as the modal allows; stacked
+         when the window is narrow. */
+      .id-links-io {
+        flex: 1 1 auto;
+        min-height: 260px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
       }
+      .id-links-col {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+      @media (max-width: 900px) {
+        .id-links-io {
+          grid-template-columns: 1fr;
+          grid-auto-rows: minmax(200px, 1fr);
+        }
+      }
+      .id-links-input,
       .id-links-output {
-        min-height: 60px;
-        max-height: 240px;
-        overflow-y: auto;
-        white-space: pre-wrap;
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
         overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+      .id-links-input {
+        outline: none;
+        cursor: text;
+      }
+      .id-links-input:focus {
+        border-color: var(--accent);
+      }
+      .id-links-input:empty::before {
+        content: attr(data-placeholder);
+        color: var(--muted);
+        pointer-events: none;
+      }
+      /* Pasted HTML carries its own line breaks as tags; its source newlines
+         are not lines. */
+      .id-links-input.rich,
+      .id-links-output.rich {
+        white-space: normal;
+      }
+      .id-links-input :is(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6),
+      .id-links-output :is(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6) {
+        margin: 0 0 0.6em;
+      }
+      .id-links-input :is(ul, ol),
+      .id-links-output :is(ul, ol) {
+        padding-left: 1.5em;
+      }
+      .id-links-input :is(td, th),
+      .id-links-output :is(td, th) {
+        border: 1px solid var(--border);
+        padding: 3px 6px;
+        vertical-align: top;
+      }
+      .id-links-input table,
+      .id-links-output table {
+        border-collapse: collapse;
+      }
+      .id-links-input img,
+      .id-links-output img {
+        max-width: 100%;
+      }
+      .id-links-input a,
+      .id-links-output a {
+        color: var(--accent);
+      }
+      .id-links-mode {
+        margin-left: 6px;
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--surface2);
+        font-size: 0.7rem;
+      }
+      .id-links-mode:empty {
+        display: none;
       }
       .id-link {
         color: var(--accent);
@@ -3545,6 +3619,9 @@
         font-size: 0.75rem;
       }
       .id-links-found {
+        flex: none;
+        max-height: 28vh;
+        overflow-y: auto;
         margin-top: 12px;
         border-top: 1px solid var(--border);
       }
@@ -13706,18 +13783,28 @@
           <div class="tools-pane">
             <h4>Convert IDs to links</h4>
             <p class="hint">
-              Paste any text. Every Article, Dialog and Dialog node ID in it
-              becomes a link to CM.com; the rest stays as you wrote it.
+              Paste any text, plain or formatted. Every Article, Dialog and Dialog
+              node ID in it becomes a link to CM.com; the rest stays as you wrote it,
+              bold, lists and tables included.
             </p>
-            <div class="tools-label">Your text</div>
-            <textarea
-              class="id-links-input"
-              id="idLinksInput"
-              spellcheck="false"
-              placeholder="Article 9102 and D-6055 still mention it, and so does dialog 42 node 7."
-            ></textarea>
-            <div class="tools-label">Result</div>
-            <div class="id-links-output" id="idLinksOutput"></div>
+            <div class="id-links-io">
+              <div class="id-links-col">
+                <div class="tools-label">Your text <span class="id-links-mode" id="idLinksMode"></span></div>
+                <div
+                  class="id-links-input"
+                  id="idLinksInput"
+                  contenteditable="true"
+                  spellcheck="false"
+                  role="textbox"
+                  aria-multiline="true"
+                  data-placeholder="Article 9102 and D-6055 still mention it, and so does dialog 42 node 7. Paste from TinyMCE, Teams or Word and the formatting stays."
+                ></div>
+              </div>
+              <div class="id-links-col">
+                <div class="tools-label">Result</div>
+                <div class="id-links-output" id="idLinksOutput"></div>
+              </div>
+            </div>
             <div class="id-links-actions">
               <span class="id-links-count" id="idLinksCount"></span>
               <button class="btn-secondary" id="idLinksCopyMd" disabled>Copy as Markdown</button>
@@ -39832,6 +39919,227 @@
           .join("")
       }
 
+      /// parseIdRefs over text that lives in many pieces — the text nodes of
+      /// pasted HTML. The pieces are read as one text, so "dialog <b>42</b>"
+      /// and "dialogen 1, 2 en 3" across a tag keep their context, and every
+      /// result is cut back at the piece boundaries: one list of parts per
+      /// piece, whose strings add up to that piece exactly. A reference split
+      /// by a boundary comes back as a ref in each piece it touches.
+      /// Whitespace of any kind reads as a space (a non-breaking space from an
+      /// editor, a newline from HTML source), but the text kept is the original.
+      function idRefsInChunks(texts, known) {
+        const flat = texts.map((t) => t.replace(/[\s\u00a0]/g, (c) => (c === "\n" && t === "\n" ? c : " "))).join("")
+        const orig = texts.join("")
+        const { parts, skipped } = parseIdRefs(flat, known)
+        const out = texts.map(() => [])
+        let ci = 0
+        let off = 0
+        let pos = 0
+        parts.forEach((part, pi) => {
+          let left = typeof part === "string" ? part.length : part.text.length
+          while (left > 0) {
+            while (ci < texts.length - 1 && off >= texts[ci].length) {
+              ci++
+              off = 0
+            }
+            const take = Math.min(left, texts[ci].length - off)
+            const piece = orig.slice(pos, pos + take)
+            out[ci].push(typeof part === "string" ? piece : Object.assign({}, part, { text: piece, part: pi }))
+            left -= take
+            off += take
+            pos += take
+          }
+        })
+        return { chunks: out, parts, skipped }
+      }
+
+      /// What a pasted page keeps: structure, emphasis, lists, tables, links and
+      /// a few inline styles. Scripts, event handlers, classes and editor
+      /// bookkeeping (Word's mso-, TinyMCE's data-mce-) are dropped; an element
+      /// not on the list gives up its tag and keeps its content.
+      const ID_LINKS_TAGS = new Set(
+        "P DIV BR SPAN B STRONG I EM U S STRIKE DEL INS SUB SUP CODE PRE BLOCKQUOTE UL OL LI H1 H2 H3 H4 H5 H6 TABLE THEAD TBODY TFOOT TR TD TH CAPTION COLGROUP COL A HR IMG".split(
+          " ",
+        ),
+      )
+      const ID_LINKS_DROP = new Set("SCRIPT STYLE META LINK TITLE HEAD NOSCRIPT TEMPLATE IFRAME OBJECT EMBED SVG MATH BUTTON INPUT SELECT TEXTAREA FORM".split(" "))
+      const ID_LINKS_STYLES = ["color", "background-color", "font-weight", "font-style", "text-decoration", "text-decoration-line", "text-align", "padding-left", "margin-left", "list-style-type"]
+
+      function sanitizeIdLinksHtml(html) {
+        const doc = new DOMParser().parseFromString(html, "text/html")
+        const clean = (el) => {
+          for (const child of [...el.childNodes]) {
+            if (child.nodeType === 3) continue
+            if (child.nodeType !== 1) {
+              child.remove()
+              continue
+            }
+            const tag = child.tagName.toUpperCase()
+            if (ID_LINKS_DROP.has(tag) || tag.includes(":")) {
+              // Word's <o:p> is an empty paragraph marker; the others are not text.
+              child.remove()
+              continue
+            }
+            clean(child)
+            if (!ID_LINKS_TAGS.has(tag)) {
+              // <font color> is the one unknown tag whose meaning is worth a span.
+              if (tag === "FONT" && child.getAttribute("color")) {
+                const span = doc.createElement("span")
+                span.style.color = child.getAttribute("color")
+                span.append(...child.childNodes)
+                child.replaceWith(span)
+              } else {
+                child.replaceWith(...child.childNodes)
+              }
+              continue
+            }
+            const keep = {}
+            if (tag === "A") {
+              const href = (child.getAttribute("href") || "").trim()
+              if (/^(https?:|mailto:)/i.test(href)) keep.href = href
+            } else if (tag === "IMG") {
+              const src = (child.getAttribute("src") || "").trim()
+              if (!/^(https?:|data:image\/)/i.test(src)) {
+                child.remove()
+                continue
+              }
+              keep.src = src
+              for (const a of ["alt", "width", "height"]) if (child.hasAttribute(a)) keep[a] = child.getAttribute(a)
+            } else if (tag === "TD" || tag === "TH") {
+              for (const a of ["colspan", "rowspan"]) if (child.hasAttribute(a)) keep[a] = child.getAttribute(a)
+            } else if (tag === "OL" && child.hasAttribute("start")) {
+              keep.start = child.getAttribute("start")
+            }
+            const style = ID_LINKS_STYLES.map((prop) => {
+              const v = child.style.getPropertyValue(prop)
+              return v && !/url\(|expression|javascript:/i.test(v) ? prop + ": " + v : ""
+            })
+              .filter(Boolean)
+              .join("; ")
+            for (const a of [...child.attributes]) child.removeAttribute(a.name)
+            for (const [a, v] of Object.entries(keep)) child.setAttribute(a, v)
+            if (style) child.setAttribute("style", style)
+            // A span that styles nothing is noise in the copy.
+            if (tag === "SPAN" && !style) child.replaceWith(...child.childNodes)
+          }
+        }
+        clean(doc.body)
+        return doc.body.innerHTML.replace(/<!--[\s\S]*?-->/g, "").trim()
+      }
+
+      /// Whether the input holds formatting worth keeping. Typing in an
+      /// editable box makes <div> and <br> lines on its own; those are plain.
+      function _idLinksIsRich(root) {
+        return !!root.querySelector(
+          "b, strong, i, em, u, s, strike, del, ins, sub, sup, code, pre, blockquote, ul, ol, li, h1, h2, h3, h4, h5, h6, table, a, img, hr, [style]",
+        )
+      }
+
+      /// The plain input's text, read from the editable box line by line the
+      /// way it was typed: each <div> or <p> a line, each <br> a break.
+      function _idLinksPlainText(root) {
+        let text = ""
+        const walk = (node) => {
+          for (const child of node.childNodes) {
+            if (child.nodeType === 3) text += child.data.replace(/\u00a0/g, " ")
+            else if (child.nodeName === "BR") text += "\n"
+            else if (child.nodeType === 1) {
+              const block = child.nodeName === "DIV" || child.nodeName === "P"
+              if (block && text && !text.endsWith("\n")) text += "\n"
+              walk(child)
+              if (block && !text.endsWith("\n")) text += "\n"
+            }
+          }
+        }
+        walk(root)
+        return text.replace(/\n$/, "")
+      }
+
+      const ID_LINKS_BLOCKS = /^(P|DIV|LI|TR|TD|TH|H[1-6]|BLOCKQUOTE|PRE|UL|OL|TABLE|THEAD|TBODY|TFOOT|CAPTION|HR)$/
+
+      /// The rich input with its IDs turned into links, as a detached copy.
+      /// forCopy writes bare <a href>; the screen version marks each link the
+      /// way the plain result does. Links already in the paste stay as they
+      /// are, and nothing inside one is linked again.
+      function _idLinksBuildRich(root, known, forCopy) {
+        const clone = root.cloneNode(true)
+        const texts = []
+        const nodes = []
+        const sep = () => {
+          if (texts.length && texts[texts.length - 1] !== "\n") {
+            texts.push("\n")
+            nodes.push(null)
+          }
+        }
+        const walk = (node) => {
+          for (const child of node.childNodes) {
+            if (child.nodeType === 3) {
+              texts.push(child.data)
+              nodes.push(child)
+            } else if (child.nodeType === 1) {
+              if (child.nodeName === "A") {
+                // Its text is read for context, but no link is made inside it.
+                texts.push(child.textContent)
+                nodes.push("A")
+                continue
+              }
+              if (child.nodeName === "BR") {
+                texts.push("\n")
+                nodes.push(null)
+                continue
+              }
+              const block = ID_LINKS_BLOCKS.test(child.nodeName)
+              if (block) sep()
+              walk(child)
+              if (block) sep()
+            }
+          }
+        }
+        walk(clone)
+        const res = idRefsInChunks(texts, known)
+        const { chunks, skipped } = res
+        // The text of a link already in the paste is never an ID of its own.
+        const inLink = new Set()
+        chunks.forEach((pieces, i) => {
+          if (nodes[i] !== "A") return
+          pieces.forEach((p) => typeof p !== "string" && inLink.add(p.part))
+          chunks[i] = pieces.map((p) => (typeof p === "string" ? p : p.text))
+        })
+        const parts = res.parts.map((p, i) => (typeof p !== "string" && inLink.has(i) ? p.text : p))
+        chunks.forEach((pieces, i) => {
+          const node = nodes[i]
+          if (!node || node === "A" || pieces.every((p) => typeof p === "string")) return
+          const frag = document.createDocumentFragment()
+          for (const piece of pieces) {
+            if (typeof piece === "string") {
+              frag.append(piece)
+              continue
+            }
+            const url = idRefUrl(piece)
+            if (forCopy) {
+              if (!url) {
+                frag.append(piece.text)
+                continue
+              }
+              const a = document.createElement("a")
+              a.href = url
+              a.textContent = piece.text
+              frag.append(a)
+              continue
+            }
+            const title = idRefToken(piece) + (_idRefTitle(piece) ? " · " + _idRefTitle(piece) : "")
+            const el = document.createElement(url ? "a" : "span")
+            el.className = url ? "id-link" + (piece.inExport === false ? " not-in-export" : "") : "id-link-nourl"
+            if (url) el.href = url
+            el.title = title
+            el.textContent = piece.text
+            frag.append(el)
+          }
+          node.replaceWith(frag)
+        })
+        return { html: clone.innerHTML, parts, skipped }
+      }
+
       function _idLinksKnown() {
         return {
           hasData: allCombinedItems.length > 0,
@@ -39854,13 +40162,25 @@
       }
 
       let _idLinksParts = []
+      let _idLinksRich = false
 
       function renderIdLinks() {
-        const text = document.getElementById("idLinksInput").value
-        const { parts, skipped } = parseIdRefs(text, _idLinksKnown())
+        const input = document.getElementById("idLinksInput")
+        // An emptied editable box keeps a stray <br>; clear it so the placeholder shows.
+        if (!input.textContent.trim() && !input.querySelector("img, table, hr, li")) input.innerHTML = ""
+        _idLinksRich = _idLinksIsRich(input)
+        input.classList.toggle("rich", _idLinksRich)
+        document.getElementById("idLinksOutput").classList.toggle("rich", _idLinksRich)
+        document.getElementById("idLinksMode").textContent = _idLinksRich ? "formatting kept" : ""
+        const known = _idLinksKnown()
+        const text = _idLinksRich ? input.textContent : _idLinksPlainText(input)
+        const rich = _idLinksRich ? _idLinksBuildRich(input, known, false) : null
+        const { parts, skipped } = rich || parseIdRefs(text, known)
         _idLinksParts = parts
         const refs = parts.filter((p) => typeof p !== "string")
-        document.getElementById("idLinksOutput").innerHTML = parts
+        document.getElementById("idLinksOutput").innerHTML = rich
+          ? rich.html
+          : parts
           .map((part) => {
             if (typeof part === "string") return esc(part)
             const url = idRefUrl(part)
@@ -39941,7 +40261,9 @@
       }
 
       function copyIdLinks(btn) {
-        const html = idLinksHtml(_idLinksParts)
+        const html = _idLinksRich
+          ? _idLinksBuildRich(document.getElementById("idLinksInput"), _idLinksKnown(), true).html
+          : idLinksHtml(_idLinksParts)
         const wrapped = "<html><body><!--StartFragment-->" + html + "<!--EndFragment--></body></html>"
         const write =
           typeof ClipboardItem !== "undefined"
@@ -39979,6 +40301,26 @@
         if (e.key === "Escape") closeToolsModal()
       })
       document.getElementById("idLinksInput").addEventListener("input", renderIdLinks)
+      // A paste from TinyMCE, Teams or Word arrives as text/html: keep its
+      // formatting, cleaned. Anything else goes in as plain text.
+      document.getElementById("idLinksInput").addEventListener("paste", (e) => {
+        const cd = e.clipboardData
+        if (!cd) return
+        e.preventDefault()
+        const html = cd.getData("text/html")
+        const clean = html ? sanitizeIdLinksHtml(html) : ""
+        if (clean) document.execCommand("insertHTML", false, clean)
+        else document.execCommand("insertText", false, cd.getData("text/plain"))
+      })
+      // A link that came with the paste opens in the browser, like any outside link.
+      document.getElementById("idLinksOutput").addEventListener("click", (e) => {
+        const a = e.target.closest("a[href]:not(.id-link)")
+        if (!a) return
+        e.preventDefault()
+        window.backend.openUrl(a.href)
+      })
+      // Dropped text would bring its markup unfiltered.
+      document.getElementById("idLinksInput").addEventListener("drop", (e) => e.preventDefault())
       document.getElementById("idLinksCopy").addEventListener("click", (e) => copyIdLinks(e.currentTarget))
       document.getElementById("idLinksCopyMd").addEventListener("click", (e) => copyIdLinksMarkdown(e.currentTarget))
 
