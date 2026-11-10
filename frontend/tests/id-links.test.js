@@ -10,7 +10,7 @@ vm.runInContext(
   `
   let cmBaseUrl = "https://cm.example/ctx"
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;") }
-  ${["buildNodeUrl", "buildItemUrl", "parseIdRefs", "idRefUrl", "idRefToken", "idLinksHtml", "idLinksMarkdown"].map(extract).join("\n")}
+  ${["buildNodeUrl", "buildItemUrl", "parseIdRefs", "idRefUrl", "idRefToken", "idLinksHtml", "idLinksMarkdown", "idRefsInChunks"].map(extract).join("\n")}
   const ARTICLES = new Set([3, 9102, 1234, 150])
   const DIALOGS = new Map([[6055, [7, 123]], [1234, [123, 124]], [42, []], [12, [11]]])
   const TDIALOGS = new Set([97])
@@ -168,5 +168,19 @@ assert.strictEqual(
 ctx.setBase("")
 assert.strictEqual(ctx.idLinksMarkdown(copyParts), "Zie Dialoog 42\n<en> qa-9")
 assert.strictEqual(ctx.idLinksHtml(copyParts), "Zie Dialoog 42<br>&lt;en&gt; qa-9")
+
+// Pasted HTML: the text nodes are read as one text and the refs cut back per node.
+const chunked = (texts) => {
+  const { chunks } = ctx.idRefsInChunks(texts, known)
+  return Array.from(chunks).map((ps) => Array.from(ps).map((p) => (typeof p === "string" ? p : "[" + p.kind[0] + ":" + p.id + (p.node != null ? "/" + p.node : "") + "=" + p.text + "]")))
+}
+// "dialog <b>42</b>": the prefix in one node, the number in the next, both linked.
+assert.deepStrictEqual(chunked(["Zie dialog ", "42", " graag"]), [["Zie ", "[d:42=dialog ]"], ["[d:42=42]"], [" graag"]])
+// Every piece adds up to its node exactly, original whitespace kept.
+assert.deepStrictEqual(chunked(["Article\u00a09102 en", "\n", "D-6055"]), [["[a:9102=Article\u00a09102]", " en"], ["\n"], ["[d:6055=D-6055]"]])
+// Source newlines inside a node read as spaces.
+assert.deepStrictEqual(chunked(["dialog\n  42"]), [["[d:42=dialog\n  42]"]])
+// Empty nodes take nothing.
+assert.deepStrictEqual(chunked(["", "qa-9102", ""]), [[], ["[a:9102=qa-9102]"], []])
 
 console.log("id-links ok")
