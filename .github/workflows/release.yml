@@ -91,12 +91,12 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Convert IDs to links keeps your formatting
-            - Paste text from TinyMCE, Teams or Word and the bold, lists and
-              tables stay. The IDs in it become links, and Copy with links
-              copies it back with that formatting, ready to paste.
-            - The tool now uses most of the window, with your text and the
-              result side by side.
+            ### Convert IDs to links: fixes
+            - A pasted list whose numbers were already links now converts:
+              each ID gets its CM.com link in place of the old one. Links
+              without an ID stay as they are.
+            - Long texts scroll inside the boxes, so the copy buttons stay
+              in view.
 
             ---
 
