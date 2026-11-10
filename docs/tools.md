@@ -61,8 +61,10 @@ keeps it too, IDs linked inside it.
   boundaries: a reference split by a tag becomes one `<a>` per piece, with the
   same URL. Block elements and `<br>` break the text into lines, as a newline
   does in plain text. Any whitespace reads as a space (`&nbsp;`, source newlines).
-- **A link already in the paste is kept and never linked inside**; its text is
-  not counted as an ID.
+- **A link already in the paste that holds an ID is replaced by the ID's link.**
+  Pasted lists are often linked already — to an old URL, another environment —
+  and a first version that left them alone found "0 IDs" on exactly that paste.
+  A link with no ID in it is kept as it is.
 - Copy with links writes the formatted HTML; its plain-text half and Copy as
   Markdown are the text with links, without the formatting.
 

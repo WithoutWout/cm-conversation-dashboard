@@ -3448,20 +3448,24 @@
         line-height: 1.55;
       }
       /* Advanced tools: a list of tools beside the open one — see docs/tools.md */
+      /* Grid from the box down to the two text boxes, not flex: WebKit does
+         not treat a flex child's stretched height as definite, so in the app
+         the pane grew with a long paste past the window and nothing scrolled.
+         Grid rows of a fixed-height box are definite in every engine. */
       #toolsModal .modal-box {
         width: min(1480px, 96vw);
         max-width: 96vw;
         height: 92vh;
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        overflow: hidden;
       }
       .tools-layout {
-        display: flex;
-        flex: 1;
+        display: grid;
+        grid-template-columns: 170px minmax(0, 1fr);
         min-height: 0;
       }
       .tools-nav {
-        flex: 0 0 170px;
         padding: 10px;
         border-right: 1px solid var(--border);
       }
@@ -3483,10 +3487,10 @@
         color: var(--text);
       }
       .tools-pane {
-        flex: 1;
         min-width: 0;
-        display: flex;
-        flex-direction: column;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto auto minmax(260px, 1fr) auto auto auto;
         overflow-y: auto;
         padding: 16px 18px;
         font-size: 0.82rem;
@@ -3514,30 +3518,44 @@
         line-height: 1.55;
       }
       /* Input beside the result, both as tall as the modal allows; stacked
-         when the window is narrow. */
+         when the window is narrow. The two boxes are grid cells of a
+         minmax(0, 1fr) row, not flex children: that gives them a definite
+         height in WebKit too, so a long paste scrolls inside the box instead
+         of growing it over the buttons below. */
       .id-links-io {
-        flex: 1 1 auto;
-        min-height: 260px;
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 14px;
-      }
-      .id-links-col {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
         min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-areas: "lin lout" "in out";
+        column-gap: 14px;
+      }
+      .id-links-label-in {
+        grid-area: lin;
+      }
+      .id-links-label-out {
+        grid-area: lout;
+      }
+      .id-links-input {
+        grid-area: in;
+      }
+      .id-links-output {
+        grid-area: out;
       }
       @media (max-width: 900px) {
         .id-links-io {
-          grid-template-columns: 1fr;
-          grid-auto-rows: minmax(200px, 1fr);
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: auto minmax(0, 1fr) auto minmax(0, 1fr);
+          grid-template-areas: "lin" "in" "lout" "out";
+        }
+        .tools-pane {
+          grid-template-rows: auto auto minmax(460px, 1fr) auto auto auto;
         }
       }
       .id-links-input,
       .id-links-output {
-        flex: 1;
         min-height: 0;
+        height: 100%;
         overflow: auto;
         overflow-wrap: anywhere;
         white-space: pre-wrap;
@@ -3619,7 +3637,6 @@
         font-size: 0.75rem;
       }
       .id-links-found {
-        flex: none;
         max-height: 28vh;
         overflow-y: auto;
         margin-top: 12px;
@@ -13788,22 +13805,18 @@
               bold, lists and tables included.
             </p>
             <div class="id-links-io">
-              <div class="id-links-col">
-                <div class="tools-label">Your text <span class="id-links-mode" id="idLinksMode"></span></div>
-                <div
-                  class="id-links-input"
-                  id="idLinksInput"
-                  contenteditable="true"
-                  spellcheck="false"
-                  role="textbox"
-                  aria-multiline="true"
-                  data-placeholder="Article 9102 and D-6055 still mention it, and so does dialog 42 node 7. Paste from TinyMCE, Teams or Word and the formatting stays."
-                ></div>
-              </div>
-              <div class="id-links-col">
-                <div class="tools-label">Result</div>
-                <div class="id-links-output" id="idLinksOutput"></div>
-              </div>
+              <div class="tools-label id-links-label-in">Your text <span class="id-links-mode" id="idLinksMode"></span></div>
+              <div class="tools-label id-links-label-out">Result</div>
+              <div
+                class="id-links-input"
+                id="idLinksInput"
+                contenteditable="true"
+                spellcheck="false"
+                role="textbox"
+                aria-multiline="true"
+                data-placeholder="Article 9102 and D-6055 still mention it, and so does dialog 42 node 7. Paste from TinyMCE, Teams or Word and the formatting stays."
+              ></div>
+              <div class="id-links-output" id="idLinksOutput"></div>
             </div>
             <div class="id-links-actions">
               <span class="id-links-count" id="idLinksCount"></span>
@@ -40077,12 +40090,6 @@
               texts.push(child.data)
               nodes.push(child)
             } else if (child.nodeType === 1) {
-              if (child.nodeName === "A") {
-                // Its text is read for context, but no link is made inside it.
-                texts.push(child.textContent)
-                nodes.push("A")
-                continue
-              }
               if (child.nodeName === "BR") {
                 texts.push("\n")
                 nodes.push(null)
@@ -40096,19 +40103,18 @@
           }
         }
         walk(clone)
-        const res = idRefsInChunks(texts, known)
-        const { chunks, skipped } = res
-        // The text of a link already in the paste is never an ID of its own.
-        const inLink = new Set()
+        const { chunks, parts, skipped } = idRefsInChunks(texts, known)
+        // A link already in the paste that holds an ID gives way to the ID's
+        // own link: pasted lists are often linked already, to an old URL or
+        // another environment. One without an ID is kept as it is.
+        const replaced = new Set()
         chunks.forEach((pieces, i) => {
-          if (nodes[i] !== "A") return
-          pieces.forEach((p) => typeof p !== "string" && inLink.add(p.part))
-          chunks[i] = pieces.map((p) => (typeof p === "string" ? p : p.text))
+          const a = nodes[i] && nodes[i].parentElement && nodes[i].parentElement.closest("a")
+          if (a && clone.contains(a) && pieces.some((p) => typeof p !== "string")) replaced.add(a)
         })
-        const parts = res.parts.map((p, i) => (typeof p !== "string" && inLink.has(i) ? p.text : p))
         chunks.forEach((pieces, i) => {
           const node = nodes[i]
-          if (!node || node === "A" || pieces.every((p) => typeof p === "string")) return
+          if (!node || pieces.every((p) => typeof p === "string")) return
           const frag = document.createDocumentFragment()
           for (const piece of pieces) {
             if (typeof piece === "string") {
@@ -40137,6 +40143,8 @@
           }
           node.replaceWith(frag)
         })
+        for (const a of replaced) a.replaceWith(...a.childNodes)
+        if (!forCopy) for (const a of clone.querySelectorAll("a:not(.id-link)")) a.classList.add("id-link-kept")
         return { html: clone.innerHTML, parts, skipped }
       }
 
@@ -40314,7 +40322,7 @@
       })
       // A link that came with the paste opens in the browser, like any outside link.
       document.getElementById("idLinksOutput").addEventListener("click", (e) => {
-        const a = e.target.closest("a[href]:not(.id-link)")
+        const a = e.target.closest("a.id-link-kept[href]")
         if (!a) return
         e.preventDefault()
         window.backend.openUrl(a.href)
