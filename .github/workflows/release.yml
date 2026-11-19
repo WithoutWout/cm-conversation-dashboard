@@ -91,12 +91,25 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Convert IDs to links: fixes
-            - A pasted list whose numbers were already links now converts:
-              each ID gets its CM.com link in place of the old one. Links
-              without an ID stay as they are.
-            - Long texts scroll inside the boxes, so the copy buttons stay
-              in view.
+            ### Quick date ranges
+            - Every calendar — Conversations, Analysis, Import and Stored
+              data — has Last 7 days, Last week, Last 30 days, This month and
+              Last month. The pickers stay open after you pick a range.
+
+            ### Smart collections and folders
+            - A collection can follow keywords and Entities (Rules tab):
+              every Article and Dialog that matches is in it, new ones too.
+              Held-out items and removed responses stay out.
+            - Folders group collections and export them all at once, one
+              file each. One collection can be linked into several folders.
+
+            ### Check links (Advanced tools)
+            - Checks every link and image in your Responses: broken, moved,
+              restricted or OK — including pages that send you to the home
+              page or show "not found".
+            - Copy the moved links (old and new address) or the problems,
+              check just the links you filter on, and skip unreachable
+              content. Results are kept with the time they were checked.
 
             ---
 
