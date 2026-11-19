@@ -15,6 +15,7 @@ const NAMES = [
   "defaultArticleAnswer","defaultDialogAnswerItem",
   "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts","_triggerTerms","_coverPhrases",
   "condenseEntityPhrases","_phraseEntityTags","_entityAt",
+  "_colRules","_colRuleSig","_colItemTexts","_colRuleTest","_colRuleKeys","_colItemKeys","_colRulesMatching",
 ]
 const ctx = vm.createContext({ console })
 vm.runInContext(`
@@ -38,6 +39,9 @@ vm.runInContext(`
   const MANUAL_ROW_REASON = "Removed by hand"
   const MANUAL_ITEM_REASON = "Removed by hand: whole item"
   function stripDisplay(t) { return (t || "").replace(/<[^>]*>/g, "").trim() }
+  function strip(t) { return (t || "").replace(/<[^>]*>/g, "") }
+  const _colRuleKeysCache = new Map()
+  let _colItemTextCache = null
   ${NAMES.map(extract).join("\n")}
   function setup(a, d, c, f) { articleMap = a; dialogMap = d; ctxVarMap = c; cmExportFilters = f; invalidateCollectionCaches() }
 `, ctx)

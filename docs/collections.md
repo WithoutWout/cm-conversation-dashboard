@@ -126,3 +126,65 @@ The detail header states the collection in one line (`N items · N export rows �
 - **Export preview** (`_colContentPaneHtml`/`_colRenderRows`) is live-searchable over the actual computed rows (post-reachability, post-exclusion, post-merge). The search `<input>` is built once and only `#colRowsWrap` re-renders per keystroke, so the caret isn't lost mid-edit the way a full-pane `innerHTML` rebuild would. Matches highlight via `hl()`, over both `trigger` and `content`. Trigger phrases render as individual chips rather than one `a | b | c` string — an Article's `Questions[]` can run to dozens of phrases.
 - **Items** (`_colItemsPaneHtml`) shows each source item with a kind badge and its own row count. Three distinct states get three distinct messages, because they need different fixes: items that produce **0 rows** (normal — routing-only content), items that no longer exist in the loaded export (`_colItemExists` — stale keys after a data reload), and an empty collection (told how to add). The old UI collapsed the first into a bare orange "N items contribute 0 rows" count and never surfaced the second at all.
 - The empty states are load-bearing, not decoration: a collection can legitimately produce zero rows, and without an explanation that is indistinguishable from a bug.
+
+## Smart collections: rules
+
+A collection can also be defined by **what it is about** instead of which items
+were ticked: `rules`, a list of `{kind: "keyword" | "entity", value}`, joined
+by `ruleMatch` (`"any"`, the default, or `"all"`). Every Article and Dialog of
+the loaded export the rules match is a member, so an Article added to CM.com
+later is in the next export without anyone adding it. Managed on the
+collection's **Rules** tab.
+
+- **`_colItemKeys(c)` is the only list of members**: the hand-picked
+  `itemKeys`, then the rule members not already among them. The build, the
+  stats, the Items tab and the Add to Collection popover all read it. Reading
+  `c.itemKeys` directly now means "the hand-picked half only" — don't.
+- **Rule members go through the same door as picked items**, so every curation
+  mechanism applies to them unchanged: Hold out (`excludedItemKeys`), a removed
+  response (`excludedContent`), smart filters, the reachability rule. That is
+  the "keeps honouring exceptions" requirement, and it costs nothing because
+  the exclusions were already keyed beside the items, never inside them.
+- **A rule member has no ✕ in the Items tab**, only Hold out: removing it would
+  last until the next render, when the rule matched it again. An item both
+  picked and matched keeps its ✕, which removes only the hand-picked entry (its
+  tooltip says so). A `by rule` badge names the matching rules.
+- **Keyword**: whole words, case-insensitive, over the item's triggers (Article
+  questions, Dialog button phrases), its Responses and a Dialog's name —
+  `_textGrams`, the same tokeniser the Dialog context uses. A trailing `*`
+  matches a word start (`parkeer*`). Substring matching was the alternative and
+  was not taken: `open` would then match every `openingstijden` Article.
+- **Entity**: an EntitiesExport Entity by name; matches when any of its words is
+  in the item's **triggers** (`_entityInGrams`), not its Responses — an Entity is
+  what recognises a question. With no EntitiesExport loaded, Entity rules match
+  nothing and the tab says so; under "all", one dead rule empties the set.
+- **Cost**: `_colItemTexts` tokenises every Article and Dialog once per export
+  load (~200 ms on the 2026-10-30 export: 3366 Articles, 848 Dialogs); each rule
+  set is then resolved once (`_colRuleKeysCache`, keyed by `_colRuleSig`). Both
+  are dropped by `invalidateCollectionCaches`, which is what makes the
+  collection follow a new export. `_colRuleSig` is part of `_colBuildSignature`.
+- Example on the real export: `parkeer*` OR Entity `PARKEREN` → 226 items
+  (157 Articles, 69 Dialogs), 865 export rows.
+
+## Folders and linked collections
+
+`cm-collection-folders` holds `[{id, name, collectionIds}]`. A folder holds
+**ids**, never copies, so one collection can sit in several folders — that is
+the "synchronised collection" for two sources that want the same content: it is
+edited once, and every folder that links it exports the current rows. The
+sidebar lists each folder with its collections under it (a linked one shows
+`linked ×N` in each), then "Not in a folder". Collapsing is per session.
+
+- A collection's header shows its folders as chips (✕ unlinks; the collection is
+  kept) and a "+ Add to folder…" picker, including "New folder…".
+- Selecting a folder opens its pane: its collections, Rename, Delete (the
+  collections are kept) and **Export all**. A collection made while a folder is
+  open goes into it. Deleting a collection removes it from every folder.
+- **Export all** (`exportCollectionFolder`) writes one `<collection name>.json`
+  per collection, the same rows as that collection's own Export JSON
+  (`buildCollectionExportRows`), into a folder picked with
+  `save_collection_folder_export`. Rust builds the file names
+  (`collection_file_names`): reserved and path characters become `_`, leading
+  dots go, a repeated name is numbered `Name (2).json`. A file already there is
+  replaced, and the toast says how many were.
+- `cm-collection-folders` is in the settings backup beside `cm-collections`.

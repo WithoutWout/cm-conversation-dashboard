@@ -10,6 +10,7 @@ const NAMES = [
   "defaultArticleAnswer","defaultDialogAnswerItem",
   "_cutSentences","_sentencePatterns","_handRemovedKey","_rowTrigger","_triggerTexts","_triggerTerms","_coverPhrases",
   "condenseEntityPhrases","_phraseEntityTags","_entityAt",
+  "_colRules","_colRuleSig","_colItemTexts","_colRuleTest","_colRuleKeys","_colItemKeys","_colRulesMatching",
 ]
 const ctx = vm.createContext({ console })
 vm.runInContext(`
@@ -35,6 +36,9 @@ vm.runInContext(`
   const _colBuildCache = new Map()
   // Not under test here: collapse HTML to its text, which is all the row needs.
   function stripDisplay(t) { return (t || "").replace(/<[^>]*>/g, "").trim() }
+  function strip(t) { return (t || "").replace(/<[^>]*>/g, "") }
+  const _colRuleKeysCache = new Map()
+  let _colItemTextCache = null
   ${NAMES.map(extract).join("\n")}
   function setData(a, d, c) { articleMap = a; dialogMap = d; ctxVarMap = c; invalidateCollectionCaches() }
   function setFilters(f) { cmExportFilters = f }
@@ -525,6 +529,52 @@ ps = trig(dd(), "tickets 2 keer").split(" | ")
 ok("all: context is every leading phrase", ["dubbel betaald", "dubbel afgeschreven", "twee keer betaald"].every((p) => ps.includes(p)))
 ctx.setStyle("names")
 ctx.setEntities([])
+
+// ── Smart collections: rules ─────────────────────────────────────────────────
+seed()
+ctx.setFilters([])
+const smart = { id: "s1", name: "S", itemKeys: [], rules: [{ kind: "keyword", value: "formulier" }] }
+ok("rules: a keyword in a Dialog Response makes it a member", JSON.stringify(ctx._colItemKeys(smart)) === '["dialog:50"]')
+smart.rules = [{ kind: "keyword", value: "open" }]
+ok("rules: whole words only — 'open' is not 'openingstijden'... but is 'hoe laat open'",
+   JSON.stringify(ctx._colItemKeys(smart)) === '["article:1"]')
+smart.rules = [{ kind: "keyword", value: "opening*" }]
+ok("rules: a trailing * matches a word start", JSON.stringify(ctx._colItemKeys(smart)) === '["article:1"]')
+smart.rules = [{ kind: "keyword", value: "klachten" }]
+ok("rules: a keyword in a Dialog's name", JSON.stringify(ctx._colItemKeys(smart)) === '["dialog:50"]')
+smart.rules = [{ kind: "keyword", value: "open" }, { kind: "keyword", value: "formulier" }]
+ok("rules: any — either rule", ctx._colItemKeys(smart).length === 2)
+smart.ruleMatch = "all"
+ok("rules: all — both rules", ctx._colItemKeys(smart).length === 0)
+smart.ruleMatch = "any"
+smart.itemKeys = ["dialog:50"]
+ok("rules: a hand-picked item is listed once, first", JSON.stringify(ctx._colItemKeys(smart)) === '["dialog:50","article:1"]')
+const sr = ctx.buildCollectionExportRows(smart)
+ok("rules: rule members are exported", sr.rows.some((r) => r.content.includes("Open 10:00")))
+smart.excludedItemKeys = ["article:1"]
+ok("rules: a held-out rule member stays out", !ctx.buildCollectionExportRows(smart).rows.some((r) => r.content.includes("Open 10:00")))
+smart.excludedItemKeys = []
+smart.excludedContent = ["Winter gesloten"]
+const sr2 = ctx.buildCollectionExportRows(smart)
+ok("rules: a removed response of a rule member stays out",
+   !sr2.rows.some((r) => r.content === "Winter gesloten") && sr2.excludedRows.some((r) => r.manual))
+smart.excludedContent = []
+// New content after a reload is picked up — the point of a smart collection.
+ctx.setData(
+  new Map([...ctx.articleById(1) ? [[1, ctx.articleById(1)]] : [],
+    [3, { Id: 3, Questions: [{ Text: "nieuw: open op zondag" }], Outputs: [{ Type: "Answer", Text: "Zondag open", IsDefault: true }] }]]),
+  new Map(), new Map([[9, "seizoen"]]),
+)
+smart.itemKeys = []
+smart.rules = [{ kind: "keyword", value: "open" }]
+ok("rules: an Article added in a newer export joins on reload", ctx._colItemKeys(smart).includes("article:3"))
+ctx.setEntities([{ name: "ZONDAG", words: [{ text: "zondag" }] }])
+smart.rules = [{ kind: "entity", value: "ZONDAG" }]
+ok("rules: an Entity matches its words in the triggers", JSON.stringify(ctx._colItemKeys(smart)) === '["article:3"]')
+smart.rules = [{ kind: "entity", value: "NOPE" }]
+ok("rules: an unknown Entity matches nothing", ctx._colItemKeys(smart).length === 0)
+ctx.setEntities([])
+seed()
 
 console.log(out.join("\n"))
 console.log(failed ? "\n" + failed + " FAILED" : "\nAll checks passed")

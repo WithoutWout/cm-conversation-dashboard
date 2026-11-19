@@ -105,6 +105,26 @@ Insights and Analysis read whatever is stored, and nothing on them says a day in
 
 The CSS is shared under `.day-cal*` (renamed from `.import-cal*` when the Stored data calendar adopted it) — including the green/orange coverage outlines, which are inset shadows rather than borders so marking a day never shifts the grid by a pixel. Both calendars also share the class-only hover update (`_impUpdateCalClasses` / `_mdbUpdateCalClasses`): a full re-render on every `mousemove` fights the pointer.
 
+### Quick ranges
+
+Every day calendar — Import, Stored data, Analysis and the Conversations date
+filter — offers the same buttons: **Last 7 days · Last week · Last 30 days ·
+This month · Last month** (`CAL_PRESETS`, resolved by `calPresetRange(key,
+today)`, drawn by `calPresetButtonsHtml(fn, activeKey)`). One list, so the
+four cannot drift apart again (Analysis had four of them, the others none).
+
+- `today` is the display timezone's today, as every calendar reads it.
+- **Last week is the previous Monday–Sunday week**, the week the calendars
+  draw; *Last 7 days* is the rolling one, ending today.
+- **On Import, a range ending today ends now** (as the Now button does): the
+  rest of today has not happened, and the API window would reach into it.
+  Earlier ranges run to 23:59.
+- Import and Stored data light the matching button by reading the picked range
+  (`_impActivePreset`, `_mdbActivePreset`), so a hand-picked range that happens
+  to be "last week" lights it too. Analysis and Conversations remember the key
+  until a day is clicked.
+- `frontend/tests/cal-presets.test.js` pins the week and month edges.
+
 ### Calendars are in your timezone; storage and requests are UTC
 
 **Every calendar means a day of the display timezone** — Import, Stored data,

@@ -3495,6 +3495,151 @@
         padding: 16px 18px;
         font-size: 0.82rem;
       }
+      .tools-pane[hidden] {
+        display: none;
+      }
+      .url-check-pane {
+        grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+      }
+      .url-check-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 12px 0 8px;
+      }
+      .url-check-summary {
+        flex: 1;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+      .url-check-progress {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--surface2);
+        overflow: hidden;
+        margin-bottom: 8px;
+      }
+      .url-check-progress > div {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+        transition: width 0.2s;
+      }
+      .url-check-filters {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .url-check-filters input[type="text"] {
+        flex: 1;
+        min-width: 160px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 5px 9px;
+        font: inherit;
+        font-size: 0.78rem;
+        outline: none;
+      }
+      .url-check-filters .sep {
+        width: 1px;
+        height: 18px;
+        background: var(--border);
+        margin: 0 2px;
+      }
+      .url-check-list {
+        min-height: 0;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .url-check-row {
+        display: grid;
+        grid-template-columns: 112px 54px minmax(0, 1fr) minmax(0, 0.8fr);
+        gap: 10px;
+        align-items: start;
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.78rem;
+      }
+      .url-check-row:last-child {
+        border-bottom: none;
+      }
+      .url-check-url {
+        overflow-wrap: anywhere;
+      }
+      .url-check-url a {
+        color: var(--text);
+      }
+      .url-check-final {
+        display: block;
+        color: var(--muted);
+        font-size: 0.72rem;
+        overflow-wrap: anywhere;
+      }
+      .url-check-type {
+        color: var(--muted);
+        font-size: 0.72rem;
+      }
+      .url-check-where {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .url-check-where button {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        color: var(--text);
+        font: inherit;
+        font-size: 0.7rem;
+        padding: 0 6px;
+        cursor: pointer;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .url-check-where button.unreachable {
+        border-style: dashed;
+        color: var(--muted);
+      }
+      .url-check-where button:hover {
+        border-color: var(--accent);
+      }
+      .url-status {
+        display: inline-block;
+        font-size: 0.7rem;
+        border-radius: 999px;
+        padding: 1px 8px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .url-status.ok {
+        color: var(--green);
+        border-color: color-mix(in srgb, var(--green) 40%, transparent);
+      }
+      .url-status.moved {
+        color: var(--blue);
+        border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+      }
+      .url-status.restricted {
+        color: var(--orange);
+        border-color: color-mix(in srgb, var(--orange) 40%, transparent);
+      }
+      .url-status.broken {
+        color: var(--red);
+        border-color: color-mix(in srgb, var(--red) 45%, transparent);
+        background: color-mix(in srgb, var(--red) 8%, transparent);
+      }
+      .url-check-more {
+        padding: 10px;
+        text-align: center;
+      }
       .tools-pane h4 {
         font-size: 0.88rem;
         font-weight: 600;
@@ -4965,6 +5110,18 @@
       .col-new-btn:hover {
         opacity: 0.85;
       }
+      .col-sidebar-top {
+        display: flex;
+        gap: 6px;
+      }
+      .col-new-btn.folder {
+        width: auto;
+        flex-shrink: 0;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-weight: 500;
+      }
       .col-nav-list {
         flex: 1;
         overflow-y: auto;
@@ -5521,6 +5678,186 @@
         opacity: 1;
         color: var(--red);
         background: rgba(248, 113, 113, 0.1);
+      }
+      .col-item-remove-spacer {
+        width: 26px;
+        flex-shrink: 0;
+      }
+      /* A member the collection's rules put there, not one picked by hand. */
+      .col-item-rule {
+        font-size: 0.66rem;
+        color: var(--teal);
+        border: 1px solid color-mix(in srgb, var(--teal) 40%, transparent);
+        border-radius: 999px;
+        padding: 0 7px;
+        flex-shrink: 0;
+        cursor: help;
+      }
+      /* ── Rules tab ── */
+      .col-rule-add {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+      .col-rule-add input[type="text"] {
+        flex: 1;
+        min-width: 180px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--text);
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        font-family: inherit;
+        outline: none;
+      }
+      .col-rule-add input[type="text"]:focus {
+        border-color: var(--accent);
+      }
+      .col-rule-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px 18px;
+      }
+      .col-rule-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface2);
+        font-size: 0.8rem;
+      }
+      .col-rule-row.dead {
+        border-color: rgba(251, 146, 60, 0.4);
+      }
+      .col-rule-kind {
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        width: 58px;
+        flex-shrink: 0;
+      }
+      .col-rule-kind.entity {
+        color: var(--teal);
+      }
+      .col-rule-value {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+      }
+      .col-rule-count {
+        font-size: 0.72rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .col-rule-row.dead .col-rule-count {
+        color: var(--orange);
+      }
+      /* ── Folders ── */
+      .col-nav-folder {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        width: 100%;
+        padding: 6px 8px 4px;
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .col-nav-folder-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+        min-width: 0;
+        background: none;
+        border: none;
+        color: inherit;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        cursor: pointer;
+        padding: 0;
+        text-align: left;
+      }
+      .col-nav-folder-toggle:hover,
+      .col-nav-folder.active .col-nav-folder-toggle {
+        color: var(--text);
+      }
+      .col-nav-folder-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .col-nav-folder-caret {
+        display: inline-block;
+        transition: transform 0.15s;
+        font-size: 0.6rem;
+      }
+      .col-nav-folder.collapsed .col-nav-folder-caret {
+        transform: rotate(-90deg);
+      }
+      .col-nav-in-folder {
+        padding-left: 18px;
+      }
+      .col-nav-linked {
+        font-size: 0.64rem;
+        color: var(--teal);
+        margin-left: 4px;
+      }
+      .col-nav-new-folder {
+        margin-top: 6px;
+      }
+      .col-folder-chips {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        font-size: 0.72rem;
+        color: var(--muted);
+      }
+      .col-folder-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 1px 4px 1px 9px;
+      }
+      .col-folder-chip button {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.7rem;
+        padding: 0 4px;
+      }
+      .col-folder-chip button:hover {
+        color: var(--red);
+      }
+      .col-folder-chips select {
+        font-size: 0.72rem;
+      }
+      .col-folder-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px 18px;
       }
       /* ── Empty states ── */
       .col-empty {
@@ -6490,6 +6827,43 @@
       }
       .cal-footer button:hover {
         color: var(--text);
+      }
+      /* Quick ranges inside the narrow one-month popup: an even two-column
+         grid under a divider, Clear taking the last cell, so nothing wraps
+         raggedly or sits alone in a footer. */
+      .cal-quick {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        margin-top: 6px;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
+      }
+      .cal-quick button {
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        color: var(--text);
+        font: inherit;
+        font-size: 0.68rem;
+        padding: 4px 6px;
+        text-align: left;
+        cursor: pointer;
+      }
+      .cal-quick button:hover:not(:disabled) {
+        background: var(--surface2);
+      }
+      .cal-quick button.active {
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+      }
+      .cal-quick button:disabled {
+        color: var(--muted);
+        opacity: 0.45;
+        cursor: default;
+      }
+      .cal-quick .cal-quick-clear {
+        color: var(--muted);
       }
       .conv-filter-pills {
         display: flex;
@@ -13795,9 +14169,10 @@
         </div>
         <div class="tools-layout">
           <nav class="tools-nav">
-            <button class="tools-nav-item active" type="button">Convert IDs to links</button>
+            <button class="tools-nav-item active" type="button" data-tool="idlinks">Convert IDs to links</button>
+            <button class="tools-nav-item" type="button" data-tool="urlcheck">Check links</button>
           </nav>
-          <div class="tools-pane">
+          <div class="tools-pane" id="toolPaneIdlinks">
             <h4>Convert IDs to links</h4>
             <p class="hint">
               Paste any text, plain or formatted. Every Article, Dialog and Dialog
@@ -13825,6 +14200,23 @@
             </div>
             <p class="hint" id="idLinksNote"></p>
             <div class="id-links-found" id="idLinksFound"></div>
+          </div>
+          <div class="tools-pane url-check-pane" id="toolPaneUrlcheck" hidden>
+            <h4>Check links</h4>
+            <p class="hint">
+              Finds every web address in the loaded export — links and images in
+              Article and Dialog Responses — and asks each one whether it still
+              answers. Nothing is changed; the check only reads.
+            </p>
+            <div class="url-check-bar">
+              <span class="url-check-summary" id="urlCheckSummary"></span>
+              <button class="btn-secondary" id="urlCheckCopyMoved" disabled title="Old address, new address and where it is used — to update the links in CM.com">Copy moved links</button>
+              <button class="btn-secondary" id="urlCheckCopy" disabled>Copy problems</button>
+              <button class="btn-primary" id="urlCheckRun">Check all links</button>
+            </div>
+            <div class="url-check-progress" id="urlCheckProgress" hidden><div></div></div>
+            <div class="url-check-filters" id="urlCheckFilters"></div>
+            <div class="url-check-list" id="urlCheckList"></div>
           </div>
         </div>
       </div>
@@ -14291,6 +14683,13 @@
               >
                 + New collection
               </button>
+              <button
+                class="col-new-btn folder"
+                onclick="createCollectionFolderPrompt()"
+                title="A folder groups collections and exports them together. One collection can be in several folders."
+              >
+                + Folder
+              </button>
             </div>
             <div class="col-nav-list" id="collectionsNav"></div>
             <div class="col-sidebar-bottom" id="collectionsNavFilters"></div>
@@ -14719,6 +15118,9 @@
               ? listen("update-progress", handler)
               : Promise.resolve(() => {}),
           getVersion: () => invoke("get_version"),
+          saveCollectionFolderExport: (files) =>
+            invoke("save_collection_folder_export", { files }),
+          checkUrls: (urls) => invoke("check_urls", { urls }),
           saveCollectionExport: (defaultName, content) =>
             invoke("save_collection_export", { defaultName, content }),
           saveExportText: (defaultName, format, content) =>
@@ -15363,6 +15765,31 @@
       function saveCollections(list) {
         localStorage.setItem("cm-collections", JSON.stringify(list))
       }
+      // Folders hold collection ids, not collections, so one collection can sit
+      // in several folders and every folder exports the same, current rows —
+      // a linked collection, edited once. Read entry by entry; ids of deleted
+      // collections are dropped where they are read (`_colFolderMembers`).
+      function loadCollectionFolders() {
+        try {
+          const v = JSON.parse(localStorage.getItem("cm-collection-folders") || "[]")
+          if (!Array.isArray(v)) return []
+          return v
+            .filter((f) => f && typeof f.id === "string" && typeof f.name === "string")
+            .map((f) => ({
+              id: f.id,
+              name: f.name,
+              collectionIds: Array.isArray(f.collectionIds)
+                ? [...new Set(f.collectionIds.filter((x) => typeof x === "string"))]
+                : [],
+              createdAt: f.createdAt || Date.now(),
+            }))
+        } catch (e) {
+          return []
+        }
+      }
+      function saveCollectionFolders(list) {
+        localStorage.setItem("cm-collection-folders", JSON.stringify(list))
+      }
       function loadExportFilters() {
         try {
           const v = JSON.parse(
@@ -15423,6 +15850,7 @@
       let collectionSelection = new Set() // keys: "article:<Id>" | "dialog:<id>"
       let cmCollections = loadCollections()
       let cmExportFilters = loadExportFilters()
+      let cmCollectionFolders = loadCollectionFolders()
       let cmExportKeepUnreachable = loadKeepUnreachable()
       let cmCondenseEntities = loadCondenseEntities()
       let cmTriggerStyle = loadTriggerStyle()
@@ -19079,6 +19507,8 @@
       let _colSharedContentCache = null // Set of shared reply contents
 
       function invalidateCollectionCaches() {
+        _colRuleKeysCache.clear()
+        _colItemTextCache = null
         _colRouteIndexCache = null
         _colSharedContentCache = null
         _colItemRowsCache.clear()
@@ -19115,6 +19545,157 @@
         return cmExportFilters.filter(
           (p) => p.enabled !== false && p.pattern && !off.has(p.id),
         )
+      }
+
+      // ── Smart collections: rules ──
+      //
+      // Beside the items picked by hand, a collection can carry `rules`:
+      // keywords and Entities, `[{kind: "keyword" | "entity", value}]`, joined
+      // by `ruleMatch` ("any", the default, or "all"). Every Article and Dialog
+      // of the loaded export that the rules match is a member, so a new Article
+      // that mentions the keyword is in the next export without anyone adding
+      // it. Rule members go through exactly the same door as picked items —
+      // `_colItemKeys` — so hold-outs, removed responses and smart filters
+      // apply to them unchanged. Resolved once per export load (and per rule
+      // set) and cached; `invalidateCollectionCaches` drops the cache.
+      //
+      //   keyword — whole words, case-insensitive, in the item's triggers
+      //             (Article questions, Dialog button phrases), its Responses
+      //             and a Dialog's name. A trailing * matches a word start:
+      //             `parkeer*` finds parkeren and parkeerplaats.
+      //   entity  — an Entity of the EntitiesExport, by name: any of its words
+      //             in the item's triggers, as the chips read them.
+      const _colRuleKeysCache = new Map() // rules signature -> [item key]
+      let _colItemTextCache = null // [{key, trig, all}] for every item
+
+      function _colRules(c) {
+        return Array.isArray(c && c.rules)
+          ? c.rules.filter(
+              (r) =>
+                r &&
+                (r.kind === "keyword" || r.kind === "entity") &&
+                String(r.value || "").trim(),
+            )
+          : []
+      }
+      function _colRuleSig(c) {
+        const rules = _colRules(c)
+        if (!rules.length) return ""
+        return JSON.stringify([
+          c.ruleMatch === "all" ? "all" : "any",
+          rules.map((r) => [r.kind, String(r.value).trim().toLowerCase()]),
+        ])
+      }
+
+      /// Every Article and Dialog as the words a rule reads: `trig` the
+      /// triggers alone (what an Entity is tested on), `all` with the Responses
+      /// and the Dialog's name too (what a keyword is tested on).
+      function _colItemTexts() {
+        if (_colItemTextCache) return _colItemTextCache
+        const out = []
+        for (const art of articleMap.values()) {
+          const trig = (art.Questions || []).map((q) => q.Text || "").join(" \n ")
+          const resp = (art.Outputs || [])
+            .filter((o) => o.Type === "Answer")
+            .map((o) => strip(o.Text || ""))
+            .join(" \n ")
+          out.push({
+            key: "article:" + art.Id,
+            trig: _textGrams(trig),
+            all: _textGrams(trig + " \n " + resp),
+          })
+        }
+        for (const d of dialogMap.values()) {
+          const trigParts = []
+          const respParts = [d.name || ""]
+          for (const n of d.nodes || []) {
+            for (const l of n.links || []) {
+              const ph = _recognitionPhrases(l)
+              if (ph) trigParts.push(ph.join(" \n "))
+            }
+            for (const it of (n.output && n.output.items) || []) {
+              if (it.type === "Answer" && it.data && it.data.text)
+                respParts.push(strip(it.data.text))
+            }
+          }
+          const trig = trigParts.join(" \n ")
+          out.push({
+            key: "dialog:" + d.id,
+            trig: _textGrams(trig),
+            all: _textGrams(trig + " \n " + respParts.join(" \n ")),
+          })
+        }
+        _colItemTextCache = out
+        return out
+      }
+
+      /// One rule as a test over `_colItemTexts` entries, or null when it can
+      /// match nothing (an Entity the EntitiesExport does not have).
+      function _colRuleTest(rule) {
+        const raw = String(rule.value || "").trim()
+        if (rule.kind === "entity") {
+          const ent = entityMap.get(raw.toUpperCase())
+          if (!ent) return null
+          return (t) => _entityInGrams(ent, t.trig)
+        }
+        const prefix = raw.endsWith("*")
+        const toks = raw
+          .replace(/\*+$/, "")
+          .toLowerCase()
+          .split(/[^\p{L}\p{N}]+/u)
+          .filter(Boolean)
+        if (!toks.length) return null
+        const needle = " " + toks.join(" ") + (prefix ? "" : " ")
+        // The first word is a cheap Set lookup — except a lone prefix, which
+        // is not a whole word of anything.
+        const first = prefix && toks.length === 1 ? null : toks[0]
+        return (t) => (!first || t.all.words.has(first)) && t.all.hay.includes(needle)
+      }
+
+      /// The item keys a collection's rules match right now, Articles then
+      /// Dialogs, each in export order.
+      function _colRuleKeys(c) {
+        const sig = _colRuleSig(c)
+        if (!sig) return []
+        const hit = _colRuleKeysCache.get(sig)
+        if (hit) return hit
+        const tests = _colRules(c).map(_colRuleTest)
+        const all = c.ruleMatch === "all"
+        let keys = []
+        // Under "all", a rule that can match nothing makes the whole set empty.
+        if (!(all && tests.some((t) => !t))) {
+          const live = tests.filter(Boolean)
+          if (live.length) {
+            keys = _colItemTexts()
+              .filter((t) => (all ? live.every((f) => f(t)) : live.some((f) => f(t))))
+              .map((t) => t.key)
+          }
+        }
+        _colRuleKeysCache.set(sig, keys)
+        return keys
+      }
+
+      /// The rules of `c` that match one item — the "by rule" badge's tooltip.
+      function _colRulesMatching(c, key) {
+        const t = _colItemTexts().find((x) => x.key === key)
+        if (!t) return []
+        return _colRules(c).filter((r) => {
+          const f = _colRuleTest(r)
+          return f && f(t)
+        })
+      }
+
+      /// Every member of a collection: the items picked by hand, then the ones
+      /// its rules match. The only list the export, the counts and the Items
+      /// tab read — a collection's `itemKeys` alone is only the hand-picked half.
+      function _colItemKeys(c) {
+        const picked = c.itemKeys || []
+        const ruled = _colRuleKeys(c)
+        if (!ruled.length) return picked
+        const seen = new Set(picked)
+        const out = picked.slice()
+        for (const k of ruled) if (!seen.has(k)) out.push(k)
+        return out
       }
 
       function _parseCollectionItemKey(key) {
@@ -19904,6 +20485,7 @@
           cmDialogContext,
           cmDialogContextCap,
           collection.itemKeys || [],
+          _colRuleSig(collection),
           collection.excludedItemKeys || [],
           collection.excludedContent || [],
         ])
@@ -19948,7 +20530,7 @@
         let unreachableCount = 0
         let manualCount = 0
         const reasonOf = (p) => (p.field || "entity") + ": " + p.pattern
-        for (const key of collection.itemKeys || []) {
+        for (const key of _colItemKeys(collection)) {
           const itemMuted = mutedItems.has(key)
           for (const r of _itemExportRows(key)) {
             totalCandidates++
@@ -20429,7 +21011,8 @@
         const sel = [...collectionSelection]
         const rows = cmCollections
           .map((c) => {
-            const have = new Set(c.itemKeys || [])
+            // A rule member is already in: adding it by hand changes nothing.
+            const have = new Set(_colItemKeys(c))
             const added = sel.filter((k) => !have.has(k)).length
             return (
               '<div class="add-to-collection-row' +
@@ -20439,7 +21022,7 @@
               '\')" title="' +
               esc(c.name) +
               " · " +
-              (c.itemKeys || []).length +
+              _colItemKeys(c).length +
               ' items">' +
               '<span class="atc-name">' +
               esc(c.name) +
@@ -24424,6 +25007,10 @@
       // collection, or a first open with none selected yet.
       function _colEnsureView() {
         if (_colView === COL_FILTERS_VIEW) return
+        if (_colView && _colView.startsWith(COL_FOLDER_VIEW)) {
+          if (_colFolderOfView()) return
+          _colView = null
+        }
         if (_colView && cmCollections.some((c) => c.id === _colView)) return
         _colView = cmCollections.length ? cmCollections[0].id : null
         _colTab = "content"
@@ -24453,7 +25040,7 @@
       function _colStats(c) {
         const { rows, excludedRows, unreachableCount, manualCount, cutCount } =
           buildCollectionExportRows(c)
-        const itemKeys = c.itemKeys || []
+        const itemKeys = _colItemKeys(c)
         const held = _colExcludedItems(c)
         return {
           rows,
@@ -24478,33 +25065,201 @@
         return cmExportFilters.filter((f) => f.enabled !== false && f.pattern)
       }
 
+      // ── Folders ──
+      //
+      // A folder is a named list of collection ids (`cm-collection-folders`).
+      // A collection may be in any number of folders — that is how two teams
+      // share one collection: it is linked into both folders, edited once, and
+      // each folder's export writes its current rows. Collections in no folder
+      // are listed under "Not in a folder".
+      const COL_FOLDER_VIEW = "folder:"
+      const _colFoldersCollapsed = new Set()
+      function _colFolderOfView() {
+        if (!_colView || !_colView.startsWith(COL_FOLDER_VIEW)) return null
+        const id = _colView.slice(COL_FOLDER_VIEW.length)
+        return cmCollectionFolders.find((f) => f.id === id) || null
+      }
+      function _colFolderMembers(f) {
+        return f.collectionIds
+          .map((id) => cmCollections.find((c) => c.id === id))
+          .filter(Boolean)
+      }
+      function _colFoldersOf(c) {
+        return cmCollectionFolders.filter((f) => f.collectionIds.includes(c.id))
+      }
+      function _colNewId(prefix) {
+        return (
+          prefix +
+          (crypto.randomUUID
+            ? crypto.randomUUID()
+            : Date.now() + Math.random().toString(36).slice(2))
+        )
+      }
+      function createCollectionFolderPrompt(thenAddCollectionId) {
+        _showFolderPrompt("New folder name", "", (name) => {
+          const f = {
+            id: _colNewId("fld_"),
+            name,
+            collectionIds: thenAddCollectionId ? [thenAddCollectionId] : [],
+            createdAt: Date.now(),
+          }
+          cmCollectionFolders.push(f)
+          saveCollectionFolders(cmCollectionFolders)
+          if (!thenAddCollectionId) _colView = COL_FOLDER_VIEW + f.id
+          renderCollectionsModal()
+        })
+      }
+      function renameCollectionFolderPrompt(folderId) {
+        const f = cmCollectionFolders.find((x) => x.id === folderId)
+        if (!f) return
+        _showFolderPrompt("Rename folder", f.name, (name) => {
+          f.name = name
+          saveCollectionFolders(cmCollectionFolders)
+          renderCollectionsModal()
+        })
+      }
+      function deleteCollectionFolderConfirm(folderId) {
+        const f = cmCollectionFolders.find((x) => x.id === folderId)
+        if (!f) return
+        _showConfirm(
+          'Delete the folder "' +
+            f.name +
+            '"? Its collections are kept — they stay in their other folders, or move to "Not in a folder".',
+          () => {
+            cmCollectionFolders = cmCollectionFolders.filter((x) => x.id !== folderId)
+            saveCollectionFolders(cmCollectionFolders)
+            if (_colView === COL_FOLDER_VIEW + folderId) _colView = null
+            renderCollectionsModal()
+          },
+        )
+      }
+      function linkCollectionToFolder(collectionId, folderId) {
+        if (folderId === "__new__") {
+          createCollectionFolderPrompt(collectionId)
+          return
+        }
+        const f = cmCollectionFolders.find((x) => x.id === folderId)
+        if (!f || f.collectionIds.includes(collectionId)) return
+        f.collectionIds.push(collectionId)
+        saveCollectionFolders(cmCollectionFolders)
+        renderCollectionsModal()
+      }
+      function unlinkCollectionFromFolder(collectionId, folderId) {
+        const f = cmCollectionFolders.find((x) => x.id === folderId)
+        if (!f) return
+        f.collectionIds = f.collectionIds.filter((x) => x !== collectionId)
+        saveCollectionFolders(cmCollectionFolders)
+        renderCollectionsModal()
+      }
+      function toggleCollectionFolder(folderId) {
+        if (_colFoldersCollapsed.has(folderId)) _colFoldersCollapsed.delete(folderId)
+        else _colFoldersCollapsed.add(folderId)
+        _colRenderNav()
+      }
+
+      /// Exports every collection of a folder into a folder on disk, one
+      /// `<collection name>.json` each — the same rows each collection's own
+      /// Export JSON writes (`buildCollectionExportRows`).
+      async function exportCollectionFolder(folderId) {
+        const f = cmCollectionFolders.find((x) => x.id === folderId)
+        if (!f) return
+        const members = _colFolderMembers(f)
+        if (!members.length) {
+          showImportToast("error", "This folder has no collections to export.")
+          return
+        }
+        const files = members.map((c) => ({
+          name: c.name || "collection",
+          content: JSON.stringify(buildCollectionExportRows(c).rows, null, 2),
+        }))
+        const rows = members.reduce((n, c) => n + buildCollectionExportRows(c).rows.length, 0)
+        try {
+          const res = await window.backend.saveCollectionFolderExport(files)
+          if (!res || res.canceled) return
+          if (!res.ok) {
+            showImportToast("error", "Export failed.")
+            return
+          }
+          showImportToast(
+            "success",
+            `Exported ${_colPlural(res.written.length, "collection")} (${_colPlural(rows, "row")}) to ${res.path}` +
+              (res.overwritten.length
+                ? ` — replaced ${_colPlural(res.overwritten.length, "existing file")}`
+                : ""),
+          )
+        } catch (e) {
+          showImportToast("error", "Export failed: " + e)
+        }
+      }
+
       // ── Sidebar ──
+      function _colNavItemHtml(c, inFolder) {
+        const st = _colStats(c)
+        const folders = _colFoldersOf(c).length
+        return (
+          '<button class="col-nav-item' +
+          (c.id === _colView ? " active" : "") +
+          (inFolder ? " col-nav-in-folder" : "") +
+          '" onclick="_colSelect(\'' +
+          esc(c.id) +
+          '\')" title="' +
+          esc(c.name) +
+          (folders > 1 ? " — linked in " + folders + " folders" : "") +
+          '">' +
+          '<span class="col-nav-name">' +
+          esc(c.name) +
+          (folders > 1 ? '<span class="col-nav-linked">linked ×' + folders + "</span>" : "") +
+          "</span>" +
+          '<span class="col-nav-meta">' +
+          (_colRules(c).length ? "smart · " : "") +
+          _colPlural(st.itemCount, "item") +
+          " · " +
+          _colPlural(st.rows.length, "row") +
+          "</span></button>"
+        )
+      }
       function _colRenderNav() {
         const nav = document.getElementById("collectionsNav")
-        nav.innerHTML = cmCollections.length
-          ? cmCollections
-              .map((c) => {
-                const st = _colStats(c)
-                return (
-                  '<button class="col-nav-item' +
-                  (c.id === _colView ? " active" : "") +
-                  '" onclick="_colSelect(\'' +
-                  esc(c.id) +
-                  '\')" title="' +
-                  esc(c.name) +
-                  '">' +
-                  '<span class="col-nav-name">' +
-                  esc(c.name) +
-                  "</span>" +
-                  '<span class="col-nav-meta">' +
-                  _colPlural(st.itemCount, "item") +
-                  " · " +
-                  _colPlural(st.rows.length, "row") +
-                  "</span></button>"
-                )
-              })
-              .join("")
-          : '<div class="col-nav-empty">No collections yet.</div>'
+        const filed = new Set(cmCollectionFolders.flatMap((f) => f.collectionIds))
+        const loose = cmCollections.filter((c) => !filed.has(c.id))
+        const folderHtml = cmCollectionFolders
+          .map((f) => {
+            const members = _colFolderMembers(f)
+            const collapsed = _colFoldersCollapsed.has(f.id)
+            return (
+              '<div class="col-nav-folder' +
+              (collapsed ? " collapsed" : "") +
+              (_colView === COL_FOLDER_VIEW + f.id ? " active" : "") +
+              '">' +
+              '<button class="col-nav-folder-caret-btn col-nav-folder-toggle" style="flex:0" onclick="toggleCollectionFolder(\'' +
+              esc(f.id) +
+              '\')" title="' +
+              (collapsed ? "Expand" : "Collapse") +
+              '"><span class="col-nav-folder-caret">▾</span></button>' +
+              '<button class="col-nav-folder-toggle" onclick="_colSelect(\'' +
+              COL_FOLDER_VIEW +
+              esc(f.id) +
+              '\')" title="' +
+              esc(f.name) +
+              ' — open the folder to export all its collections">' +
+              '<span class="col-nav-folder-name">' +
+              esc(f.name) +
+              "</span>" +
+              '<span class="col-count-badge">' +
+              members.length +
+              "</span></button></div>" +
+              (collapsed ? "" : members.map((c) => _colNavItemHtml(c, true)).join(""))
+            )
+          })
+          .join("")
+        nav.innerHTML =
+          cmCollections.length || cmCollectionFolders.length
+            ? folderHtml +
+              (loose.length && cmCollectionFolders.length
+                ? '<div class="col-nav-folder"><span class="col-nav-folder-name">Not in a folder</span></div>'
+                : "") +
+              loose.map((c) => _colNavItemHtml(c, false)).join("")
+            : '<div class="col-nav-empty">No collections yet.</div>'
         const enabled = _colEnabledFilters().length
         document.getElementById("collectionsNavFilters").innerHTML =
           '<button class="col-nav-item col-nav-filters' +
@@ -24526,6 +25281,11 @@
         if (!el) return
         if (_colView === COL_FILTERS_VIEW) {
           el.innerHTML = _colFiltersPaneHtml()
+          return
+        }
+        const folder = _colFolderOfView()
+        if (folder) {
+          el.innerHTML = _colFolderPaneHtml(folder)
           return
         }
         const c = cmCollections.find((x) => x.id === _colView)
@@ -24551,7 +25311,9 @@
           "</div>" +
           '<div class="col-detail-sub">' +
           sub +
-          "</div></div>" +
+          "</div>" +
+          _colFolderChipsHtml(c) +
+          "</div>" +
           '<div class="col-detail-actions">' +
           '<button class="col-icon-btn" onclick="renameCollectionPrompt(\'' +
           esc(c.id) +
@@ -24566,12 +25328,15 @@
           '<div class="col-detail-tabs">' +
           _colTabBtn("content", "Export preview", st.rows.length) +
           _colTabBtn("items", "Items", st.itemCount, st.zero > 0) +
+          _colTabBtn("rules", "Rules", _colRules(c).length) +
           _colTabBtn("filters", "Filters", _colEffectivePatterns(c).length) +
           _colTabBtn("filtered", "Filtered out", st.excludedRows.length) +
           "</div>" +
           '<div class="col-detail-body">' +
           (_colTab === "items"
             ? _colItemsPaneHtml(c, st)
+            : _colTab === "rules"
+            ? _colRulesPaneHtml(c)
             : _colTab === "filtered"
               ? _colFilteredPaneHtml(c, st)
               : _colTab === "filters"
@@ -24583,6 +25348,249 @@
         else if (_colTab === "filtered") _colRenderFiltered()
         else if (_colTab === "items") _colRenderItems()
       }
+      /// Which folders this collection is in, each removable, and a picker to
+      /// link it into another — the same collection, not a copy.
+      function _colFolderChipsHtml(c) {
+        const mine = _colFoldersOf(c)
+        const others = cmCollectionFolders.filter((f) => !f.collectionIds.includes(c.id))
+        return (
+          '<div class="col-folder-chips">' +
+          (mine.length ? (mine.length > 1 ? "Linked in" : "In") : "Not in a folder") +
+          mine
+            .map(
+              (f) =>
+                '<span class="col-folder-chip">' +
+                esc(f.name) +
+                '<button title="Take it out of this folder (the collection is kept)" onclick="unlinkCollectionFromFolder(\'' +
+                esc(c.id) +
+                "','" +
+                esc(f.id) +
+                '\')">&#x2715;</button></span>',
+            )
+            .join("") +
+          '<select class="sort-select" title="Add to a folder — the same collection, kept in sync everywhere it is linked" onchange="linkCollectionToFolder(\'' +
+          esc(c.id) +
+          '\', this.value)">' +
+          '<option value="" selected disabled>+ Add to folder…</option>' +
+          others.map((f) => '<option value="' + esc(f.id) + '">' + esc(f.name) + "</option>").join("") +
+          '<option value="__new__">New folder…</option>' +
+          "</select>" +
+          (mine.length > 1
+            ? '<span title="One collection, listed in each folder: edit it once and every folder exports the change.">· one collection, kept in sync</span>'
+            : "") +
+          "</div>"
+        )
+      }
+
+      function _colFolderPaneHtml(f) {
+        const members = _colFolderMembers(f)
+        const rows = members.reduce((n, c) => n + _colStats(c).rows.length, 0)
+        const addable = cmCollections.filter((c) => !f.collectionIds.includes(c.id))
+        return (
+          '<div class="col-detail-head">' +
+          '<div class="col-detail-titles">' +
+          '<div class="col-detail-name">' +
+          esc(f.name) +
+          "</div>" +
+          '<div class="col-detail-sub">Folder · ' +
+          _colPlural(members.length, "collection") +
+          " · " +
+          _colPlural(rows, "export row") +
+          "</div></div>" +
+          '<div class="col-detail-actions">' +
+          '<button class="col-icon-btn" onclick="renameCollectionFolderPrompt(\'' +
+          esc(f.id) +
+          '\')">Rename</button>' +
+          '<button class="col-icon-btn danger" onclick="deleteCollectionFolderConfirm(\'' +
+          esc(f.id) +
+          '\')">Delete</button>' +
+          '<button class="btn-primary" ' +
+          (members.length ? "" : "disabled ") +
+          'onclick="exportCollectionFolder(\'' +
+          esc(f.id) +
+          '\')" title="Choose a folder on disk; each collection is written as its own .json">Export all (' +
+          members.length +
+          ")</button>" +
+          "</div></div>" +
+          '<div class="col-detail-body">' +
+          '<div class="col-note">A folder groups collections so they can be exported together — one <code>.json</code> per collection, named after it, into a folder you choose. A collection can be linked into several folders: it stays one collection, so an edit shows up in every folder that has it.</div>' +
+          (members.length
+            ? '<div class="col-folder-list">' +
+              members
+                .map((c) => {
+                  const st = _colStats(c)
+                  const n = _colFoldersOf(c).length
+                  return (
+                    '<div class="col-rule-row">' +
+                    '<span class="col-rule-value" style="cursor:pointer" onclick="_colSelect(\'' +
+                    esc(c.id) +
+                    '\')">' +
+                    esc(c.name) +
+                    "</span>" +
+                    (n > 1 ? '<span class="col-nav-linked">linked in ' + n + " folders</span>" : "") +
+                    '<span class="col-rule-count">' +
+                    (_colRules(c).length ? "smart · " : "") +
+                    _colPlural(st.itemCount, "item") +
+                    " · " +
+                    _colPlural(st.rows.length, "row") +
+                    "</span>" +
+                    '<button class="col-item-remove" title="Take it out of this folder (the collection is kept)" onclick="unlinkCollectionFromFolder(\'' +
+                    esc(c.id) +
+                    "','" +
+                    esc(f.id) +
+                    '\')">&#x2715;</button></div>'
+                  )
+                })
+                .join("") +
+              "</div>"
+            : '<div class="col-empty"><div class="col-empty-title">This folder is empty</div><div class="col-empty-text">Add collections below, or from a collection’s own “+ Add to folder…”.</div></div>') +
+          (addable.length
+            ? '<div class="col-rule-add"><select class="sort-select" onchange="linkCollectionToFolder(this.value, \'' +
+              esc(f.id) +
+              '\')"><option value="" selected disabled>+ Add a collection…</option>' +
+              addable.map((c) => '<option value="' + esc(c.id) + '">' + esc(c.name) + "</option>").join("") +
+              "</select></div>"
+            : "") +
+          "</div>"
+        )
+      }
+
+      // ── Rules tab ──
+      let _colRuleKind = "keyword"
+      function _colRulesPaneHtml(c) {
+        const rules = _colRules(c)
+        const all = c.ruleMatch === "all"
+        const ruled = _colRuleKeys(c)
+        const arts = ruled.filter((k) => k.startsWith("article:")).length
+        const noEntities = !entityMap.size
+        const pill = (id, label) =>
+          '<button class="col-item-pill' +
+          ((id === "all") === all ? " active" : "") +
+          '" onclick="setCollectionRuleMatch(\'' +
+          esc(c.id) +
+          "','" +
+          id +
+          '\')">' +
+          label +
+          "</button>"
+        const rowsHtml = rules
+          .map((r, i) => {
+            const test = _colRuleTest(r)
+            const n = test ? _colItemTexts().filter(test).length : 0
+            const dead = !test || n === 0
+            return (
+              '<div class="col-rule-row' +
+              (dead ? " dead" : "") +
+              '">' +
+              '<span class="col-rule-kind ' +
+              r.kind +
+              '">' +
+              (r.kind === "entity" ? "Entity" : "Keyword") +
+              "</span>" +
+              '<span class="col-rule-value" title="' +
+              esc(r.value) +
+              '">' +
+              esc(r.value) +
+              "</span>" +
+              '<span class="col-rule-count">' +
+              (!test
+                ? r.kind === "entity"
+                  ? "not in the loaded EntitiesExport"
+                  : "nothing to match"
+                : "matches " + _colPlural(n, "item")) +
+              "</span>" +
+              '<button class="col-item-remove" title="Remove this rule" onclick="removeCollectionRule(\'' +
+              esc(c.id) +
+              "'," +
+              i +
+              ')">&#x2715;</button></div>'
+            )
+          })
+          .join("")
+        return (
+          '<div class="col-note">Rules make a collection follow the content: every Article and Dialog that matches is in it, including ones added to CM.com after the collection was made. Matching runs again each time an export is loaded. <b>Keyword</b>: whole words in the triggers, the Responses and Dialog names. End it with <code>*</code> to match the start of a word (<code>parkeer*</code>). <b>Entity</b>: any word of that Entity in the triggers. Items you <b>hold out</b>, responses you remove and smart filters still apply.' +
+          (noEntities
+            ? ' <span class="warn">No EntitiesExport is loaded, so Entity rules match nothing.</span>'
+            : "") +
+          "</div>" +
+          '<div class="col-rule-add">' +
+          '<select class="sort-select" id="colRuleKind" onchange="_colRuleKind=this.value;document.getElementById(\'colRuleInput\').setAttribute(\'list\', this.value===\'entity\'?\'colEntityList\':\'\');document.getElementById(\'colRuleInput\').placeholder=this.value===\'entity\'?\'Entity name…\':\'Keyword or phrase…\'">' +
+          '<option value="keyword"' +
+          (_colRuleKind === "keyword" ? " selected" : "") +
+          ">Keyword</option>" +
+          '<option value="entity"' +
+          (_colRuleKind === "entity" ? " selected" : "") +
+          ">Entity</option></select>" +
+          '<input type="text" id="colRuleInput" ' +
+          (_colRuleKind === "entity" ? 'list="colEntityList" ' : "") +
+          'placeholder="' +
+          (_colRuleKind === "entity" ? "Entity name…" : "Keyword or phrase…") +
+          '" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addCollectionRule(\'' +
+          esc(c.id) +
+          '\')}" />' +
+          '<datalist id="colEntityList">' +
+          allEntities
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map((e) => '<option value="' + esc(e.name) + '"></option>')
+            .join("") +
+          "</datalist>" +
+          '<button class="btn-secondary" onclick="addCollectionRule(\'' +
+          esc(c.id) +
+          '\')">Add rule</button>' +
+          "</div>" +
+          (rules.length
+            ? '<div class="col-item-pills" style="align-items:center">' +
+              '<span class="col-rule-count">An item is in when it matches</span>' +
+              pill("any", "any rule") +
+              pill("all", "every rule") +
+              '<span class="col-rule-count" style="margin-left:auto">' +
+              _colPlural(ruled.length, "item") +
+              " by rule · " +
+              _colPlural(arts, "Article") +
+              " · " +
+              _colPlural(ruled.length - arts, "Dialog") +
+              "</span></div>" +
+              '<div class="col-rule-list">' +
+              rowsHtml +
+              "</div>"
+            : '<div class="col-empty"><div class="col-empty-title">No rules yet</div><div class="col-empty-text">Add a keyword or an Entity above. Items picked by hand on the Content tab stay in the collection alongside whatever the rules match.</div></div>')
+        )
+      }
+      function addCollectionRule(collectionId) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        const inp = document.getElementById("colRuleInput")
+        if (!c || !inp) return
+        const value = inp.value.trim()
+        if (!value) return
+        const kind = _colRuleKind === "entity" ? "entity" : "keyword"
+        if (kind === "entity" && entityMap.size && !entityMap.has(value.toUpperCase())) {
+          showImportToast("error", "No Entity named “" + value + "” in the loaded EntitiesExport.")
+          return
+        }
+        c.rules = _colRules(c)
+        const dup = c.rules.some(
+          (r) => r.kind === kind && r.value.trim().toLowerCase() === value.toLowerCase(),
+        )
+        if (!dup) c.rules.push({ kind, value: kind === "entity" ? value.toUpperCase() : value })
+        _colAfterCurationChange(c, null)
+        const next = document.getElementById("colRuleInput")
+        if (next) next.focus()
+      }
+      function removeCollectionRule(collectionId, i) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.rules = _colRules(c)
+        c.rules.splice(i, 1)
+        _colAfterCurationChange(c, null)
+      }
+      function setCollectionRuleMatch(collectionId, m) {
+        const c = cmCollections.find((x) => x.id === collectionId)
+        if (!c) return
+        c.ruleMatch = m === "all" ? "all" : "any"
+        _colAfterCurationChange(c, null)
+      }
+
       function _colTabBtn(tab, label, count, warn) {
         return (
           '<button class="col-tab' +
@@ -24718,10 +25726,10 @@
             '<div class="col-empty-text">Nothing in this collection’s triggers or content matches “' +
             esc(q) +
             '”.</div></div>'
-          : (c.itemKeys || []).length
+          : _colItemKeys(c).length
             ? '<div class="col-empty"><div class="col-empty-title">Nothing to export yet</div>' +
               '<div class="col-empty-text">' +
-              ((c.itemKeys || []).every((k) => !_colItemExists(k))
+              (_colItemKeys(c).every((k) => !_colItemExists(k))
                 ? "None of this collection’s items exist in the currently loaded content export. Load the folder they came from, or open the <b>Items</b> tab to clear them out."
                 : "This collection has items, but none of them answer directly — they only route into other Dialogs, or every row they produced is unreachable or removed by a smart filter. Check the <b>Items</b> and <b>Filtered out</b> tabs.") +
               "</div></div>"
@@ -24789,12 +25797,13 @@
       // Searchable over the item name *and* the responses it produces, so you can
       // find the item responsible for a line you don't want and hold it out.
       function _colItemsPaneHtml(c, st) {
-        const keys = c.itemKeys || []
+        const keys = _colItemKeys(c)
         if (!keys.length) {
           return (
             '<div class="col-empty"><div class="col-empty-title">No items in this collection</div>' +
             '<div class="col-empty-text">' +
             _colAddStepsHtml() +
+            ' Or add keywords and Entities on the <b>Rules</b> tab, and every Article and Dialog they match is in the collection — new ones too.' +
             "</div></div>"
           )
         }
@@ -24846,10 +25855,9 @@
       // answer. The counts sit on the pills so the collection states its own
       // shape before you click anything.
       function _colItemFilterPills(c) {
-        const total = (c.itemKeys || []).length
-        const held = (c.itemKeys || []).filter((k) =>
-          _colExcludedItems(c).has(k),
-        ).length
+        const members = _colItemKeys(c)
+        const total = members.length
+        const held = members.filter((k) => _colExcludedItems(c).has(k)).length
         const pill = (id, label, n) =>
           '<button class="col-item-pill' +
           (_colItemFilter === id ? " active" : "") +
@@ -24881,7 +25889,7 @@
         const wrap = document.getElementById("colItemsWrap")
         if (!c || !wrap) return
         const held = _colExcludedItems(c)
-        const all = c.itemKeys || []
+        const all = _colItemKeys(c)
         const keys =
           _colItemFilter === "held" ? all.filter((k) => held.has(k)) : all
         const q = (_colQuery || "").trim()
@@ -24964,6 +25972,15 @@
         const { kind, kindLabel, label } = _colItemLabel(key)
         const held = _colExcludedItems(c).has(key)
         const n = _itemExportRowCount(key, c)
+        const picked = (c.itemKeys || []).includes(key)
+        // A rule member has no ✕: removing it would last until the next render.
+        // Hold out is how it is kept out, and it survives the rule matching again.
+        const ruled = _colRules(c).length ? _colRulesMatching(c, key) : []
+        const ruleBadge = ruled.length
+          ? '<span class="col-item-rule" title="In this collection because it matches: ' +
+            esc(ruled.map((r) => (r.kind === "entity" ? "Entity " : "") + r.value).join(", ")) +
+            '">by rule</span>'
+          : ""
         return (
           '<div class="col-item-row' +
           (held ? " held" : "") +
@@ -24978,6 +25995,7 @@
           '">' +
           hl(label, q) +
           "</span>" +
+          ruleBadge +
           '<span class="col-item-rows' +
           (n === 0 ? " zero" : "") +
           '">' +
@@ -24996,11 +26014,18 @@
           '\')">' +
           (held ? "Restore" : "Hold out") +
           "</button>" +
-          '<button class="col-item-remove" title="Remove from this collection" onclick="removeCollectionItem(\'' +
-          esc(c.id) +
-          "','" +
-          esc(key) +
-          '\')">&#x2715;</button></div>'
+          (picked
+            ? '<button class="col-item-remove" title="' +
+              (ruled.length
+                ? "Remove the hand-picked entry — it stays in through its rule; use Hold out to keep it out"
+                : "Remove from this collection") +
+              '" onclick="removeCollectionItem(\'' +
+              esc(c.id) +
+              "','" +
+              esc(key) +
+              '\')">&#x2715;</button>'
+            : '<span class="col-item-remove-spacer"></span>') +
+          "</div>"
         )
       }
       function _colAddStepsHtml() {
@@ -25710,13 +26735,23 @@
       }
       function deleteCollectionConfirm(collectionId) {
         const c = cmCollections.find((x) => x.id === collectionId)
+        const linked = c ? _colFoldersOf(c).length : 0
         _showConfirm(
           'Delete the collection "' +
             (c ? c.name : "") +
-            '"? The Articles and Dialogs themselves are not affected.',
+            '"? The Articles and Dialogs themselves are not affected.' +
+            (linked > 1 ? " It is linked in " + linked + " folders and goes from all of them." : ""),
           () => {
             cmCollections = cmCollections.filter((x) => x.id !== collectionId)
             saveCollections(cmCollections)
+            let foldersChanged = false
+            for (const f of cmCollectionFolders) {
+              if (f.collectionIds.includes(collectionId)) {
+                f.collectionIds = f.collectionIds.filter((x) => x !== collectionId)
+                foldersChanged = true
+              }
+            }
+            if (foldersChanged) saveCollectionFolders(cmCollectionFolders)
             if (_colView === collectionId) _colView = null
             renderCollectionsModal()
           },
@@ -25737,6 +26772,12 @@
             updatedAt: Date.now(),
           })
           saveCollections(cmCollections)
+          // Made from inside a folder: it goes in that folder.
+          const folder = _colFolderOfView()
+          if (folder) {
+            folder.collectionIds.push(id)
+            saveCollectionFolders(cmCollectionFolders)
+          }
           // Land on what you just made, rather than leaving it to be hunted for.
           _colView = id
           _colTab = "items"
@@ -26068,6 +27109,7 @@
         { key: "cm-sort-dialogs" },
         { key: "cm-flow-direction" },
         { key: "cm-collections" },
+        { key: "cm-collection-folders" },
         { key: "cm-export-filters" },
         { key: "cm-export-keep-unreachable" },
         { key: "cm-share-linked" },
@@ -26132,7 +27174,8 @@
       // is simply absent from a backup looks exactly like one that was never
       // set. The test reads the keys out of this file, so the only way to add a
       // stored key is to decide which of the two lists it belongs in.
-      const SETTINGS_EXPORT_EXCLUDED = ["cm-conv-db-path", "cm-data-folder", "cm-perf-debug"]
+      // cm-url-checks is a cache of Check links answers, not a setting.
+      const SETTINGS_EXPORT_EXCLUDED = ["cm-conv-db-path", "cm-data-folder", "cm-perf-debug", "cm-url-checks"]
 
       function _settingsIoStatus(msg, tone) {
         const el = document.getElementById("settingsIoStatus")
@@ -28183,16 +29226,40 @@
         }
       }
 
-      function gapPresetRange(preset) {
-        const today = gapToday()
+      /// The quick ranges every day calendar offers, in one order everywhere.
+      /// "Last week" is the previous Monday-to-Sunday week, the week the
+      /// calendars draw (they start on Monday); "Last 7 days" ends today.
+      // prettier-ignore
+      const CAL_PRESETS = [["7", "Last 7 days"], ["last-week", "Last week"], ["30", "Last 30 days"], ["month", "This month"], ["last-month", "Last month"]]
+
+      /// A preset as an inclusive `{from, to}` of day keys, counted back from
+      /// `today` (a `YYYY-MM-DD` key in the display timezone).
+      function calPresetRange(preset, today) {
         if (preset === "month") return { from: today.slice(0, 8) + "01", to: today }
         if (preset === "last-month") {
           const firstThis = today.slice(0, 8) + "01"
           const lastPrev = insShiftDay(firstThis, -1)
           return { from: lastPrev.slice(0, 8) + "01", to: lastPrev }
         }
+        if (preset === "last-week") {
+          const dow = (new Date(today + "T12:00:00Z").getUTCDay() + 6) % 7 // Mon=0
+          const lastSunday = insShiftDay(today, -(dow + 1))
+          return { from: insShiftDay(lastSunday, -6), to: lastSunday }
+        }
         const days = Number(preset) || 7
         return { from: insShiftDay(today, -(days - 1)), to: today }
+      }
+
+      /// The preset buttons, `activeKey` lit. `fn` is the global the buttons call.
+      function calPresetButtonsHtml(fn, activeKey) {
+        return CAL_PRESETS.map(
+          ([k, label]) =>
+            `<button class="${activeKey === k ? "active" : ""}" onclick="${fn}('${k}')">${label}</button>`,
+        ).join("")
+      }
+
+      function gapPresetRange(preset) {
+        return calPresetRange(preset, gapToday())
       }
 
       /// A plain line of what the bot said: CM.com markup and tokens out.
@@ -30587,12 +31654,6 @@
           gapCalMonth = new Date(+end.slice(0, 4), +end.slice(5, 7) - 2, 1)
         }
         const second = new Date(gapCalMonth.getFullYear(), gapCalMonth.getMonth() + 1, 1)
-        const presets = [
-          ["7", "Last 7 days"],
-          ["30", "Last 30 days"],
-          ["month", "This month"],
-          ["last-month", "Last month"],
-        ]
         pop.innerHTML =
           `<div class="day-cal-legend"><span>${
             gapPickPhase === 1 ? "Now pick the other end" : "Click a start day, then an end day"
@@ -30609,12 +31670,10 @@
             gapCalMonth,
             true,
           )}</div><div class="day-cal-month">${_gapMonthHtml(second, false)}</div></div>` +
-          `<div class="manage-db-quick">${presets
-            .map(
-              ([k, label]) =>
-                `<button class="${gapPreset === k && gapPickPhase === 0 ? "active" : ""}" onclick="gapApplyPreset('${k}')">${label}</button>`,
-            )
-            .join("")}</div>`
+          `<div class="manage-db-quick">${calPresetButtonsHtml(
+            "gapApplyPreset",
+            gapPickPhase === 0 ? gapPreset : "",
+          )}</div>`
         const cal = document.getElementById("gapCal")
         cal.addEventListener("mouseover", (e) => {
           if (gapPickPhase !== 1) return
@@ -30681,15 +31740,24 @@
         }
         gapRange = key < gapPickFrom ? { from: key, to: gapPickFrom } : { from: gapPickFrom, to: key }
         gapPreset = ""
-        gapCloseCal()
+        _gapKeepCalOpen()
         gapRenderRangeLabel()
         gapReload()
+      }
+
+      /// A picked range stays on screen in the calendar, which stays open so it
+      /// can be adjusted; a click outside or Esc closes it. The list reloads
+      /// behind it.
+      function _gapKeepCalOpen() {
+        gapPickPhase = 0
+        gapHover = ""
+        gapRenderCal()
       }
 
       function gapApplyPreset(k) {
         gapRange = gapPresetRange(k)
         gapPreset = k
-        gapCloseCal()
+        _gapKeepCalOpen()
         gapRenderRangeLabel()
         gapReload()
       }
@@ -40295,11 +41363,534 @@
         document.getElementById("toolsModal").classList.remove("open")
       }
 
+      let _toolsActive = "idlinks"
+      function selectTool(tool) {
+        _toolsActive = tool
+        document.querySelectorAll("#toolsModal .tools-nav-item").forEach((b) => {
+          b.classList.toggle("active", b.dataset.tool === tool)
+        })
+        document.getElementById("toolPaneIdlinks").hidden = tool !== "idlinks"
+        document.getElementById("toolPaneUrlcheck").hidden = tool !== "urlcheck"
+        if (tool === "urlcheck") renderUrlCheck()
+        else document.getElementById("idLinksInput").focus()
+      }
+      document.querySelector("#toolsModal .tools-nav").addEventListener("click", (e) => {
+        const b = e.target.closest(".tools-nav-item[data-tool]")
+        if (b) selectTool(b.dataset.tool)
+      })
+
+      // ── Check links ──────────────────────────────────────────────────
+      //
+      // Every http(s) address in the loaded export's Responses: in the text
+      // (bare, Markdown, <a href>, <img src>) and in any field of an output —
+      // Links, Images, Videos — whatever its shape, so a new field in a later
+      // export is covered without a change here. Checked by `check_urls` in
+      // batches, so progress shows and Stop works between them. Results live
+      // until the app restarts; a new export keeps the ones still in it.
+      const URL_CHECK_BATCH = 24
+      const URL_CHECK_SHOWN = 300
+      const _URL_RE = /https?:\/\/[^\s"'<>()\[\]{}|\\^`]+/gi
+      const _URL_IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)(\?|#|$)/i
+      // Answers are kept in localStorage (`cm-url-checks`), each with the time it
+      // was checked, so a restart does not throw a long check away. Read entry
+      // by entry; capped at URL_CHECK_KEEP, newest kept.
+      const URL_CHECK_STORAGE_KEY = "cm-url-checks"
+      const URL_CHECK_KEEP = 6000
+      function loadUrlChecks() {
+        const out = new Map()
+        try {
+          const v = JSON.parse(localStorage.getItem(URL_CHECK_STORAGE_KEY) || "[]")
+          if (!Array.isArray(v)) return out
+          for (const r of v) {
+            if (!r || typeof r.url !== "string" || !Number.isFinite(r.checkedAt)) continue
+            out.set(r.url, {
+              url: r.url,
+              status: Number.isInteger(r.status) ? r.status : null,
+              finalUrl: typeof r.finalUrl === "string" ? r.finalUrl : null,
+              redirects: Array.isArray(r.redirects) ? r.redirects.filter(Number.isInteger) : [],
+              title: typeof r.title === "string" ? r.title : null,
+              error: typeof r.error === "string" ? r.error : null,
+              checkedAt: r.checkedAt,
+            })
+          }
+        } catch (e) {
+          /* a damaged cache is an empty one */
+        }
+        return out
+      }
+      function saveUrlChecks() {
+        try {
+          const list = [..._urlResults.values()]
+            .sort((a, b) => b.checkedAt - a.checkedAt)
+            .slice(0, URL_CHECK_KEEP)
+            .map(({ url, status, finalUrl, redirects, title, error, checkedAt }) => ({
+              url, status, finalUrl, redirects, title, error, checkedAt,
+            }))
+          localStorage.setItem(URL_CHECK_STORAGE_KEY, JSON.stringify(list))
+        } catch (e) {
+          /* full or disabled storage: the answers still hold for this session */
+        }
+      }
+      function _urlFmtTime(ms) {
+        try {
+          return new Date(ms).toLocaleString("en-GB", {
+            timeZone: insZone(),
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        } catch (e) {
+          return new Date(ms).toLocaleString("en-GB")
+        }
+      }
+      const _urlResults = loadUrlChecks() // url -> check_urls result + checkedAt
+      let _urlFound = null // [{url, image, where: [{kind, id, label}]}]
+      let _urlFoundFor = null // allCombinedItems it was found in
+      let _urlChecking = false
+      let _urlStop = false
+      let _urlFilter = "all"
+      let _urlType = "all"
+      let _urlQuery = ""
+      let _urlShown = URL_CHECK_SHOWN
+      let _urlSkipUnreachable = true // only matters with Show unreachable content on
+
+      /// Pulls every URL out of one string. `&amp;` is undone first, since
+      /// Responses are HTML; trailing punctuation is sentence, not address.
+      function urlsInText(text) {
+        const out = []
+        const t = String(text || "").replace(/&amp;/gi, "&")
+        for (const m of t.matchAll(_URL_RE)) {
+          const u = m[0].replace(/[.,;:!?*_~]+$/, "")
+          if (u.length > 10) out.push(u)
+        }
+        return out
+      }
+      /// Every URL in an output object, each marked image when it came from an
+      /// <img>, an image-ish field, or ends in an image extension.
+      function urlsInOutput(o) {
+        const found = []
+        const walk = (v, imageHint) => {
+          if (typeof v === "string") {
+            if (!/https?:\/\//i.test(v)) return
+            const imgSrcs = new Set()
+            for (const m of v.matchAll(/<img[^>]+src\s*=\s*["']?([^"' >]+)/gi))
+              imgSrcs.add(m[1].replace(/&amp;/gi, "&"))
+            for (const u of urlsInText(v))
+              found.push({ url: u, image: imageHint || imgSrcs.has(u) || _URL_IMAGE_EXT.test(u) })
+          } else if (Array.isArray(v)) {
+            for (const x of v) walk(x, imageHint)
+          } else if (v && typeof v === "object") {
+            for (const [k, x] of Object.entries(v)) walk(x, imageHint || /image|img|picture|thumbnail/i.test(k))
+          }
+        }
+        walk(o, false)
+        return found
+      }
+      function collectContentUrls() {
+        const byUrl = new Map()
+        const add = (hits, where) => {
+          for (const h of hits) {
+            let e = byUrl.get(h.url)
+            if (!e) byUrl.set(h.url, (e = { url: h.url, image: false, where: [] }))
+            e.image = e.image || h.image
+            const k = where.kind + ":" + where.id + ":" + (where.nodeId || "")
+            const have = e.where.find((w) => w.k === k)
+            // One reachable output of an item makes the item a reachable use.
+            if (have) have.unreachable = have.unreachable && where.unreachable
+            else e.where.push({ ...where, k })
+          }
+        }
+        // The rule `pruneUnreachable` applies at load: a non-default output
+        // with no context condition, where the item has a default at all.
+        // Only reaches here with Settings › Show unreachable content on.
+        for (const art of articleMap.values()) {
+          const outs = art.Outputs || []
+          const hasDefault = outs.some((o) => o.IsDefault)
+          for (const o of outs) {
+            if (o.Type !== "Answer") continue
+            add(urlsInOutput(o), {
+              kind: "article",
+              id: art.Id,
+              label: "qa-" + art.Id + " · " + (aFaqQ(art) || ""),
+              unreachable: hasDefault && !o.IsDefault && !articleAnswerHasContext(o),
+            })
+          }
+        }
+        for (const d of dialogMap.values()) {
+          for (const n of d.nodes || []) {
+            const out = n.output || {}
+            const items = Array.isArray(out.items) ? out.items : []
+            const hasDefault = items.some((i) => i.isDefault)
+            const where = (unreachable) => ({
+              kind: "dialog",
+              id: d.id,
+              nodeId: n.id,
+              label: "dn-" + d.id + "-" + n.id + " · " + (d.name || ""),
+              unreachable,
+            })
+            for (const it of items)
+              add(urlsInOutput(it), where(hasDefault && !it.isDefault && !dialogAnswerHasContext(it)))
+            const { items: _skip, ...rest } = out
+            add(urlsInOutput(rest), where(false))
+          }
+        }
+        for (const e of byUrl.values()) e.unreachable = e.where.every((w) => w.unreachable)
+        return [...byUrl.values()].sort((a, b) => a.url.localeCompare(b.url))
+      }
+
+      /// One result read as what to do about it — `{cat, why}`:
+      ///   broken     — an error status, no answer, a "not found" page that
+      ///                answers 200 (its title says so), or a redirect to the
+      ///                site's home page or a not-found address: the page is gone.
+      ///   moved      — every redirect permanent (301/308) to a specific page:
+      ///                it works, but the link should be updated. `why` is
+      ///                "parent" when it landed on a broader page of the same
+      ///                path (`/bus/kaatsheuvel` → `/bus`) — worth a look.
+      ///   restricted — 401/403/429: an automated check was refused.
+      ///   ok         — answered, directly or through a temporary redirect
+      ///                (a login, a cookie wall, a language chooser).
+      /// Measured on the 2026-10-30 export: the account pages all redirect to
+      /// the login through 307/302 chains, which is why a chain with any
+      /// temporary hop is not "moved".
+      const _URL_NOT_FOUND_TITLE = /\b(404|not found|page not found|niet gevonden|bestaat niet|nicht gefunden|introuvable|no encontrada)\b/i
+      const _URL_NOT_FOUND_PATH = /(\b404\b|not-?found|niet-?gevonden|pagina-bestaat-niet|\/error(\b|\.|\/))/i
+      const _URL_HOME_PATH = /^\/?([a-z]{2}([-_][a-z]{2})?\/?)?$/i
+      function urlCheckVerdict(r) {
+        if (!r) return { cat: "unchecked" }
+        if (r.status == null) return { cat: "broken", why: "error" }
+        if (r.status === 401 || r.status === 403 || r.status === 429) return { cat: "restricted" }
+        if (r.status >= 400) return { cat: "broken", why: "status" }
+        if (r.title && _URL_NOT_FOUND_TITLE.test(r.title)) return { cat: "broken", why: "title" }
+        const hops = r.redirects || []
+        if (!r.finalUrl || !hops.length || _urlSameish(r.url, r.finalUrl)) return { cat: "ok" }
+        let from, to
+        try {
+          from = new URL(r.url)
+          to = new URL(r.finalUrl)
+        } catch (e) {
+          return { cat: "ok" }
+        }
+        const host = (u) => u.hostname.replace(/^www\./, "")
+        const path = (u) => u.pathname.replace(/\/+$/, "")
+        // Only a tracking parameter dropped (apps.apple.com drops ?mt=8): same page.
+        if (host(from) === host(to) && path(from) === path(to) && !to.search) return { cat: "ok" }
+        if (_URL_NOT_FOUND_PATH.test(to.pathname)) return { cat: "broken", why: "notfound" }
+        // Sent to its own site's home page from a page that was not one: the
+        // page is gone. Same site only — a login on another host
+        // (login.efteling.com/nl) also has a root-like path.
+        if (
+          host(from) === host(to) &&
+          _URL_HOME_PATH.test(to.pathname) &&
+          !to.search &&
+          !_URL_HOME_PATH.test(from.pathname)
+        )
+          return { cat: "broken", why: "home" }
+        if (!hops.every((c) => c === 301 || c === 308)) return { cat: "ok", why: "temporary" }
+        const fp = path(from).toLowerCase()
+        const tp = path(to).toLowerCase()
+        if (host(from) === host(to) && tp && fp.startsWith(tp + "/")) return { cat: "moved", why: "parent" }
+        return { cat: "moved" }
+      }
+      function urlCheckCategory(r) {
+        return urlCheckVerdict(r).cat
+      }
+      /// A redirect that only adds https, www or a trailing slash lands on the
+      /// same page; listing it as moved would bury the ones that matter.
+      function _urlSameish(a, b) {
+        const norm = (u) =>
+          String(u || "")
+            .toLowerCase()
+            .replace(/^https?:\/\/(www\.)?/, "")
+            .replace(/\/+(?=$|[?#])/, "")
+        return norm(a) === norm(b)
+      }
+      function _urlStatusLabel(r) {
+        const v = urlCheckVerdict(r)
+        if (v.cat === "unchecked") return "not checked"
+        if (r.status == null) return r.error || "no answer"
+        if (v.cat === "broken")
+          return v.why === "home"
+            ? "Broken · sent to home page"
+            : v.why === "notfound"
+            ? "Broken · sent to not-found page"
+            : v.why === "title"
+            ? "Broken · not-found page"
+            : "Broken · " + r.status
+        if (v.cat === "moved") return v.why === "parent" ? "Moved · to a broader page" : "Moved · " + r.redirects[0]
+        if (v.cat === "restricted") return "Restricted · " + r.status
+        return v.why === "temporary" ? "OK · temporary redirect" : "OK · " + r.status
+      }
+
+      function _urlEnsureFound() {
+        if (_urlFound && _urlFoundFor === allCombinedItems) return
+        _urlFound = collectContentUrls()
+        _urlFoundFor = allCombinedItems
+        _urlShown = URL_CHECK_SHOWN
+      }
+      /// The addresses in play: all of them, minus those used only in
+      /// unreachable content while that is skipped. Counts, the list and the
+      /// check button all read this, so a skipped address is never checked.
+      function _urlPool() {
+        return _urlSkipUnreachable ? _urlFound.filter((e) => !e.unreachable) : _urlFound
+      }
+      function _urlView() {
+        const q = _urlQuery.trim().toLowerCase()
+        return _urlPool().filter((e) => {
+          if (_urlType === "image" && !e.image) return false
+          if (_urlType === "page" && e.image) return false
+          const cat = urlCheckCategory(_urlResults.get(e.url))
+          if (_urlFilter === "problems" && cat !== "broken" && cat !== "restricted") return false
+          if (_urlFilter !== "all" && _urlFilter !== "problems" && cat !== _urlFilter) return false
+          if (q && !e.url.toLowerCase().includes(q) && !e.where.some((w) => w.label.toLowerCase().includes(q)))
+            return false
+          return true
+        })
+      }
+      function renderUrlCheck() {
+        if (!articleMap.size && !dialogMap.size) {
+          document.getElementById("urlCheckSummary").textContent = "Load a content export first."
+          document.getElementById("urlCheckRun").disabled = true
+          document.getElementById("urlCheckFilters").innerHTML = ""
+          document.getElementById("urlCheckList").innerHTML = ""
+          return
+        }
+        _urlEnsureFound()
+        const pool = _urlPool()
+        const counts = { ok: 0, moved: 0, restricted: 0, broken: 0, unchecked: 0 }
+        for (const e of pool) counts[urlCheckCategory(_urlResults.get(e.url))]++
+        const images = pool.filter((e) => e.image).length
+        const checked = pool.length - counts.unchecked
+        const onlyUnreachable = _urlFound.filter((e) => e.unreachable).length
+        let last = 0,
+          first = Infinity
+        for (const e of pool) {
+          const r = _urlResults.get(e.url)
+          if (r) {
+            last = Math.max(last, r.checkedAt || 0)
+            first = Math.min(first, r.checkedAt || 0)
+          }
+        }
+        document.getElementById("urlCheckSummary").textContent =
+          pool.length +
+          " addresses · " +
+          images +
+          " images · " +
+          (pool.length - images) +
+          " pages" +
+          (!contentShowUnreachable
+            ? " · unreachable content is ignored (Settings)"
+            : onlyUnreachable && _urlSkipUnreachable
+            ? " · " + onlyUnreachable + " only in unreachable content skipped"
+            : "") +
+          (checked
+            ? " — " + checked + " checked, " + counts.broken + " broken, " + counts.moved + " moved, " + counts.restricted + " restricted" +
+              " · last check " + _urlFmtTime(last) +
+              (last - first > 3600000 ? " (oldest " + _urlFmtTime(first) + ")" : "")
+            : "")
+        _urlRenderRunButton()
+        document.getElementById("urlCheckCopy").disabled = !(counts.broken + counts.restricted)
+        document.getElementById("urlCheckCopyMoved").disabled = !counts.moved
+        const pill = (group, id, label, n) =>
+          '<button class="col-item-pill' +
+          ((group === "f" ? _urlFilter : _urlType) === id ? " active" : "") +
+          '" onclick="setUrlCheckFilter(\'' + group + "','" + id + '\')">' +
+          label + (n == null ? "" : '<span class="col-count-badge">' + n + "</span>") + "</button>"
+        const filters = document.getElementById("urlCheckFilters")
+        // Rebuilt only when the search box is not focused, so typing keeps the caret.
+        const inp = document.getElementById("urlCheckQuery")
+        const pillsHtml =
+          pill("f", "all", "All", pool.length) +
+          pill("f", "problems", "Problems", counts.broken + counts.restricted) +
+          pill("f", "broken", "Broken", counts.broken) +
+          pill("f", "restricted", "Restricted", counts.restricted) +
+          pill("f", "moved", "Moved", counts.moved) +
+          pill("f", "ok", "OK", counts.ok) +
+          pill("f", "unchecked", "Not checked", counts.unchecked) +
+          '<span class="sep"></span>' +
+          pill("t", "all", "Any type") +
+          pill("t", "image", "Images") +
+          pill("t", "page", "Pages") +
+          (onlyUnreachable
+            ? '<span class="sep"></span><button class="col-item-pill' +
+              (_urlSkipUnreachable ? " active" : "") +
+              '" onclick="toggleUrlSkipUnreachable()" title="Addresses used only in non-default responses with no context — content no user can reach">Skip unreachable<span class="col-count-badge">' +
+              onlyUnreachable +
+              "</span></button>"
+            : "")
+        if (inp) {
+          filters.querySelector(".url-check-pills").innerHTML = pillsHtml
+        } else {
+          filters.innerHTML =
+            '<span class="url-check-pills" style="display:contents">' + pillsHtml + "</span>" +
+            '<input type="text" id="urlCheckQuery" placeholder="Filter by address or Article / Dialog…" value="' +
+            esc(_urlQuery) + '" />'
+          document.getElementById("urlCheckQuery").addEventListener("input", (e) => {
+            _urlQuery = e.target.value
+            _urlShown = URL_CHECK_SHOWN
+            _renderUrlCheckList()
+            _urlRenderRunButton()
+          })
+        }
+        _renderUrlCheckList()
+      }
+      /// What the check button will check. With a filter narrowing the list,
+      /// exactly what is shown, checked or not — the way to test a few, or to
+      /// re-check the broken ones. Otherwise everything not yet checked, or
+      /// everything again once all are.
+      function _urlCheckTargets() {
+        const pool = _urlPool()
+        const view = _urlView()
+        if (view.length < pool.length)
+          return { urls: view.map((e) => e.url), label: "Check " + view.length + " shown" }
+        const left = pool.filter((e) => !_urlResults.has(e.url))
+        if (left.length === pool.length)
+          return { urls: left.map((e) => e.url), label: "Check all links" }
+        if (left.length)
+          return { urls: left.map((e) => e.url), label: "Check the rest (" + left.length + ")" }
+        return { urls: pool.map((e) => e.url), label: "Check again" }
+      }
+      function _urlRenderRunButton() {
+        const run = document.getElementById("urlCheckRun")
+        if (!run || !_urlFound) return
+        const t = _urlCheckTargets()
+        run.textContent = _urlChecking ? "Stop" : t.label
+        run.disabled = !_urlChecking && !t.urls.length
+      }
+      function _renderUrlCheckList() {
+        const view = _urlView()
+        const list = document.getElementById("urlCheckList")
+        if (!view.length) {
+          list.innerHTML =
+            '<div class="col-empty"><div class="col-empty-title">' +
+            (_urlFound.length ? "Nothing here" : "No web addresses in this export") +
+            '</div><div class="col-empty-text">' +
+            (_urlFound.length ? "No address matches these filters." : "No Article or Dialog Response links to a page or an image.") +
+            "</div></div>"
+          return
+        }
+        const rows = view.slice(0, _urlShown).map((e) => {
+          const r = _urlResults.get(e.url)
+          const cat = urlCheckCategory(r)
+          const where = e.where
+            .slice(0, 3)
+            .map(
+              (w) =>
+                '<button class="' + (w.unreachable ? "unreachable" : "") + '" title="' + esc(w.label) +
+                (w.unreachable ? " — unreachable: a non-default response with no context" : "") +
+                '" onclick="urlCheckOpenItem(\'' + w.kind + "'," + Number(w.id) + ')">' +
+                esc(w.label) + "</button>",
+            )
+            .join("") + (e.where.length > 3 ? '<span class="url-check-type">+' + (e.where.length - 3) + " more</span>" : "")
+          return (
+            '<div class="url-check-row">' +
+            '<span><span class="url-status ' + cat + '" title="' +
+            esc((r && r.error ? r.error + " — " : "") + (r && r.checkedAt ? "checked " + _urlFmtTime(r.checkedAt) : "")) + '">' +
+            esc(_urlStatusLabel(r)) + "</span></span>" +
+            '<span class="url-check-type">' + (e.image ? "image" : "page") + "</span>" +
+            '<span class="url-check-url"><a href="' + esc(e.url) + '" data-url-open="1">' + esc(e.url) + "</a>" +
+            (r && r.finalUrl ? '<span class="url-check-final">→ ' + esc(r.finalUrl) + "</span>" : "") +
+            (r && r.title && cat !== "ok" ? '<span class="url-check-final">“' + esc(r.title) + "”</span>" : "") +
+            "</span>" +
+            '<span class="url-check-where">' + where + "</span>" +
+            "</div>"
+          )
+        })
+        list.innerHTML =
+          rows.join("") +
+          (view.length > _urlShown
+            ? '<div class="url-check-more"><button class="btn-secondary" onclick="_urlShown+=' + URL_CHECK_SHOWN +
+              ';_renderUrlCheckList()">Show ' + Math.min(URL_CHECK_SHOWN, view.length - _urlShown) + " more of " +
+              (view.length - _urlShown) + "</button></div>"
+            : "")
+      }
+      function toggleUrlSkipUnreachable() {
+        _urlSkipUnreachable = !_urlSkipUnreachable
+        _urlShown = URL_CHECK_SHOWN
+        renderUrlCheck()
+      }
+      function setUrlCheckFilter(group, id) {
+        if (group === "f") _urlFilter = id
+        else _urlType = id
+        _urlShown = URL_CHECK_SHOWN
+        renderUrlCheck()
+      }
+      function urlCheckOpenItem(kind, id) {
+        if (kind === "article") openArticleInfoModal(id)
+        else openDialogInfoModal(id, false)
+      }
+      document.getElementById("urlCheckList").addEventListener("click", (e) => {
+        const a = e.target.closest("a[data-url-open]")
+        if (!a) return
+        e.preventDefault()
+        window.backend.openUrl(a.getAttribute("href"))
+      })
+
+      async function runUrlCheck() {
+        if (_urlChecking) {
+          _urlStop = true
+          return
+        }
+        _urlEnsureFound()
+        // Taken once: the list under a "Not checked" filter shrinks as answers come in.
+        // Old answers stay until a new one replaces them, so a stopped re-check
+        // loses nothing.
+        const { urls: todo } = _urlCheckTargets()
+        if (!todo.length) return
+        _urlChecking = true
+        _urlStop = false
+        const bar = document.getElementById("urlCheckProgress")
+        bar.hidden = false
+        bar.firstElementChild.style.width = "0%"
+        renderUrlCheck()
+        try {
+          for (let i = 0; i < todo.length && !_urlStop; i += URL_CHECK_BATCH) {
+            const batch = todo.slice(i, i + URL_CHECK_BATCH)
+            const res = await window.backend.checkUrls(batch)
+            const now = Date.now()
+            for (const r of res || []) _urlResults.set(r.url, { ...r, checkedAt: now })
+            saveUrlChecks()
+            bar.firstElementChild.style.width = Math.round(((i + batch.length) / todo.length) * 100) + "%"
+            renderUrlCheck()
+          }
+        } catch (e) {
+          showImportToast("error", "Link check stopped: " + e)
+        } finally {
+          _urlChecking = false
+          bar.hidden = true
+          renderUrlCheck()
+        }
+      }
+      document.getElementById("urlCheckRun").addEventListener("click", runUrlCheck)
+      document.getElementById("urlCheckCopyMoved").addEventListener("click", (e) => {
+        const lines = ["Old URL\tNew URL\tStatus\tUsed in"]
+        for (const x of _urlPool()) {
+          const r = _urlResults.get(x.url)
+          if (urlCheckCategory(r) !== "moved") continue
+          lines.push([x.url, r.finalUrl, _urlStatusLabel(r), x.where.map((w) => w.label.split(" · ")[0]).join(", ")].join("\t"))
+        }
+        navigator.clipboard.writeText(lines.join("\n"))
+        _idLinksCopied(e.currentTarget)
+      })
+      document.getElementById("urlCheckCopy").addEventListener("click", (e) => {
+        const lines = ["Status\tType\tURL\tFinal URL\tUsed in"]
+        for (const x of _urlPool()) {
+          const r = _urlResults.get(x.url)
+          const cat = urlCheckCategory(r)
+          if (cat !== "broken" && cat !== "restricted") continue
+          lines.push(
+            [_urlStatusLabel(r), x.image ? "image" : "page", x.url, (r && r.finalUrl) || "", x.where.map((w) => w.label.split(" · ")[0]).join(", ")].join("\t"),
+          )
+        }
+        navigator.clipboard.writeText(lines.join("\n"))
+        _idLinksCopied(e.currentTarget)
+      })
+
       document.getElementById("toolsBtn").addEventListener("click", () => {
         document.getElementById("toolsModal").classList.add("open")
         // The export or the Context URL may have changed since the last open.
         renderIdLinks()
-        document.getElementById("idLinksInput").focus()
+        selectTool(_toolsActive)
       })
       document.getElementById("closeToolsModal").addEventListener("click", closeToolsModal)
       document.getElementById("toolsModal").addEventListener("click", (e) => {
@@ -40576,6 +42167,10 @@
              <button class="import-now-btn" onclick="impSetNow()" title="Set the end to now">Now</button>
            </div>
            <div class="day-cal" id="impCal">${_impCalHtml()}</div>
+           <div class="manage-db-quick" style="margin-top:8px">${calPresetButtonsHtml(
+             "impApplyPreset",
+             _impActivePreset(),
+           )}</div>
            <div class="day-cal-legend">
              <span><span class="swatch full"></span>Fully imported</span>
              <span><span class="swatch partial"></span>Partly imported</span>
@@ -41053,6 +42648,32 @@
         }
         _impPickHover = ""
         _impRenderModal()
+      }
+      /// A quick range on the Import calendar: whole days, except that a range
+      /// ending today ends now, as the Now button does — the rest of today has
+      /// not happened yet.
+      function impApplyPreset(k) {
+        const now = zoneNow(insZone())
+        const r = calPresetRange(k, now.day)
+        _impFromDate = r.from
+        _impFromTime = "00:00"
+        _impToDate = r.to
+        _impToTime = r.to === now.day ? now.time : "23:59"
+        _impPickPhase = 0
+        _impPickHover = ""
+        _impCalMonth = new Date(+r.to.slice(0, 4), +r.to.slice(5, 7) - 2, 1)
+        _impRenderModal()
+      }
+      /// The preset the picked range is, if it is one — read off the range
+      /// rather than remembered, so a hand-picked range that happens to match lights it too.
+      function _impActivePreset() {
+        if (!_impFromDate || !_impToDate || _impFromTime !== "00:00") return ""
+        const today = zoneNow(insZone()).day
+        const hit = CAL_PRESETS.find(([k]) => {
+          const r = calPresetRange(k, today)
+          return r.from === _impFromDate && r.to === _impToDate
+        })
+        return hit ? hit[0] : ""
       }
       function impSetNow() {
         const now = zoneNow(insZone())
@@ -41826,6 +43447,7 @@
               }">Older than retention (${dataRetentionDays}d)${
                 stale.length ? ` · ${stale.length}` : ""
               }</button>
+              ${calPresetButtonsHtml("mdbApplyPreset", _mdbActivePreset())}
               <button onclick="mdbSelectAllData()">Everything stored</button>
               <button onclick="mdbClearSelection()" ${
                 lo ? "" : "disabled"
@@ -41925,6 +43547,25 @@
         _manageDbConfirming = false
         _mdbCalMonth = _mdbMonthStart(_mdbTo)
         renderManageDbBody()
+      }
+      function mdbApplyPreset(k) {
+        const r = calPresetRange(k, zoneDayKey(Date.now(), insZone()))
+        _mdbFrom = r.from
+        _mdbTo = r.to
+        _mdbPickPhase = 0
+        _mdbHover = ""
+        _manageDbConfirming = false
+        _mdbCalMonth = _mdbMonthStart(r.to)
+        renderManageDbBody()
+      }
+      function _mdbActivePreset() {
+        if (!_mdbFrom || !_mdbTo || _mdbPickPhase !== 0) return ""
+        const today = zoneDayKey(Date.now(), insZone())
+        const hit = CAL_PRESETS.find(([k]) => {
+          const r = calPresetRange(k, today)
+          return r.from === _mdbFrom && r.to === _mdbTo
+        })
+        return hit ? hit[0] : ""
       }
       function mdbSelectAllData() {
         const days = _manageDbStats?.days || []
@@ -46525,6 +48166,40 @@
 
       // ── Date range picker ───────────────────────────────────────────
       let _calHoverSetup = false
+      let convPickPreset = "" // the quick range last applied, until a day is clicked
+
+      /// A quick range on the Conversations calendar: picked as if both ends had
+      /// been clicked, so it resolves to the same display-timezone bounds.
+      /// A preset clipped to the days the database holds; null when none of
+      /// them fall inside it — "Last 7 days" on data that ends last month
+      /// would otherwise pick seven empty days.
+      function _convPresetRange(k) {
+        const today = insZoneDayOf(new Date().toISOString().slice(0, 19), insZone())
+        const r = calPresetRange(k, today)
+        const from = convDateMin && r.from < convDateMin ? convDateMin : r.from
+        const to = convDateMax && r.to > convDateMax ? convDateMax : r.to
+        return from <= to ? { from, to } : null
+      }
+      function fmtCalRangeTitle(a, b) {
+        const f = (d) =>
+          new Date(d + "T12:00:00Z").toLocaleDateString("en-GB", {
+            timeZone: "UTC",
+            day: "numeric",
+            month: "short",
+          })
+        return a === b ? f(a) : f(a) + " – " + f(b)
+      }
+      function convApplyPreset(k) {
+        const r = _convPresetRange(k)
+        if (!r) return
+        convPickStart = r.from
+        convPickEnd = r.to
+        convPickHover = ""
+        convPickPhase = 0
+        convPickMonth = new Date(+r.to.slice(0, 4), +r.to.slice(5, 7) - 1, 1)
+        convPickPreset = k
+        applyDateRange()
+      }
 
       function initDatePicker(min, max) {
         // Widened by a day at each end, because these arrive as UTC days and
@@ -46611,6 +48286,7 @@
       }
 
       function pickDay(d) {
+        convPickPreset = ""
         if (convPickPhase === 0) {
           convPickStart = d
           convPickEnd = ""
@@ -46657,6 +48333,7 @@
       }
 
       function clearDateRange() {
+        convPickPreset = ""
         convPickStart = ""
         convPickEnd = ""
         convPickHover = ""
@@ -46680,8 +48357,9 @@
         convDateFrom = bounds.from
         convDateTo = bounds.to
         renderDateRangeBtn()
-        document.getElementById("convCalPopup").classList.remove("open")
-        document.getElementById("convDateRangeBtn").classList.remove("active")
+        // The popup stays open on the picked range, so it can be adjusted; a
+        // click outside closes it.
+        renderCalendar()
         convPage = 1
       }
 
@@ -46809,10 +48487,16 @@
             }>&#x203a;</button>
           </div>
           <div class="cal-grid">${daysHtml}</div>
-          <div class="cal-hint" id="calHint">${hint}</div>
-          <div class="cal-footer">
-            <button onclick="clearDateRange()">Clear</button>
-          </div>`
+          ${hint ? `<div class="cal-hint" id="calHint">${hint}</div>` : ""}
+          <div class="cal-quick">${CAL_PRESETS.map(([k, label]) => {
+            const r = _convPresetRange(k)
+            const title = r
+              ? fmtCalRangeTitle(r.from, r.to)
+              : "No stored conversations in this range"
+            return `<button class="${
+              convPickPhase === 0 && convPickPreset === k ? "active" : ""
+            }" ${r ? "" : "disabled"} title="${esc(title)}" onclick="convApplyPreset('${k}')">${label}</button>`
+          }).join("")}<button class="cal-quick-clear" onclick="clearDateRange()">Clear</button></div>`
         // Apply hover preview classes after render
         updateCalRangeClasses()
       }

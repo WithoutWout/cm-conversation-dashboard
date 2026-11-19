@@ -39,7 +39,7 @@ implementation was tried first and was wrong.
 | `docs/ai-export.md` | `export_conversations_for_ai` and its `.jsonl` schema |
 | `docs/gap.md` | the GAP analysis view, fixed marks, `save_export_xlsx` and `xlsx.rs` |
 | `docs/export-files.md` | what counts as an older export file, and the offer to delete it |
-| `docs/tools.md` | the Advanced tools modal, and Convert IDs to links (`parseIdRefs`) |
+| `docs/tools.md` | the Advanced tools modal, Convert IDs to links (`parseIdRefs`), Check links (`check_urls`) |
 
 A rule that belongs to one feature belongs in that feature's doc. A rule that
 would change how you write *any* part of this app belongs here.
@@ -81,7 +81,7 @@ frontend/
     unreachable-search.test.js, modal-tags.test.js,
     dialog-flow.test.js, expr-group.test.js, entity-condense.test.js,
     link-search.test.js, import-progress.test.js, old-exports.test.js,
-    id-links.test.js
+    id-links.test.js, cal-presets.test.js, url-check.test.js
                                                      — `npm run test:frontend`
 package.json        — scripts: tauri dev / tauri build / test:frontend
 docs/               — the per-feature reference; see `Where the details live`
@@ -118,6 +118,8 @@ Data files (read-only, never committed, placed in a user-selected folder):
 | `install_update`      | `installUpdate()`                | Downloads the verified artifact, installs it, restarts. Portable Windows copies swap their own `.exe`; everything else uses the plugin's installer |
 | `get_version`         | `getVersion()`                   | Returns the app version string from `package_info()` |
 | `save_collection_export` | `saveCollectionExport(defaultName, content)` | Opens a native Save dialog (`.json` filter, defaulted filename) and writes `content` to the chosen path, returns `{ ok, canceled, path }`. A wrapper over `save_with_dialog` |
+| `save_collection_folder_export` | `saveCollectionFolderExport(files)` | Folder picker, then writes each `{name, content}` as `<name>.json` inside it — names sanitised and de-duplicated in Rust, never paths. Returns `{ ok, canceled, path, written, overwritten }`. See `docs/collections.md` → "Folders and linked collections" |
+| `check_urls`          | `checkUrls(urls)`                | Up to 64 http(s) URLs: GET, redirects followed by hand (each hop's status kept), 8 at a time, 15 s timeout, an HTML page's `<title>` read from its first 32 KB. Returns `[{url, status, finalUrl, redirects, title, error, elapsedMs}]` in input order. See `docs/tools.md` → "Check links" |
 | `save_export_text`    | `saveExportText(defaultName, format, content)` | The same, for any format in `export_format` (`svg` `csv` `tsv` `html` `md` `txt` `json` `jsonl`). An unknown format is an `Err` *before* the dialog opens |
 | `save_export_bytes`   | `saveExportBytes(defaultName, format, content)` | The binary half — `content` is a plain number array taken as `Vec<u8>`. Used for the 2× chart PNG; see `docs/insights.md` → "Saving to a file" |
 | `save_export_xlsx`    | `saveExportXlsx(defaultName, sheet)` | Builds a one-sheet `.xlsx` (`xlsx.rs`) from `{name, headers, rows: [{cells, highlight}], widths}` and saves it through the same dialog. Cells are strings, numbers or null |
@@ -433,7 +435,7 @@ The orientation map for the whole window. It says what is on screen and where;
 
 <div#view-gap>   (header Analysis button — see docs/gap.md)
   toolbar: Recognition | Feedback | GenAI switch · range button → the shared two-month day calendar (display
-           timezone) with Last 7 / Last 30 / This month / Last month ·
+           timezone) with the shared quick ranges (CAL_PRESETS) ·
            threshold (from Settings) · Filters bubble (All/Low/Zero ·
            Any/Open/Fixed, with a count of those on) · text filter · count ·
            Export .xlsx
@@ -574,6 +576,10 @@ The orientation map for the whole window. It says what is on screen and where;
   a list of tools | the open tool
   Convert IDs to links: text field | result, live, IDs as links |
     Copy as Markdown · Copy with links | the IDs found, by type and title
+  Check links: N addresses · images · pages | Copy moved links · Copy problems ·
+    Check all links / Check N shown (Stop) |
+    progress | All / Problems / Broken / Restricted / Moved / OK / Not checked ·
+    Any type / Images / Pages · filter | rows: status · type · URL (→ final) · used in
 
 <div#missingDaysModal>   (once a day at launch, Analytics API set up — docs/import.md
                          → "The daily missing-days check")
@@ -619,9 +625,18 @@ The orientation map for the whole window. It says what is on screen and where;
           set — docs/ai-export.md → "Content") | feedback
 
 <div#collectionsModal>
-  sidebar: + New collection | one row per collection (name · N items · N rows)
+  sidebar: + New collection · + Folder | each folder (caret · name · count) with its
+           collections under it (a linked one shows "linked ×N"), then
+           "Not in a folder" | one row per collection (smart · N items · N rows)
            | pinned "Smart filters" entry with enabled-pattern count
-  detail (per collection): name · counts | Rename / Delete / Export JSON
+  detail (per folder): name · N collections · N rows | Rename / Delete / Export all
+           (one .json per collection into a chosen folder) | its collections, ✕ unlink |
+           + Add a collection…
+  detail (per collection): name · counts · folder chips (✕ unlink, + Add to folder…)
+                           | Rename / Delete / Export JSON
+    Rules          — Keyword / Entity + value (Entity type-ahead) · Add rule ·
+                     match any / every rule · N items by rule · each rule with
+                     its own match count, ✕
     Export preview — search + trigger chips and response text per row, ✕ to
                      hand-remove a response from the export
     Items          — All items / Held out pills, search (name *and* response
@@ -706,7 +721,9 @@ Always use these terms in the UI:
 | `conv-data-retention-days` | Retention window in days — applied by the purge that runs each time the database opens |
 | `cm-missing-days-checked`  | The display-timezone day (`YYYY-MM-DD`) the launch check for missing import days last ran. It runs once a day, whatever the answer |
 | `chat-copy-format`         | Chat copy format preference |
-| `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`) |
+| `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`), and optional `rules` (`[{kind: "keyword"\|"entity", value}]`) with `ruleMatch` (`"any"` default \| `"all"`) — see `docs/collections.md` → "Smart collections: rules" |
+| `cm-url-checks`            | JSON array of Check links answers `{url, status, finalUrl, redirects, title, error, checkedAt}`, newest 6000 kept. A cache, left out of the settings backup — see `docs/tools.md` → "Check links" |
+| `cm-collection-folders`    | JSON array of `{ id, name, collectionIds, createdAt }` — Collections folders. Ids, not copies: one collection may be in several folders. Read entry by entry |
 | `cm-show-unreachable`      | `"1"` to load the content export with its unreachable outputs (not the default, no context condition); anything else, including absent, prunes them as it loads, so the whole app ignores them (`pruneUnreachable`). See `docs/search.md` → "Unreachable content is ignored by the whole app" |
 | `cm-share-linked`          | Share Content's Linked content: `"0"` off, `"complete"` everything that links into each row (Complete overview), anything else including absent what each row links out to that matches (Matching only) |
 | `cm-saved-searches`        | JSON array of `{id, view, name, state, savedAt}` — saved searches, `view` `"content"` or `"conversations"`. `state` is that bar's chips, toggles, tag filters and (Conversations) U/B and pill — never dates. Read entry by entry; see `docs/search.md` → "Saved searches" |

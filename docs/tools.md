@@ -1,7 +1,7 @@
 # Advanced tools
 
 The wrench in the header opens `#toolsModal`: a list of tools beside the open
-one. A new tool is a `.tools-nav-item` and a pane. It has one so far.
+one. A new tool is a `.tools-nav-item` with a `data-tool` and a pane (`selectTool`).
 
 ## Convert IDs to links
 
@@ -77,3 +77,77 @@ and Markdown as its `text/plain` half (`idLinksMarkdown`), so a plain-text field
 still gets the links. **Copy as Markdown** writes only the Markdown, for a field
 that would otherwise take the HTML. A link reads as it was typed, the whole phrase:
 `D-4066, node 1340`. Without a CM.com Context URL both are disabled.
+
+## Check links
+
+Finds every web address in the loaded export and asks each one whether it still
+answers. It only reads; nothing in CM.com changes.
+
+- **Where addresses come from** (`collectContentUrls`, `urlsInOutput`): every
+  Article Answer output and every Dialog node output, walked field by field, so
+  `Text`, `Links`, `Images`, `Videos` — and any field a later export adds — are
+  covered without naming them. In text it finds bare URLs, Markdown links,
+  `<a href>` and `<img src>`; `&amp;` is undone and trailing punctuation dropped.
+  **Unreachable content** (a non-default response with no context, the rule
+  `pruneUnreachable` uses) is pruned at load, so by default its addresses are
+  never found. With Settings › *Show unreachable content* on, each use is
+  tagged `unreachable` (an Article output, or a Dialog node's output item; the
+  node's other fields count as reachable) and an address used **only** there is
+  skipped: a *Skip unreachable (N)* pill, on by default, takes them out of the
+  counts, the list, the check and both copies (`_urlPool`). Turned off, they
+  are listed and their uses drawn dashed. The 2026-10-30 export has 74 such
+  addresses — with them skipped the tool sees the same 1395 as with the
+  setting off.
+  An address is an **image** when it came from an `<img>`, from a field whose key
+  says image, or ends in an image extension. Unreachable outputs are already
+  pruned at load unless Settings shows them. On the 2026-10-30 export: 1395
+  addresses, 414 of them images.
+- **The check** is `check_urls(urls)` in Rust, at most 64 URLs a call, eight at
+  a time, 15 s each. A plain GET — many servers and CDNs answer HEAD
+  differently — with **redirects followed by hand** (`Policy::none`), up to 10,
+  so every hop's status comes back in `redirects`: whether a page moved
+  (301/308) or is temporarily elsewhere (302/303/307) is in the hops, which an
+  automatic policy hides. Of an HTML page the first 32 KB are read for its
+  `<title>` (`html_title`); no other body is read. Only absolute http(s) URLs
+  are requested (`url_check_target`). The renderer sends batches of 24, so
+  progress shows and **Stop** works between batches.
+- **The button checks what the filters show** (`_urlCheckTargets`): with a
+  filter, search or type narrowing the list it reads *Check N shown* and checks
+  exactly those, already-checked ones again — to try a few, or to re-check the
+  broken ones. With nothing narrowing it checks everything not yet checked
+  (*Check all links* / *Check the rest*), or everything again once all are.
+- **Reading a result** (`urlCheckVerdict` → `{cat, why}`), in this order:
+  - *Broken* — no answer (timeout, DNS, refused, TLS, redirect loop); any error
+    status but 401/403/429; a page answering 200 whose title says not found
+    (`_URL_NOT_FOUND_TITLE`: 404, niet gevonden, nicht gefunden…); a redirect
+    to a not-found address (`_URL_NOT_FOUND_PATH`); or a redirect to **its own
+    site's** home page or language root from a page that was not one
+    (`_URL_HOME_PATH`). Same site only: the account pages redirect to
+    `login.efteling.com/nl`, whose path also looks like a root.
+  - *Restricted* — 401/403/429: an automated check was refused; open by hand.
+  - *OK* — answered directly, or a redirect that only adds https / `www.` / a
+    trailing slash or drops the query (`_urlSameish`, apps.apple.com's `?mt=8`),
+    or **any chain with a temporary hop**: on the 2026-10-30 export every
+    account page reaches the login through 307/302 chains, and those work.
+  - *Moved* — every hop permanent (301/308) to another page. It works, but the
+    link should be updated; **Copy moved links** copies old URL, new URL and
+    where it is used. "to a broader page" marks a move up the same path
+    (`/bus/kaatsheuvel-efteling` → `/bus`), which is often a dead page in
+    disguise and worth a look.
+  - Tuned on a 192-address sample of the real export: 175 OK (14 through
+    temporary redirects), 10 moved (2 to a broader page), 7 broken.
+  - `frontend/tests/url-check.test.js` pins each rule with those real answers.
+  - Not caught: a soft 404 whose title says nothing, and a permanent move to an
+    unrelated page on the same site.
+- Each row names the Articles and Dialog nodes using the address; a chip opens
+  that item's info modal. **Copy problems** writes a TSV of Broken and
+  Restricted rows (status, type, URL, final URL, used in).
+- **Answers are kept across restarts** in `localStorage["cm-url-checks"]`, each
+  with its `checkedAt`; the summary says when the last check ran (and the
+  oldest, when they span more than an hour), and each status chip's tooltip
+  when that address was checked. Saved after every batch, so a stopped or
+  crashed check keeps what it got. Capped at 6000 answers, newest kept; read
+  entry by entry. A re-check replaces answers as they arrive and never clears
+  them first, so stopping it loses nothing. It is a cache, not a setting, so it
+  is in `SETTINGS_EXPORT_EXCLUDED`. An address that leaves the export keeps its
+  answer until the cap pushes it out — harmless, it is never shown.

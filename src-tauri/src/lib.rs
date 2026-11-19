@@ -3889,6 +3889,303 @@ async fn save_collection_export(
     save_with_dialog(app, default_name, "json", content.into_bytes()).await
 }
 
+/// One file of a folder export: a collection's name and its JSON.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionExportFile {
+    name: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FolderExportResult {
+    ok: bool,
+    canceled: bool,
+    path: Option<String>,
+    written: Vec<String>,
+    overwritten: Vec<String>,
+}
+
+/// A collection name as a file name: path separators, reserved characters and
+/// control characters become `_`, leading dots and trailing dots/spaces go (so a
+/// name can never point outside the chosen folder or be hidden), and an empty
+/// result becomes `collection`. Capped at 120 characters.
+fn collection_file_stem(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .take(120)
+        .collect();
+    let trimmed = cleaned
+        .trim_start_matches(['.', ' '])
+        .trim_end_matches(['.', ' '])
+        .to_string();
+    if trimmed.is_empty() {
+        "collection".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// File names for a folder export: one `<stem>.json` each, a repeated name
+/// numbered (`Name (2).json`) rather than overwriting its sibling. Compared
+/// case-insensitively, since macOS and Windows file systems are.
+fn collection_file_names(names: &[String]) -> Vec<String> {
+    let mut used = std::collections::HashSet::new();
+    names
+        .iter()
+        .map(|n| {
+            let stem = collection_file_stem(n);
+            let mut candidate = format!("{stem}.json");
+            let mut i = 2;
+            while !used.insert(candidate.to_lowercase()) {
+                candidate = format!("{stem} ({i}).json");
+                i += 1;
+            }
+            candidate
+        })
+        .collect()
+}
+
+/// Asks for a folder and writes every collection of a Collections folder into
+/// it, one `.json` per collection. Takes names and contents, never paths: the
+/// file names are built here, inside the picked folder.
+#[tauri::command]
+async fn save_collection_folder_export(
+    app: AppHandle,
+    files: Vec<CollectionExportFile>,
+) -> Result<FolderExportResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
+
+    if files.is_empty() {
+        return Err("Nothing to export".into());
+    }
+    if files.len() > 500 {
+        return Err("Too many collections in one export".into());
+    }
+
+    let (tx, rx) = oneshot::channel::<Option<PathBuf>>();
+    app.dialog().file().pick_folder(move |path| {
+        let _ = tx.send(path.and_then(|f| f.into_path().ok()));
+    });
+    let Some(dir) = rx.await.ok().flatten() else {
+        return Ok(FolderExportResult {
+            ok: false,
+            canceled: true,
+            path: None,
+            written: vec![],
+            overwritten: vec![],
+        });
+    };
+    if !dir.is_dir() {
+        return Err("The chosen folder does not exist".into());
+    }
+
+    let names = collection_file_names(&files.iter().map(|f| f.name.clone()).collect::<Vec<_>>());
+    let mut written = Vec::new();
+    let mut overwritten = Vec::new();
+    for (file, name) in files.iter().zip(names) {
+        let path = dir.join(&name);
+        if path.exists() {
+            overwritten.push(name.clone());
+        }
+        fs::write(&path, file.content.as_bytes())
+            .map_err(|e| format!("Cannot write {name}: {e}"))?;
+        written.push(name);
+    }
+    Ok(FolderExportResult {
+        ok: true,
+        canceled: false,
+        path: Some(dir.to_string_lossy().into_owned()),
+        written,
+        overwritten,
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UrlCheckResult {
+    url: String,
+    /// The HTTP status of the last response, after redirects.
+    status: Option<u16>,
+    /// Where the redirects ended, when that is not `url`.
+    final_url: Option<String>,
+    /// The status of each redirect followed, in order: 301/308 permanent,
+    /// 302/303/307 temporary. Empty when the URL answered directly.
+    redirects: Vec<u16>,
+    /// The final page's `<title>`, when it is HTML — how a "not found" page
+    /// that answers 200 is recognised.
+    title: Option<String>,
+    /// Why there is no status: timeout, DNS, TLS, refused…
+    error: Option<String>,
+    elapsed_ms: u64,
+}
+
+const URL_CHECK_MAX_PER_CALL: usize = 64;
+const URL_CHECK_CONCURRENCY: usize = 8;
+const URL_CHECK_MAX_REDIRECTS: usize = 10;
+/// How much of an HTML page is read for its title. Titles sit in `<head>`.
+const URL_CHECK_TITLE_BYTES: usize = 32 * 1024;
+
+/// Only absolute http(s) URLs of a sane length are checked; anything else is
+/// refused before a request goes out.
+fn url_check_target(raw: &str) -> Result<reqwest::Url, String> {
+    if raw.len() > 4096 {
+        return Err("URL too long".into());
+    }
+    let url = reqwest::Url::parse(raw.trim()).map_err(|_| "Not a valid URL".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Only http and https URLs are checked".into());
+    }
+    Ok(url)
+}
+
+/// The text of the first `<title>` in `html`, entities for the common
+/// characters undone and whitespace collapsed; capped at 200 characters.
+fn html_title(html: &str) -> Option<String> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"(?is)<title[^>]*>(.*?)</title>").unwrap());
+    let raw = re.captures(html)?.get(1)?.as_str();
+    let text = raw
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+    let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.chars().take(200).collect())
+    }
+}
+
+/// GET, following redirects by hand so each hop's status is known — whether a
+/// page *moved* (301/308) or is *temporarily* elsewhere is in the first hop,
+/// which an automatic redirect policy hides. Of an HTML page, the first
+/// `URL_CHECK_TITLE_BYTES` are read for its title; no other body is read.
+/// GET rather than HEAD: many servers and CDNs answer HEAD differently.
+async fn check_one_url(client: &reqwest::Client, raw: String) -> UrlCheckResult {
+    let started = std::time::Instant::now();
+    let fail = |raw: String, redirects: Vec<u16>, e: String, started: std::time::Instant| UrlCheckResult {
+        url: raw,
+        status: None,
+        final_url: None,
+        redirects,
+        title: None,
+        error: Some(e),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    };
+    let first = match url_check_target(&raw) {
+        Ok(u) => u,
+        Err(e) => return fail(raw, vec![], e, started),
+    };
+    let mut url = first.clone();
+    let mut redirects = Vec::new();
+    loop {
+        let mut res = match client.get(url.clone()).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                let why = if e.is_timeout() {
+                    "Timed out".to_string()
+                } else if e.is_connect() {
+                    "Could not connect (DNS, refused or TLS)".to_string()
+                } else {
+                    e.to_string()
+                };
+                return fail(raw, redirects, why, started);
+            }
+        };
+        let status = res.status();
+        if status.is_redirection() {
+            let next = res
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|loc| url.join(loc).ok())
+                .filter(|u| matches!(u.scheme(), "http" | "https"));
+            if let Some(next) = next {
+                redirects.push(status.as_u16());
+                if redirects.len() > URL_CHECK_MAX_REDIRECTS {
+                    return fail(raw, redirects, "Too many redirects".into(), started);
+                }
+                url = next;
+                continue;
+            }
+            // A redirect with no usable Location is the answer itself.
+        }
+        let is_html = res
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|t| t.to_ascii_lowercase().contains("text/html"))
+            .unwrap_or(false);
+        let mut title = None;
+        if is_html {
+            let mut buf: Vec<u8> = Vec::new();
+            while buf.len() < URL_CHECK_TITLE_BYTES {
+                match res.chunk().await {
+                    Ok(Some(c)) => buf.extend_from_slice(&c),
+                    _ => break,
+                }
+            }
+            buf.truncate(URL_CHECK_TITLE_BYTES);
+            title = html_title(&String::from_utf8_lossy(&buf));
+        }
+        return UrlCheckResult {
+            final_url: if url != first { Some(url.to_string()) } else { None },
+            status: Some(status.as_u16()),
+            url: raw,
+            redirects,
+            title,
+            error: None,
+            elapsed_ms: started.elapsed().as_millis() as u64,
+        };
+    }
+}
+
+/// Checks whether each URL still answers — the Advanced tools link checker.
+/// At most `URL_CHECK_MAX_PER_CALL` per call; the renderer sends batches so it
+/// can show progress and stop between them. Results come back in input order.
+#[tauri::command]
+async fn check_urls(urls: Vec<String>) -> Result<Vec<UrlCheckResult>, String> {
+    if urls.len() > URL_CHECK_MAX_PER_CALL {
+        return Err(format!("At most {URL_CHECK_MAX_PER_CALL} URLs per call"));
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(8))
+        // Followed by hand in `check_one_url`, which records every hop.
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("Mozilla/5.0 (compatible; ContentLinkChecker/1.0)")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(URL_CHECK_CONCURRENCY));
+    let mut handles = Vec::with_capacity(urls.len());
+    for raw in urls {
+        let client = client.clone();
+        let sem = sem.clone();
+        handles.push(tauri::async_runtime::spawn(async move {
+            let _permit = sem.acquire_owned().await;
+            check_one_url(&client, raw).await
+        }));
+    }
+    let mut out = Vec::with_capacity(handles.len());
+    for h in handles {
+        out.push(h.await.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 async fn select_db_open_path(app: AppHandle) -> FileSaveResult {
     use tauri_plugin_dialog::DialogExt;
@@ -12845,6 +13142,8 @@ pub fn run() {
             open_url,
             open_preview_window,
             select_data_folder,
+            save_collection_folder_export,
+            check_urls,
             check_for_updates,
             install_update,
             get_version,
@@ -21435,5 +21734,47 @@ mod expr_perf {
                 print_plan(&conn, &sql, &ps);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod collection_folder_export_tests {
+    use super::*;
+
+    #[test]
+    fn a_name_cannot_leave_the_chosen_folder() {
+        assert_eq!(collection_file_stem("../../etc/passwd"), "_.._etc_passwd");
+        assert_eq!(collection_file_stem("a\\b:c"), "a_b_c");
+        assert_eq!(collection_file_stem("..."), "collection");
+        assert_eq!(collection_file_stem("  "), "collection");
+        assert_eq!(collection_file_stem("Parkeren "), "Parkeren");
+    }
+
+    #[test]
+    fn repeated_names_are_numbered_not_overwritten() {
+        let names = vec!["FAQ".to_string(), "faq".to_string(), "FAQ".to_string(), "Other".to_string()];
+        assert_eq!(
+            collection_file_names(&names),
+            vec!["FAQ.json", "faq (2).json", "FAQ (3).json", "Other.json"]
+        );
+    }
+
+    #[test]
+    fn a_page_title_is_read_from_the_head() {
+        assert_eq!(
+            html_title("<html><head><TITLE>\n Pagina  niet gevonden &amp; zo\n</TITLE></head>").as_deref(),
+            Some("Pagina niet gevonden & zo")
+        );
+        assert_eq!(html_title("<html><body>no title</body>"), None);
+        assert_eq!(html_title("<title>  </title>"), None);
+    }
+
+    #[test]
+    fn only_http_urls_are_checked() {
+        assert!(url_check_target("https://example.com/a.png").is_ok());
+        assert!(url_check_target("http://example.com").is_ok());
+        assert!(url_check_target("file:///etc/passwd").is_err());
+        assert!(url_check_target("javascript:alert(1)").is_err());
+        assert!(url_check_target("not a url").is_err());
     }
 }
