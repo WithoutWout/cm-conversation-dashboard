@@ -89,15 +89,17 @@ answers. It only reads; nothing in CM.com changes.
   covered without naming them. In text it finds bare URLs, Markdown links,
   `<a href>` and `<img src>`; `&amp;` is undone and trailing punctuation dropped.
   **Unreachable content** (a non-default response with no context, the rule
-  `pruneUnreachable` uses) is pruned at load, so by default its addresses are
-  never found. With Settings › *Show unreachable content* on, each use is
-  tagged `unreachable` (an Article output, or a Dialog node's output item; the
-  node's other fields count as reachable) and an address used **only** there is
-  skipped: a *Skip unreachable (N)* pill, on by default, takes them out of the
-  counts, the list, the check and both copies (`_urlPool`). Turned off, they
-  are listed and their uses drawn dashed. The 2026-10-30 export has 74 such
-  addresses — with them skipped the tool sees the same 1395 as with the
-  setting off.
+  `pruneUnreachable` uses) is the tool's own choice, not Settings'. Pruning at
+  load keeps what it removed on the owner as a non-enumerable `_pruned`
+  (`_setPruned`) — invisible to JSON, the worker's structured clone and every
+  other reader — and the collector reads `Outputs`/`items` plus `_pruned`, so it
+  sees the same content whatever *Show unreachable content* says. Each use is
+  tagged `unreachable`; an address used **only** there is skipped while the
+  *Skip unreachable (N)* pill is on (`_urlPool`: counts, list, check, both
+  copies). On by default, remembered in `cm-url-skip-unreachable`. Turned off,
+  they are listed and their uses drawn dashed; with the Settings toggle off, the
+  Article or Dialog a chip opens does not show that pruned response. The
+  2026-10-30 export has 74 such addresses, 1469 in all.
   An address is an **image** when it came from an `<img>`, from a field whose key
   says image, or ends in an image extension. Unreachable outputs are already
   pruned at load unless Settings shows them. On the 2026-10-30 export: 1395

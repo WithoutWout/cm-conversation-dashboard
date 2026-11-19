@@ -16842,6 +16842,13 @@
       /// place, and say how many. Only where a default is flagged — every real
       /// export flags exactly one; without one there is no telling which
       /// output is the default, so nothing is called unreachable.
+      /// What pruning removed stays on the owner as `_pruned`, non-enumerable,
+      /// so nothing that walks, clones or serialises the export sees it (the
+      /// worker's structured clone and JSON both skip it). Only Check links
+      /// reads it, to offer the links in unreachable content on its own toggle.
+      function _setPruned(owner, removed) {
+        Object.defineProperty(owner, "_pruned", { value: removed, enumerable: false, configurable: true })
+      }
       function pruneUnreachable(articles, dialogs) {
         let n = 0
         for (const a of articles || []) {
@@ -16850,6 +16857,7 @@
           const keep = outs.filter((o) => o.IsDefault || articleAnswerHasContext(o))
           if (keep.length === outs.length) continue
           n += outs.length - keep.length
+          _setPruned(a, outs.filter((o) => !keep.includes(o)))
           a.Outputs = keep
         }
         for (const d of dialogs || []) {
@@ -16859,6 +16867,7 @@
             const keep = items.filter((i) => i.isDefault || dialogAnswerHasContext(i))
             if (keep.length === items.length) continue
             n += items.length - keep.length
+            _setPruned(node.output, items.filter((i) => !keep.includes(i)))
             node.output.items = keep
           }
         }
@@ -27110,6 +27119,7 @@
         { key: "cm-flow-direction" },
         { key: "cm-collections" },
         { key: "cm-collection-folders" },
+        { key: "cm-url-skip-unreachable" },
         { key: "cm-export-filters" },
         { key: "cm-export-keep-unreachable" },
         { key: "cm-share-linked" },
@@ -41453,7 +41463,9 @@
       let _urlType = "all"
       let _urlQuery = ""
       let _urlShown = URL_CHECK_SHOWN
-      let _urlSkipUnreachable = true // only matters with Show unreachable content on
+      // The tool's own choice, kept per machine; Settings › Show unreachable
+      // content does not decide it.
+      let _urlSkipUnreachable = localStorage.getItem("cm-url-skip-unreachable") !== "0"
 
       /// Pulls every URL out of one string. `&amp;` is undone first, since
       /// Responses are HTML; trailing punctuation is sentence, not address.
@@ -41503,9 +41515,11 @@
         }
         // The rule `pruneUnreachable` applies at load: a non-default output
         // with no context condition, where the item has a default at all.
-        // Only reaches here with Settings › Show unreachable content on.
+        // Pruned at load or not, the tool sees it: what pruning removed is
+        // kept on `_pruned` (see `_setPruned`), so the Skip unreachable toggle
+        // works whatever Settings › Show unreachable content says.
         for (const art of articleMap.values()) {
-          const outs = art.Outputs || []
+          const outs = (art.Outputs || []).concat(art._pruned || [])
           const hasDefault = outs.some((o) => o.IsDefault)
           for (const o of outs) {
             if (o.Type !== "Answer") continue
@@ -41520,7 +41534,7 @@
         for (const d of dialogMap.values()) {
           for (const n of d.nodes || []) {
             const out = n.output || {}
-            const items = Array.isArray(out.items) ? out.items : []
+            const items = (Array.isArray(out.items) ? out.items : []).concat(out._pruned || [])
             const hasDefault = items.some((i) => i.isDefault)
             const where = (unreachable) => ({
               kind: "dialog",
@@ -41678,9 +41692,7 @@
           " images · " +
           (pool.length - images) +
           " pages" +
-          (!contentShowUnreachable
-            ? " · unreachable content is ignored (Settings)"
-            : onlyUnreachable && _urlSkipUnreachable
+          (onlyUnreachable && _urlSkipUnreachable
             ? " · " + onlyUnreachable + " only in unreachable content skipped"
             : "") +
           (checked
@@ -41806,6 +41818,11 @@
       }
       function toggleUrlSkipUnreachable() {
         _urlSkipUnreachable = !_urlSkipUnreachable
+        try {
+          localStorage.setItem("cm-url-skip-unreachable", _urlSkipUnreachable ? "1" : "0")
+        } catch (e) {
+          /* the choice still holds for this session */
+        }
         _urlShown = URL_CHECK_SHOWN
         renderUrlCheck()
       }

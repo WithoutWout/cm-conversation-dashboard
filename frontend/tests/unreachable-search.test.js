@@ -13,7 +13,7 @@ const { extract } = require("./extract")
 const src = fs.readFileSync(path.join(__dirname, "..", "search-worker.js"), "utf8")
 const page = vm.createContext({})
 vm.runInContext(
-  ["articleAnswerHasContext", "dialogAnswerHasContext", "pruneUnreachable"].map(extract).join("\n") +
+  ["articleAnswerHasContext", "dialogAnswerHasContext", "_setPruned", "pruneUnreachable"].map(extract).join("\n") +
     "\nglobalThis.prune = pruneUnreachable",
   page,
 )
@@ -172,6 +172,16 @@ test("with Show unreachable content on, they are found as before", () => {
 test("nothing is pruned where no output is flagged the default", () => {
   const arts = [{ Id: 9, Outputs: [{ Type: "Answer", IsDefault: false, ContextVariables: [] }, { Type: "Answer", IsDefault: false, ContextVariables: [] }] }]
   assert.strictEqual(page.prune(arts, []), 0)
+})
+
+test("what was pruned is kept aside, out of sight of JSON and the worker", () => {
+  const arts = clone(ARTICLES)
+  const dlgs = clone(DIALOGS)
+  page.prune(arts, dlgs)
+  const pruned = arts.flatMap((a) => a._pruned || []).length + dlgs.flatMap((d) => d.nodes.flatMap((n) => (n.output && n.output._pruned) || [])).length
+  assert.strictEqual(pruned, 3, "the three pruned outputs are on _pruned")
+  assert.ok(!JSON.stringify(arts).includes("_pruned") && !JSON.stringify(dlgs).includes("_pruned"), "not enumerable")
+  assert.strictEqual(structuredClone(arts).some((a) => a._pruned), false, "not cloned to the worker")
 })
 
 if (failures) {

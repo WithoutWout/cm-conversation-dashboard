@@ -322,7 +322,7 @@ let cmExportFilters = loadExportFilters()  // in-memory mirror of localStorage "
 
 | Function                          | Purpose |
 | --------------------------------- | ------- |
-| `pruneUnreachable(articles, dialogs)` | Drops every output that is not the default and has no context condition, as the export loads — the one place the app ignores unreachable content. Skipped when `cm-show-unreachable` is on |
+| `pruneUnreachable(articles, dialogs)` | Drops every output that is not the default and has no context condition, as the export loads — the one place the app ignores unreachable content. Skipped when `cm-show-unreachable` is on. What it drops is kept on a non-enumerable `_pruned`, read only by Check links |
 | `buildSearchRegex(q)`             | Renderer highlight regex builder; worker has the authoritative search compiler |
 | `hl(text, q)`                     | HTML-escapes text and wraps matches in `<mark>` |
 | `esc(s)`                          | HTML-escapes a string (use for all dynamic content inserted into innerHTML) |
@@ -722,6 +722,7 @@ Always use these terms in the UI:
 | `cm-missing-days-checked`  | The display-timezone day (`YYYY-MM-DD`) the launch check for missing import days last ran. It runs once a day, whatever the answer |
 | `chat-copy-format`         | Chat copy format preference |
 | `cm-collections`           | JSON array of `{ id, name, itemKeys, createdAt, updatedAt }`, plus optional `excludedItemKeys`, `excludedContent` and `disabledFilterIds` curation lists (all default `[]`), and optional `rules` (`[{kind: "keyword"\|"entity", value}]`) with `ruleMatch` (`"any"` default \| `"all"`) — see `docs/collections.md` → "Smart collections: rules" |
+| `cm-url-skip-unreachable`  | `"0"` to list Check links addresses that only appear in unreachable content; anything else, including absent, skips them. The tool's own choice — independent of `cm-show-unreachable` |
 | `cm-url-checks`            | JSON array of Check links answers `{url, status, finalUrl, redirects, title, error, checkedAt}`, newest 6000 kept. A cache, left out of the settings backup — see `docs/tools.md` → "Check links" |
 | `cm-collection-folders`    | JSON array of `{ id, name, collectionIds, createdAt }` — Collections folders. Ids, not copies: one collection may be in several folders. Read entry by entry |
 | `cm-show-unreachable`      | `"1"` to load the content export with its unreachable outputs (not the default, no context condition); anything else, including absent, prunes them as it loads, so the whole app ignores them (`pruneUnreachable`). See `docs/search.md` → "Unreachable content is ignored by the whole app" |
