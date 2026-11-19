@@ -65,5 +65,22 @@ ok("tsv: five columns everywhere", tsv.every((l) => l.split("\t").length === 5))
 const csv = fx.urlCheckCsv(rows)
 ok("csv: a field with a comma is quoted", csv.includes('"qa-12 Tickets | prijzen, dn-5-7 Parkeren"'))
 
+
+// ── Finding URLs: CTA buttons ──
+// extract() cannot balance urlsInOutput's regexes; slice it by indentation.
+{
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "index.html"), "utf8")
+  const sl = (n) => { const i = src.indexOf("      function " + n + "("); return src.slice(i, src.indexOf("\n      }\n", i) + 8) }
+  const fc = vm.createContext({})
+  vm.runInContext([extractConst("_URL_RE"), extractConst("_URL_IMAGE_EXT"), sl("urlsInText"), sl("urlsInOutput")].join("\n"), fc)
+  const urls = (o) => fc.urlsInOutput(o).map((h) => h.url)
+  const cta = '{message:cta buttonLink="https://9292.nl/?naar=kaatsheuvel\\_bushalte-efteling&amp;van=station-tilburg" buttonText="Plan je reis" buttonNewTab="TRUE"}{/message:cta}'
+  ok("a CTA button's link is found, Markdown escapes and &amp; undone",
+     JSON.stringify(urls({ Text: "Kom met het OV. " + cta })) === '["https://9292.nl/?naar=kaatsheuvel_bushalte-efteling&van=station-tilburg"]')
+  ok("app, tel and mailto CTAs are not web addresses",
+     urls({ Text: '{message:cta buttonLink="eftelingapp://poi/x"}{/message:cta}{message:cta buttonLink="mailto:a@b.nl"}{/message:cta}' }).length === 0)
+  ok("a link in the Links field is found", JSON.stringify(urls({ Text: "%{Link(1)}", Links: [{ URL: "https://www.efteling.com/nl/pers/" }] })) === '["https://www.efteling.com/nl/pers/"]')
+}
+
 console.log(failed ? "\n" + failed + " FAILED" : "\nAll checks passed")
 process.exit(failed ? 1 : 0)

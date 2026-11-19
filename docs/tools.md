@@ -87,7 +87,12 @@ answers. It only reads; nothing in CM.com changes.
   Article Answer output and every Dialog node output, walked field by field, so
   `Text`, `Links`, `Images`, `Videos` — and any field a later export adds — are
   covered without naming them. In text it finds bare URLs, Markdown links,
-  `<a href>` and `<img src>`; `&amp;` is undone and trailing punctuation dropped.
+  `<a href>`, `<img src>` and CTA buttons (`{message:cta buttonLink="…"}`, 999 of
+  them on the 2026-10-30 export: 753 web links, the rest `eftelingapp://`,
+  `mailto:`, `tel:` or empty, which are not web addresses and are not checked);
+  `&amp;` and Markdown backslash escapes (`\_`) are undone — CM.com's editor
+  escapes underscores inside CTA links too, and read raw the backslash cut 33
+  of them short — and trailing punctuation dropped.
   **Unreachable content** (a non-default response with no context, the rule
   `pruneUnreachable` uses) is the tool's own choice, not Settings'. Pruning at
   load keeps what it removed on the owner as a non-enumerable `_pruned`

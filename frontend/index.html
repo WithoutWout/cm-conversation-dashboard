@@ -41543,7 +41543,13 @@
       /// Responses are HTML; trailing punctuation is sentence, not address.
       function urlsInText(text) {
         const out = []
-        const t = String(text || "").replace(/&amp;/gi, "&")
+        // CM.com's editor writes Markdown, which escapes `_` and friends with a
+        // backslash — in CTA `buttonLink`s too (`kaatsheuvel\_bushalte`). The
+        // address is the unescaped one; read raw, the backslash ended the match
+        // and a truncated address was checked (33 CTAs on the 2026-10-30 export).
+        const t = String(text || "")
+          .replace(/&amp;/gi, "&")
+          .replace(/\\([_*~#()[\]\\-])/g, "$1")
         for (const m of t.matchAll(_URL_RE)) {
           const u = m[0].replace(/[.,;:!?*_~]+$/, "")
           if (u.length > 10) out.push(u)
