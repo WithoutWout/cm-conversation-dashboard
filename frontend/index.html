@@ -3636,6 +3636,76 @@
         border-color: color-mix(in srgb, var(--red) 45%, transparent);
         background: color-mix(in srgb, var(--red) 8%, transparent);
       }
+      .url-copy-wrap {
+        position: relative;
+      }
+      .url-copy-pop {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 6px);
+        z-index: 20;
+        width: 300px;
+        padding: 10px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+      }
+      .url-copy-pop[hidden] {
+        display: none;
+      }
+      .url-copy-label {
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        margin: 2px 2px 6px;
+      }
+      .url-copy-what {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-bottom: 10px;
+      }
+      .url-copy-what .col-item-pill:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .url-copy-fmt {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1px;
+        width: 100%;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: var(--text);
+        font: inherit;
+        font-size: 0.78rem;
+        padding: 6px 8px;
+        cursor: pointer;
+        text-align: left;
+      }
+      .url-copy-fmt b {
+        font-weight: 600;
+      }
+      .url-copy-fmt span {
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      .url-copy-fmt:hover:not(:disabled) {
+        background: var(--surface2);
+      }
+      .url-copy-fmt:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .url-copy-note {
+        font-size: 0.7rem;
+        color: var(--orange);
+        margin: 8px 2px 0;
+      }
       .url-check-more {
         padding: 10px;
         text-align: center;
@@ -14210,8 +14280,10 @@
             </p>
             <div class="url-check-bar">
               <span class="url-check-summary" id="urlCheckSummary"></span>
-              <button class="btn-secondary" id="urlCheckCopyMoved" disabled title="Old address, new address and where it is used — to update the links in CM.com">Copy moved links</button>
-              <button class="btn-secondary" id="urlCheckCopy" disabled>Copy problems</button>
+              <span class="url-copy-wrap" id="urlCopyWrap">
+                <button class="btn-secondary" id="urlCheckCopy" disabled>Copy &#x25BE;</button>
+                <div class="url-copy-pop" id="urlCopyPop" hidden></div>
+              </span>
               <button class="btn-primary" id="urlCheckRun">Check all links</button>
             </div>
             <div class="url-check-progress" id="urlCheckProgress" hidden><div></div></div>
@@ -41701,8 +41773,8 @@
               (last - first > 3600000 ? " (oldest " + _urlFmtTime(first) + ")" : "")
             : "")
         _urlRenderRunButton()
-        document.getElementById("urlCheckCopy").disabled = !(counts.broken + counts.restricted)
-        document.getElementById("urlCheckCopyMoved").disabled = !counts.moved
+        document.getElementById("urlCheckCopy").disabled = !pool.length
+        if (!document.getElementById("urlCopyPop").hidden) _renderUrlCopyPop()
         const pill = (group, id, label, n) =>
           '<button class="col-item-pill' +
           ((group === "f" ? _urlFilter : _urlType) === id ? " active" : "") +
@@ -41879,28 +41951,141 @@
         }
       }
       document.getElementById("urlCheckRun").addEventListener("click", runUrlCheck)
-      document.getElementById("urlCheckCopyMoved").addEventListener("click", (e) => {
-        const lines = ["Old URL\tNew URL\tStatus\tUsed in"]
-        for (const x of _urlPool()) {
-          const r = _urlResults.get(x.url)
-          if (urlCheckCategory(r) !== "moved") continue
-          lines.push([x.url, r.finalUrl, _urlStatusLabel(r), x.where.map((w) => w.label.split(" · ")[0]).join(", ")].join("\t"))
-        }
-        navigator.clipboard.writeText(lines.join("\n"))
-        _idLinksCopied(e.currentTarget)
-      })
-      document.getElementById("urlCheckCopy").addEventListener("click", (e) => {
-        const lines = ["Status\tType\tURL\tFinal URL\tUsed in"]
-        for (const x of _urlPool()) {
-          const r = _urlResults.get(x.url)
-          const cat = urlCheckCategory(r)
-          if (cat !== "broken" && cat !== "restricted") continue
+      // ── Copying the results ──
+      //
+      // One Copy menu: what (Problems · Moved · What's shown) and how. The
+      // table format writes HTML — a real table with links, which Jira, Teams
+      // and TinyMCE all paste as a table — with Markdown as its text/plain
+      // half, the way Convert IDs to links copies. Markdown, TSV (Excel,
+      // Sheets) and CSV are there for everything else. The four are built by
+      // the pure functions below from the same rows, so they cannot disagree.
+      let _urlCopyWhat = "problems"
+      function urlCheckCopyRows(entries, results) {
+        return entries.map((e) => {
+          const r = results.get(e.url)
+          return {
+            status: _urlStatusLabel(r),
+            type: e.image ? "image" : "page",
+            url: e.url,
+            goesTo: (r && r.finalUrl) || "",
+            uses: e.where.map((w) => {
+              const i = w.label.indexOf(" · ")
+              return {
+                token: i < 0 ? w.label : w.label.slice(0, i),
+                title: i < 0 ? "" : w.label.slice(i + 3),
+                url: w.kind === "article" ? buildItemUrl("article", w.id) : buildNodeUrl(w.id, w.nodeId),
+              }
+            }),
+          }
+        })
+      }
+      const URL_COPY_HEAD = ["Status", "Type", "URL", "Goes to", "Used in"]
+      function urlCheckTableHtml(rows) {
+        const a = (href, text) => (href ? '<a href="' + esc(href) + '">' + esc(text) + "</a>" : esc(text))
+        const th = URL_COPY_HEAD.map((h) => "<th>" + h + "</th>").join("")
+        const body = rows
+          .map(
+            (r) =>
+              "<tr><td>" + esc(r.status) + "</td><td>" + r.type + "</td><td>" + a(r.url, r.url) + "</td><td>" +
+              (r.goesTo ? a(r.goesTo, r.goesTo) : "") + "</td><td>" +
+              r.uses.map((u) => a(u.url, u.token) + (u.title ? " " + esc(u.title) : "")).join("<br>") +
+              "</td></tr>",
+          )
+          .join("")
+        return '<table border="1" cellpadding="4" style="border-collapse:collapse"><thead><tr>' + th + "</tr></thead><tbody>" + body + "</tbody></table>"
+      }
+      function urlCheckMarkdown(rows) {
+        const cell = (t) => String(t).replace(/\|/g, "\\|").replace(/\s+/g, " ").trim()
+        const link = (href, text) => (href ? "[" + cell(text).replace(/[[\]]/g, "\\$&") + "](" + href + ")" : cell(text))
+        const lines = ["| " + URL_COPY_HEAD.join(" | ") + " |", "|" + URL_COPY_HEAD.map(() => " --- |").join("")]
+        for (const r of rows)
           lines.push(
-            [_urlStatusLabel(r), x.image ? "image" : "page", x.url, (r && r.finalUrl) || "", x.where.map((w) => w.label.split(" · ")[0]).join(", ")].join("\t"),
+            "| " +
+              [
+                cell(r.status),
+                r.type,
+                r.url,
+                r.goesTo,
+                r.uses.map((u) => link(u.url, u.token) + (u.title ? " " + cell(u.title) : "")).join(", "),
+              ].join(" | ") +
+              " |",
+          )
+        return lines.join("\n")
+      }
+      function _urlFlatRow(r) {
+        return [r.status, r.type, r.url, r.goesTo, r.uses.map((u) => u.token + (u.title ? " " + u.title : "")).join(", ")]
+      }
+      function urlCheckTsv(rows) {
+        const clean = (t) => String(t).replace(/[\t\r\n]+/g, " ")
+        return [URL_COPY_HEAD, ...rows.map(_urlFlatRow)].map((f) => f.map(clean).join("\t")).join("\n")
+      }
+      function urlCheckCsv(rows) {
+        const q = (t) => (/[",\r\n]/.test(t) ? '"' + String(t).replace(/"/g, '""') + '"' : String(t))
+        return [URL_COPY_HEAD, ...rows.map(_urlFlatRow)].map((f) => f.map(q).join(",")).join("\r\n")
+      }
+
+      function _urlCopySets() {
+        const pool = _urlPool()
+        const cat = (e) => urlCheckCategory(_urlResults.get(e.url))
+        return {
+          problems: pool.filter((e) => cat(e) === "broken" || cat(e) === "restricted"),
+          moved: pool.filter((e) => cat(e) === "moved"),
+          shown: _urlView(),
+        }
+      }
+      function _renderUrlCopyPop() {
+        const sets = _urlCopySets()
+        if (!sets[_urlCopyWhat].length) _urlCopyWhat = sets.problems.length ? "problems" : sets.moved.length ? "moved" : "shown"
+        const what = (id, label) =>
+          '<button class="col-item-pill' + (_urlCopyWhat === id ? " active" : "") + '" ' +
+          (sets[id].length ? "" : "disabled ") + 'onclick="_urlCopyWhat=\'' + id + '\';_renderUrlCopyPop()">' +
+          label + '<span class="col-count-badge">' + sets[id].length + "</span></button>"
+        const fmt = (id, label, hint) =>
+          '<button class="url-copy-fmt" ' + (sets[_urlCopyWhat].length ? "" : "disabled ") +
+          'onclick="copyUrlCheck(\'' + id + '\', this)"><b>' + label + "</b><span>" + hint + "</span></button>"
+        document.getElementById("urlCopyPop").innerHTML =
+          '<div class="url-copy-label">What</div><div class="url-copy-what">' +
+          what("problems", "Problems") + what("moved", "Moved") + what("shown", "What’s shown") + "</div>" +
+          '<div class="url-copy-label">As</div>' +
+          fmt("table", "Table with links", "Jira, Teams, TinyMCE, Word") +
+          fmt("md", "Markdown", "GitHub, Confluence, chat") +
+          fmt("tsv", "Spreadsheet", "Excel, Google Sheets (tab-separated)") +
+          fmt("csv", "CSV", "a .csv file or import") +
+          (cmBaseUrl ? "" : '<div class="url-copy-note">Set a CM.com Context URL in Settings to link the Articles and Dialogs too.</div>')
+      }
+      function copyUrlCheck(format, btn) {
+        const rows = urlCheckCopyRows(_urlCopySets()[_urlCopyWhat], _urlResults)
+        if (format === "table") {
+          const html = urlCheckTableHtml(rows)
+          const wrapped = "<html><body><!--StartFragment-->" + html + "<!--EndFragment--></body></html>"
+          const write =
+            typeof ClipboardItem !== "undefined"
+              ? navigator.clipboard.write([
+                  new ClipboardItem({
+                    "text/html": new Blob([wrapped], { type: "text/html" }),
+                    "text/plain": new Blob([urlCheckMarkdown(rows)], { type: "text/plain" }),
+                  }),
+                ])
+              : Promise.reject()
+          write.catch(() => execCommandCopy(html))
+        } else {
+          navigator.clipboard.writeText(
+            format === "md" ? urlCheckMarkdown(rows) : format === "csv" ? urlCheckCsv(rows) : urlCheckTsv(rows),
           )
         }
-        navigator.clipboard.writeText(lines.join("\n"))
-        _idLinksCopied(e.currentTarget)
+        const b = btn.querySelector("b")
+        const label = b.textContent
+        b.textContent = "✓ Copied " + rows.length + (rows.length === 1 ? " row" : " rows")
+        setTimeout(() => (b.textContent = label), 1500)
+      }
+      document.getElementById("urlCheckCopy").addEventListener("click", () => {
+        const pop = document.getElementById("urlCopyPop")
+        pop.hidden = !pop.hidden
+        if (!pop.hidden) _renderUrlCopyPop()
+      })
+      document.addEventListener("mousedown", (e) => {
+        const pop = document.getElementById("urlCopyPop")
+        if (pop && !pop.hidden && !e.target.closest("#urlCopyWrap")) pop.hidden = true
       })
 
       document.getElementById("toolsBtn").addEventListener("click", () => {

@@ -576,7 +576,8 @@ The orientation map for the whole window. It says what is on screen and where;
   a list of tools | the open tool
   Convert IDs to links: text field | result, live, IDs as links |
     Copy as Markdown · Copy with links | the IDs found, by type and title
-  Check links: N addresses · images · pages | Copy moved links · Copy problems ·
+  Check links: N addresses · images · pages | Copy ▾ (Problems / Moved / What's shown ×
+    Table with links / Markdown / Spreadsheet / CSV) ·
     Check all links / Check N shown (Stop) |
     progress | All / Problems / Broken / Restricted / Moved / OK / Not checked ·
     Any type / Images / Pages · filter | rows: status · type · URL (→ final) · used in

@@ -132,8 +132,8 @@ answers. It only reads; nothing in CM.com changes.
     or **any chain with a temporary hop**: on the 2026-10-30 export every
     account page reaches the login through 307/302 chains, and those work.
   - *Moved* — every hop permanent (301/308) to another page. It works, but the
-    link should be updated; **Copy moved links** copies old URL, new URL and
-    where it is used. "to a broader page" marks a move up the same path
+    link should be updated (Copy → Moved gives old and new address and where
+    it is used). "to a broader page" marks a move up the same path
     (`/bus/kaatsheuvel-efteling` → `/bus`), which is often a dead page in
     disguise and worth a look.
   - Tuned on a 192-address sample of the real export: 175 OK (14 through
@@ -142,8 +142,20 @@ answers. It only reads; nothing in CM.com changes.
   - Not caught: a soft 404 whose title says nothing, and a permanent move to an
     unrelated page on the same site.
 - Each row names the Articles and Dialog nodes using the address; a chip opens
-  that item's info modal. **Copy problems** writes a TSV of Broken and
-  Restricted rows (status, type, URL, final URL, used in).
+  that item's info modal.
+- **Copy ▾** opens a menu: *what* — Problems (Broken + Restricted), Moved, or
+  What's shown (the filtered list) — and *as*:
+  - **Table with links** — HTML `<table>` with the URLs and each Article / Dialog
+    node linked to CM.com (`buildItemUrl` / `buildNodeUrl`, plain ids without a
+    Context URL, which the menu says), and Markdown as the `text/plain` half.
+    Jira, Teams, TinyMCE and Word paste the HTML as a real table; a plain-text
+    field gets the Markdown. The same two-flavour write as Convert IDs to links.
+  - **Markdown** (a table, `|` escaped), **Spreadsheet** (TSV, for Excel and
+    Sheets), **CSV** (RFC 4180 quoting).
+  - All four come from one row list (`urlCheckCopyRows`) through pure
+    formatters (`urlCheckTableHtml`, `urlCheckMarkdown`, `urlCheckTsv`,
+    `urlCheckCsv`), columns Status · Type · URL · Goes to · Used in, pinned in
+    `url-check.test.js`.
 - **Answers are kept across restarts** in `localStorage["cm-url-checks"]`, each
   with its `checkedAt`; the summary says when the last check ran (and the
   oldest, when they span more than an hour), and each status chip's tooltip
