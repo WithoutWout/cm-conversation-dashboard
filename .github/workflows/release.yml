@@ -91,15 +91,10 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Check links: copy in any format
-            - One Copy menu: copy the problems, the moved links or exactly
-              what you filtered on — as a table with links that pastes into
-              Jira, Teams and TinyMCE, or as Markdown, a spreadsheet or CSV.
-
-            ### Check links: unreachable content
-            - Skip unreachable is now a switch in Check links itself. It
-              finds links in unreachable content whatever the Settings
-              option says, and remembers whether you skip them.
+            ### Check links: CTA buttons fixed
+            - Links in CTA buttons that contain an underscore (route planner
+              links, playlists) were checked cut short. They are now read
+              whole — press Check again to refresh their results.
 
             ---
 
