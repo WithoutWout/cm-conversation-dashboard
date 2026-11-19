@@ -91,25 +91,15 @@ jobs:
           releaseBody: |
             ## What's new in ${{ github.ref_name }}
 
-            ### Quick date ranges
-            - Every calendar — Conversations, Analysis, Import and Stored
-              data — has Last 7 days, Last week, Last 30 days, This month and
-              Last month. The pickers stay open after you pick a range.
+            ### Check links: copy in any format
+            - One Copy menu: copy the problems, the moved links or exactly
+              what you filtered on — as a table with links that pastes into
+              Jira, Teams and TinyMCE, or as Markdown, a spreadsheet or CSV.
 
-            ### Smart collections and folders
-            - A collection can follow keywords and Entities (Rules tab):
-              every Article and Dialog that matches is in it, new ones too.
-              Held-out items and removed responses stay out.
-            - Folders group collections and export them all at once, one
-              file each. One collection can be linked into several folders.
-
-            ### Check links (Advanced tools)
-            - Checks every link and image in your Responses: broken, moved,
-              restricted or OK — including pages that send you to the home
-              page or show "not found".
-            - Copy the moved links (old and new address) or the problems,
-              check just the links you filter on, and skip unreachable
-              content. Results are kept with the time they were checked.
+            ### Check links: unreachable content
+            - Skip unreachable is now a switch in Check links itself. It
+              finds links in unreachable content whatever the Settings
+              option says, and remembers whether you skip them.
 
             ---
 
